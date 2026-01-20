@@ -540,45 +540,6 @@ textarea {
     font-style: italic;
 }
 
-.validation-breakdown {
-    margin-top: 12px;
-    padding: 12px 16px;
-    border: 1px dashed var(--border-color);
-    border-radius: var(--radius-md);
-    background: #fff8e7;
-}
-
-.validation-breakdown-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: #92400e;
-    margin-bottom: 8px;
-}
-
-.validation-breakdown ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: grid;
-    gap: 10px;
-}
-
-.validation-breakdown-rule {
-    font-size: 13px;
-    font-weight: 600;
-    color: #92400e;
-}
-
-.validation-breakdown-dates {
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-
-.validation-breakdown-example {
-    margin-top: 4px;
-    font-size: 12px;
-    color: #78350f;
-}
 
 .alert {
     padding: 12px 16px;

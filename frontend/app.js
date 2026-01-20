@@ -417,16 +417,6 @@ function renderValidationAlerts() {
         }
 
         if (totalWarnings > 0) {
-            html += `<div class="validation-summary-item validation-warning">
-                <span class="validation-icon">⚡</span>
-                <span class="validation-text">${totalWarnings} waarschuwing${totalWarnings > 1 ? 'en' : ''} (bijv. team toewijzing, bezettingsregels)</span>
-            </div>`;
-        }
-
-        html += '<div class="validation-summary-note">Klik op een dienst in de kalender om details te zien</div>';
-        html += '</div>';
-
-        if (totalWarnings > 0) {
             const warningBreakdown = {};
             Object.entries(summary.dates).forEach(([date, dateIssues]) => {
                 dateIssues.warnings.forEach(warning => {
@@ -446,7 +436,7 @@ function renderValidationAlerts() {
                 });
             });
 
-            const warningItems = Object.entries(warningBreakdown)
+            const tooltipLines = Object.entries(warningBreakdown)
                 .sort((a, b) => b[1].count - a[1].count)
                 .map(([rule, info]) => {
                     const dates = Array.from(info.dates).sort();
@@ -456,21 +446,21 @@ function renderValidationAlerts() {
                         ? `${formattedDates.join(', ')} (+${remaining} meer)`
                         : formattedDates.join(', ');
                     const example = info.messages.size > 0 ? Array.from(info.messages)[0] : '';
-                    const exampleLabel = example ? `<div class="validation-breakdown-example">${example}</div>` : '';
-
-                    return `<li>
-                        <div class="validation-breakdown-rule">${rule} (${info.count}x)</div>
-                        <div class="validation-breakdown-dates">${dateLabel}</div>
-                        ${exampleLabel}
-                    </li>`;
+                    return `• ${rule} (${info.count}x) — ${dateLabel}${example ? `\\n  ${example}` : ''}`;
                 })
-                .join('');
+                .join('\\n');
 
-            html += `<div class="validation-breakdown">
-                <div class="validation-breakdown-title">Herkomst van waarschuwingen</div>
-                <ul>${warningItems}</ul>
+            const tooltipText = tooltipLines || 'Geen extra details beschikbaar.';
+
+            html += `<div class="validation-summary-item validation-warning" data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
+                <span class="validation-icon">⚡</span>
+                <span class="validation-text">${totalWarnings} waarschuwing${totalWarnings > 1 ? 'en' : ''} (hover voor details)</span>
             </div>`;
         }
+
+        html += '<div class="validation-summary-note">Klik op een dienst in de kalender om details te zien</div>';
+        html += '</div>';
+
     }
 
     DOM.validationAlerts.innerHTML = html;
