@@ -32,13 +32,15 @@ function getShiftEndDateTime(shift) {
 }
 
 function getHoursBetweenShifts(shift1, shift2) {
+    const start1 = parseDateTime(shift1.date, shift1.startTime);
     const end1 = getShiftEndDateTime(shift1);
     const start2 = parseDateTime(shift2.date, shift2.startTime);
+    const end2 = getShiftEndDateTime(shift2);
 
-    const diffMs = Math.abs(start2 - end1);
-    const diffMinutes = diffMs / (1000 * 60);
+    const restMs = start1 <= start2 ? (start2 - end1) : (start1 - end2);
+    const restMinutes = restMs / (1000 * 60);
 
-    return diffMinutes / 60;
+    return restMinutes / 60;
 }
 
 function shiftsOverlap(shift1, shift2) {
@@ -65,13 +67,14 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
     // Check voor elke bestaande dienst
     employeeShifts.forEach(existingShift => {
         const hoursBetween = getHoursBetweenShifts(existingShift, newShift);
+        const displayHours = Math.max(0, Math.round(hoursBetween * 10) / 10);
 
         if (hoursBetween < minHoursBetweenShifts) {
             const employee = getEmployee(employeeId);
             errors.push({
                 type: ValidationRules.ERROR,
                 rule: '11-uur regel',
-                message: `${employee.name} heeft minder dan ${minHoursBetweenShifts} uur rust tussen diensten (${Math.round(hoursBetween * 10) / 10} uur tussen ${formatDate(existingShift.date)} en ${formatDate(newShift.date)})`,
+                message: `${employee.name} heeft minder dan ${minHoursBetweenShifts} uur rust tussen diensten (${displayHours} uur tussen ${formatDate(existingShift.date)} en ${formatDate(newShift.date)})`,
                 shift1: existingShift,
                 shift2: newShift
             });
@@ -118,17 +121,6 @@ function validateTeamAssignment(employeeId, teamId) {
         return { errors, warnings };
     }
 
-    // Check of medewerker op dit team mag werken
-    const canWork = employee.mainTeam === teamId || employee.extraTeams.includes(teamId);
-
-    if (!canWork) {
-        warnings.push({
-            type: ValidationRules.WARNING,
-            rule: 'Team toewijzing',
-            message: `${employee.name} is niet gekoppeld aan team ${DataStore.settings.teams[teamId].name}. Hoofdteam: ${DataStore.settings.teams[employee.mainTeam].name}`
-        });
-    }
-
     return { errors, warnings };
 }
 
@@ -137,7 +129,7 @@ function validateMinimumStaffing(date, teamId = null) {
     const errors = [];
 
     const shiftsOnDate = getShiftsByDate(date);
-    const day = new Date(date).getDay();
+    const day = parseDateOnly(date).getDay();
     const isWeekend = day === 0 || day === 6;
 
     // Friday evening closure for closed weekends
@@ -237,8 +229,8 @@ function shiftOverlapsNightWindow(shift, targetDate) {
 
 function getNightShiftsForDate(date) {
     const nightShifts = [];
-    const currentDate = new Date(date);
-    const prevDate = new Date(currentDate);
+    const currentDate = parseDateOnly(date);
+    const prevDate = parseDateOnly(currentDate);
     prevDate.setDate(prevDate.getDate() - 1);
     const prevDateStr = formatDateYYYYMMDD(prevDate);
 
@@ -258,7 +250,7 @@ function getNightShiftsForDate(date) {
 
 function validateWeekendStatus(date, startTime = null, endTime = null) {
     const warnings = [];
-    const d = new Date(date);
+    const d = parseDateOnly(date);
     const dayOfWeek = d.getDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
@@ -404,11 +396,11 @@ function validateAllShifts() {
 
 function getValidationSummary(startDate, endDate) {
     const dates = [];
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = parseDateOnly(startDate);
+    const end = parseDateOnly(endDate);
 
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        dates.push(d.toISOString().split('T')[0]);
+    for (let d = parseDateOnly(start); d <= end; d.setDate(d.getDate() + 1)) {
+        dates.push(formatDateYYYYMMDD(d));
     }
 
     const summary = {

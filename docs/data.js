@@ -291,7 +291,7 @@ function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
             const shift = {
                 id: Date.now() + Math.random(),
                 employeeId: employeeId,
-                team: scheduleForDay.team,
+                team: scheduleForDay.team || employee.mainTeam,
                 date: dateStr,
                 startTime: scheduleForDay.startTime,
                 endTime: scheduleForDay.endTime,
@@ -410,9 +410,22 @@ function calculateShiftHours(shift) {
     const end = getShiftEndDateTime(shift);
 
     const diffMs = end - start;
-    const hours = diffMs / (1000 * 60 * 60);
+    let hours = diffMs / (1000 * 60 * 60);
 
-    return hours;
+    // Nachturen tussen 23:00 en 07:00 tellen niet mee (slapende nacht)
+    const sleepStart = parseDateTime(shift.date, '23:00');
+    const sleepEnd = parseDateTime(shift.date, '07:00');
+    sleepEnd.setDate(sleepEnd.getDate() + 1);
+
+    const overlapStart = Math.max(start.getTime(), sleepStart.getTime());
+    const overlapEnd = Math.min(end.getTime(), sleepEnd.getTime());
+
+    if (overlapEnd > overlapStart) {
+        const sleepMs = overlapEnd - overlapStart;
+        hours -= sleepMs / (1000 * 60 * 60);
+    }
+
+    return Math.max(0, hours);
 }
 
 function getEmployeeHoursInPeriod(employeeId, startDate, endDate) {

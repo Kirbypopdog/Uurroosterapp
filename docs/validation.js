@@ -118,17 +118,6 @@ function validateTeamAssignment(employeeId, teamId) {
         return { errors, warnings };
     }
 
-    // Check of medewerker op dit team mag werken
-    const canWork = employee.mainTeam === teamId || employee.extraTeams.includes(teamId);
-
-    if (!canWork) {
-        warnings.push({
-            type: ValidationRules.WARNING,
-            rule: 'Team toewijzing',
-            message: `${employee.name} is niet gekoppeld aan team ${DataStore.settings.teams[teamId].name}. Hoofdteam: ${DataStore.settings.teams[employee.mainTeam].name}`
-        });
-    }
-
     return { errors, warnings };
 }
 

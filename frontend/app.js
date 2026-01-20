@@ -8,6 +8,7 @@ const AppState = {
     viewMode: 'week',
     visibleTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     visibleEmployeeTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
+    employeeWeekOffsets: {},
     editingShiftId: null,
     editingEmployeeId: null,
     warningBreakdown: null,
@@ -22,6 +23,57 @@ const USERS = [
 
 // DOM Elements
 const DOM = {};
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getContrastColor(hexColor) {
+    if (typeof hexColor !== 'string') return '#ffffff';
+    const hex = hexColor.replace('#', '');
+    const normalized = hex.length === 3
+        ? hex.split('').map(ch => ch + ch).join('')
+        : hex;
+    if (normalized.length !== 6) return '#ffffff';
+    const r = parseInt(normalized.slice(0, 2), 16) / 255;
+    const g = parseInt(normalized.slice(2, 4), 16) / 255;
+    const b = parseInt(normalized.slice(4, 6), 16) / 255;
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return luminance > 0.6 ? '#1f2933' : '#ffffff';
+}
+
+function applyTeamColors() {
+    const styleId = 'team-color-overrides';
+    let styleEl = document.getElementById(styleId);
+    if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = styleId;
+        document.head.appendChild(styleEl);
+    }
+
+    const teams = DataStore.settings.teams || {};
+    let css = '';
+    Object.entries(teams).forEach(([teamId, team]) => {
+        const color = team.color || '#64748b';
+        const textColor = getContrastColor(color);
+        css += `
+.team-toggle.active[data-team="${teamId}"] { background: ${color} !important; color: ${textColor} !important; border-color: transparent !important; }
+.team-badge.${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.team-badge-mini.${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.shift-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.shift-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.shift-team-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.timeline-team-header.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.team-tab.active.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+`;
+    });
+    styleEl.textContent = css;
+}
 
 function initDOM() {
     DOM.loginContainer = document.getElementById('login-container');
@@ -66,7 +118,6 @@ function initDOM() {
     DOM.employeeName = document.getElementById('employee-name');
     DOM.employeeEmail = document.getElementById('employee-email');
     DOM.employeeMainTeam = document.getElementById('employee-main-team');
-    DOM.employeeExtraTeams = document.querySelectorAll('.employee-extra-teams');
     DOM.employeeContract = document.getElementById('employee-contract');
     DOM.employeeActive = document.getElementById('employee-active');
     DOM.employeeCancelBtn = document.getElementById('employee-cancel-btn');
@@ -105,7 +156,7 @@ function handleTooltipShow(e) {
     const text = target.getAttribute('data-tooltip');
     if (!text) return;
 
-    tooltipElement.innerHTML = text.replace(/\\n/g, '<br>');
+    tooltipElement.textContent = text;
     tooltipElement.style.display = 'block';
 
     // Positie berekenen
@@ -158,6 +209,7 @@ function init() {
         console.log('Het Vlot Roosterplanning start...');
         console.log('Data loaded:', DataStore);
         initDOM();
+        applyTeamColors();
         console.log('DOM initialized');
         setCurrentWeek(new Date());
         console.log('Current week set');
@@ -356,13 +408,22 @@ function switchView(viewName) {
 }
 
 function setCurrentWeek(date) {
-    const d = new Date(date);
+    const d = parseDateOnly(date);
     const day = d.getDay();
     const diff = d.getDate() - day + (day === 0 ? -6 : 1);
     d.setDate(diff);
     d.setHours(0, 0, 0, 0);
     AppState.currentWeekStart = d;
     updatePeriodDisplay();
+}
+
+function getEmployeeWeekStart(employeeId) {
+    const base = getMonday(new Date());
+    const offset = AppState.employeeWeekOffsets?.[employeeId] || 0;
+    const d = new Date(base);
+    d.setDate(d.getDate() + (offset * 7));
+    d.setHours(0, 0, 0, 0);
+    return d;
 }
 
 function changeWeek(direction) {
@@ -509,11 +570,11 @@ function openWarningDetailsModal() {
         DOM.warningDetailsList.innerHTML = '<p>Geen waarschuwingen gevonden voor deze periode.</p>';
     } else {
         DOM.warningDetailsList.innerHTML = breakdown.map(item => {
-            const dates = item.dates.map(date => `<li>${date}</li>`).join('');
-            const messageItems = item.messages.map(message => `<li>${message}</li>`).join('');
+            const dates = item.dates.map(date => `<li>${escapeHtml(date)}</li>`).join('');
+            const messageItems = item.messages.map(message => `<li>${escapeHtml(message)}</li>`).join('');
             return `<div class="issue-details-item">
                 <div class="issue-details-header">
-                    <span class="issue-details-rule">${item.rule}</span>
+                    <span class="issue-details-rule">${escapeHtml(item.rule)}</span>
                     <span class="issue-details-count">${item.count}x</span>
                 </div>
                 <div class="issue-details-messages">
@@ -545,11 +606,11 @@ function openErrorDetailsModal() {
         DOM.errorDetailsList.innerHTML = '<p>Geen fouten gevonden voor deze periode.</p>';
     } else {
         DOM.errorDetailsList.innerHTML = breakdown.map(item => {
-            const dates = item.dates.map(date => `<li>${date}</li>`).join('');
-            const messageItems = item.messages.map(message => `<li>${message}</li>`).join('');
+            const dates = item.dates.map(date => `<li>${escapeHtml(date)}</li>`).join('');
+            const messageItems = item.messages.map(message => `<li>${escapeHtml(message)}</li>`).join('');
             return `<div class="issue-details-item">
                 <div class="issue-details-header">
-                    <span class="issue-details-rule">${item.rule}</span>
+                    <span class="issue-details-rule">${escapeHtml(item.rule)}</span>
                     <span class="issue-details-count">${item.count}x</span>
                 </div>
                 <div class="issue-details-messages">
@@ -689,7 +750,7 @@ function renderTimelineView() {
     html += '<div class="timeline-header">';
     html += '<div class="timeline-name-header">Medewerker</div>';
     weekDates.forEach((date) => {
-        const d = new Date(date);
+        const d = parseDateOnly(date);
         const dayOfWeek = d.getDay();
         const dayName = dayNames[dayOfWeek];
         const dateNum = d.getDate();
@@ -703,7 +764,8 @@ function renderTimelineView() {
         if (isClosed) headerClass += ' closed';
         if (isHoliday) headerClass += ' holiday';
 
-        const holidayBadge = isHoliday ? `<span class="holiday-badge" data-tooltip="${holidayInfo?.name || 'Vakantie'}">🏖️</span>` : '';
+        const holidayLabel = escapeHtml(holidayInfo?.name || 'Vakantie');
+        const holidayBadge = isHoliday ? `<span class="holiday-badge" data-tooltip="${holidayLabel}">🏖️</span>` : '';
 
         html += `<div class="${headerClass}">
             <span class="day-name">${dayName}</span>
@@ -739,10 +801,11 @@ function renderTimelineView() {
             if (teamEmployees.length === 0) return; // Skip empty teams
 
             const team = teams[teamKey] || { name: teamKey };
+            const teamName = escapeHtml(team.name);
 
             // Team header row
             html += `<div class="timeline-team-header team-${teamKey}">
-                <div class="team-header-name">${team.name}</div>
+                <div class="team-header-name">${teamName}</div>
                 <div class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</div>
             </div>`;
 
@@ -757,13 +820,14 @@ function renderTimelineView() {
                 const responsibleClass = isResponsible ? ' is-responsible' : '';
                 const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
 
+                const employeeName = escapeHtml(emp.name);
                 html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
-                    ${responsibleBadge}<span class="emp-name">${emp.name}</span>
+                    ${responsibleBadge}<span class="emp-name">${employeeName}</span>
                 </div>`;
 
                 // Day cells with time blocks
                 weekDates.forEach(date => {
-                    const d = new Date(date);
+                    const d = parseDateOnly(date);
                     const dayOfWeek = d.getDay();
                     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
                     const isClosed = isWeekend && !isWeekendOpen(date);
@@ -853,7 +917,7 @@ function renderTimelineView() {
                             const widthStyle = typeof widthPercent === 'string' ? widthPercent : `${widthPercent}%`;
 
                             // Escape quotes voor data-tooltip
-                            const tooltipText = titleText.replace(/"/g, '&quot;');
+                            const tooltipText = escapeHtml(titleText);
 
                             html += `<div class="${blockClass}"
                                          data-shift-id="${shift.id}"
@@ -1017,11 +1081,12 @@ function renderShiftBlock(shift, stackInfo = { offset: 0, total: 1, groupShifts:
         countBadge = `<span class="shift-count-badge">${stackInfo.total}</span>`;
     }
 
+    const employeeName = escapeHtml(employee.name);
     return `<div class="${cardClass}"
                  data-shift-id="${shift.id}"
                  style="top: ${top}px; height: ${height}px; left: ${leftOffset}px; right: ${rightOffset}px; z-index: ${100 + stackInfo.offset};">
         <div class="shift-block-content">
-            <div class="shift-employee-name">${employee.name}${availabilityIcon}</div>
+            <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
             <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
             ${countBadge}
             <button class="shift-delete-btn" data-shift-id="${shift.id}">×</button>
@@ -1052,7 +1117,8 @@ function renderShiftCard(shift) {
     // Check availability indicator
     let availabilityIcon = '';
     if (availability && !availability.available) {
-        availabilityIcon = `<span class="shift-availability-indicator unavailable" title="Medewerker niet beschikbaar: ${availability.reason || 'Geen reden opgegeven'}">⚠️</span>`;
+        const reason = escapeHtml(availability.reason || 'Geen reden opgegeven');
+        availabilityIcon = `<span class="shift-availability-indicator unavailable" title="Medewerker niet beschikbaar: ${reason}">⚠️</span>`;
     } else if (availability && availability.shiftTypes && availability.shiftTypes.length > 0) {
         // Check if shift matches availability
         let shiftType = null;
@@ -1061,15 +1127,17 @@ function renderShiftCard(shift) {
         else if (startHour >= 23 || startHour < 9) shiftType = 'nacht';
 
         if (shiftType && !availability.shiftTypes.includes(shiftType)) {
-            availabilityIcon = `<span class="shift-availability-indicator partial" title="Alleen beschikbaar voor: ${availability.shiftTypes.join(', ')}">⚡</span>`;
+            const shiftTypes = escapeHtml(availability.shiftTypes.join(', '));
+            availabilityIcon = `<span class="shift-availability-indicator partial" title="Alleen beschikbaar voor: ${shiftTypes}">⚡</span>`;
         }
     }
 
+    const employeeName = escapeHtml(employee.name);
     return `<div class="${cardClass}" data-shift-id="${shift.id}">
-        <div class="shift-employee-name">${employee.name}${availabilityIcon}</div>
+        <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
         <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
         <div class="shift-card-footer">
-            <span class="shift-team-badge">${DataStore.settings.teams[shift.team].name}</span>
+            <span class="shift-team-badge team-${shift.team}">${escapeHtml(DataStore.settings.teams[shift.team].name)}</span>
             <button class="shift-delete-btn" data-shift-id="${shift.id}">×</button>
         </div>
     </div>`;
@@ -1080,7 +1148,7 @@ function openAddShiftModal() {
     DOM.shiftModalTitle.textContent = 'Dienst toevoegen';
     DOM.shiftForm.reset();
     DOM.shiftValidationErrors.innerHTML = '';
-    DOM.shiftDate.value = new Date().toISOString().split('T')[0];
+    DOM.shiftDate.value = formatDateYYYYMMDD(new Date());
     DOM.shiftDeleteBtn.style.display = 'none';
     populateEmployeeDropdown();
     DOM.shiftModal.classList.remove('hidden');
@@ -1120,20 +1188,21 @@ function openEditShiftModal(shiftId) {
     let issuesHtml = '';
     if (isAbsent) {
         const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren opnemen', 'vorming': 'Vorming', 'andere': 'Afwezig' };
+        const employeeName = escapeHtml(getEmployee(shift.employeeId)?.name || '');
         issuesHtml += `<div class="validation-warning absence">
-            <strong>⚠️ Afwezigheid:</strong> ${getEmployee(shift.employeeId)?.name} is afwezig (${absenceLabels[availability.type] || 'Afwezig'})
+            <strong>⚠️ Afwezigheid:</strong> ${employeeName} is afwezig (${absenceLabels[availability.type] || 'Afwezig'})
         </div>`;
     }
     if (!validation.isValid && validation.errors.length > 0) {
         issuesHtml += `<div class="validation-error">
             <strong>❌ Fouten:</strong>
-            <ul>${validation.errors.map(e => `<li>${e.message}</li>`).join('')}</ul>
+            <ul>${validation.errors.map(e => `<li>${escapeHtml(e.message)}</li>`).join('')}</ul>
         </div>`;
     }
     if (validation.hasWarnings && validation.warnings.length > 0) {
         issuesHtml += `<div class="validation-warning">
             <strong>⚠️ Waarschuwingen:</strong>
-            <ul>${validation.warnings.map(w => `<li>${w.message}</li>`).join('')}</ul>
+            <ul>${validation.warnings.map(w => `<li>${escapeHtml(w.message)}</li>`).join('')}</ul>
         </div>`;
     }
     DOM.shiftValidationErrors.innerHTML = issuesHtml;
@@ -1161,7 +1230,7 @@ function populateEmployeeDropdown() {
     const employees = getAllEmployees(true);
     let html = '<option value="">-- Selecteer medewerker --</option>';
     employees.forEach(emp => {
-        html += `<option value="${emp.id}">${emp.name}</option>`;
+        html += `<option value="${emp.id}">${escapeHtml(emp.name)}</option>`;
     });
     DOM.shiftEmployee.innerHTML = html;
 }
@@ -1257,8 +1326,6 @@ function deleteShiftConfirm(shiftId) {
 
 function renderEmployees() {
     const employees = getAllEmployees();
-    const today = formatDateYYYYMMDD(new Date());
-
     // Groepeer medewerkers per team - alleen zichtbare teams
     const teams = DataStore.settings.teams;
     const teamOrder = ['vlot1', 'vlot2', 'cargo', 'overkoepelend', 'jobstudent']
@@ -1279,16 +1346,17 @@ function renderEmployees() {
         if (teamEmployees.length === 0) return;
 
         const team = teams[teamKey];
+        const teamName = escapeHtml(team.name);
 
         html += `<div class="employees-team-section">
             <div class="employees-team-header team-${teamKey}">
-                <span class="team-header-name">${team.name}</span>
+                <span class="team-header-name">${teamName}</span>
                 <span class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</span>
             </div>
             <div class="employees-team-grid">`;
 
         teamEmployees.forEach(emp => {
-            html += renderEmployeeCard(emp, today);
+            html += renderEmployeeCard(emp);
         });
 
         html += `</div></div>`;
@@ -1305,17 +1373,54 @@ function renderEmployees() {
             openEditEmployeeModal(employeeId);
         });
     });
+    document.querySelectorAll('.week-nav-btn').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const direction = btn.dataset.direction;
+            const employeeId = btn.dataset.employeeId;
+            if (!employeeId) return;
+            const current = AppState.employeeWeekOffsets?.[employeeId] || 0;
+            if (direction === 'prev') {
+                AppState.employeeWeekOffsets[employeeId] = current - 1;
+            } else if (direction === 'next') {
+                AppState.employeeWeekOffsets[employeeId] = current + 1;
+            } else if (direction === 'today') {
+                AppState.employeeWeekOffsets[employeeId] = 0;
+            }
+            renderEmployees();
+        });
+    });
+    document.querySelectorAll('.hours-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const card = btn.closest('.employee-card');
+            if (!card) return;
+            const isOpen = card.classList.toggle('show-month');
+            btn.textContent = isOpen ? 'Verberg maand' : 'Toon maand';
+        });
+    });
 }
 
-function renderEmployeeCard(emp, today) {
+function renderEmployeeCard(emp) {
     const statusClass = emp.active ? 'active' : 'inactive';
     const statusText = emp.active ? 'Actief' : 'Inactief';
     const mainTeam = DataStore.settings.teams[emp.mainTeam];
+    const employeeName = escapeHtml(emp.name);
+    const employeeEmail = escapeHtml(emp.email || '');
+    const mainTeamName = escapeHtml(mainTeam.name);
 
     // Calculate hours
-    const hoursThisWeek = getEmployeeHoursThisWeek(emp.id, today);
-    const hoursThisMonth = getEmployeeHoursThisMonth(emp.id, today);
+    const weekStartDate = getEmployeeWeekStart(emp.id);
+    const weekDates = getWeekDates(weekStartDate);
+    const startDate = weekDates[0];
+    const endDate = weekDates[6];
+    const weekNumber = getISOWeekNumber(weekStartDate);
+    const hoursThisWeek = getEmployeeHoursThisWeek(emp.id, startDate);
+    const hoursThisMonth = getEmployeeHoursThisMonth(emp.id, startDate);
     const contractHours = emp.contractHours || 0;
+    const monthContractHours = contractHours * 4.33;
+    const overtimeWeek = contractHours > 0 ? Math.max(0, hoursThisWeek - contractHours) : 0;
+    const overtimeMonth = contractHours > 0 ? Math.max(0, hoursThisMonth - monthContractHours) : 0;
 
     // Calculate percentages for progress bars
     const weekPercentage = contractHours > 0 ? Math.min((hoursThisWeek / contractHours) * 100, 100) : 0;
@@ -1328,33 +1433,49 @@ function renderEmployeeCard(emp, today) {
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
             <div class="employee-header">
-                <div class="employee-name">${emp.name}</div>
+                <div class="employee-name">${employeeName}</div>
                 <span class="employee-status ${statusClass}">${statusText}</span>
             </div>
             <div class="employee-info">
-                ${emp.email ? `<div class="employee-info-item">📧 ${emp.email}</div>` : ''}
+                ${emp.email ? `<div class="employee-info-item">📧 ${employeeEmail}</div>` : ''}
                 ${emp.contractHours ? `<div class="employee-info-item">⏰ ${emp.contractHours}u/week contract</div>` : ''}
             </div>
             <div class="employee-teams">
-                <span class="team-badge ${emp.mainTeam}">${mainTeam.name}</span>
-                ${emp.extraTeams.map(teamId => {
-                    const team = DataStore.settings.teams[teamId];
-                    return `<span class="team-badge ${teamId}">${team.name}</span>`;
-                }).join('')}
+                <span class="team-badge ${emp.mainTeam}">${mainTeamName}</span>
             </div>
             ${contractHours > 0 ? `
                 <div class="employee-hours">
+                    <div class="hours-week-label">
+                        <span class="week-pill">Week ${weekNumber}</span>
+                        <span class="week-range">${formatDate(startDate)} - ${formatDate(endDate)}</span>
+                    </div>
                     <div class="hours-section">
                         <div class="hours-label">Deze week: ${hoursThisWeek.toFixed(1)}u / ${contractHours}u</div>
                         <div class="progress-bar">
                             <div class="progress-fill" style="width: ${weekPercentage}%; background: ${weekColor};"></div>
                         </div>
                     </div>
-                    <div class="hours-section">
-                        <div class="hours-label">Deze maand: ${hoursThisMonth.toFixed(1)}u / ${(contractHours * 4.33).toFixed(0)}u</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${monthPercentage}%; background: ${monthColor};"></div>
+                    <div class="month-only">
+                        <div class="hours-section">
+                            <div class="hours-label">Deze maand: ${hoursThisMonth.toFixed(1)}u / ${monthContractHours.toFixed(0)}u</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${monthPercentage}%; background: ${monthColor};"></div>
+                            </div>
                         </div>
+                    </div>
+                    ${(overtimeWeek > 0 || overtimeMonth > 0) ? `
+                        <div class="overtime-summary">
+                            ${overtimeWeek > 0 ? `<span class="overtime-chip">Overuren week: ${overtimeWeek.toFixed(1)}u</span>` : ''}
+                            ${overtimeMonth > 0 ? `<span class="overtime-chip month-only">Overuren maand: ${overtimeMonth.toFixed(1)}u</span>` : ''}
+                        </div>
+                    ` : ''}
+                    <div class="hours-controls">
+                        <div class="hours-week-nav">
+                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="prev" title="Vorige week">&larr;</button>
+                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="today" title="Huidige week">•</button>
+                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="next" title="Volgende week">&rarr;</button>
+                        </div>
+                        <button class="hours-toggle-btn" type="button" data-employee-id="${emp.id}">Toon maand</button>
                     </div>
                 </div>
             ` : ''}
@@ -1383,9 +1504,6 @@ function openEditEmployeeModal(employeeId) {
     DOM.employeeMainTeam.value = employee.mainTeam;
     DOM.employeeContract.value = employee.contractHours || '';
     DOM.employeeActive.checked = employee.active;
-    DOM.employeeExtraTeams.forEach(checkbox => {
-        checkbox.checked = employee.extraTeams.includes(checkbox.value);
-    });
     generateWeekScheduleHTML();
     loadWeekScheduleForm(1, employee.weekScheduleWeek1 || []);
     loadWeekScheduleForm(2, employee.weekScheduleWeek2 || []);
@@ -1402,7 +1520,6 @@ function closeEmployeeModal() {
 
 function handleEmployeeSubmit(e) {
     e.preventDefault();
-    const extraTeams = Array.from(DOM.employeeExtraTeams).filter(cb => cb.checked).map(cb => cb.value);
     const weekScheduleWeek1 = getWeekScheduleFromForm(1);
     const weekScheduleWeek2 = getWeekScheduleFromForm(2);
 
@@ -1410,7 +1527,7 @@ function handleEmployeeSubmit(e) {
         name: DOM.employeeName.value.trim(),
         email: DOM.employeeEmail.value.trim(),
         mainTeam: DOM.employeeMainTeam.value,
-        extraTeams: extraTeams,
+        extraTeams: [],
         contractHours: parseFloat(DOM.employeeContract.value) || 0,
         active: DOM.employeeActive.checked,
         weekScheduleWeek1: weekScheduleWeek1,
@@ -1475,16 +1592,10 @@ function generateWeekScheduleHTML() {
         4: 'Donderdag', 5: 'Vrijdag', 6: 'Zaterdag', 0: 'Zondag'
     };
 
-    // Build team options
-    const teamOptions = Object.keys(DataStore.settings.teams).map(teamId => {
-        const team = DataStore.settings.teams[teamId];
-        return `<option value="${teamId}">${team.name}</option>`;
-    }).join('');
-
     // Build template options
     const templateOptions = Object.keys(DataStore.settings.shiftTemplates).map(templateId => {
         const template = DataStore.settings.shiftTemplates[templateId];
-        return `<option value="${templateId}">${template.name} (${template.start}-${template.end})</option>`;
+        return `<option value="${templateId}">${escapeHtml(template.name)} (${template.start}-${template.end})</option>`;
     }).join('');
 
     function generateWeekHTML(weekNumber, days) {
@@ -1501,9 +1612,6 @@ function generateWeekScheduleHTML() {
                     <option value="">-- Kies template --</option>
                     ${templateOptions}
                     <option value="custom">Aangepast...</option>
-                </select>
-                <select class="week-schedule-team" data-week="${weekNumber}" data-day="${dayNum}" disabled>
-                    ${teamOptions}
                 </select>
                 <div class="week-schedule-times">
                     <input type="time" class="week-schedule-start" data-week="${weekNumber}" data-day="${dayNum}" disabled>
@@ -1579,18 +1687,15 @@ function loadWeekScheduleForm(weekNumber, weekSchedule) {
     weekSchedule.forEach(schedule => {
         const checkbox = document.querySelector(`.week-schedule-enabled[data-week="${weekNumber}"][data-day="${schedule.dayOfWeek}"]`);
         const templateSelect = document.querySelector(`.week-schedule-template[data-week="${weekNumber}"][data-day="${schedule.dayOfWeek}"]`);
-        const teamSelect = document.querySelector(`.week-schedule-team[data-week="${weekNumber}"][data-day="${schedule.dayOfWeek}"]`);
         const startInput = document.querySelector(`.week-schedule-start[data-week="${weekNumber}"][data-day="${schedule.dayOfWeek}"]`);
         const endInput = document.querySelector(`.week-schedule-end[data-week="${weekNumber}"][data-day="${schedule.dayOfWeek}"]`);
 
         if (checkbox && schedule.enabled) {
             checkbox.checked = true;
             templateSelect.disabled = false;
-            teamSelect.disabled = false;
             startInput.disabled = false;
             endInput.disabled = false;
 
-            teamSelect.value = schedule.team;
             startInput.value = schedule.startTime;
             endInput.value = schedule.endTime;
 
@@ -1617,14 +1722,12 @@ function getWeekScheduleFromForm(weekNumber) {
         const enabled = checkbox.checked;
 
         if (enabled) {
-            const teamSelect = document.querySelector(`.week-schedule-team[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
             const startInput = document.querySelector(`.week-schedule-start[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
             const endInput = document.querySelector(`.week-schedule-end[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
 
             weekSchedule.push({
                 dayOfWeek: dayOfWeek,
                 enabled: true,
-                team: teamSelect.value,
                 startTime: startInput.value,
                 endTime: endInput.value
             });
@@ -1640,12 +1743,10 @@ function toggleWeekScheduleDay(checkbox) {
     const enabled = checkbox.checked;
 
     const templateSelect = document.querySelector(`.week-schedule-template[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
-    const teamSelect = document.querySelector(`.week-schedule-team[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
     const startInput = document.querySelector(`.week-schedule-start[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
     const endInput = document.querySelector(`.week-schedule-end[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
 
     templateSelect.disabled = !enabled;
-    teamSelect.disabled = !enabled;
     startInput.disabled = !enabled;
     endInput.disabled = !enabled;
 
@@ -1717,7 +1818,7 @@ function renderAvailability() {
 
     // Header with days
     weekDates.forEach((date, index) => {
-        const d = new Date(date);
+        const d = parseDateOnly(date);
         const dayOfWeek = d.getDay();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
         const isClosed = isWeekend && !isWeekendOpen(date);
@@ -1738,7 +1839,7 @@ function renderAvailability() {
         const teamEmployees = employeesByTeam[teamId];
         if (teamEmployees.length === 0) return;
 
-        const teamName = DataStore.settings.teams[teamId]?.name || teamId;
+        const teamName = escapeHtml(DataStore.settings.teams[teamId]?.name || teamId);
 
         // Team header
         html += `<div class="availability-team-header ${teamId}">
@@ -1750,13 +1851,13 @@ function renderAvailability() {
         teamEmployees.forEach(emp => {
             html += `<div class="availability-employee-row">
                 <div class="availability-employee-col">
-                    <span class="emp-name">${emp.name}</span>
+                    <span class="emp-name">${escapeHtml(emp.name)}</span>
                 </div>
             `;
 
             // Days for this employee
             weekDates.forEach(date => {
-                const d = new Date(date);
+                const d = parseDateOnly(date);
                 const dayOfWeek = d.getDay();
                 const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
                 const isClosed = isWeekend && !isWeekendOpen(date);
@@ -1814,8 +1915,8 @@ function renderAvailability() {
                     <div class="availability-cell-content ${statusClass}"
                          data-employee-id="${emp.id}"
                          data-date="${date}"
-                         title="${tooltipText}">
-                        ${conflictIcon}${statusText ? `<span class="status-label">${statusText}</span>` : '<span class="status-check">✓</span>'}
+                         title="${escapeHtml(tooltipText)}">
+                        ${conflictIcon}${statusText ? `<span class="status-label">${escapeHtml(statusText)}</span>` : '<span class="status-check">✓</span>'}
                     </div>
                 ` : '';
 
@@ -2089,12 +2190,14 @@ function renderTeamsConfig() {
     let html = '';
     Object.keys(DataStore.settings.teams).forEach(teamId => {
         const team = DataStore.settings.teams[teamId];
+        const teamName = escapeHtml(team.name);
+        const teamKey = escapeHtml(teamId);
         html += `
         <div class="team-config-item" data-team-id="${teamId}">
             <div class="team-color-dot" style="background: ${team.color}"></div>
             <div class="team-info">
-                <span class="team-name">${team.name}</span>
-                <span class="team-id">${teamId}</span>
+                <span class="team-name">${teamName}</span>
+                <span class="team-id">${teamKey}</span>
             </div>
             <div class="team-actions">
                 <input type="color" class="color-picker" value="${team.color}"
@@ -2110,11 +2213,12 @@ function renderTemplatesConfig() {
     Object.keys(DataStore.settings.shiftTemplates).forEach(templateId => {
         const template = DataStore.settings.shiftTemplates[templateId];
         const duration = calculateTemplateDuration(template.start, template.end);
+        const templateName = escapeHtml(template.name);
         html += `
         <div class="template-config-item" data-template-id="${templateId}">
             <div class="template-icon">${getTemplateIcon(templateId)}</div>
             <div class="template-info">
-                <span class="template-name">${template.name}</span>
+                <span class="template-name">${templateName}</span>
                 <span class="template-times">${template.start} - ${template.end} (${duration})</span>
             </div>
             <div class="template-actions">
@@ -2161,6 +2265,7 @@ function updateTeamColor(teamId, color) {
     if (DataStore.settings.teams[teamId]) {
         DataStore.settings.teams[teamId].color = color;
         saveToStorage();
+        applyTeamColors();
     }
 }
 
@@ -2202,6 +2307,8 @@ function deleteTemplate(templateId) {
 function openTemplateModal(templateId = null, template = null) {
     const isEdit = templateId !== null;
     const title = isEdit ? 'Template bewerken' : 'Nieuwe template';
+    const safeTemplateId = escapeHtml(templateId || '');
+    const safeTemplateName = escapeHtml(template?.name || '');
 
     const modalHtml = `
     <div class="modal-overlay active" id="template-modal-overlay" onclick="closeTemplateModal()">
@@ -2214,7 +2321,7 @@ function openTemplateModal(templateId = null, template = null) {
                 <div class="form-group">
                     <label for="template-id">Template ID:</label>
                     <input type="text" id="template-id" class="form-input"
-                           value="${templateId || ''}"
+                           value="${safeTemplateId}"
                            ${isEdit ? 'readonly' : ''}
                            placeholder="bv. vroeg, laat, nacht" />
                     <span class="form-hint">Korte identifier (geen spaties)</span>
@@ -2222,7 +2329,7 @@ function openTemplateModal(templateId = null, template = null) {
                 <div class="form-group">
                     <label for="template-name">Naam:</label>
                     <input type="text" id="template-name" class="form-input"
-                           value="${template ? template.name : ''}"
+                           value="${safeTemplateName}"
                            placeholder="bv. Vroege dienst" />
                 </div>
                 <div class="form-row">
@@ -2254,13 +2361,19 @@ function closeTemplateModal() {
 }
 
 function saveTemplate(originalId) {
-    const id = document.getElementById('template-id').value.trim().toLowerCase().replace(/\s+/g, '_');
+    const rawId = document.getElementById('template-id').value.trim().toLowerCase().replace(/\s+/g, '_');
+    const id = rawId.replace(/[^a-z0-9_-]/g, '');
     const name = document.getElementById('template-name').value.trim();
     const start = document.getElementById('template-start').value;
     const end = document.getElementById('template-end').value;
 
     if (!id || !name || !start || !end) {
         alert('Vul alle velden in');
+        return;
+    }
+
+    if (rawId !== id) {
+        alert('Template ID mag enkel letters, cijfers, _ of - bevatten');
         return;
     }
 
@@ -2289,14 +2402,15 @@ function renderHolidayPeriods() {
     }
 
     // Sorteer op startdatum
-    const sorted = [...periods].sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+    const sorted = [...periods].sort((a, b) => parseDateOnly(a.startDate) - parseDateOnly(b.startDate));
 
     return sorted.map(period => {
-        const start = new Date(period.startDate);
-        const end = new Date(period.endDate);
+        const start = parseDateOnly(period.startDate);
+        const end = parseDateOnly(period.endDate);
         const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-        const isActive = isHolidayPeriod(new Date());
-        const isPast = end < new Date();
+        const today = parseDateOnly(new Date());
+        const isActive = today >= start && today <= end;
+        const isPast = end < today;
 
         let statusClass = '';
         if (isPast) statusClass = 'past';
@@ -2305,7 +2419,7 @@ function renderHolidayPeriods() {
         return `
         <div class="holiday-period-item ${statusClass}">
             <div class="holiday-period-info">
-                <span class="holiday-period-name">${period.name}</span>
+                <span class="holiday-period-name">${escapeHtml(period.name)}</span>
                 <span class="holiday-period-dates">
                     ${formatDateShort(period.startDate)} - ${formatDateShort(period.endDate)}
                     <span class="holiday-period-days">(${days} dagen)</span>
@@ -2317,7 +2431,7 @@ function renderHolidayPeriods() {
 }
 
 function formatDateShort(date) {
-    const d = new Date(date);
+    const d = parseDateOnly(date);
     return d.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
@@ -2385,8 +2499,8 @@ function updateHolidayDateInfo() {
     const infoDiv = document.getElementById('holiday-date-info');
 
     if (start && end) {
-        const startDate = new Date(start);
-        const endDate = new Date(end);
+        const startDate = parseDateOnly(start);
+        const endDate = parseDateOnly(end);
 
         if (endDate >= startDate) {
             const days = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
@@ -2414,7 +2528,7 @@ function saveHolidayPeriod() {
         return;
     }
 
-    if (new Date(end) < new Date(start)) {
+    if (parseDateOnly(end) < parseDateOnly(start)) {
         alert('Einddatum moet na startdatum liggen');
         return;
     }
@@ -2461,7 +2575,7 @@ function renderEligibleTeamsCheckboxes() {
             <input type="checkbox" id="eligible-team-${teamId}" ${checked} onchange="saveEligibleTeamsQuiet()" />
             <span class="checkbox-label">
                 <span class="team-color-dot" style="background: ${team.color}"></span>
-                ${team.name}
+                ${escapeHtml(team.name)}
             </span>
         </label>`;
     });
@@ -2517,15 +2631,16 @@ function renderRotationSettingsCompact() {
     eligible.forEach(emp => {
         // Compare as strings to avoid precision issues
         const selected = String(emp.id) === currentEmployee ? 'selected' : '';
-        employeeOptions += `<option value="${emp.id}" ${selected}>${emp.name}</option>`;
+        employeeOptions += `<option value="${emp.id}" ${selected}>${escapeHtml(emp.name)}</option>`;
     });
 
     // Show current status if set
     let statusHtml = '';
     if (currentStart && currentEmployee) {
         const startPerson = eligible.find(e => String(e.id) === currentEmployee);
+        const startPersonName = escapeHtml(startPerson?.name || 'onbekend');
         statusHtml = `<div class="rotation-status">
-            Rotatie gestart op ${formatDate(currentStart)} met ${startPerson?.name || 'onbekend'}
+            Rotatie gestart op ${formatDate(currentStart)} met ${startPersonName}
         </div>`;
     }
 
@@ -2564,7 +2679,7 @@ function saveRotationSettings() {
     }
 
     // Check if it's a Monday
-    const date = new Date(startDate);
+    const date = parseDateOnly(startDate);
     if (date.getDay() !== 1) {
         alert('⚠️ Kies een maandag als startdatum');
         return;
@@ -2604,11 +2719,12 @@ function renderUpcomingResponsibles() {
 
             if (responsible) {
                 const teamColor = DataStore.settings.teams[responsible.mainTeam]?.color || '#6b7280';
+                const responsibleName = escapeHtml(responsible.name);
                 html += `
                 <div class="upcoming-item">
                     <span class="upcoming-date">${weekNum} (${dateDisplay})</span>
                     <span class="upcoming-name" style="border-left: 3px solid ${teamColor}; padding-left: 8px;">
-                        ${responsible.name}
+                        ${responsibleName}
                     </span>
                 </div>`;
                 count++;
@@ -2634,7 +2750,7 @@ function updateBiWeeklyReference() {
     }
 
     // Check if it's a Monday
-    const date = new Date(selectedDate);
+    const date = parseDateOnly(selectedDate);
     const dayOfWeek = date.getDay();
 
     if (dayOfWeek !== 1) {
@@ -2678,8 +2794,8 @@ function updateAbsenceDateInfo() {
     const infoDiv = document.getElementById('absence-date-info');
 
     if (startDate && endDate) {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
+        const start = parseDateOnly(startDate);
+        const end = parseDateOnly(endDate);
 
         if (end >= start) {
             const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
@@ -2816,8 +2932,8 @@ function handleAvailabilitySave() {
         return;
     }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = parseDateOnly(startDate);
+    const end = parseDateOnly(endDate);
 
     if (end < start) {
         alert('Einddatum moet na startdatum liggen');
@@ -2827,7 +2943,7 @@ function handleAvailabilitySave() {
     try {
         // Check for conflicts first
         let conflictDates = [];
-        let checkDate = new Date(start);
+        let checkDate = parseDateOnly(start);
         while (checkDate <= end) {
             const dateStr = formatDateYYYYMMDD(checkDate);
             const shifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
@@ -2847,7 +2963,7 @@ function handleAvailabilitySave() {
         }
 
         // Apply absence for each day in range
-        let currentDate = new Date(start);
+        let currentDate = parseDateOnly(start);
         let daysSet = 0;
 
         while (currentDate <= end) {
@@ -2888,8 +3004,8 @@ function handleRemoveAbsence() {
         return;
     }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = parseDateOnly(startDate);
+    const end = parseDateOnly(endDate);
 
     if (end < start) {
         alert('Ongeldige datum range');
@@ -2903,7 +3019,7 @@ function handleRemoveAbsence() {
     }
 
     // Remove absence for each day in range
-    let currentDate = new Date(start);
+    let currentDate = parseDateOnly(start);
     while (currentDate <= end) {
         const dateStr = formatDateYYYYMMDD(currentDate);
         removeAvailability(employeeId, dateStr);
@@ -2927,6 +3043,192 @@ function exportData() {
     URL.revokeObjectURL(url);
 }
 
+function sanitizeString(value, maxLen = 200) {
+    if (typeof value !== 'string') return '';
+    return value.replace(/\0/g, '').trim().slice(0, maxLen);
+}
+
+function isValidDateString(value) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    return formatDateYYYYMMDD(parseDateOnly(value)) === value;
+}
+
+function isValidTimeString(value) {
+    if (typeof value !== 'string' || !/^\d{2}:\d{2}$/.test(value)) return false;
+    const [hours, minutes] = value.split(':').map(Number);
+    return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+}
+
+function sanitizeSettings(rawSettings) {
+    const normalized = normalizeSettings(rawSettings || {});
+    const defaults = normalizeSettings(DEFAULT_SETTINGS || {});
+
+    const teams = {};
+    Object.keys(normalized.teams || {}).forEach(teamId => {
+        const team = normalized.teams[teamId] || {};
+        const name = sanitizeString(team.name || defaults.teams?.[teamId]?.name || teamId, 80);
+        const color = typeof team.color === 'string' && /^#([0-9a-fA-F]{3}){1,2}$/.test(team.color)
+            ? team.color
+            : (defaults.teams?.[teamId]?.color || '#64748b');
+        teams[teamId] = { name, color };
+    });
+
+    const shiftTemplates = {};
+    Object.keys(normalized.shiftTemplates || {}).forEach(templateId => {
+        if (!/^[a-z0-9_-]+$/i.test(templateId)) return;
+        const template = normalized.shiftTemplates[templateId] || {};
+        if (!isValidTimeString(template.start) || !isValidTimeString(template.end)) return;
+        shiftTemplates[templateId] = {
+            name: sanitizeString(template.name || templateId, 80),
+            start: template.start,
+            end: template.end
+        };
+    });
+
+    const holidayPeriods = Array.isArray(normalized.holidayPeriods)
+        ? normalized.holidayPeriods
+            .map(period => ({
+                id: Number.isFinite(Number(period?.id)) ? Number(period.id) : Date.now(),
+                name: sanitizeString(period?.name || '', 80),
+                startDate: period?.startDate,
+                endDate: period?.endDate
+            }))
+            .filter(period => period.name && isValidDateString(period.startDate) && isValidDateString(period.endDate))
+        : [];
+
+    const eligibleTeams = Array.isArray(normalized.responsibleRotation?.eligibleTeams)
+        ? normalized.responsibleRotation.eligibleTeams.filter(teamId => teams[teamId])
+        : (defaults.responsibleRotation?.eligibleTeams || []);
+
+    const assignments = {};
+    const rawAssignments = normalized.responsibleRotation?.assignments || {};
+    Object.keys(rawAssignments).forEach(dateKey => {
+        const employeeId = Number(rawAssignments[dateKey]);
+        if (Number.isFinite(employeeId) && isValidDateString(dateKey)) {
+            assignments[dateKey] = employeeId;
+        }
+    });
+
+    const rotationStart = isValidDateString(normalized.responsibleRotation?.rotationStart)
+        ? normalized.responsibleRotation.rotationStart
+        : (defaults.responsibleRotation?.rotationStart || '');
+    const rotationStartEmployee = Number.isFinite(Number(normalized.responsibleRotation?.rotationStartEmployee))
+        ? String(normalized.responsibleRotation.rotationStartEmployee)
+        : (defaults.responsibleRotation?.rotationStartEmployee || '');
+
+    const rules = {
+        minHoursBetweenShifts: Number(normalized.rules?.minHoursBetweenShifts) || defaults.rules?.minHoursBetweenShifts || 11,
+        minStaffingDay: Number(normalized.rules?.minStaffingDay) || defaults.rules?.minStaffingDay || 1,
+        minStaffingNight: Number(normalized.rules?.minStaffingNight) || defaults.rules?.minStaffingNight || 1
+    };
+
+    const holidayRules = {
+        minStaffingDay: Number(normalized.holidayRules?.minStaffingDay) || defaults.holidayRules?.minStaffingDay || 2,
+        minStaffingNight: Number(normalized.holidayRules?.minStaffingNight) || defaults.holidayRules?.minStaffingNight || 1
+    };
+
+    return {
+        ...normalized,
+        teams,
+        shiftTemplates,
+        holidayPeriods,
+        rules,
+        holidayRules,
+        responsibleRotation: {
+            eligibleTeams,
+            assignments,
+            rotationStart,
+            rotationStartEmployee
+        }
+    };
+}
+
+function sanitizeImportedData(rawData) {
+    const data = rawData && typeof rawData === 'object' ? rawData : {};
+    const settings = sanitizeSettings(data.settings);
+
+    const employees = Array.isArray(data.employees) ? data.employees
+        .map(emp => {
+            const id = Number(emp?.id);
+            if (!Number.isFinite(id)) return null;
+            const mainTeam = settings.teams[emp?.mainTeam] ? emp.mainTeam : Object.keys(settings.teams)[0];
+            const extraTeams = Array.isArray(emp?.extraTeams) ? emp.extraTeams.filter(teamId => settings.teams[teamId]) : [];
+            const weekScheduleWeek1 = Array.isArray(emp?.weekScheduleWeek1) ? emp.weekScheduleWeek1 : [];
+            const weekScheduleWeek2 = Array.isArray(emp?.weekScheduleWeek2) ? emp.weekScheduleWeek2 : [];
+
+            function sanitizeScheduleItem(item) {
+                const dayOfWeek = Number(item?.dayOfWeek);
+                if (!Number.isFinite(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) return null;
+                if (!settings.teams[item?.team]) return null;
+                if (!isValidTimeString(item?.startTime) || !isValidTimeString(item?.endTime)) return null;
+                return {
+                    dayOfWeek,
+                    enabled: Boolean(item?.enabled),
+                    team: item.team,
+                    startTime: item.startTime,
+                    endTime: item.endTime
+                };
+            }
+
+            return {
+                id,
+                name: sanitizeString(emp?.name || 'Onbekend', 80),
+                email: sanitizeString(emp?.email || '', 120),
+                mainTeam,
+                extraTeams,
+                contractHours: Number(emp?.contractHours) || 0,
+                active: emp?.active !== false,
+                weekScheduleWeek1: weekScheduleWeek1.map(sanitizeScheduleItem).filter(Boolean),
+                weekScheduleWeek2: weekScheduleWeek2.map(sanitizeScheduleItem).filter(Boolean),
+                createdAt: emp?.createdAt || new Date().toISOString()
+            };
+        })
+        .filter(Boolean) : [];
+
+    const employeeIds = new Set(employees.map(emp => String(emp.id)));
+
+    const shifts = Array.isArray(data.shifts) ? data.shifts
+        .map(shift => {
+            const employeeId = Number(shift?.employeeId);
+            if (!Number.isFinite(employeeId) || !employeeIds.has(String(employeeId))) return null;
+            if (!settings.teams[shift?.team]) return null;
+            if (!isValidDateString(shift?.date)) return null;
+            if (!isValidTimeString(shift?.startTime) || !isValidTimeString(shift?.endTime)) return null;
+            return {
+                id: Number.isFinite(Number(shift?.id)) ? Number(shift.id) : Date.now() + Math.random(),
+                employeeId,
+                team: shift.team,
+                date: shift.date,
+                startTime: shift.startTime,
+                endTime: shift.endTime,
+                notes: sanitizeString(shift?.notes || '', 300),
+                createdAt: shift?.createdAt || new Date().toISOString()
+            };
+        })
+        .filter(Boolean) : [];
+
+    const availability = Array.isArray(data.availability) ? data.availability
+        .map(entry => {
+            const employeeId = Number(entry?.employeeId);
+            if (!Number.isFinite(employeeId) || !employeeIds.has(String(employeeId))) return null;
+            if (!isValidDateString(entry?.date)) return null;
+            const type = entry?.type;
+            const allowedTypes = ['verlof', 'ziek', 'overuren', 'vorming', 'andere'];
+            if (!allowedTypes.includes(type)) return null;
+            return {
+                key: `${employeeId}_${entry.date}`,
+                employeeId,
+                date: entry.date,
+                type,
+                reason: sanitizeString(entry?.reason || '', 200),
+                updatedAt: entry?.updatedAt || new Date().toISOString()
+            };
+        })
+        .filter(Boolean) : [];
+
+    return { employees, shifts, availability, settings };
+}
+
 function importData(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -2934,10 +3236,15 @@ function importData(event) {
     reader.onload = (e) => {
         try {
             const data = JSON.parse(e.target.result);
+            const sanitized = sanitizeImportedData(data);
             if (confirm('Data importeren? Dit overschrijft huidige data!')) {
-                if (data.employees) DataStore.employees = data.employees;
-                if (data.shifts) DataStore.shifts = data.shifts;
-                if (data.settings) DataStore.settings = {...DataStore.settings, ...data.settings};
+                DataStore.employees = sanitized.employees;
+                DataStore.shifts = sanitized.shifts;
+                DataStore.availability = sanitized.availability;
+                DataStore.settings = sanitizeSettings({
+                    ...DataStore.settings,
+                    ...sanitized.settings
+                });
                 saveToStorage();
                 alert('Data geïmporteerd!');
                 location.reload();

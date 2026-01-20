@@ -318,6 +318,27 @@ textarea {
     gap: 16px;
 }
 
+.employees-filters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding: 10px 12px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.employees-filters .filter-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
 .view-header h2 {
     font-size: 28px;
     color: var(--text-primary);
@@ -1594,17 +1615,61 @@ textarea {
 }
 
 .timeline-view-wrapper > * {
-    min-width: 1500px; /* Ensure minimum width for all content */
+    min-width: 100%;
 }
 
 .timeline-header {
     display: grid;
-    grid-template-columns: 140px repeat(7, minmax(180px, 1fr));
+    grid-template-columns: 140px repeat(7, minmax(160px, 1fr));
     background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
     color: white;
     position: sticky;
     top: 0;
     z-index: 20;
+}
+
+@media (max-width: 1400px) {
+    .timeline-view-wrapper > * {
+        min-width: 0;
+    }
+
+    .timeline-header {
+        grid-template-columns: 120px repeat(7, minmax(0, 1fr));
+    }
+
+    .timeline-scale-row {
+        grid-template-columns: 120px repeat(7, minmax(0, 1fr));
+    }
+
+    .timeline-row {
+        grid-template-columns: 120px repeat(7, minmax(0, 1fr));
+    }
+
+    .timeline-name-header {
+        font-size: 12px;
+    }
+
+    .timeline-day-header .day-name {
+        font-size: 11px;
+    }
+
+    .timeline-day-header .day-num {
+        font-size: 13px;
+    }
+}
+
+@media (max-width: 1200px) {
+    .timeline-header {
+        grid-template-columns: 110px repeat(7, minmax(0, 1fr));
+    }
+
+    .timeline-scale-row {
+        grid-template-columns: 110px repeat(7, minmax(0, 1fr));
+    }
+
+    .timeline-row {
+        grid-template-columns: 110px repeat(7, minmax(0, 1fr));
+    }
 }
 
 .timeline-name-header {
@@ -1678,7 +1743,7 @@ textarea {
 
 .timeline-scale-row {
     display: grid;
-    grid-template-columns: 140px repeat(7, 1fr);
+    grid-template-columns: 140px repeat(7, minmax(160px, 1fr));
     background: #f1f5f9;
     border-bottom: 1px solid var(--border-color);
 }
@@ -1764,7 +1829,7 @@ textarea {
 
 .timeline-row {
     display: grid;
-    grid-template-columns: 140px repeat(7, minmax(180px, 1fr));
+    grid-template-columns: 140px repeat(7, minmax(160px, 1fr));
     border-bottom: 1px solid var(--border-color);
     min-height: 44px;
     overflow: visible; /* Nodig voor nachtblokken die over meerdere dagen lopen */
@@ -3619,6 +3684,72 @@ textarea {
     border-top: 1px solid var(--border-color);
 }
 
+.hours-week-label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.week-pill {
+    background: #e0e7ff;
+    color: #3730a3;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+.week-range {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.hours-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.hours-week-nav {
+    display: flex;
+    gap: 6px;
+}
+
+.week-nav-btn {
+    border: 1px solid var(--border-color);
+    background: #f8fafc;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.week-nav-btn:hover {
+    background: #e2e8f0;
+    color: var(--text-primary);
+}
+
+.week-nav-btn[data-direction="today"] {
+    font-weight: 900;
+    padding: 4px 7px;
+}
+
+.month-only {
+    display: none;
+}
+
+.employee-card.show-month .month-only {
+    display: block;
+}
+
 .hours-section {
     margin-bottom: 12px;
 }
@@ -3646,6 +3777,41 @@ textarea {
     height: 100%;
     transition: width 0.3s ease, background 0.3s ease;
     border-radius: 4px;
+}
+
+.hours-toggle-btn {
+    margin-top: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    background: #f8fafc;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.hours-toggle-btn:hover {
+    background: #e2e8f0;
+    color: var(--text-primary);
+}
+
+.overtime-summary {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.overtime-chip {
+    background: #fffbeb;
+    border: 1px solid #f59e0b;
+    color: #92400e;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
 }
 
 /* ===== WEEKEND/VAKANTIE VERANTWOORDELIJKE ===== */
