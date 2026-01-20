@@ -140,6 +140,11 @@ function validateMinimumStaffing(date, teamId = null) {
     const day = new Date(date).getDay();
     const isWeekend = day === 0 || day === 6;
 
+    // Friday evening closure for closed weekends
+    if (day === 5 && !isWeekendOpen(date)) {
+        return { errors, warnings };
+    }
+
     if (isWeekend && !isWeekendOpen(date)) {
         return { errors, warnings };
     }
