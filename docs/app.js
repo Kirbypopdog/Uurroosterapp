@@ -180,7 +180,7 @@ function applyTeamColors() {
     let css = '';
     Object.entries(teams).forEach(([teamId, team]) => {
         const color = team.color || '#64748b';
-        const textColor = getContrastColor(color);
+        const textColor = '#ffffff';
         css += `
 .team-toggle.active[data-team="${teamId}"] { background: ${color} !important; color: ${textColor} !important; border-color: transparent !important; }
 .team-badge.${teamId} { background: ${color} !important; color: ${textColor} !important; }
@@ -691,7 +691,12 @@ function groupOverlappingShifts(shifts) {
 }
 
 function renderCalendar() {
-    renderTimelineView();
+    try {
+        renderTimelineView();
+    } catch (error) {
+        console.error('Error rendering calendar:', error);
+        DOM.rosterCalendar.innerHTML = '<div class="no-shifts-message">Planner kon niet geladen worden. Check de console (F12).</div>';
+    }
 }
 
 function renderTimelineView() {
