@@ -103,6 +103,11 @@ function deleteEmployee(id) {
     const index = DataStore.employees.findIndex(e => e.id === id);
     if (index !== -1) {
         DataStore.employees.splice(index, 1);
+        DataStore.shifts = DataStore.shifts.filter(shift => shift.employeeId !== id);
+        DataStore.availability = DataStore.availability.filter(entry => String(entry.employeeId) !== String(id));
+        DataStore.swapRequests = DataStore.swapRequests.filter(request =>
+            String(request.fromEmployeeId) !== String(id) && String(request.toEmployeeId) !== String(id)
+        );
         saveToStorage();
         return true;
     }
@@ -178,6 +183,15 @@ function getShiftsByDate(date) {
 
 function getShiftsByDateRange(startDate, endDate) {
     return DataStore.shifts.filter(s => s.date >= startDate && s.date <= endDate);
+}
+
+function removeShiftsInDateRange(startDate, endDate) {
+    const originalCount = DataStore.shifts.length;
+    DataStore.shifts = DataStore.shifts.filter(shift => shift.date < startDate || shift.date > endDate);
+    if (DataStore.shifts.length !== originalCount) {
+        saveToStorage();
+    }
+    return originalCount - DataStore.shifts.length;
 }
 
 function getShiftsByEmployee(employeeId, startDate = null, endDate = null) {
@@ -371,11 +385,9 @@ function getAvailabilityForWeek(employeeId, weekStartDate) {
 // ===== UREN BEREKENING =====
 
 function parseDateTime(date, time) {
-    // Als tijd over middernacht gaat (bijv. nachtdienst), voeg dag toe
+    const [year, month, day] = date.split('-').map(Number);
     const [hours, minutes] = time.split(':').map(Number);
-    const dt = new Date(date);
-    dt.setHours(hours, minutes, 0, 0);
-    return dt;
+    return new Date(year, month - 1, day, hours, minutes, 0, 0);
 }
 
 function getShiftEndDateTime(shift) {
