@@ -525,6 +525,11 @@ textarea {
     color: #92400e;
 }
 
+.validation-summary-item.validation-warning:hover {
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+}
+
 .validation-icon {
     font-size: 16px;
 }
@@ -539,6 +544,59 @@ textarea {
     color: var(--text-secondary);
     font-style: italic;
 }
+
+.issue-details-item {
+    padding: 16px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: #fffaf0;
+    margin-bottom: 12px;
+}
+
+.issue-details-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+}
+
+.issue-details-rule {
+    font-weight: 600;
+    color: #92400e;
+}
+
+.issue-details-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.issue-details-example {
+    font-size: 13px;
+    color: #78350f;
+    margin-bottom: 8px;
+}
+
+.issue-details-messages ul {
+    margin: 0 0 12px;
+    padding-left: 18px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.issue-details-dates ul {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.issue-details-label {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #92400e;
+}
+
 
 .alert {
     padding: 12px 16px;

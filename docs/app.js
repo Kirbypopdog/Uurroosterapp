@@ -9,7 +9,9 @@ const AppState = {
     visibleTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     visibleEmployeeTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     editingShiftId: null,
-    editingEmployeeId: null
+    editingEmployeeId: null,
+    warningBreakdown: null,
+    errorBreakdown: null
 };
 
 // Demo users
@@ -70,6 +72,12 @@ function initDOM() {
     DOM.employeeCancelBtn = document.getElementById('employee-cancel-btn');
     DOM.employeeDeleteBtn = document.getElementById('employee-delete-btn');
     DOM.generateScheduleBtn = document.getElementById('generate-schedule-btn');
+    DOM.warningDetailsModal = document.getElementById('warning-details-modal');
+    DOM.warningDetailsList = document.getElementById('warning-details-list');
+    DOM.warningDetailsClose = document.getElementById('warning-details-close');
+    DOM.errorDetailsModal = document.getElementById('error-details-modal');
+    DOM.errorDetailsList = document.getElementById('error-details-list');
+    DOM.errorDetailsClose = document.getElementById('error-details-close');
 
     // Create tooltip element
     createTooltipElement();
@@ -182,7 +190,7 @@ function setupEventListeners() {
     });
 
     // Team toggle buttons for planning view
-    document.querySelectorAll('.team-filters .team-toggle').forEach(btn => {
+    document.querySelectorAll('#team-toggles .team-toggle').forEach(btn => {
         btn.addEventListener('click', () => {
             const team = btn.dataset.team;
             btn.classList.toggle('active');
@@ -231,6 +239,14 @@ function setupEventListeners() {
     document.querySelectorAll('#employee-modal .modal-close').forEach(btn => {
         btn.addEventListener('click', closeEmployeeModal);
     });
+    DOM.warningDetailsClose.addEventListener('click', closeWarningDetailsModal);
+    DOM.warningDetailsModal.addEventListener('click', (e) => {
+        if (e.target === DOM.warningDetailsModal) closeWarningDetailsModal();
+    });
+    DOM.errorDetailsClose.addEventListener('click', closeErrorDetailsModal);
+    DOM.errorDetailsModal.addEventListener('click', (e) => {
+        if (e.target === DOM.errorDetailsModal) closeErrorDetailsModal();
+    });
     DOM.shiftModal.addEventListener('click', (e) => {
         if (e.target === DOM.shiftModal) closeShiftModal();
     });
@@ -245,6 +261,18 @@ function setupEventListeners() {
 
     // Generate schedule button
     DOM.generateScheduleBtn.addEventListener('click', handleGenerateSchedule);
+
+    DOM.validationAlerts.addEventListener('click', (event) => {
+        const errorChip = event.target.closest('.validation-summary-item.validation-error');
+        if (errorChip) {
+            openErrorDetailsModal();
+            return;
+        }
+        const warningChip = event.target.closest('.validation-summary-item.validation-warning');
+        if (warningChip) {
+            openWarningDetailsModal();
+        }
+    });
 }
 
 function handleLogin(e) {
@@ -410,24 +438,138 @@ function renderValidationAlerts() {
         html += '<div class="validation-summary">';
 
         if (totalErrors > 0) {
+            AppState.errorBreakdown = buildIssueBreakdown(summary, 'errors');
             html += `<div class="validation-summary-item validation-error">
                 <span class="validation-icon">⚠️</span>
-                <span class="validation-text">${totalErrors} fout${totalErrors > 1 ? 'en' : ''} (bijv. 11-uur regel, overlappende diensten)</span>
+                <span class="validation-text">${totalErrors} fout${totalErrors > 1 ? 'en' : ''} (klik voor details)</span>
             </div>`;
+        } else {
+            AppState.errorBreakdown = null;
         }
 
         if (totalWarnings > 0) {
+            AppState.warningBreakdown = buildIssueBreakdown(summary, 'warnings');
             html += `<div class="validation-summary-item validation-warning">
                 <span class="validation-icon">⚡</span>
-                <span class="validation-text">${totalWarnings} waarschuwing${totalWarnings > 1 ? 'en' : ''} (bijv. team toewijzing, bezettingsregels)</span>
+                <span class="validation-text">${totalWarnings} waarschuwing${totalWarnings > 1 ? 'en' : ''} (klik voor details)</span>
             </div>`;
+        } else {
+            AppState.warningBreakdown = null;
         }
 
         html += '<div class="validation-summary-note">Klik op een dienst in de kalender om details te zien</div>';
         html += '</div>';
+
     }
 
     DOM.validationAlerts.innerHTML = html;
+}
+
+function buildIssueBreakdown(summary, issueType) {
+    const issueBreakdown = {};
+    const issuesKey = issueType === 'errors' ? 'errors' : 'warnings';
+    Object.entries(summary.dates).forEach(([date, dateIssues]) => {
+        dateIssues[issuesKey].forEach(issue => {
+            const key = issue.rule || 'Onbekende waarschuwing';
+            if (!issueBreakdown[key]) {
+                issueBreakdown[key] = {
+                    count: 0,
+                    dates: new Set(),
+                    messages: new Set()
+                };
+            }
+            issueBreakdown[key].count += 1;
+            issueBreakdown[key].dates.add(date);
+            if (issue.message) {
+                issueBreakdown[key].messages.add(issue.message);
+            }
+        });
+    });
+
+    return Object.entries(issueBreakdown)
+        .sort((a, b) => b[1].count - a[1].count)
+        .map(([rule, info]) => {
+            const dates = Array.from(info.dates).sort().map(date => formatDate(date));
+            const messages = Array.from(info.messages);
+            return {
+                rule,
+                count: info.count,
+                dates,
+                messages
+            };
+        });
+}
+
+function openWarningDetailsModal() {
+    if (!DOM.warningDetailsModal) return;
+    DOM.warningDetailsList.innerHTML = '';
+
+    const breakdown = AppState.warningBreakdown || [];
+    if (breakdown.length === 0) {
+        DOM.warningDetailsList.innerHTML = '<p>Geen waarschuwingen gevonden voor deze periode.</p>';
+    } else {
+        DOM.warningDetailsList.innerHTML = breakdown.map(item => {
+            const dates = item.dates.map(date => `<li>${date}</li>`).join('');
+            const messageItems = item.messages.map(message => `<li>${message}</li>`).join('');
+            return `<div class="issue-details-item">
+                <div class="issue-details-header">
+                    <span class="issue-details-rule">${item.rule}</span>
+                    <span class="issue-details-count">${item.count}x</span>
+                </div>
+                <div class="issue-details-messages">
+                    <div class="issue-details-label">Context</div>
+                    <ul>${messageItems}</ul>
+                </div>
+                <div class="issue-details-dates">
+                    <div class="issue-details-label">Datums</div>
+                    <ul>${dates}</ul>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    DOM.warningDetailsModal.classList.remove('hidden');
+}
+
+function closeWarningDetailsModal() {
+    if (!DOM.warningDetailsModal) return;
+    DOM.warningDetailsModal.classList.add('hidden');
+}
+
+function openErrorDetailsModal() {
+    if (!DOM.errorDetailsModal) return;
+    DOM.errorDetailsList.innerHTML = '';
+
+    const breakdown = AppState.errorBreakdown || [];
+    if (breakdown.length === 0) {
+        DOM.errorDetailsList.innerHTML = '<p>Geen fouten gevonden voor deze periode.</p>';
+    } else {
+        DOM.errorDetailsList.innerHTML = breakdown.map(item => {
+            const dates = item.dates.map(date => `<li>${date}</li>`).join('');
+            const messageItems = item.messages.map(message => `<li>${message}</li>`).join('');
+            return `<div class="issue-details-item">
+                <div class="issue-details-header">
+                    <span class="issue-details-rule">${item.rule}</span>
+                    <span class="issue-details-count">${item.count}x</span>
+                </div>
+                <div class="issue-details-messages">
+                    <div class="issue-details-label">Context</div>
+                    <ul>${messageItems}</ul>
+                </div>
+                <div class="issue-details-dates">
+                    <div class="issue-details-label">Datums</div>
+                    <ul>${dates}</ul>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    DOM.errorDetailsModal.classList.remove('hidden');
+}
+
+function closeErrorDetailsModal() {
+    if (!DOM.errorDetailsModal) return;
+    DOM.errorDetailsModal.classList.add('hidden');
 }
 
 function renderResponsibleSection() {

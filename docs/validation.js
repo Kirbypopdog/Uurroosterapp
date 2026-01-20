@@ -137,6 +137,17 @@ function validateMinimumStaffing(date, teamId = null) {
     const errors = [];
 
     const shiftsOnDate = getShiftsByDate(date);
+    const day = new Date(date).getDay();
+    const isWeekend = day === 0 || day === 6;
+
+    // Friday evening closure for closed weekends
+    if (day === 5 && !isWeekendOpen(date)) {
+        return { errors, warnings };
+    }
+
+    if (isWeekend && !isWeekendOpen(date)) {
+        return { errors, warnings };
+    }
 
     // Check of dit een vakantieperiode is
     const isHoliday = isHolidayPeriod(date);
@@ -148,6 +159,9 @@ function validateMinimumStaffing(date, teamId = null) {
     const minStaffingNight = isHoliday ? (holidayRules.minStaffingNight || 1) : normalRules.minStaffingNight;
 
     if (teamId) {
+        if (teamId === 'jobstudent' || teamId === 'overkoepelend') {
+            return { errors, warnings };
+        }
         // Check specifiek team (alleen in normale periode)
         if (!isHoliday) {
             const teamShifts = shiftsOnDate.filter(s => s.team === teamId);
@@ -180,8 +194,9 @@ function validateMinimumStaffing(date, teamId = null) {
                 });
             }
         } else {
-            // Normale periode: check alle teams apart
+            // Normale periode: check alle teams apart (jobstudenten tellen niet mee)
             Object.keys(DataStore.settings.teams).forEach(team => {
+                if (team === 'jobstudent' || team === 'overkoepelend') return;
                 const teamShifts = shiftsOnDate.filter(s => s.team === team);
 
                 if (teamShifts.length < minStaffingDay) {
@@ -196,6 +211,7 @@ function validateMinimumStaffing(date, teamId = null) {
     }
 
     // Check minimale bezetting nacht (totaal)
+    const nightShifts = getNightShiftsForDate(date);
     const nightShifts = shiftsOnDate.filter(shift => {
         const [startHour] = shift.startTime.split(':').map(Number);
         return startHour >= 22 || startHour < 7;
@@ -210,6 +226,38 @@ function validateMinimumStaffing(date, teamId = null) {
     }
 
     return { errors, warnings };
+}
+
+function shiftOverlapsNightWindow(shift, targetDate) {
+    if (shift.team === 'jobstudent' || shift.team === 'overkoepelend') return false;
+    const shiftStart = parseDateTime(shift.date, shift.startTime);
+    const shiftEnd = getShiftEndDateTime(shift);
+    const nightStart = parseDateTime(targetDate, '22:00');
+    const nightEnd = parseDateTime(targetDate, '07:00');
+    nightEnd.setDate(nightEnd.getDate() + 1);
+
+    return shiftStart < nightEnd && shiftEnd > nightStart;
+}
+
+function getNightShiftsForDate(date) {
+    const nightShifts = [];
+    const currentDate = new Date(date);
+    const prevDate = new Date(currentDate);
+    prevDate.setDate(prevDate.getDate() - 1);
+    const prevDateStr = formatDateYYYYMMDD(prevDate);
+
+    const candidateShifts = [
+        ...getShiftsByDate(date),
+        ...getShiftsByDate(prevDateStr)
+    ];
+
+    candidateShifts.forEach(shift => {
+        if (shiftOverlapsNightWindow(shift, date)) {
+            nightShifts.push(shift);
+        }
+    });
+
+    return nightShifts;
 }
 
 function validateWeekendStatus(date, startTime = null, endTime = null) {
