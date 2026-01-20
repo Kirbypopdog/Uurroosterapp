@@ -3,6 +3,19 @@
 
 const DEFAULT_SETTINGS = window.DEFAULT_SETTINGS || {};
 
+function parseDateOnly(value) {
+    if (value instanceof Date) {
+        return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    }
+    if (typeof value === 'string') {
+        const parts = value.split('-').map(Number);
+        if (parts.length === 3 && parts.every(part => Number.isFinite(part))) {
+            return new Date(parts[0], parts[1] - 1, parts[2]);
+        }
+    }
+    return new Date(value);
+}
+
 function cloneSettings(settings) {
     if (typeof structuredClone === 'function') {
         return structuredClone(settings);
@@ -256,9 +269,9 @@ function getShiftsByTeam(teamId, startDate = null, endDate = null) {
 
 function getWeekNumber(date) {
     // Bepaal of een datum Week 1 of Week 2 is op basis van de referentie datum (bi-weekly patroon)
-    const referenceDate = new Date(DataStore.settings.biWeeklyReferenceDate);
+    const referenceDate = parseDateOnly(DataStore.settings.biWeeklyReferenceDate);
     referenceDate.setHours(0, 0, 0, 0);
-    const currentDate = new Date(date);
+    const currentDate = parseDateOnly(date);
     currentDate.setHours(0, 0, 0, 0);
 
     // Zet beide datums op maandag van hun week
@@ -277,7 +290,7 @@ function getWeekNumber(date) {
 
 function getISOWeekNumber(date) {
     // Geeft het echte ISO weeknummer terug (1-53)
-    const d = new Date(date);
+    const d = parseDateOnly(date);
     d.setHours(0, 0, 0, 0);
     // Donderdag van dezelfde week bepaalt het weeknummer
     d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
@@ -333,7 +346,7 @@ function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
             const shift = {
                 id: Date.now() + Math.random(),
                 employeeId: employeeId,
-                team: scheduleForDay.team,
+                team: scheduleForDay.team || employee.mainTeam,
                 date: dateStr,
                 startTime: scheduleForDay.startTime,
                 endTime: scheduleForDay.endTime,
@@ -452,9 +465,22 @@ function calculateShiftHours(shift) {
     const end = getShiftEndDateTime(shift);
 
     const diffMs = end - start;
-    const hours = diffMs / (1000 * 60 * 60);
+    let hours = diffMs / (1000 * 60 * 60);
 
-    return hours;
+    // Nachturen tussen 23:00 en 07:00 tellen niet mee (slapende nacht)
+    const sleepStart = parseDateTime(shift.date, '23:00');
+    const sleepEnd = parseDateTime(shift.date, '07:00');
+    sleepEnd.setDate(sleepEnd.getDate() + 1);
+
+    const overlapStart = Math.max(start.getTime(), sleepStart.getTime());
+    const overlapEnd = Math.min(end.getTime(), sleepEnd.getTime());
+
+    if (overlapEnd > overlapStart) {
+        const sleepMs = overlapEnd - overlapStart;
+        hours -= sleepMs / (1000 * 60 * 60);
+    }
+
+    return Math.max(0, hours);
 }
 
 function getEmployeeHoursInPeriod(employeeId, startDate, endDate) {
@@ -624,7 +650,7 @@ function checkStaffingWarnings(date, timeSlot) {
 // ===== HELPER FUNCTIES =====
 
 function isWeekendOpen(date) {
-    const d = new Date(date);
+    const d = parseDateOnly(date);
     const dayOfWeek = d.getDay();
 
     // Tuesday-Thursday - not part of weekend, always open
@@ -656,22 +682,22 @@ function isWeekendOpen(date) {
 
 function isHolidayPeriod(date) {
     const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
-    const checkDate = new Date(dateStr);
+    const checkDate = parseDateOnly(dateStr);
 
     return DataStore.settings.holidayPeriods.some(period => {
-        const start = new Date(period.startDate);
-        const end = new Date(period.endDate);
+        const start = parseDateOnly(period.startDate);
+        const end = parseDateOnly(period.endDate);
         return checkDate >= start && checkDate <= end;
     });
 }
 
 function getHolidayPeriod(date) {
     const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
-    const checkDate = new Date(dateStr);
+    const checkDate = parseDateOnly(dateStr);
 
     return DataStore.settings.holidayPeriods.find(period => {
-        const start = new Date(period.startDate);
-        const end = new Date(period.endDate);
+        const start = parseDateOnly(period.startDate);
+        const end = parseDateOnly(period.endDate);
         return checkDate >= start && checkDate <= end;
     });
 }
@@ -814,7 +840,7 @@ function removeWeekendResponsible(weekStartDate) {
 
 function isWeekendOrHolidayWeek(weekStartDate) {
     // Gebruikt bi-weekly logica: Week 2 = open weekend
-    const monday = new Date(weekStartDate);
+    const monday = parseDateOnly(weekStartDate);
     monday.setHours(0, 0, 0, 0);
 
     // Check bi-weekly patroon: Week 2 = weekend open
@@ -836,7 +862,7 @@ function isWeekendOrHolidayWeek(weekStartDate) {
 }
 
 function formatDateYYYYMMDD(date) {
-    const d = new Date(date);
+    const d = parseDateOnly(date);
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
@@ -844,7 +870,7 @@ function formatDateYYYYMMDD(date) {
 }
 
 function formatDate(date) {
-    const d = new Date(date);
+    const d = parseDateOnly(date);
     return d.toLocaleDateString('nl-BE', {
         weekday: 'long',
         year: 'numeric',
@@ -858,7 +884,7 @@ function formatTime(time) {
 }
 
 function getMonday(date) {
-    const d = new Date(date);
+    const d = parseDateOnly(date);
     const day = d.getDay();
     const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
     d.setDate(diff);

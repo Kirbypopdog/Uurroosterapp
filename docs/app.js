@@ -8,6 +8,7 @@ const AppState = {
     viewMode: 'week',
     visibleTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     visibleEmployeeTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
+    employeeWeekOffsets: {},
     editingShiftId: null,
     editingEmployeeId: null,
     warningBreakdown: null,
@@ -66,7 +67,6 @@ function initDOM() {
     DOM.employeeName = document.getElementById('employee-name');
     DOM.employeeEmail = document.getElementById('employee-email');
     DOM.employeeMainTeam = document.getElementById('employee-main-team');
-    DOM.employeeExtraTeams = document.querySelectorAll('.employee-extra-teams');
     DOM.employeeContract = document.getElementById('employee-contract');
     DOM.employeeActive = document.getElementById('employee-active');
     DOM.employeeCancelBtn = document.getElementById('employee-cancel-btn');
@@ -153,11 +153,54 @@ function handleTooltipHide(e) {
     }
 }
 
+function getContrastColor(hexColor) {
+    if (typeof hexColor !== 'string') return '#ffffff';
+    const hex = hexColor.replace('#', '');
+    const normalized = hex.length === 3
+        ? hex.split('').map(ch => ch + ch).join('')
+        : hex;
+    if (normalized.length !== 6) return '#ffffff';
+    const r = parseInt(normalized.slice(0, 2), 16) / 255;
+    const g = parseInt(normalized.slice(2, 4), 16) / 255;
+    const b = parseInt(normalized.slice(4, 6), 16) / 255;
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return luminance > 0.6 ? '#1f2933' : '#ffffff';
+}
+
+function applyTeamColors() {
+    const styleId = 'team-color-overrides';
+    let styleEl = document.getElementById(styleId);
+    if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = styleId;
+        document.head.appendChild(styleEl);
+    }
+
+    const teams = DataStore.settings.teams || {};
+    let css = '';
+    Object.entries(teams).forEach(([teamId, team]) => {
+        const color = team.color || '#64748b';
+        const textColor = getContrastColor(color);
+        css += `
+.team-toggle.active[data-team="${teamId}"] { background: ${color} !important; color: ${textColor} !important; border-color: transparent !important; }
+.team-badge.${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.team-badge-mini.${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.shift-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.shift-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.shift-team-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.timeline-team-header.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.team-tab.active.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+`;
+    });
+    styleEl.textContent = css;
+}
+
 function init() {
     try {
         console.log('Het Vlot Roosterplanning start...');
         console.log('Data loaded:', DataStore);
         initDOM();
+        applyTeamColors();
         console.log('DOM initialized');
         setCurrentWeek(new Date());
         console.log('Current week set');
@@ -363,6 +406,15 @@ function setCurrentWeek(date) {
     d.setHours(0, 0, 0, 0);
     AppState.currentWeekStart = d;
     updatePeriodDisplay();
+}
+
+function getEmployeeWeekStart(employeeId) {
+    const base = getMonday(new Date());
+    const offset = AppState.employeeWeekOffsets?.[employeeId] || 0;
+    const d = new Date(base);
+    d.setDate(d.getDate() + (offset * 7));
+    d.setHours(0, 0, 0, 0);
+    return d;
 }
 
 function changeWeek(direction) {
@@ -1069,7 +1121,7 @@ function renderShiftCard(shift) {
         <div class="shift-employee-name">${employee.name}${availabilityIcon}</div>
         <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
         <div class="shift-card-footer">
-            <span class="shift-team-badge">${DataStore.settings.teams[shift.team].name}</span>
+            <span class="shift-team-badge team-${shift.team}">${DataStore.settings.teams[shift.team].name}</span>
             <button class="shift-delete-btn" data-shift-id="${shift.id}">×</button>
         </div>
     </div>`;
@@ -1257,7 +1309,6 @@ function deleteShiftConfirm(shiftId) {
 
 function renderEmployees() {
     const employees = getAllEmployees();
-    const today = formatDateYYYYMMDD(new Date());
 
     // Groepeer medewerkers per team - alleen zichtbare teams
     const teams = DataStore.settings.teams;
@@ -1288,7 +1339,7 @@ function renderEmployees() {
             <div class="employees-team-grid">`;
 
         teamEmployees.forEach(emp => {
-            html += renderEmployeeCard(emp, today);
+            html += renderEmployeeCard(emp);
         });
 
         html += `</div></div>`;
@@ -1305,17 +1356,51 @@ function renderEmployees() {
             openEditEmployeeModal(employeeId);
         });
     });
+    document.querySelectorAll('.week-nav-btn').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const direction = btn.dataset.direction;
+            const employeeId = btn.dataset.employeeId;
+            if (!employeeId) return;
+            const current = AppState.employeeWeekOffsets?.[employeeId] || 0;
+            if (direction === 'prev') {
+                AppState.employeeWeekOffsets[employeeId] = current - 1;
+            } else if (direction === 'next') {
+                AppState.employeeWeekOffsets[employeeId] = current + 1;
+            } else if (direction === 'today') {
+                AppState.employeeWeekOffsets[employeeId] = 0;
+            }
+            renderEmployees();
+        });
+    });
+    document.querySelectorAll('.hours-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const card = btn.closest('.employee-card');
+            if (!card) return;
+            const isOpen = card.classList.toggle('show-month');
+            btn.textContent = isOpen ? 'Verberg maand' : 'Toon maand';
+        });
+    });
 }
 
-function renderEmployeeCard(emp, today) {
+function renderEmployeeCard(emp) {
     const statusClass = emp.active ? 'active' : 'inactive';
     const statusText = emp.active ? 'Actief' : 'Inactief';
     const mainTeam = DataStore.settings.teams[emp.mainTeam];
 
     // Calculate hours
-    const hoursThisWeek = getEmployeeHoursThisWeek(emp.id, today);
-    const hoursThisMonth = getEmployeeHoursThisMonth(emp.id, today);
+    const weekStartDate = getEmployeeWeekStart(emp.id);
+    const weekDates = getWeekDates(weekStartDate);
+    const startDate = weekDates[0];
+    const endDate = weekDates[6];
+    const weekNumber = getISOWeekNumber(weekStartDate);
+    const hoursThisWeek = getEmployeeHoursThisWeek(emp.id, startDate);
+    const hoursThisMonth = getEmployeeHoursThisMonth(emp.id, startDate);
     const contractHours = emp.contractHours || 0;
+    const monthContractHours = contractHours * 4.33;
+    const overtimeWeek = contractHours > 0 ? Math.max(0, hoursThisWeek - contractHours) : 0;
+    const overtimeMonth = contractHours > 0 ? Math.max(0, hoursThisMonth - monthContractHours) : 0;
 
     // Calculate percentages for progress bars
     const weekPercentage = contractHours > 0 ? Math.min((hoursThisWeek / contractHours) * 100, 100) : 0;
@@ -1337,24 +1422,40 @@ function renderEmployeeCard(emp, today) {
             </div>
             <div class="employee-teams">
                 <span class="team-badge ${emp.mainTeam}">${mainTeam.name}</span>
-                ${emp.extraTeams.map(teamId => {
-                    const team = DataStore.settings.teams[teamId];
-                    return `<span class="team-badge ${teamId}">${team.name}</span>`;
-                }).join('')}
             </div>
             ${contractHours > 0 ? `
                 <div class="employee-hours">
+                    <div class="hours-week-label">
+                        <span class="week-pill">Week ${weekNumber}</span>
+                        <span class="week-range">${formatDate(startDate)} - ${formatDate(endDate)}</span>
+                    </div>
                     <div class="hours-section">
                         <div class="hours-label">Deze week: ${hoursThisWeek.toFixed(1)}u / ${contractHours}u</div>
                         <div class="progress-bar">
                             <div class="progress-fill" style="width: ${weekPercentage}%; background: ${weekColor};"></div>
                         </div>
                     </div>
-                    <div class="hours-section">
-                        <div class="hours-label">Deze maand: ${hoursThisMonth.toFixed(1)}u / ${(contractHours * 4.33).toFixed(0)}u</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${monthPercentage}%; background: ${monthColor};"></div>
+                    <div class="month-only">
+                        <div class="hours-section">
+                            <div class="hours-label">Deze maand: ${hoursThisMonth.toFixed(1)}u / ${monthContractHours.toFixed(0)}u</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${monthPercentage}%; background: ${monthColor};"></div>
+                            </div>
                         </div>
+                    </div>
+                    ${(overtimeWeek > 0 || overtimeMonth > 0) ? `
+                        <div class="overtime-summary">
+                            ${overtimeWeek > 0 ? `<span class="overtime-chip">Overuren week: ${overtimeWeek.toFixed(1)}u</span>` : ''}
+                            ${overtimeMonth > 0 ? `<span class="overtime-chip month-only">Overuren maand: ${overtimeMonth.toFixed(1)}u</span>` : ''}
+                        </div>
+                    ` : ''}
+                    <div class="hours-controls">
+                        <div class="hours-week-nav">
+                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="prev" title="Vorige week">&larr;</button>
+                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="today" title="Huidige week">•</button>
+                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="next" title="Volgende week">&rarr;</button>
+                        </div>
+                        <button class="hours-toggle-btn" type="button" data-employee-id="${emp.id}">Toon maand</button>
                     </div>
                 </div>
             ` : ''}
@@ -1383,9 +1484,6 @@ function openEditEmployeeModal(employeeId) {
     DOM.employeeMainTeam.value = employee.mainTeam;
     DOM.employeeContract.value = employee.contractHours || '';
     DOM.employeeActive.checked = employee.active;
-    DOM.employeeExtraTeams.forEach(checkbox => {
-        checkbox.checked = employee.extraTeams.includes(checkbox.value);
-    });
     generateWeekScheduleHTML();
     loadWeekScheduleForm(1, employee.weekScheduleWeek1 || []);
     loadWeekScheduleForm(2, employee.weekScheduleWeek2 || []);
@@ -1402,7 +1500,6 @@ function closeEmployeeModal() {
 
 function handleEmployeeSubmit(e) {
     e.preventDefault();
-    const extraTeams = Array.from(DOM.employeeExtraTeams).filter(cb => cb.checked).map(cb => cb.value);
     const weekScheduleWeek1 = getWeekScheduleFromForm(1);
     const weekScheduleWeek2 = getWeekScheduleFromForm(2);
 
@@ -1410,7 +1507,7 @@ function handleEmployeeSubmit(e) {
         name: DOM.employeeName.value.trim(),
         email: DOM.employeeEmail.value.trim(),
         mainTeam: DOM.employeeMainTeam.value,
-        extraTeams: extraTeams,
+        extraTeams: [],
         contractHours: parseFloat(DOM.employeeContract.value) || 0,
         active: DOM.employeeActive.checked,
         weekScheduleWeek1: weekScheduleWeek1,
@@ -1475,12 +1572,6 @@ function generateWeekScheduleHTML() {
         4: 'Donderdag', 5: 'Vrijdag', 6: 'Zaterdag', 0: 'Zondag'
     };
 
-    // Build team options
-    const teamOptions = Object.keys(DataStore.settings.teams).map(teamId => {
-        const team = DataStore.settings.teams[teamId];
-        return `<option value="${teamId}">${team.name}</option>`;
-    }).join('');
-
     // Build template options
     const templateOptions = Object.keys(DataStore.settings.shiftTemplates).map(templateId => {
         const template = DataStore.settings.shiftTemplates[templateId];
@@ -1501,9 +1592,6 @@ function generateWeekScheduleHTML() {
                     <option value="">-- Kies template --</option>
                     ${templateOptions}
                     <option value="custom">Aangepast...</option>
-                </select>
-                <select class="week-schedule-team" data-week="${weekNumber}" data-day="${dayNum}" disabled>
-                    ${teamOptions}
                 </select>
                 <div class="week-schedule-times">
                     <input type="time" class="week-schedule-start" data-week="${weekNumber}" data-day="${dayNum}" disabled>
@@ -1579,18 +1667,15 @@ function loadWeekScheduleForm(weekNumber, weekSchedule) {
     weekSchedule.forEach(schedule => {
         const checkbox = document.querySelector(`.week-schedule-enabled[data-week="${weekNumber}"][data-day="${schedule.dayOfWeek}"]`);
         const templateSelect = document.querySelector(`.week-schedule-template[data-week="${weekNumber}"][data-day="${schedule.dayOfWeek}"]`);
-        const teamSelect = document.querySelector(`.week-schedule-team[data-week="${weekNumber}"][data-day="${schedule.dayOfWeek}"]`);
         const startInput = document.querySelector(`.week-schedule-start[data-week="${weekNumber}"][data-day="${schedule.dayOfWeek}"]`);
         const endInput = document.querySelector(`.week-schedule-end[data-week="${weekNumber}"][data-day="${schedule.dayOfWeek}"]`);
 
         if (checkbox && schedule.enabled) {
             checkbox.checked = true;
             templateSelect.disabled = false;
-            teamSelect.disabled = false;
             startInput.disabled = false;
             endInput.disabled = false;
 
-            teamSelect.value = schedule.team;
             startInput.value = schedule.startTime;
             endInput.value = schedule.endTime;
 
@@ -1617,14 +1702,12 @@ function getWeekScheduleFromForm(weekNumber) {
         const enabled = checkbox.checked;
 
         if (enabled) {
-            const teamSelect = document.querySelector(`.week-schedule-team[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
             const startInput = document.querySelector(`.week-schedule-start[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
             const endInput = document.querySelector(`.week-schedule-end[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
 
             weekSchedule.push({
                 dayOfWeek: dayOfWeek,
                 enabled: true,
-                team: teamSelect.value,
                 startTime: startInput.value,
                 endTime: endInput.value
             });
@@ -1640,12 +1723,10 @@ function toggleWeekScheduleDay(checkbox) {
     const enabled = checkbox.checked;
 
     const templateSelect = document.querySelector(`.week-schedule-template[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
-    const teamSelect = document.querySelector(`.week-schedule-team[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
     const startInput = document.querySelector(`.week-schedule-start[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
     const endInput = document.querySelector(`.week-schedule-end[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
 
     templateSelect.disabled = !enabled;
-    teamSelect.disabled = !enabled;
     startInput.disabled = !enabled;
     endInput.disabled = !enabled;
 
@@ -2161,6 +2242,7 @@ function updateTeamColor(teamId, color) {
     if (DataStore.settings.teams[teamId]) {
         DataStore.settings.teams[teamId].color = color;
         saveToStorage();
+        applyTeamColors();
     }
 }
 
