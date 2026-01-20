@@ -3,6 +3,7 @@
 // App State
 const AppState = {
     currentUser: null,
+    authToken: null,
     currentView: 'planning',
     currentWeekStart: null,
     viewMode: 'week',
@@ -12,7 +13,8 @@ const AppState = {
     editingShiftId: null,
     editingEmployeeId: null,
     warningBreakdown: null,
-    errorBreakdown: null
+    errorBreakdown: null,
+    apiTeams: []
 };
 
 // Demo users
@@ -23,6 +25,7 @@ const USERS = [
 
 // DOM Elements
 const DOM = {};
+const API_BASE = window.API_BASE || 'http://localhost:3001';
 
 function escapeHtml(value) {
     return String(value)
@@ -31,6 +34,26 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+async function apiFetch(path, options = {}) {
+    const headers = { ...(options.headers || {}) };
+    if (AppState.authToken) {
+        headers.Authorization = `Bearer ${AppState.authToken}`;
+    }
+    if (options.body && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json';
+    }
+    const response = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const message = data.error || 'Request failed';
+        throw new Error(message);
+    }
+    return data;
 }
 
 function getContrastColor(hexColor) {
@@ -86,6 +109,8 @@ function initDOM() {
     DOM.currentUserSpan = document.getElementById('current-user');
     DOM.planningView = document.getElementById('planning-view');
     DOM.employeesView = document.getElementById('employees-view');
+    DOM.profileView = document.getElementById('profile-view');
+    DOM.profileContent = document.getElementById('profile-content');
     DOM.availabilityView = document.getElementById('availability-view');
     DOM.swapsView = document.getElementById('swaps-view');
     DOM.settingsView = document.getElementById('settings-view');
@@ -327,33 +352,47 @@ function setupEventListeners() {
     });
 }
 
-function handleLogin(e) {
+async function handleLogin(e) {
     e.preventDefault();
-    const username = DOM.usernameInput.value.trim();
+    const email = DOM.usernameInput.value.trim();
     const password = DOM.passwordInput.value;
-    const user = USERS.find(u => u.username === username && u.password === password);
-    if (user) {
-        AppState.currentUser = user;
-        sessionStorage.setItem('hetvlot_user', JSON.stringify(user));
+    try {
+        const data = await apiFetch('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ email, password })
+        });
+        AppState.currentUser = data.user;
+        AppState.authToken = data.token;
+        sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
+        sessionStorage.setItem('hetvlot_token', data.token);
         showApp();
-    } else {
+    } catch (error) {
         alert('Ongeldige gebruikersnaam of wachtwoord');
     }
 }
 
 function handleLogout() {
     AppState.currentUser = null;
+    AppState.authToken = null;
     sessionStorage.removeItem('hetvlot_user');
+    sessionStorage.removeItem('hetvlot_token');
     showLogin();
 }
 
-function checkSession() {
-    const savedUser = sessionStorage.getItem('hetvlot_user');
-    if (savedUser) {
-        AppState.currentUser = JSON.parse(savedUser);
-        showApp();
-    } else {
+async function checkSession() {
+    const savedToken = sessionStorage.getItem('hetvlot_token');
+    if (!savedToken) {
         showLogin();
+        return;
+    }
+    AppState.authToken = savedToken;
+    try {
+        const data = await apiFetch('/me');
+        AppState.currentUser = data.user;
+        sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
+        showApp();
+    } catch (error) {
+        handleLogout();
     }
 }
 
@@ -368,7 +407,33 @@ function showApp() {
     DOM.loginContainer.classList.add('hidden');
     DOM.appContainer.classList.remove('hidden');
     DOM.currentUserSpan.textContent = AppState.currentUser.name;
+    applyRoleVisibility();
     switchView(AppState.currentView);
+}
+
+function applyRoleVisibility() {
+    const role = AppState.currentUser?.role || 'medewerker';
+    const allowedViews = new Set(['planning', 'profile']);
+
+    if (role === 'teamverantwoordelijke' || role === 'hoofdverantwoordelijke') {
+        allowedViews.add('employees');
+    }
+    if (role === 'admin') {
+        allowedViews.add('employees');
+        allowedViews.add('availability');
+        allowedViews.add('swaps');
+        allowedViews.add('settings');
+    }
+
+    DOM.navButtons.forEach(btn => {
+        const view = btn.dataset.view;
+        const isAllowed = allowedViews.has(view);
+        btn.style.display = isAllowed ? '' : 'none';
+    });
+
+    if (!allowedViews.has(AppState.currentView)) {
+        AppState.currentView = 'planning';
+    }
 }
 
 function switchView(viewName) {
@@ -391,6 +456,10 @@ function switchView(viewName) {
         case 'employees':
             DOM.employeesView.classList.add('active');
             renderEmployees();
+            break;
+        case 'profile':
+            DOM.profileView.classList.add('active');
+            renderProfile();
             break;
         case 'availability':
             DOM.availabilityView.classList.add('active');
@@ -1406,6 +1475,58 @@ function renderEmployees() {
     });
 }
 
+function renderProfile() {
+    const user = AppState.currentUser;
+    if (!user) return;
+
+    DOM.profileContent.innerHTML = `
+        <div class="settings-card">
+            <div class="settings-card-header">
+                <h3><span class="settings-icon">👤</span> Mijn profiel</h3>
+            </div>
+            <div class="settings-card-body">
+                <form id="profile-form">
+                    <div class="form-group">
+                        <label for="profile-name">Naam</label>
+                        <input type="text" id="profile-name" value="${escapeHtml(user.name)}" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="profile-email">Email</label>
+                        <input type="email" id="profile-email" value="${escapeHtml(user.email)}" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="profile-password">Nieuw wachtwoord</label>
+                        <input type="password" id="profile-password" placeholder="Laat leeg om niet te wijzigen" />
+                    </div>
+                    <button type="submit" class="btn btn-primary">Opslaan</button>
+                </form>
+            </div>
+        </div>
+    `;
+
+    const form = document.getElementById('profile-form');
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const name = document.getElementById('profile-name').value.trim();
+        const email = document.getElementById('profile-email').value.trim();
+        const password = document.getElementById('profile-password').value;
+
+        try {
+            const payload = { name, email };
+            if (password) payload.password = password;
+            const data = await apiFetch('/me', {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+            AppState.currentUser = data.user;
+            sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
+            alert('Profiel opgeslagen');
+        } catch (error) {
+            alert(`Opslaan mislukt: ${error.message}`);
+        }
+    });
+}
+
 function renderEmployeeCard(emp) {
     const statusClass = emp.active ? 'active' : 'inactive';
     const statusText = emp.active ? 'Actief' : 'Inactief';
@@ -1974,6 +2095,7 @@ function renderSwaps() {
 function renderSettings() {
     const settingsContent = DOM.settingsView.querySelector('.settings-content');
     const rules = DataStore.settings.rules;
+    const role = AppState.currentUser?.role;
 
     let html = `
     <div class="settings-grid">
@@ -2189,6 +2311,113 @@ function renderSettings() {
     `;
 
     settingsContent.innerHTML = html;
+
+    if (role === 'admin') {
+        renderAdminAccountsSection();
+    }
+}
+
+async function ensureTeamsLoaded() {
+    if (AppState.apiTeams && AppState.apiTeams.length > 0) {
+        return AppState.apiTeams;
+    }
+    const data = await apiFetch('/teams');
+    AppState.apiTeams = data.teams || [];
+    return AppState.apiTeams;
+}
+
+async function renderAdminAccountsSection() {
+    const settingsContent = DOM.settingsView.querySelector('.settings-content');
+    const container = document.createElement('div');
+    container.className = 'settings-card';
+    container.innerHTML = `
+        <div class="settings-card-header">
+            <h3><span class="settings-icon">🔐</span> Accountbeheer</h3>
+        </div>
+        <div class="settings-card-body">
+            <div id="admin-users-list">Laden...</div>
+        </div>
+    `;
+    settingsContent.appendChild(container);
+
+    try {
+        const teams = await ensureTeamsLoaded();
+        const data = await apiFetch('/admin/users');
+        const users = data.users || [];
+
+        const teamOptions = ['<option value="">(geen team)</option>']
+            .concat(teams.map(team => `<option value="${team.id}">${escapeHtml(team.name)}</option>`))
+            .join('');
+
+        const roleOptions = `
+            <option value="admin">Admin</option>
+            <option value="hoofdverantwoordelijke">Hoofdverantwoordelijke</option>
+            <option value="teamverantwoordelijke">Teamverantwoordelijke</option>
+            <option value="medewerker">Medewerker</option>
+        `;
+
+        const rows = users.map(user => `
+            <div class="admin-user-row" data-user-id="${user.id}">
+                <div class="admin-user-main">
+                    <div class="admin-user-name">${escapeHtml(user.name)}</div>
+                    <div class="admin-user-email">${escapeHtml(user.email)}</div>
+                </div>
+                <div class="admin-user-controls">
+                    <select class="admin-role-select">
+                        ${roleOptions}
+                    </select>
+                    <select class="admin-team-select">
+                        ${teamOptions}
+                    </select>
+                    <button class="btn btn-sm btn-primary admin-save-btn">Opslaan</button>
+                    <button class="btn btn-sm btn-secondary admin-reset-btn">Reset wachtwoord</button>
+                </div>
+            </div>
+        `).join('');
+
+        const list = container.querySelector('#admin-users-list');
+        list.innerHTML = rows || '<p>Geen accounts gevonden.</p>';
+
+        container.querySelectorAll('.admin-user-row').forEach(row => {
+            const userId = row.dataset.userId;
+            const user = users.find(u => String(u.id) === String(userId));
+            if (!user) return;
+            const roleSelect = row.querySelector('.admin-role-select');
+            const teamSelect = row.querySelector('.admin-team-select');
+            roleSelect.value = user.role;
+            teamSelect.value = user.team_id || '';
+
+            row.querySelector('.admin-save-btn').addEventListener('click', async () => {
+                try {
+                    const payload = {
+                        role: roleSelect.value,
+                        team_id: teamSelect.value || null
+                    };
+                    await apiFetch(`/admin/users/${userId}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify(payload)
+                    });
+                    alert('Account bijgewerkt');
+                } catch (error) {
+                    alert(`Opslaan mislukt: ${error.message}`);
+                }
+            });
+
+            row.querySelector('.admin-reset-btn').addEventListener('click', async () => {
+                if (!confirm('Wachtwoord resetten naar standaard?')) return;
+                try {
+                    const result = await apiFetch(`/admin/users/${userId}/reset-password`, {
+                        method: 'POST'
+                    });
+                    alert(`Wachtwoord gereset naar: ${result.resetPassword}`);
+                } catch (error) {
+                    alert(`Reset mislukt: ${error.message}`);
+                }
+            });
+        });
+    } catch (error) {
+        container.querySelector('#admin-users-list').textContent = `Fout: ${error.message}`;
+    }
 }
 
 function renderTeamsConfig() {

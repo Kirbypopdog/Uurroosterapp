@@ -3797,6 +3797,51 @@ textarea {
     color: var(--text-primary);
 }
 
+.admin-user-row {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.admin-user-row:last-child {
+    border-bottom: none;
+}
+
+.admin-user-main {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.admin-user-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.admin-user-email {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.admin-user-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.admin-role-select,
+.admin-team-select {
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--surface-color);
+    font-size: 12px;
+}
+
 .overtime-summary {
     margin-top: 8px;
     display: flex;

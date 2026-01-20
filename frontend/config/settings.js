@@ -1,6 +1,8 @@
 // ===== GECENTRALISEERDE SETTINGS =====
 // Deze file is de centrale plek voor alle standaard instellingen.
 
+window.API_BASE = window.API_BASE || 'http://localhost:3001';
+
 window.DEFAULT_SETTINGS = {
     // Referentie datum voor bi-weekly rooster (Week 1 begint op deze maandag)
     // Dit is de referentie: maandag 6 januari 2025 = Week 1

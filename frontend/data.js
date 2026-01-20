@@ -33,7 +33,7 @@ function normalizeSettings(settings) {
     } else if (defaults.teams) {
         merged.teams = { ...defaults.teams, ...merged.teams };
     }
-    if (!merged.shiftTemplates || typeof merged.shiftTemplates !== 'object') {
+    if (!merged.shiftTemplates || typeof merged.shiftTemplates !== 'object' || Object.keys(merged.shiftTemplates).length === 0) {
         merged.shiftTemplates = defaults.shiftTemplates || {};
     } else if (defaults.shiftTemplates) {
         merged.shiftTemplates = { ...defaults.shiftTemplates, ...merged.shiftTemplates };
