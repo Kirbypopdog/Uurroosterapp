@@ -159,6 +159,9 @@ function validateMinimumStaffing(date, teamId = null) {
     const minStaffingNight = isHoliday ? (holidayRules.minStaffingNight || 1) : normalRules.minStaffingNight;
 
     if (teamId) {
+        if (teamId === 'jobstudent' || teamId === 'overkoepelend') {
+            return { errors, warnings };
+        }
         // Check specifiek team (alleen in normale periode)
         if (!isHoliday) {
             const teamShifts = shiftsOnDate.filter(s => s.team === teamId);
@@ -193,7 +196,7 @@ function validateMinimumStaffing(date, teamId = null) {
         } else {
             // Normale periode: check alle teams apart (jobstudenten tellen niet mee)
             Object.keys(DataStore.settings.teams).forEach(team => {
-                if (team === 'jobstudent') return;
+                if (team === 'jobstudent' || team === 'overkoepelend') return;
                 const teamShifts = shiftsOnDate.filter(s => s.team === team);
 
                 if (teamShifts.length < minStaffingDay) {
@@ -222,7 +225,7 @@ function validateMinimumStaffing(date, teamId = null) {
 }
 
 function shiftOverlapsNightWindow(shift, targetDate) {
-    if (shift.team === 'jobstudent') return false;
+    if (shift.team === 'jobstudent' || shift.team === 'overkoepelend') return false;
     const shiftStart = parseDateTime(shift.date, shift.startTime);
     const shiftEnd = getShiftEndDateTime(shift);
     const nightStart = parseDateTime(targetDate, '22:00');
