@@ -425,6 +425,52 @@ function renderValidationAlerts() {
 
         html += '<div class="validation-summary-note">Klik op een dienst in de kalender om details te zien</div>';
         html += '</div>';
+
+        if (totalWarnings > 0) {
+            const warningBreakdown = {};
+            Object.entries(summary.dates).forEach(([date, dateIssues]) => {
+                dateIssues.warnings.forEach(warning => {
+                    const key = warning.rule || 'Onbekende waarschuwing';
+                    if (!warningBreakdown[key]) {
+                        warningBreakdown[key] = {
+                            count: 0,
+                            dates: new Set(),
+                            messages: new Set()
+                        };
+                    }
+                    warningBreakdown[key].count += 1;
+                    warningBreakdown[key].dates.add(date);
+                    if (warning.message) {
+                        warningBreakdown[key].messages.add(warning.message);
+                    }
+                });
+            });
+
+            const warningItems = Object.entries(warningBreakdown)
+                .sort((a, b) => b[1].count - a[1].count)
+                .map(([rule, info]) => {
+                    const dates = Array.from(info.dates).sort();
+                    const formattedDates = dates.slice(0, 3).map(date => formatDate(date));
+                    const remaining = dates.length - formattedDates.length;
+                    const dateLabel = remaining > 0
+                        ? `${formattedDates.join(', ')} (+${remaining} meer)`
+                        : formattedDates.join(', ');
+                    const example = info.messages.size > 0 ? Array.from(info.messages)[0] : '';
+                    const exampleLabel = example ? `<div class="validation-breakdown-example">${example}</div>` : '';
+
+                    return `<li>
+                        <div class="validation-breakdown-rule">${rule} (${info.count}x)</div>
+                        <div class="validation-breakdown-dates">${dateLabel}</div>
+                        ${exampleLabel}
+                    </li>`;
+                })
+                .join('');
+
+            html += `<div class="validation-breakdown">
+                <div class="validation-breakdown-title">Herkomst van waarschuwingen</div>
+                <ul>${warningItems}</ul>
+            </div>`;
+        }
     }
 
     DOM.validationAlerts.innerHTML = html;
