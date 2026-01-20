@@ -212,10 +212,6 @@ function validateMinimumStaffing(date, teamId = null) {
 
     // Check minimale bezetting nacht (totaal)
     const nightShifts = getNightShiftsForDate(date);
-    const nightShifts = shiftsOnDate.filter(shift => {
-        const [startHour] = shift.startTime.split(':').map(Number);
-        return startHour >= 22 || startHour < 7;
-    });
 
     if (minStaffingNight && nightShifts.length < minStaffingNight) {
         warnings.push({
