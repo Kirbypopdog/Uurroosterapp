@@ -68,6 +68,7 @@ function initDOM() {
     DOM.employeeContract = document.getElementById('employee-contract');
     DOM.employeeActive = document.getElementById('employee-active');
     DOM.employeeCancelBtn = document.getElementById('employee-cancel-btn');
+    DOM.employeeDeleteBtn = document.getElementById('employee-delete-btn');
     DOM.generateScheduleBtn = document.getElementById('generate-schedule-btn');
 
     // Create tooltip element
@@ -181,7 +182,7 @@ function setupEventListeners() {
     });
 
     // Team toggle buttons for planning view
-    document.querySelectorAll('.team-filters .team-toggle').forEach(btn => {
+    document.querySelectorAll('#team-toggles .team-toggle').forEach(btn => {
         btn.addEventListener('click', () => {
             const team = btn.dataset.team;
             btn.classList.toggle('active');
@@ -226,6 +227,7 @@ function setupEventListeners() {
     });
     DOM.employeeForm.addEventListener('submit', handleEmployeeSubmit);
     DOM.employeeCancelBtn.addEventListener('click', closeEmployeeModal);
+    DOM.employeeDeleteBtn.addEventListener('click', handleEmployeeDelete);
     document.querySelectorAll('#employee-modal .modal-close').forEach(btn => {
         btn.addEventListener('click', closeEmployeeModal);
     });
@@ -1223,6 +1225,7 @@ function openAddEmployeeModal() {
     DOM.employeeModalTitle.textContent = 'Medewerker toevoegen';
     DOM.employeeForm.reset();
     DOM.employeeActive.checked = true;
+    DOM.employeeDeleteBtn.style.display = 'none';
     generateWeekScheduleHTML();
     resetWeekScheduleForm();
     DOM.employeeModal.classList.remove('hidden');
@@ -1244,6 +1247,7 @@ function openEditEmployeeModal(employeeId) {
     generateWeekScheduleHTML();
     loadWeekScheduleForm(1, employee.weekScheduleWeek1 || []);
     loadWeekScheduleForm(2, employee.weekScheduleWeek2 || []);
+    DOM.employeeDeleteBtn.style.display = 'inline-flex';
     DOM.employeeModal.classList.remove('hidden');
 }
 
@@ -1251,6 +1255,7 @@ function closeEmployeeModal() {
     DOM.employeeModal.classList.add('hidden');
     DOM.employeeForm.reset();
     AppState.editingEmployeeId = null;
+    DOM.employeeDeleteBtn.style.display = 'none';
 }
 
 function handleEmployeeSubmit(e) {
@@ -1278,6 +1283,22 @@ function handleEmployeeSubmit(e) {
     renderEmployees();
 }
 
+function handleEmployeeDelete() {
+    if (!AppState.editingEmployeeId) return;
+    const employee = getEmployee(AppState.editingEmployeeId);
+    if (!employee) return;
+
+    const relatedShifts = getShiftsByEmployee(employee.id).length;
+    const confirmMsg = `Weet je zeker dat je ${employee.name} wilt verwijderen?\n\nDit verwijdert ook ${relatedShifts} dienst${relatedShifts !== 1 ? 'en' : ''} en eventuele afwezigheden.`;
+
+    if (!confirm(confirmMsg)) return;
+
+    deleteEmployee(employee.id);
+    closeEmployeeModal();
+    renderEmployees();
+    renderPlanning();
+}
+
 // ===== WEEKROOSTER FUNCTIES =====
 
 function handleGenerateSchedule() {
@@ -1287,17 +1308,19 @@ function handleGenerateSchedule() {
     const startDate = weekDates[0];
     const endDate = weekDates[6];
 
-    if (!confirm(`Wil je de weekroosters genereren voor deze week (${formatDate(startDate)} t/m ${formatDate(endDate)})?\\n\\nDiensten worden alleen aangemaakt waar nog geen dienst is ingepland.`)) {
+    if (!confirm(`Wil je de weekroosters genereren voor deze week (${formatDate(startDate)} t/m ${formatDate(endDate)})?\\n\\nBestaande diensten in deze week worden verwijderd en opnieuw gegenereerd.`)) {
         return;
     }
 
+    const removedShifts = removeShiftsInDateRange(startDate, endDate);
     const totalShifts = applyWeekScheduleForAllEmployees(startDate, endDate);
 
-    if (totalShifts > 0) {
-        alert(`✅ ${totalShifts} dienst${totalShifts > 1 ? 'en' : ''} automatisch aangemaakt op basis van weekroosters!`);
+    if (totalShifts > 0 || removedShifts > 0) {
+        const removedLabel = removedShifts > 0 ? ` (${removedShifts} bestaande dienst${removedShifts !== 1 ? 'en' : ''} verwijderd)` : '';
+        alert(`✅ ${totalShifts} dienst${totalShifts !== 1 ? 'en' : ''} automatisch aangemaakt op basis van weekroosters!${removedLabel}`);
         renderPlanning();
     } else {
-        alert('Geen nieuwe diensten aangemaakt. Alle dagen zijn al ingepland of medewerkers hebben geen weekrooster ingesteld.');
+        alert('Geen nieuwe diensten aangemaakt. Medewerkers hebben geen weekrooster ingesteld.');
     }
 }
 
