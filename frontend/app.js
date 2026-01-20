@@ -661,7 +661,7 @@ function renderTimelineView() {
     let employees = employeeIds.map(id => getEmployee(id)).filter(e => e);
 
     // Group employees by their main team - only show visible teams
-    const teams = DataStore.settings.teams;
+    const teams = DataStore.settings.teams || {};
     // Custom order: Vlot 1, Jobstudent, Vlot 2, Cargo, Overkoepelend
     const teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
         .filter(t => AppState.visibleTeams.includes(t));
@@ -738,7 +738,7 @@ function renderTimelineView() {
             const teamEmployees = employeesByTeam[teamKey];
             if (teamEmployees.length === 0) return; // Skip empty teams
 
-            const team = teams[teamKey];
+            const team = teams[teamKey] || { name: teamKey };
 
             // Team header row
             html += `<div class="timeline-team-header team-${teamKey}">
