@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Het Vlot - Roosterplanning</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Login Scherm -->
+    <div id="login-container" class="container">
+        <div class="login-box">
+            <div class="logo">
+                <h1>Het Vlot</h1>
+                <p class="subtitle">Roosterplanning</p>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Gebruikersnaam</label>
+                    <input type="text" id="username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Wachtwoord</label>
+                    <input type="password" id="password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary">Inloggen</button>
+            </form>
+            <p class="info-text">Demo: admin/admin of medewerker/medewerker</p>
+        </div>
+    </div>
+
+    <!-- Hoofdapplicatie -->
+    <div id="app-container" class="container hidden">
+        <!-- Navigatie -->
+        <nav class="main-nav">
+            <div class="nav-left">
+                <h1 class="app-title">Het Vlot - Roosterplanning</h1>
+            </div>
+            <div class="nav-center">
+                <button class="nav-btn active" data-view="planning">Planning</button>
+                <button class="nav-btn" data-view="employees">Medewerkers</button>
+                <button class="nav-btn" data-view="availability">Verlof & Afwezigheid</button>
+                <button class="nav-btn" data-view="swaps">Dienstenruil</button>
+                <button class="nav-btn" data-view="settings">Instellingen</button>
+            </div>
+            <div class="nav-right">
+                <span id="current-user" class="user-badge"></span>
+                <button id="logout-btn" class="btn btn-secondary btn-sm">Uitloggen</button>
+            </div>
+        </nav>
+
+        <!-- Planning View -->
+        <div id="planning-view" class="view active">
+            <div class="view-header">
+                <h2>Roosterplanning</h2>
+                <div class="header-actions">
+                    <button id="generate-schedule-btn" class="btn btn-success">⚡ Genereer weekroosters</button>
+                    <button id="add-shift-btn" class="btn btn-primary">+ Dienst toevoegen</button>
+                </div>
+            </div>
+
+            <div class="planning-controls">
+                <div class="date-navigation">
+                    <button id="prev-week" class="btn">&larr;</button>
+                    <button id="today-btn" class="btn">Vandaag</button>
+                    <button id="next-week" class="btn">&rarr;</button>
+                </div>
+                <div id="current-period" class="period-display"></div>
+                <div class="team-toggles" id="team-toggles">
+                    <span class="toggle-label">Teams:</span>
+                    <button class="team-toggle active" data-team="vlot1">Vlot 1</button>
+                    <button class="team-toggle active" data-team="jobstudent">Jobstudent</button>
+                    <button class="team-toggle active" data-team="vlot2">Vlot 2</button>
+                    <button class="team-toggle active" data-team="cargo">Cargo</button>
+                    <button class="team-toggle active" data-team="overkoepelend">Overkoepelend</button>
+                </div>
+            </div>
+
+            <div id="validation-alerts" class="alerts-container"></div>
+
+            <div id="roster-calendar" class="calendar-container"></div>
+        </div>
+
+        <!-- Medewerkers View -->
+        <div id="employees-view" class="view">
+            <div class="view-header">
+                <h2>Medewerkers</h2>
+                <button id="add-employee-btn" class="btn btn-primary">+ Medewerker toevoegen</button>
+            </div>
+            <div class="employees-filters">
+                <span class="filter-label">Teams:</span>
+                <div class="team-toggles" id="employee-team-toggles">
+                    <button class="team-toggle active" data-team="vlot1">Vlot 1</button>
+                    <button class="team-toggle active" data-team="vlot2">Vlot 2</button>
+                    <button class="team-toggle active" data-team="cargo">Cargo</button>
+                    <button class="team-toggle active" data-team="overkoepelend">Overkoepelend</button>
+                    <button class="team-toggle active" data-team="jobstudent">Jobstudent</button>
+                </div>
+            </div>
+            <div id="employees-list" class="employees-grid"></div>
+        </div>
+
+        <!-- Verlof & Afwezigheid View -->
+        <div id="availability-view" class="view">
+            <div class="view-header">
+                <h2>Verlof & Afwezigheid</h2>
+                <p class="view-description">Registreer wanneer medewerkers afwezig zijn (verlof, ziek, etc.)</p>
+            </div>
+            <div id="availability-content"></div>
+        </div>
+
+        <!-- Dienstenruil View -->
+        <div id="swaps-view" class="view">
+            <div class="view-header">
+                <h2>Dienstenruil</h2>
+                <p class="view-description">Overzicht van dienstruilverzoeken tussen medewerkers</p>
+            </div>
+            <div id="swaps-list"></div>
+        </div>
+
+        <!-- Instellingen View -->
+        <div id="settings-view" class="view">
+            <div class="view-header">
+                <h2>Instellingen</h2>
+            </div>
+            <div class="settings-content">
+                <div class="settings-section">
+                    <h3>Teams configuratie</h3>
+                    <div id="teams-config"></div>
+                </div>
+                <div class="settings-section">
+                    <h3>Planning regels</h3>
+                    <div id="rules-config"></div>
+                </div>
+                <div class="settings-section">
+                    <h3>Weekend patroon</h3>
+                    <div id="weekend-config"></div>
+                </div>
+                <div class="settings-section">
+                    <h3>Dienst templates</h3>
+                    <div id="shift-templates-config"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <span class="footer-logo">Het Vlot</span>
+                    <span class="footer-tagline">Roosterplanning</span>
+                </div>
+                <div class="footer-info">
+                    <span>&copy; 2025 Het Vlot</span>
+                    <span class="footer-divider">|</span>
+                    <span>Versie 1.0</span>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modal: Dienst toevoegen/bewerken -->
+    <div id="shift-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="shift-modal-title">Dienst toevoegen</h2>
+                <span class="modal-close">&times;</span>
+            </div>
+            <form id="shift-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="shift-employee">Medewerker *</label>
+                        <select id="shift-employee" required></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="shift-team">Team *</label>
+                        <select id="shift-team" required>
+                            <option value="vlot1">Vlot 1</option>
+                            <option value="vlot2">Vlot 2</option>
+                            <option value="cargo">Cargo</option>
+                            <option value="overkoepelend">Overkoepelend</option>
+                            <option value="jobstudent">Jobstudenten/Stagiairs</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="shift-date">Datum *</label>
+                        <input type="date" id="shift-date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="shift-template">Template</label>
+                        <select id="shift-template">
+                            <option value="">-- Kies template --</option>
+                            <option value="vroeg">Vroege dienst (7:30-16:00)</option>
+                            <option value="laat">Late dienst (16:00-23:00)</option>
+                            <option value="nacht">Nachtdienst (23:00-9:00)</option>
+                            <option value="lang">Lange dienst (9:00-21:00)</option>
+                            <option value="custom">Aangepast</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="shift-start">Starttijd *</label>
+                        <input type="time" id="shift-start" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="shift-end">Eindtijd *</label>
+                        <input type="time" id="shift-end" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="shift-notes">Notities</label>
+                    <textarea id="shift-notes" rows="2" placeholder="Bijzonderheden of opmerkingen..."></textarea>
+                </div>
+                <div id="shift-validation-errors" class="validation-errors"></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-danger" id="shift-delete-btn" style="display: none; margin-right: auto;">Verwijderen</button>
+                    <button type="button" class="btn btn-secondary" id="shift-cancel-btn">Annuleren</button>
+                    <button type="submit" class="btn btn-primary">Opslaan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Medewerker toevoegen/bewerken -->
+    <div id="employee-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="employee-modal-title">Medewerker toevoegen</h2>
+                <span class="modal-close">&times;</span>
+            </div>
+            <form id="employee-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="employee-name">Naam *</label>
+                        <input type="text" id="employee-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="employee-email">Email</label>
+                        <input type="email" id="employee-email">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Hoofdteam *</label>
+                    <select id="employee-main-team" required>
+                        <option value="vlot1">Vlot 1</option>
+                        <option value="vlot2">Vlot 2</option>
+                        <option value="cargo">Cargo</option>
+                        <option value="overkoepelend">Overkoepelend</option>
+                        <option value="jobstudent">Jobstudenten/Stagiairs</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Kan ook werken bij</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" value="vlot1" class="employee-extra-teams"> Vlot 1</label>
+                        <label><input type="checkbox" value="vlot2" class="employee-extra-teams"> Vlot 2</label>
+                        <label><input type="checkbox" value="cargo" class="employee-extra-teams"> Cargo</label>
+                        <label><input type="checkbox" value="overkoepelend" class="employee-extra-teams"> Overkoepelend</label>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="employee-contract">Contract uren/week</label>
+                        <input type="number" id="employee-contract" min="0" max="40" step="0.5" placeholder="bijv. 32">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="employee-active">
+                            Actief
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Vast weekrooster -->
+                <div class="form-section">
+                    <h3>Vast weekrooster (Bi-weekly patroon)</h3>
+                    <p class="form-help-text">Stel het 2-weken rooster patroon in. Week 1 en Week 2 wisselen elkaar af. <strong>Week 1 = weekend gesloten</strong>, <strong>Week 2 = weekend open</strong>.</p>
+
+                    <!-- Week tabs -->
+                    <div class="week-tabs">
+                        <button type="button" class="week-tab active" data-week="1">Week 1 (weekend gesloten)</button>
+                        <button type="button" class="week-tab" data-week="2">Week 2 (weekend open)</button>
+                    </div>
+
+                    <div id="week-schedule-container" class="week-schedule-tabs-content">
+                        <!-- Dynamisch gegenereerd door JavaScript -->
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="employee-cancel-btn">Annuleren</button>
+                    <button type="submit" class="btn btn-primary">Opslaan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Afwezigheid registreren -->
+    <div id="availability-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="availability-modal-title">Afwezigheid registreren</h2>
+                <span class="modal-close" id="availability-modal-close">&times;</span>
+            </div>
+            <div id="availability-warning"></div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="absence-employee">Medewerker</label>
+                    <select id="absence-employee" class="select-input">
+                        <option value="">-- Selecteer medewerker --</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="absence-start-date">Van datum *</label>
+                        <input type="date" id="absence-start-date" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="absence-end-date">Tot datum *</label>
+                        <input type="date" id="absence-end-date" class="form-control" required>
+                    </div>
+                </div>
+
+                <div id="absence-date-info" class="date-range-info"></div>
+
+                <div class="form-group">
+                    <label for="absence-type">Type afwezigheid *</label>
+                    <select id="absence-type" class="select-input" required>
+                        <option value="">-- Selecteer type --</option>
+                        <option value="verlof">Verlof</option>
+                        <option value="ziek">Ziekte</option>
+                        <option value="overuren">Overuren opnemen</option>
+                        <option value="vorming">Vorming/Opleiding</option>
+                        <option value="andere">Andere</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="availability-reason">Opmerking</label>
+                    <textarea id="availability-reason" rows="2" placeholder="Optioneel: extra toelichting..."></textarea>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger" id="remove-absence-btn" style="display:none; margin-right: auto;">Verwijderen</button>
+                <button type="button" class="btn btn-secondary" id="availability-cancel-btn">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="availability-save-btn">Opslaan</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="config/settings.js"></script>
+    <script src="data.js"></script>
+    <script src="validation.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
