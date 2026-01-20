@@ -11,11 +11,9 @@ const ValidationRules = {
 // ===== TIJD BEREKENINGEN =====
 
 function parseDateTime(date, time) {
-    // Als tijd over middernacht gaat (bijv. nachtdienst), voeg dag toe
+    const [year, month, day] = date.split('-').map(Number);
     const [hours, minutes] = time.split(':').map(Number);
-    const dt = new Date(date);
-    dt.setHours(hours, minutes, 0, 0);
-    return dt;
+    return new Date(year, month - 1, day, hours, minutes, 0, 0);
 }
 
 function getShiftEndDateTime(shift) {
@@ -38,9 +36,9 @@ function getHoursBetweenShifts(shift1, shift2) {
     const start2 = parseDateTime(shift2.date, shift2.startTime);
 
     const diffMs = Math.abs(start2 - end1);
-    const diffHours = diffMs / (1000 * 60 * 60);
+    const diffMinutes = diffMs / (1000 * 60);
 
-    return diffHours;
+    return diffMinutes / 60;
 }
 
 function shiftsOverlap(shift1, shift2) {
@@ -57,6 +55,7 @@ function shiftsOverlap(shift1, shift2) {
 function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
     const errors = [];
     const warnings = [];
+    const minHoursBetweenShifts = DataStore.settings.rules?.minHoursBetweenShifts || 11;
 
     // Haal alle diensten van deze medewerker op (behalve de dienst die we aanpassen)
     const employeeShifts = DataStore.shifts.filter(s =>
@@ -67,21 +66,12 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
     employeeShifts.forEach(existingShift => {
         const hoursBetween = getHoursBetweenShifts(existingShift, newShift);
 
-        if (hoursBetween < 11) {
+        if (hoursBetween < minHoursBetweenShifts) {
             const employee = getEmployee(employeeId);
             errors.push({
                 type: ValidationRules.ERROR,
                 rule: '11-uur regel',
-                message: `${employee.name} heeft minder dan 11 uur rust tussen diensten (${Math.round(hoursBetween * 10) / 10} uur tussen ${formatDate(existingShift.date)} en ${formatDate(newShift.date)})`,
-                shift1: existingShift,
-                shift2: newShift
-            });
-        } else if (hoursBetween < 12) {
-            const employee = getEmployee(employeeId);
-            warnings.push({
-                type: ValidationRules.WARNING,
-                rule: '11-uur regel',
-                message: `${employee.name} heeft weinig rust tussen diensten (${Math.round(hoursBetween * 10) / 10} uur tussen ${formatDate(existingShift.date)} en ${formatDate(newShift.date)})`,
+                message: `${employee.name} heeft minder dan ${minHoursBetweenShifts} uur rust tussen diensten (${Math.round(hoursBetween * 10) / 10} uur tussen ${formatDate(existingShift.date)} en ${formatDate(newShift.date)})`,
                 shift1: existingShift,
                 shift2: newShift
             });
@@ -155,6 +145,7 @@ function validateMinimumStaffing(date, teamId = null) {
 
     // Tijdens vakantie: andere regels (Vlot 1 + Vlot 2 samen)
     const minStaffingDay = isHoliday ? (holidayRules.minStaffingDay || 2) : normalRules.minStaffingDay;
+    const minStaffingNight = isHoliday ? (holidayRules.minStaffingNight || 1) : normalRules.minStaffingNight;
 
     if (teamId) {
         // Check specifiek team (alleen in normale periode)
@@ -202,6 +193,20 @@ function validateMinimumStaffing(date, teamId = null) {
                 }
             });
         }
+    }
+
+    // Check minimale bezetting nacht (totaal)
+    const nightShifts = shiftsOnDate.filter(shift => {
+        const [startHour] = shift.startTime.split(':').map(Number);
+        return startHour >= 22 || startHour < 7;
+    });
+
+    if (minStaffingNight && nightShifts.length < minStaffingNight) {
+        warnings.push({
+            type: ValidationRules.WARNING,
+            rule: 'Minimale bezetting nacht',
+            message: `Nachtbezetting: ${nightShifts.length} persoon/personen op ${formatDate(date)}, minimum: ${minStaffingNight}`
+        });
     }
 
     return { errors, warnings };
