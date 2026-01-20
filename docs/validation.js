@@ -180,8 +180,9 @@ function validateMinimumStaffing(date, teamId = null) {
                 });
             }
         } else {
-            // Normale periode: check alle teams apart
+            // Normale periode: check alle teams apart (jobstudenten tellen niet mee)
             Object.keys(DataStore.settings.teams).forEach(team => {
+                if (team === 'jobstudent') return;
                 const teamShifts = shiftsOnDate.filter(s => s.team === team);
 
                 if (teamShifts.length < minStaffingDay) {
@@ -196,10 +197,7 @@ function validateMinimumStaffing(date, teamId = null) {
     }
 
     // Check minimale bezetting nacht (totaal)
-    const nightShifts = shiftsOnDate.filter(shift => {
-        const [startHour] = shift.startTime.split(':').map(Number);
-        return startHour >= 22 || startHour < 7;
-    });
+    const nightShifts = getNightShiftsForDate(date);
 
     if (minStaffingNight && nightShifts.length < minStaffingNight) {
         warnings.push({
@@ -210,6 +208,38 @@ function validateMinimumStaffing(date, teamId = null) {
     }
 
     return { errors, warnings };
+}
+
+function shiftOverlapsNightWindow(shift, targetDate) {
+    if (shift.team === 'jobstudent') return false;
+    const shiftStart = parseDateTime(shift.date, shift.startTime);
+    const shiftEnd = getShiftEndDateTime(shift);
+    const nightStart = parseDateTime(targetDate, '22:00');
+    const nightEnd = parseDateTime(targetDate, '07:00');
+    nightEnd.setDate(nightEnd.getDate() + 1);
+
+    return shiftStart < nightEnd && shiftEnd > nightStart;
+}
+
+function getNightShiftsForDate(date) {
+    const nightShifts = [];
+    const currentDate = new Date(date);
+    const prevDate = new Date(currentDate);
+    prevDate.setDate(prevDate.getDate() - 1);
+    const prevDateStr = formatDateYYYYMMDD(prevDate);
+
+    const candidateShifts = [
+        ...getShiftsByDate(date),
+        ...getShiftsByDate(prevDateStr)
+    ];
+
+    candidateShifts.forEach(shift => {
+        if (shiftOverlapsNightWindow(shift, date)) {
+            nightShifts.push(shift);
+        }
+    });
+
+    return nightShifts;
 }
 
 function validateWeekendStatus(date, startTime = null, endTime = null) {

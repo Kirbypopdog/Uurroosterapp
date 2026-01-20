@@ -10,7 +10,8 @@ const AppState = {
     visibleEmployeeTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     editingShiftId: null,
     editingEmployeeId: null,
-    warningBreakdown: null
+    warningBreakdown: null,
+    errorBreakdown: null
 };
 
 // Demo users
@@ -74,6 +75,9 @@ function initDOM() {
     DOM.warningDetailsModal = document.getElementById('warning-details-modal');
     DOM.warningDetailsList = document.getElementById('warning-details-list');
     DOM.warningDetailsClose = document.getElementById('warning-details-close');
+    DOM.errorDetailsModal = document.getElementById('error-details-modal');
+    DOM.errorDetailsList = document.getElementById('error-details-list');
+    DOM.errorDetailsClose = document.getElementById('error-details-close');
 
     // Create tooltip element
     createTooltipElement();
@@ -239,6 +243,10 @@ function setupEventListeners() {
     DOM.warningDetailsModal.addEventListener('click', (e) => {
         if (e.target === DOM.warningDetailsModal) closeWarningDetailsModal();
     });
+    DOM.errorDetailsClose.addEventListener('click', closeErrorDetailsModal);
+    DOM.errorDetailsModal.addEventListener('click', (e) => {
+        if (e.target === DOM.errorDetailsModal) closeErrorDetailsModal();
+    });
     DOM.shiftModal.addEventListener('click', (e) => {
         if (e.target === DOM.shiftModal) closeShiftModal();
     });
@@ -255,6 +263,11 @@ function setupEventListeners() {
     DOM.generateScheduleBtn.addEventListener('click', handleGenerateSchedule);
 
     DOM.validationAlerts.addEventListener('click', (event) => {
+        const errorChip = event.target.closest('.validation-summary-item.validation-error');
+        if (errorChip) {
+            openErrorDetailsModal();
+            return;
+        }
         const warningChip = event.target.closest('.validation-summary-item.validation-warning');
         if (warningChip) {
             openWarningDetailsModal();
@@ -425,14 +438,17 @@ function renderValidationAlerts() {
         html += '<div class="validation-summary">';
 
         if (totalErrors > 0) {
+            AppState.errorBreakdown = buildIssueBreakdown(summary, 'errors');
             html += `<div class="validation-summary-item validation-error">
                 <span class="validation-icon">⚠️</span>
-                <span class="validation-text">${totalErrors} fout${totalErrors > 1 ? 'en' : ''} (bijv. 11-uur regel, overlappende diensten)</span>
+                <span class="validation-text">${totalErrors} fout${totalErrors > 1 ? 'en' : ''} (klik voor details)</span>
             </div>`;
+        } else {
+            AppState.errorBreakdown = null;
         }
 
         if (totalWarnings > 0) {
-            AppState.warningBreakdown = buildWarningBreakdown(summary);
+            AppState.warningBreakdown = buildIssueBreakdown(summary, 'warnings');
             html += `<div class="validation-summary-item validation-warning">
                 <span class="validation-icon">⚡</span>
                 <span class="validation-text">${totalWarnings} waarschuwing${totalWarnings > 1 ? 'en' : ''} (klik voor details)</span>
@@ -449,27 +465,28 @@ function renderValidationAlerts() {
     DOM.validationAlerts.innerHTML = html;
 }
 
-function buildWarningBreakdown(summary) {
-    const warningBreakdown = {};
+function buildIssueBreakdown(summary, issueType) {
+    const issueBreakdown = {};
+    const issuesKey = issueType === 'errors' ? 'errors' : 'warnings';
     Object.entries(summary.dates).forEach(([date, dateIssues]) => {
-        dateIssues.warnings.forEach(warning => {
-            const key = warning.rule || 'Onbekende waarschuwing';
-            if (!warningBreakdown[key]) {
-                warningBreakdown[key] = {
+        dateIssues[issuesKey].forEach(issue => {
+            const key = issue.rule || 'Onbekende waarschuwing';
+            if (!issueBreakdown[key]) {
+                issueBreakdown[key] = {
                     count: 0,
                     dates: new Set(),
                     messages: new Set()
                 };
             }
-            warningBreakdown[key].count += 1;
-            warningBreakdown[key].dates.add(date);
-            if (warning.message) {
-                warningBreakdown[key].messages.add(warning.message);
+            issueBreakdown[key].count += 1;
+            issueBreakdown[key].dates.add(date);
+            if (issue.message) {
+                issueBreakdown[key].messages.add(issue.message);
             }
         });
     });
 
-    return Object.entries(warningBreakdown)
+    return Object.entries(issueBreakdown)
         .sort((a, b) => b[1].count - a[1].count)
         .map(([rule, info]) => {
             const dates = Array.from(info.dates).sort().map(date => formatDate(date));
@@ -493,15 +510,15 @@ function openWarningDetailsModal() {
     } else {
         DOM.warningDetailsList.innerHTML = breakdown.map(item => {
             const dates = item.dates.map(date => `<li>${date}</li>`).join('');
-            const example = item.example ? `<p class="warning-details-example">${item.example}</p>` : '';
-            return `<div class="warning-details-item">
-                <div class="warning-details-header">
-                    <span class="warning-details-rule">${item.rule}</span>
-                    <span class="warning-details-count">${item.count}x</span>
+            const example = item.example ? `<p class="issue-details-example">${item.example}</p>` : '';
+            return `<div class="issue-details-item">
+                <div class="issue-details-header">
+                    <span class="issue-details-rule">${item.rule}</span>
+                    <span class="issue-details-count">${item.count}x</span>
                 </div>
                 ${example}
-                <div class="warning-details-dates">
-                    <div class="warning-details-label">Datums</div>
+                <div class="issue-details-dates">
+                    <div class="issue-details-label">Datums</div>
                     <ul>${dates}</ul>
                 </div>
             </div>`;
@@ -514,6 +531,39 @@ function openWarningDetailsModal() {
 function closeWarningDetailsModal() {
     if (!DOM.warningDetailsModal) return;
     DOM.warningDetailsModal.classList.add('hidden');
+}
+
+function openErrorDetailsModal() {
+    if (!DOM.errorDetailsModal) return;
+    DOM.errorDetailsList.innerHTML = '';
+
+    const breakdown = AppState.errorBreakdown || [];
+    if (breakdown.length === 0) {
+        DOM.errorDetailsList.innerHTML = '<p>Geen fouten gevonden voor deze periode.</p>';
+    } else {
+        DOM.errorDetailsList.innerHTML = breakdown.map(item => {
+            const dates = item.dates.map(date => `<li>${date}</li>`).join('');
+            const example = item.example ? `<p class="issue-details-example">${item.example}</p>` : '';
+            return `<div class="issue-details-item">
+                <div class="issue-details-header">
+                    <span class="issue-details-rule">${item.rule}</span>
+                    <span class="issue-details-count">${item.count}x</span>
+                </div>
+                ${example}
+                <div class="issue-details-dates">
+                    <div class="issue-details-label">Datums</div>
+                    <ul>${dates}</ul>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    DOM.errorDetailsModal.classList.remove('hidden');
+}
+
+function closeErrorDetailsModal() {
+    if (!DOM.errorDetailsModal) return;
+    DOM.errorDetailsModal.classList.add('hidden');
 }
 
 function renderResponsibleSection() {
