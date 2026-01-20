@@ -576,6 +576,13 @@ textarea {
     margin-bottom: 8px;
 }
 
+.issue-details-messages ul {
+    margin: 0 0 12px;
+    padding-left: 18px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
 .issue-details-dates ul {
     margin: 0;
     padding-left: 18px;

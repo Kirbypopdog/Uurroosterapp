@@ -490,12 +490,12 @@ function buildIssueBreakdown(summary, issueType) {
         .sort((a, b) => b[1].count - a[1].count)
         .map(([rule, info]) => {
             const dates = Array.from(info.dates).sort().map(date => formatDate(date));
-            const example = info.messages.size > 0 ? Array.from(info.messages)[0] : '';
+            const messages = Array.from(info.messages);
             return {
                 rule,
                 count: info.count,
                 dates,
-                example
+                messages
             };
         });
 }
@@ -510,13 +510,16 @@ function openWarningDetailsModal() {
     } else {
         DOM.warningDetailsList.innerHTML = breakdown.map(item => {
             const dates = item.dates.map(date => `<li>${date}</li>`).join('');
-            const example = item.example ? `<p class="issue-details-example">${item.example}</p>` : '';
+            const messageItems = item.messages.map(message => `<li>${message}</li>`).join('');
             return `<div class="issue-details-item">
                 <div class="issue-details-header">
                     <span class="issue-details-rule">${item.rule}</span>
                     <span class="issue-details-count">${item.count}x</span>
                 </div>
-                ${example}
+                <div class="issue-details-messages">
+                    <div class="issue-details-label">Context</div>
+                    <ul>${messageItems}</ul>
+                </div>
                 <div class="issue-details-dates">
                     <div class="issue-details-label">Datums</div>
                     <ul>${dates}</ul>
@@ -543,13 +546,16 @@ function openErrorDetailsModal() {
     } else {
         DOM.errorDetailsList.innerHTML = breakdown.map(item => {
             const dates = item.dates.map(date => `<li>${date}</li>`).join('');
-            const example = item.example ? `<p class="issue-details-example">${item.example}</p>` : '';
+            const messageItems = item.messages.map(message => `<li>${message}</li>`).join('');
             return `<div class="issue-details-item">
                 <div class="issue-details-header">
                     <span class="issue-details-rule">${item.rule}</span>
                     <span class="issue-details-count">${item.count}x</span>
                 </div>
-                ${example}
+                <div class="issue-details-messages">
+                    <div class="issue-details-label">Context</div>
+                    <ul>${messageItems}</ul>
+                </div>
                 <div class="issue-details-dates">
                     <div class="issue-details-label">Datums</div>
                     <ul>${dates}</ul>

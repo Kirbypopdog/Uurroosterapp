@@ -137,6 +137,12 @@ function validateMinimumStaffing(date, teamId = null) {
     const errors = [];
 
     const shiftsOnDate = getShiftsByDate(date);
+    const day = new Date(date).getDay();
+    const isWeekend = day === 0 || day === 6;
+
+    if (isWeekend && !isWeekendOpen(date)) {
+        return { errors, warnings };
+    }
 
     // Check of dit een vakantieperiode is
     const isHoliday = isHolidayPeriod(date);
