@@ -9,7 +9,8 @@ const AppState = {
     visibleTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     visibleEmployeeTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     editingShiftId: null,
-    editingEmployeeId: null
+    editingEmployeeId: null,
+    warningBreakdown: null
 };
 
 // Demo users
@@ -70,6 +71,9 @@ function initDOM() {
     DOM.employeeCancelBtn = document.getElementById('employee-cancel-btn');
     DOM.employeeDeleteBtn = document.getElementById('employee-delete-btn');
     DOM.generateScheduleBtn = document.getElementById('generate-schedule-btn');
+    DOM.warningDetailsModal = document.getElementById('warning-details-modal');
+    DOM.warningDetailsList = document.getElementById('warning-details-list');
+    DOM.warningDetailsClose = document.getElementById('warning-details-close');
 
     // Create tooltip element
     createTooltipElement();
@@ -231,6 +235,10 @@ function setupEventListeners() {
     document.querySelectorAll('#employee-modal .modal-close').forEach(btn => {
         btn.addEventListener('click', closeEmployeeModal);
     });
+    DOM.warningDetailsClose.addEventListener('click', closeWarningDetailsModal);
+    DOM.warningDetailsModal.addEventListener('click', (e) => {
+        if (e.target === DOM.warningDetailsModal) closeWarningDetailsModal();
+    });
     DOM.shiftModal.addEventListener('click', (e) => {
         if (e.target === DOM.shiftModal) closeShiftModal();
     });
@@ -245,6 +253,13 @@ function setupEventListeners() {
 
     // Generate schedule button
     DOM.generateScheduleBtn.addEventListener('click', handleGenerateSchedule);
+
+    DOM.validationAlerts.addEventListener('click', (event) => {
+        const warningChip = event.target.closest('.validation-summary-item.validation-warning');
+        if (warningChip) {
+            openWarningDetailsModal();
+        }
+    });
 }
 
 function handleLogin(e) {
@@ -417,45 +432,13 @@ function renderValidationAlerts() {
         }
 
         if (totalWarnings > 0) {
-            const warningBreakdown = {};
-            Object.entries(summary.dates).forEach(([date, dateIssues]) => {
-                dateIssues.warnings.forEach(warning => {
-                    const key = warning.rule || 'Onbekende waarschuwing';
-                    if (!warningBreakdown[key]) {
-                        warningBreakdown[key] = {
-                            count: 0,
-                            dates: new Set(),
-                            messages: new Set()
-                        };
-                    }
-                    warningBreakdown[key].count += 1;
-                    warningBreakdown[key].dates.add(date);
-                    if (warning.message) {
-                        warningBreakdown[key].messages.add(warning.message);
-                    }
-                });
-            });
-
-            const tooltipLines = Object.entries(warningBreakdown)
-                .sort((a, b) => b[1].count - a[1].count)
-                .map(([rule, info]) => {
-                    const dates = Array.from(info.dates).sort();
-                    const formattedDates = dates.slice(0, 3).map(date => formatDate(date));
-                    const remaining = dates.length - formattedDates.length;
-                    const dateLabel = remaining > 0
-                        ? `${formattedDates.join(', ')} (+${remaining} meer)`
-                        : formattedDates.join(', ');
-                    const example = info.messages.size > 0 ? Array.from(info.messages)[0] : '';
-                    return `• ${rule} (${info.count}x) — ${dateLabel}${example ? `\\n  ${example}` : ''}`;
-                })
-                .join('\\n');
-
-            const tooltipText = tooltipLines || 'Geen extra details beschikbaar.';
-
-            html += `<div class="validation-summary-item validation-warning" data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
+            AppState.warningBreakdown = buildWarningBreakdown(summary);
+            html += `<div class="validation-summary-item validation-warning">
                 <span class="validation-icon">⚡</span>
-                <span class="validation-text">${totalWarnings} waarschuwing${totalWarnings > 1 ? 'en' : ''} (hover voor details)</span>
+                <span class="validation-text">${totalWarnings} waarschuwing${totalWarnings > 1 ? 'en' : ''} (klik voor details)</span>
             </div>`;
+        } else {
+            AppState.warningBreakdown = null;
         }
 
         html += '<div class="validation-summary-note">Klik op een dienst in de kalender om details te zien</div>';
@@ -464,6 +447,73 @@ function renderValidationAlerts() {
     }
 
     DOM.validationAlerts.innerHTML = html;
+}
+
+function buildWarningBreakdown(summary) {
+    const warningBreakdown = {};
+    Object.entries(summary.dates).forEach(([date, dateIssues]) => {
+        dateIssues.warnings.forEach(warning => {
+            const key = warning.rule || 'Onbekende waarschuwing';
+            if (!warningBreakdown[key]) {
+                warningBreakdown[key] = {
+                    count: 0,
+                    dates: new Set(),
+                    messages: new Set()
+                };
+            }
+            warningBreakdown[key].count += 1;
+            warningBreakdown[key].dates.add(date);
+            if (warning.message) {
+                warningBreakdown[key].messages.add(warning.message);
+            }
+        });
+    });
+
+    return Object.entries(warningBreakdown)
+        .sort((a, b) => b[1].count - a[1].count)
+        .map(([rule, info]) => {
+            const dates = Array.from(info.dates).sort().map(date => formatDate(date));
+            const example = info.messages.size > 0 ? Array.from(info.messages)[0] : '';
+            return {
+                rule,
+                count: info.count,
+                dates,
+                example
+            };
+        });
+}
+
+function openWarningDetailsModal() {
+    if (!DOM.warningDetailsModal) return;
+    DOM.warningDetailsList.innerHTML = '';
+
+    const breakdown = AppState.warningBreakdown || [];
+    if (breakdown.length === 0) {
+        DOM.warningDetailsList.innerHTML = '<p>Geen waarschuwingen gevonden voor deze periode.</p>';
+    } else {
+        DOM.warningDetailsList.innerHTML = breakdown.map(item => {
+            const dates = item.dates.map(date => `<li>${date}</li>`).join('');
+            const example = item.example ? `<p class="warning-details-example">${item.example}</p>` : '';
+            return `<div class="warning-details-item">
+                <div class="warning-details-header">
+                    <span class="warning-details-rule">${item.rule}</span>
+                    <span class="warning-details-count">${item.count}x</span>
+                </div>
+                ${example}
+                <div class="warning-details-dates">
+                    <div class="warning-details-label">Datums</div>
+                    <ul>${dates}</ul>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    DOM.warningDetailsModal.classList.remove('hidden');
+}
+
+function closeWarningDetailsModal() {
+    if (!DOM.warningDetailsModal) return;
+    DOM.warningDetailsModal.classList.add('hidden');
 }
 
 function renderResponsibleSection() {
