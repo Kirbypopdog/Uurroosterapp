@@ -14,8 +14,72 @@ const AppState = {
     editingEmployeeId: null,
     warningBreakdown: null,
     errorBreakdown: null,
-    apiTeams: []
+    apiTeams: [],
+    activeSettingsTab: 'accounts',
+    mobileDayIndex: 0, // 0=Monday, 1=Tuesday, ..., 6=Sunday (for mobile day view)
+    availabilityMobileDayIndex: 0 // Same for availability view
 };
+
+// ===== PERMISSIONS SYSTEM =====
+const PERMISSIONS = {
+    VIEW_ALL_EMPLOYEES: ['admin', 'hoofdverantwoordelijke'],
+    EDIT_ALL_EMPLOYEES: ['admin', 'hoofdverantwoordelijke'],
+    EDIT_TEAM_EMPLOYEES: ['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'],
+    ADD_EMPLOYEES: ['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'],
+    VIEW_ALL_AVAILABILITY: ['admin', 'hoofdverantwoordelijke'],
+    MANAGE_AVAILABILITY: ['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'],
+    CHANGE_SETTINGS: ['admin', 'hoofdverantwoordelijke'],
+    MANAGE_ACCOUNTS: ['admin'],
+    EXPORT_DATA: ['admin', 'hoofdverantwoordelijke']
+};
+
+function hasPermission(permission) {
+    const role = AppState.currentUser?.role;
+    return PERMISSIONS[permission]?.includes(role) || false;
+}
+
+function canManageEmployee(employee) {
+    const role = AppState.currentUser?.role;
+    const userTeam = AppState.currentUser?.team_id;
+
+    if (['admin', 'hoofdverantwoordelijke'].includes(role)) return true;
+    if (role === 'teamverantwoordelijke') {
+        const empTeam = typeof employee === 'object' ? employee.mainTeam : employee;
+        return empTeam === userTeam;
+    }
+    return false;
+}
+
+function canManageAvailability(employeeId) {
+    const role = AppState.currentUser?.role;
+    const userId = AppState.currentUser?.id;
+    const userTeam = AppState.currentUser?.team_id;
+
+    if (['admin', 'hoofdverantwoordelijke'].includes(role)) return true;
+    if (role === 'teamverantwoordelijke') {
+        const emp = DataStore.employees.find(e => String(e.id) === String(employeeId));
+        return emp?.mainTeam === userTeam;
+    }
+    if (role === 'medewerker') return String(employeeId) === String(userId);
+    return false;
+}
+
+function getVisibleTeamsForRole() {
+    const role = AppState.currentUser?.role;
+    const userTeam = AppState.currentUser?.team_id;
+    const allTeams = ['vlot1', 'vlot2', 'cargo', 'overkoepelend', 'jobstudent'];
+
+    if (['admin', 'hoofdverantwoordelijke'].includes(role)) {
+        return allTeams;
+    }
+    if (role === 'teamverantwoordelijke' && userTeam) {
+        return [userTeam];
+    }
+    if (role === 'medewerker' && userTeam) {
+        return [userTeam];
+    }
+    return allTeams;
+}
 
 // Demo users
 const USERS = [
@@ -179,6 +243,12 @@ function initDOM() {
     DOM.errorDetailsList = document.getElementById('error-details-list');
     DOM.errorDetailsClose = document.getElementById('error-details-close');
 
+    // Mobile day navigation
+    DOM.mobileDayNav = document.getElementById('mobile-day-nav');
+    DOM.mobilePrevDay = document.getElementById('mobile-prev-day');
+    DOM.mobileNextDay = document.getElementById('mobile-next-day');
+    DOM.mobileDayDisplay = document.getElementById('mobile-day-display');
+
     // Create tooltip element
     createTooltipElement();
 }
@@ -261,6 +331,10 @@ function init() {
         applyTeamColors();
         console.log('DOM initialized');
         setCurrentWeek(new Date());
+        // Set initial mobile day to today's day of the week
+        const today = new Date();
+        const dayOfWeek = today.getDay();
+        AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
         console.log('Current week set');
         setupEventListeners();
         setupAvailabilityModal();
@@ -276,16 +350,74 @@ function init() {
 function setupEventListeners() {
     DOM.loginForm.addEventListener('submit', handleLogin);
     DOM.logoutBtn.addEventListener('click', handleLogout);
+
+    // Mobile menu toggle
+    const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+    const navMenu = document.getElementById('nav-menu');
+    if (mobileMenuBtn && navMenu) {
+        mobileMenuBtn.addEventListener('click', () => {
+            mobileMenuBtn.classList.toggle('active');
+            navMenu.classList.toggle('open');
+        });
+    }
+
     DOM.navButtons.forEach(btn => {
-        btn.addEventListener('click', () => switchView(btn.dataset.view));
+        btn.addEventListener('click', () => {
+            // Close mobile menu on navigation
+            if (mobileMenuBtn && navMenu) {
+                mobileMenuBtn.classList.remove('active');
+                navMenu.classList.remove('open');
+            }
+            switchView(btn.dataset.view);
+        });
     });
     DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
     DOM.prevWeekBtn.addEventListener('click', () => changeWeek(-1));
     DOM.nextWeekBtn.addEventListener('click', () => changeWeek(1));
     DOM.todayBtn.addEventListener('click', () => {
         setCurrentWeek(new Date());
+        // Set mobile day to today's day of the week (0=Mon, 6=Sun)
+        const today = new Date();
+        const dayOfWeek = today.getDay();
+        // Convert from JS day (0=Sun, 6=Sat) to our format (0=Mon, 6=Sun)
+        AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
         renderPlanning();
     });
+
+    // Mobile day navigation
+    if (DOM.mobilePrevDay) {
+        DOM.mobilePrevDay.addEventListener('click', () => changeMobileDay(-1));
+    }
+    if (DOM.mobileNextDay) {
+        DOM.mobileNextDay.addEventListener('click', () => changeMobileDay(1));
+    }
+
+    // Mobile date picker - jump to specific date
+    const mobileDatePicker = document.getElementById('mobile-date-picker');
+    if (mobileDatePicker) {
+        mobileDatePicker.addEventListener('change', (e) => {
+            const selectedDate = new Date(e.target.value);
+            if (!isNaN(selectedDate.getTime())) {
+                jumpToDate(selectedDate);
+            }
+        });
+    }
+
+    // Click on day display to open date picker
+    if (DOM.mobileDayDisplay) {
+        DOM.mobileDayDisplay.addEventListener('click', () => {
+            const picker = document.getElementById('mobile-date-picker');
+            if (picker) {
+                if (picker.showPicker) {
+                    picker.showPicker();
+                } else {
+                    picker.click();
+                    picker.focus();
+                }
+            }
+        });
+    }
+
     DOM.viewToggleBtns.forEach(btn => {
         btn.addEventListener('click', () => changeViewMode(btn.dataset.mode));
     });
@@ -447,21 +579,13 @@ function applyRoleVisibility() {
     const role = AppState.currentUser?.role || 'medewerker';
     const allowedViews = new Set(['planning', 'profile']);
 
-    if (role === 'medewerker') {
-        allowedViews.add('employees');
-        allowedViews.add('availability');
-        allowedViews.add('swaps');
-    }
-    if (role === 'hoofdverantwoordelijke') {
-        allowedViews.add('employees');
-        allowedViews.add('availability');
-        allowedViews.add('swaps');
-        allowedViews.add('settings');
-    }
-    if (role === 'admin') {
-        allowedViews.add('employees');
-        allowedViews.add('availability');
-        allowedViews.add('swaps');
+    // All roles get basic views
+    allowedViews.add('employees');
+    allowedViews.add('availability');
+    allowedViews.add('swaps');
+
+    // Settings only for hoofdverantwoordelijke and admin
+    if (['hoofdverantwoordelijke', 'admin'].includes(role)) {
         allowedViews.add('settings');
     }
 
@@ -475,11 +599,21 @@ function applyRoleVisibility() {
         AppState.currentView = 'planning';
     }
 
+    // Team filters: hide for medewerker, show limited for teamverantwoordelijke
     const hideTeamFilters = role === 'medewerker';
+    const limitTeamFilters = role === 'teamverantwoordelijke';
     const planningFilters = document.getElementById('team-toggles');
     const employeeFilters = document.getElementById('employee-team-toggles');
+
     if (planningFilters) planningFilters.style.display = hideTeamFilters ? 'none' : '';
     if (employeeFilters) employeeFilters.style.display = hideTeamFilters ? 'none' : '';
+
+    // For teamverantwoordelijke, limit visible teams to their own
+    if (limitTeamFilters) {
+        const visibleTeams = getVisibleTeamsForRole();
+        AppState.visibleTeams = visibleTeams;
+        AppState.visibleEmployeeTeams = visibleTeams;
+    }
 }
 
 function switchView(viewName) {
@@ -552,6 +686,110 @@ function changeWeek(direction) {
     renderPlanning();
 }
 
+// ===== MOBILE DAY NAVIGATION =====
+function changeMobileDay(direction) {
+    AppState.mobileDayIndex += direction;
+
+    // Wrap around: if < 0, go to Sunday (6), if > 6, go to Monday (0)
+    if (AppState.mobileDayIndex < 0) {
+        AppState.mobileDayIndex = 6;
+        changeWeek(-1); // Go to previous week
+    } else if (AppState.mobileDayIndex > 6) {
+        AppState.mobileDayIndex = 0;
+        changeWeek(1); // Go to next week
+    } else {
+        updateMobileDayDisplay();
+        updateTimelineMobileDayAttribute();
+    }
+}
+
+function updateMobileDayDisplay() {
+    if (!DOM.mobileDayDisplay || !AppState.currentWeekStart) return;
+
+    const dayNames = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
+    const currentDate = new Date(AppState.currentWeekStart);
+    currentDate.setDate(currentDate.getDate() + AppState.mobileDayIndex);
+
+    const dayName = dayNames[AppState.mobileDayIndex];
+    const dateStr = currentDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+    const dateValue = formatDateYYYYMMDD(currentDate);
+
+    DOM.mobileDayDisplay.innerHTML = `
+        <span class="mobile-day-name">${dayName}</span>
+        <span class="mobile-day-date">${dateStr}</span>
+        <input type="date" id="mobile-date-picker" class="mobile-date-picker" value="${dateValue}">
+    `;
+
+    // Re-attach event listener since we replaced the element
+    const picker = document.getElementById('mobile-date-picker');
+    if (picker) {
+        picker.addEventListener('change', (e) => {
+            const selectedDate = new Date(e.target.value);
+            if (!isNaN(selectedDate.getTime())) {
+                jumpToDate(selectedDate);
+            }
+        });
+    }
+}
+
+function updateTimelineMobileDayAttribute() {
+    const wrapper = document.querySelector('.timeline-view-wrapper');
+    if (wrapper) {
+        wrapper.setAttribute('data-mobile-day', AppState.mobileDayIndex);
+    }
+}
+
+function jumpToDate(date) {
+    // Set the week to the week containing the selected date
+    setCurrentWeek(date);
+
+    // Calculate which day of the week (0=Mon, 6=Sun)
+    const dayOfWeek = date.getDay();
+    AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+    renderPlanning();
+}
+
+// ===== AVAILABILITY MOBILE DAY NAVIGATION =====
+function getAvailabilityMobileDayDisplayHTML() {
+    if (!AppState.currentWeekStart) return '';
+
+    const dayNames = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
+    const currentDate = new Date(AppState.currentWeekStart);
+    currentDate.setDate(currentDate.getDate() + AppState.availabilityMobileDayIndex);
+
+    const dayName = dayNames[AppState.availabilityMobileDayIndex];
+    const dateStr = currentDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+    const dateValue = formatDateYYYYMMDD(currentDate);
+
+    return `
+        <span class="mobile-day-name">${dayName}</span>
+        <span class="mobile-day-date">${dateStr}</span>
+        <input type="date" id="availability-mobile-date-picker" class="mobile-date-picker" value="${dateValue}">
+    `;
+}
+
+function changeAvailabilityMobileDay(direction) {
+    AppState.availabilityMobileDayIndex += direction;
+
+    if (AppState.availabilityMobileDayIndex < 0) {
+        AppState.availabilityMobileDayIndex = 6;
+        AppState.currentWeekStart.setDate(AppState.currentWeekStart.getDate() - 7);
+    } else if (AppState.availabilityMobileDayIndex > 6) {
+        AppState.availabilityMobileDayIndex = 0;
+        AppState.currentWeekStart.setDate(AppState.currentWeekStart.getDate() + 7);
+    }
+
+    renderAvailability();
+}
+
+function jumpToAvailabilityDate(date) {
+    setCurrentWeek(date);
+    const dayOfWeek = date.getDay();
+    AppState.availabilityMobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    renderAvailability();
+}
+
 function changeViewMode(mode) {
     AppState.viewMode = mode;
     DOM.viewToggleBtns.forEach(btn => {
@@ -583,8 +821,11 @@ function renderPlanning() {
         setCurrentWeek(new Date());
     }
     updatePeriodDisplay();
+    updateMobileDayDisplay();
     renderValidationAlerts();
     renderCalendar();
+    // Set mobile day attribute after calendar is rendered
+    updateTimelineMobileDayAttribute();
 }
 
 function renderValidationAlerts() {
@@ -1453,7 +1694,8 @@ function renderEmployees() {
         .filter(t => AppState.visibleEmployeeTeams.includes(t));
     let teamOrder = baseTeamOrder;
 
-    if (role === 'medewerker') {
+    // Filter teams based on role
+    if (['medewerker', 'teamverantwoordelijke'].includes(role)) {
         const userTeam = AppState.currentUser?.team_id
             || employees.find(emp => emp.user_id === AppState.currentUser?.id)?.mainTeam
             || employees.find(emp => emp.email && emp.email.toLowerCase() === String(AppState.currentUser?.email || '').toLowerCase())?.mainTeam;
@@ -1496,14 +1738,19 @@ function renderEmployees() {
     }
 
     DOM.employeesList.innerHTML = html;
-    if (role !== 'medewerker') {
-        document.querySelectorAll('.employee-card').forEach(card => {
+    // Add click handler for employee cards based on permissions
+    document.querySelectorAll('.employee-card').forEach(card => {
+        const employeeId = parseFloat(card.dataset.employeeId);
+        const employee = employees.find(e => e.id === employeeId);
+        if (employee && canManageEmployee(employee)) {
+            card.style.cursor = 'pointer';
             card.addEventListener('click', () => {
-                const employeeId = parseFloat(card.dataset.employeeId);
                 openEditEmployeeModal(employeeId);
             });
-        });
-    }
+        } else {
+            card.style.cursor = 'default';
+        }
+    });
     document.querySelectorAll('.week-nav-btn').forEach(btn => {
         btn.addEventListener('click', (event) => {
             event.stopPropagation();
@@ -1539,6 +1786,7 @@ function renderProfile() {
     const roleLabels = {
         admin: 'Admin',
         hoofdverantwoordelijke: 'Hoofdverantwoordelijke',
+        teamverantwoordelijke: 'Teamverantwoordelijke',
         medewerker: 'Medewerker'
     };
     const role = roleLabels[user.role] || user.role || 'Onbekend';
@@ -1550,6 +1798,7 @@ function renderProfile() {
     const accessMap = {
         admin: 'Alle paginas + instellingen + accountbeheer',
         hoofdverantwoordelijke: 'Alle paginas + instellingen (zonder accountbeheer)',
+        teamverantwoordelijke: 'Eigen team beheren + verlof registreren',
         medewerker: 'Alle paginas behalve instellingen'
     };
     const accessSummary = accessMap[user.role] || 'Planning + profiel';
@@ -2056,7 +2305,8 @@ function renderAvailability() {
 
     // Group employees by team (same order as Timeline)
     let teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'];
-    if (role === 'medewerker') {
+    // Filter by team for medewerker and teamverantwoordelijke
+    if (['medewerker', 'teamverantwoordelijke'].includes(role)) {
         const userTeam = AppState.currentUser?.team_id
             || employees.find(emp => emp.user_id === AppState.currentUser?.id)?.mainTeam
             || employees.find(emp => emp.email && emp.email.toLowerCase() === String(AppState.currentUser?.email || '').toLowerCase())?.mainTeam;
@@ -2091,7 +2341,16 @@ function renderAvailability() {
             </div>
         </div>
 
-        <div class="availability-container">
+        <!-- Mobile day navigation for availability -->
+        <div id="availability-mobile-day-nav" class="mobile-day-nav availability-mobile-nav">
+            <button id="availability-mobile-prev-day" class="btn btn-sm">&larr;</button>
+            <div id="availability-mobile-day-display" class="mobile-day-display">
+                ${getAvailabilityMobileDayDisplayHTML()}
+            </div>
+            <button id="availability-mobile-next-day" class="btn btn-sm">&rarr;</button>
+        </div>
+
+        <div class="availability-container" data-mobile-day="${AppState.availabilityMobileDayIndex}">
             <div class="availability-table">
                 <div class="availability-header-row">
                     <div class="availability-employee-col">Medewerker</div>
@@ -2225,8 +2484,48 @@ function renderAvailability() {
 
     document.getElementById('availability-today').addEventListener('click', () => {
         AppState.currentWeekStart = getMonday(new Date());
+        // Also set mobile day to today
+        const today = new Date();
+        const dayOfWeek = today.getDay();
+        AppState.availabilityMobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
         renderAvailability();
     });
+
+    // Mobile day navigation for availability
+    const availMobilePrev = document.getElementById('availability-mobile-prev-day');
+    const availMobileNext = document.getElementById('availability-mobile-next-day');
+    const availMobileDayDisplay = document.getElementById('availability-mobile-day-display');
+
+    if (availMobilePrev) {
+        availMobilePrev.addEventListener('click', () => changeAvailabilityMobileDay(-1));
+    }
+    if (availMobileNext) {
+        availMobileNext.addEventListener('click', () => changeAvailabilityMobileDay(1));
+    }
+    if (availMobileDayDisplay) {
+        availMobileDayDisplay.addEventListener('click', () => {
+            const picker = document.getElementById('availability-mobile-date-picker');
+            if (picker) {
+                if (picker.showPicker) {
+                    picker.showPicker();
+                } else {
+                    picker.click();
+                    picker.focus();
+                }
+            }
+        });
+    }
+
+    // Date picker for availability
+    const availDatePicker = document.getElementById('availability-mobile-date-picker');
+    if (availDatePicker) {
+        availDatePicker.addEventListener('change', (e) => {
+            const selectedDate = new Date(e.target.value);
+            if (!isNaN(selectedDate.getTime())) {
+                jumpToAvailabilityDate(selectedDate);
+            }
+        });
+    }
 
     // Add absence button
     document.getElementById('add-absence-btn').addEventListener('click', () => {
@@ -2248,317 +2547,111 @@ function renderSwaps() {
 }
 
 function renderSettings() {
-    const settingsContent = DOM.settingsView.querySelector('.settings-content');
-    const rules = DataStore.settings.rules;
+    // Update tab active states and scroll active into view
+    document.querySelectorAll('.settings-tab').forEach(tab => {
+        const isActive = tab.dataset.settingsTab === AppState.activeSettingsTab;
+        tab.classList.toggle('active', isActive);
+        if (isActive) {
+            // Scroll active tab into view after a brief delay
+            setTimeout(() => {
+                tab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+            }, 100);
+        }
+    });
+
+    // Setup tab click listeners
+    document.querySelectorAll('.settings-tab').forEach(tab => {
+        tab.onclick = () => switchSettingsTab(tab.dataset.settingsTab);
+    });
+
+    // Render the active tab content
+    renderSettingsTabContent(AppState.activeSettingsTab);
+}
+
+function switchSettingsTab(tabName) {
+    AppState.activeSettingsTab = tabName;
+    document.querySelectorAll('.settings-tab').forEach(tab => {
+        const isActive = tab.dataset.settingsTab === tabName;
+        tab.classList.toggle('active', isActive);
+        // Scroll active tab into view on mobile
+        if (isActive) {
+            tab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+        }
+    });
+    renderSettingsTabContent(tabName);
+}
+
+function renderSettingsTabContent(tabName) {
+    const content = document.getElementById('settings-tab-content');
+    if (!content) return;
+
+    switch (tabName) {
+        case 'accounts':
+            renderSettingsAccounts(content);
+            break;
+        case 'planning':
+            renderSettingsPlanning(content);
+            break;
+        case 'rooster':
+            renderSettingsRooster(content);
+            break;
+        case 'teams':
+            renderSettingsTeams(content);
+            break;
+        case 'systeem':
+            renderSettingsSystem(content);
+            break;
+        default:
+            content.innerHTML = '<p>Ongeldige tab</p>';
+    }
+}
+
+// ===== SETTINGS TAB: ACCOUNTS =====
+function renderSettingsAccounts(container) {
     const role = AppState.currentUser?.role;
 
-    let html = `
-    <div class="settings-header">
-        <div>
-            <h2>Instellingen</h2>
-            <p class="settings-subtitle">Open alleen de kaarten die je nodig hebt. Zo blijft het overzichtelijk.</p>
-        </div>
-    </div>
-    <div class="settings-grid">
-        <!-- Linker kolom -->
-        <div class="settings-column">
-
-            <div id="settings-accounts-slot"></div>
-
-            <!-- Bi-weekly rooster & Weekendverantwoordelijke -->
-            <div class="settings-card is-collapsible" id="settings-biweekly" data-collapsible="true" data-open="true">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <h3><span class="settings-icon">📅</span> Rooster & Weekend</h3>
-                        <p class="settings-card-subtitle">Week 1 start + weekendverantwoordelijke rotatie.</p>
-                    </div>
-                    <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Verberg</button>
-                </div>
-                <div class="settings-card-body">
-                    <div class="info-box info">
-                        <p><strong>Week 1</strong> = weekend GESLOTEN (vrij 18:00 - ma 7:30)</p>
-                        <p><strong>Week 2</strong> = weekend OPEN</p>
-                        <p class="current-setting">Huidige Week 1 start: <strong>${formatDate(DataStore.settings.biWeeklyReferenceDate)}</strong></p>
-                    </div>
-                    <div class="form-group">
-                        <label for="biweekly-reference-date">Referentie maandag voor Week 1:</label>
-                        <div class="input-with-button">
-                            <input type="date" id="biweekly-reference-date" class="form-input" value="${DataStore.settings.biWeeklyReferenceDate}" />
-                            <button class="btn btn-primary" onclick="updateBiWeeklyReference()">Opslaan</button>
-                        </div>
-                        <span class="form-hint">Selecteer altijd een maandag</span>
-                    </div>
-
-                    <hr style="margin: 20px 0; border: none; border-top: 1px solid #e2e8f0;">
-
-                    <!-- Weekendverantwoordelijke rotatie -->
-                    <div class="responsible-settings-section">
-                        <h4>Weekendverantwoordelijke Rotatie</h4>
-                        <p class="form-help-text">Tijdens open weekenden (Week 2) wordt automatisch een verantwoordelijke aangeduid. De rotatie gaat om de beurt door medewerkers van de geselecteerde teams.</p>
-
-                        <div class="eligible-teams-compact">
-                            ${renderEligibleTeamsCheckboxes()}
-                        </div>
-
-                        <div class="rotation-form" style="margin-top: 12px;">
-                            ${renderRotationSettingsCompact()}
-                        </div>
-                    </div>
-
-                    <!-- Komende weekenden preview -->
-                    <div class="upcoming-section" style="margin-top: 16px;">
-                        <h4>Komende open weekenden</h4>
-                        <div class="upcoming-responsibles">
-                            ${renderUpcomingResponsibles()}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Planning regels -->
-            <div class="settings-card is-collapsible" id="settings-rules" data-collapsible="true" data-open="true">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <h3><span class="settings-icon">⚙️</span> Planning regels</h3>
-                        <p class="settings-card-subtitle">Regels voor rust en minimale bezetting.</p>
-                    </div>
-                    <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Verberg</button>
-                </div>
-                <div class="settings-card-body">
-                    <div class="form-group">
-                        <label for="rule-min-hours">Minimum uren tussen diensten:</label>
-                        <div class="input-with-unit">
-                            <input type="number" id="rule-min-hours" class="form-input" value="${rules.minHoursBetweenShifts}" min="0" max="24" />
-                            <span class="unit">uur</span>
-                        </div>
-                        <span class="form-hint">Wettelijk minimum is 11 uur</span>
-                    </div>
-                    <div class="form-group">
-                        <label for="rule-min-staff-day">Minimum bezetting overdag (per team):</label>
-                        <div class="input-with-unit">
-                            <input type="number" id="rule-min-staff-day" class="form-input" value="${rules.minStaffingDay}" min="0" max="10" />
-                            <span class="unit">personen</span>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="rule-min-staff-night">Minimum bezetting nacht (totaal):</label>
-                        <div class="input-with-unit">
-                            <input type="number" id="rule-min-staff-night" class="form-input" value="${rules.minStaffingNight}" min="0" max="10" />
-                            <span class="unit">personen</span>
-                        </div>
-                    </div>
-                    <button class="btn btn-primary" onclick="saveRules()">Regels opslaan</button>
-                </div>
-            </div>
-
-            <!-- Vakantiewerking -->
-            <div class="settings-card is-collapsible" id="settings-holidays" data-collapsible="true" data-open="false">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <h3><span class="settings-icon">🏖️</span> Vakantiewerking</h3>
-                        <p class="settings-card-subtitle">Regels en periodes voor vakantieplanning.</p>
-                    </div>
-                    <div class="settings-card-actions">
-                        <button class="btn btn-sm btn-secondary" onclick="openAddHolidayModal()">+ Periode</button>
-                        <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
-                    </div>
-                </div>
-                <div class="settings-card-body">
-                    <div class="info-box info">
-                        <p>Tijdens schoolvakanties: <strong>Vlot 1 en Vlot 2 worden samengevoegd</strong> tot 1 leefgroep. Begeleiders van beide teams werken samen.</p>
-                    </div>
-
-                    <!-- Vakantie regels -->
-                    <div class="holiday-rules-section">
-                        <h4>Vakantie bezetting</h4>
-                        <p class="form-help-text">Minimum aantal begeleiders (Vlot 1 + Vlot 2 samen) tijdens vakantie:</p>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="holiday-min-staff-day">Min. bezetting dag:</label>
-                                <input type="number" id="holiday-min-staff-day" class="form-input" value="${DataStore.settings.holidayRules?.minStaffingDay || 2}" min="0" max="10" />
-                            </div>
-                            <div class="form-group">
-                                <label for="holiday-min-staff-night">Min. bezetting nacht:</label>
-                                <input type="number" id="holiday-min-staff-night" class="form-input" value="${DataStore.settings.holidayRules?.minStaffingNight || 1}" min="0" max="10" />
-                            </div>
-                        </div>
-                        <button class="btn btn-primary btn-sm" onclick="saveHolidayRules()">Regels opslaan</button>
-                    </div>
-
-                    <!-- Vakantieperiodes lijst -->
-                    <div class="holiday-periods-section">
-                        <h4>Vakantieperiodes</h4>
-                        <div class="holiday-periods-list" id="holiday-periods-list">
-                            ${renderHolidayPeriods()}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Data beheer -->
-            <div class="settings-card is-collapsible" id="settings-data" data-collapsible="true" data-open="false">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <h3><span class="settings-icon">💾</span> Data beheer</h3>
-                        <p class="settings-card-subtitle">Backup, import en reset van de data.</p>
-                    </div>
-                    <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
-                </div>
+    if (role !== 'admin') {
+        container.innerHTML = `
+            <div class="settings-card">
                 <div class="settings-card-body">
                     <div class="info-box neutral">
-                        <p>Alle data wordt lokaal opgeslagen in je browser (LocalStorage).</p>
-                        <p>Exporteer regelmatig een backup om dataverlies te voorkomen.</p>
-                    </div>
-                    <div class="data-stats">
-                        <div class="stat-item">
-                            <span class="stat-value">${DataStore.employees.length}</span>
-                            <span class="stat-label">Medewerkers</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-value">${DataStore.shifts.length}</span>
-                            <span class="stat-label">Diensten</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-value">${DataStore.availability.length}</span>
-                            <span class="stat-label">Afwezigheden</span>
-                        </div>
-                    </div>
-                    <div class="button-group">
-                        <button class="btn btn-secondary" onclick="exportData()">
-                            <span class="btn-icon">📥</span> Exporteer
-                        </button>
-                        <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">
-                            <span class="btn-icon">📤</span> Importeer
-                        </button>
-                        <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importData(event)">
-                    </div>
-                    <div class="danger-zone">
-                        <h4>Gevarenzone</h4>
-                        <p>Deze actie kan niet ongedaan worden gemaakt!</p>
-                        <button class="btn btn-danger" onclick="resetData()">
-                            <span class="btn-icon">🗑️</span> Alle data wissen
-                        </button>
+                        <p>Je hebt geen toegang tot accountbeheer.</p>
+                        <p>Neem contact op met een administrator als je toegang nodig hebt.</p>
                     </div>
                 </div>
             </div>
-        </div>
-
-        <!-- Rechter kolom -->
-        <div class="settings-column">
-
-            <!-- Teams configuratie -->
-            <div class="settings-card is-collapsible" id="settings-teams" data-collapsible="true" data-open="false">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <h3><span class="settings-icon">👥</span> Teams</h3>
-                        <p class="settings-card-subtitle">Beheer teamnamen en kleuren.</p>
-                    </div>
-                    <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
-                </div>
-                <div class="settings-card-body">
-                    <div class="teams-list" id="teams-config">
-                        ${renderTeamsConfig()}
-                    </div>
-                </div>
-            </div>
-
-            <!-- Dienst templates -->
-            <div class="settings-card is-collapsible" id="settings-templates" data-collapsible="true" data-open="false">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <h3><span class="settings-icon">🕐</span> Dienst templates</h3>
-                        <p class="settings-card-subtitle">Standaard diensten voor snelle planning.</p>
-                    </div>
-                    <div class="settings-card-actions">
-                        <button class="btn btn-sm btn-secondary" onclick="openAddTemplateModal()">+ Nieuw</button>
-                        <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
-                    </div>
-                </div>
-                <div class="settings-card-body">
-                    <div class="templates-list" id="shift-templates-config">
-                        ${renderTemplatesConfig()}
-                    </div>
-                </div>
-            </div>
-
-            <!-- App info -->
-            <div class="settings-card is-collapsible" id="settings-about" data-collapsible="true" data-open="false">
-                <div class="settings-card-header">
-                    <div class="settings-card-title">
-                        <h3><span class="settings-icon">ℹ️</span> Over de app</h3>
-                        <p class="settings-card-subtitle">Versie en korte uitleg.</p>
-                    </div>
-                    <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
-                </div>
-                <div class="settings-card-body">
-                    <div class="app-info">
-                        <div class="app-logo">Het Vlot</div>
-                        <p class="app-subtitle">Roosterplanning Applicatie</p>
-                        <div class="app-version">Versie 1.0.0</div>
-                        <p class="app-description">
-                            Een planning tool voor Het Vlot om diensten, medewerkers en beschikbaarheid te beheren.
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    `;
-
-    settingsContent.innerHTML = html;
-
-    setupSettingsCollapsibles();
-
-    if (role === 'admin') {
-        renderAdminAccountsSection();
+        `;
+        return;
     }
-}
 
-async function ensureTeamsLoaded() {
-    if (AppState.apiTeams && AppState.apiTeams.length > 0) {
-        return AppState.apiTeams;
-    }
-    const data = await apiFetch('/teams');
-    AppState.apiTeams = data.teams || [];
-    return AppState.apiTeams;
-}
-
-async function renderAdminAccountsSection() {
-    const settingsContent = DOM.settingsView.querySelector('.settings-content');
-    const slot = document.getElementById('settings-accounts-slot');
-    const container = document.createElement('div');
-    container.className = 'settings-card is-collapsible';
-    container.id = 'settings-accounts';
-    container.dataset.collapsible = 'true';
-    container.dataset.open = 'true';
     container.innerHTML = `
-        <div class="settings-card-header">
-            <div class="settings-card-title">
-                <h3><span class="settings-icon">🔐</span> Accountbeheer</h3>
-                <p class="settings-card-subtitle">Gebruikers, rollen en reset wachtwoorden.</p>
+        <div class="settings-card" id="settings-accounts">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Accountbeheer</h3>
+                    <p class="settings-card-subtitle">Gebruikers, rollen en reset wachtwoorden.</p>
+                </div>
             </div>
-            <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
-        </div>
-        <div class="settings-card-body">
-            <div class="admin-users-intro">
-                <p>Beheer rollen en teams per gebruiker. Gebruik "Reset wachtwoord" enkel wanneer nodig.</p>
+            <div class="settings-card-body">
+                <div class="admin-users-intro">
+                    <p>Beheer rollen en teams per gebruiker. Gebruik "Reset wachtwoord" enkel wanneer nodig.</p>
+                </div>
+                <div class="admin-filter-bar">
+                    <input type="text" id="admin-user-search" class="form-input" placeholder="Zoek op naam of email" />
+                    <select id="admin-team-filter" class="form-input">
+                        <option value="">Alle teams</option>
+                    </select>
+                </div>
+                <div id="admin-users-list">Laden...</div>
             </div>
-            <div class="admin-filter-bar">
-                <input type="text" id="admin-user-search" class="form-input" placeholder="Zoek op naam of email" />
-                <select id="admin-team-filter" class="form-input">
-                    <option value="">Alle teams</option>
-                </select>
-            </div>
-            <div id="admin-users-list">Laden...</div>
         </div>
     `;
-    if (slot) {
-        slot.replaceWith(container);
-    } else {
-        settingsContent.prepend(container);
-    }
-    setupSettingsCollapsibles(container);
 
+    // Load and render admin users
+    loadAdminUsers(container);
+}
+
+async function loadAdminUsers(container) {
     try {
         const teams = await ensureTeamsLoaded();
         const data = await apiFetch('/admin/users');
@@ -2571,6 +2664,7 @@ async function renderAdminAccountsSection() {
         const roleOptions = `
             <option value="admin">Admin</option>
             <option value="hoofdverantwoordelijke">Hoofdverantwoordelijke</option>
+            <option value="teamverantwoordelijke">Teamverantwoordelijke</option>
             <option value="medewerker">Medewerker</option>
         `;
 
@@ -2593,6 +2687,7 @@ async function renderAdminAccountsSection() {
                         <div class="role-pill-group">
                             <button type="button" class="role-pill-btn" data-role="admin">Admin</button>
                             <button type="button" class="role-pill-btn" data-role="hoofdverantwoordelijke">Hoofd</button>
+                            <button type="button" class="role-pill-btn" data-role="teamverantwoordelijke">Team</button>
                             <button type="button" class="role-pill-btn" data-role="medewerker">Medewerker</button>
                         </div>
                         <select class="admin-role-select role-select-hidden">
@@ -2624,6 +2719,7 @@ async function renderAdminAccountsSection() {
                 .join('');
         }
 
+        // Setup event listeners for each user row
         container.querySelectorAll('.admin-user-row').forEach(row => {
             const userId = row.dataset.userId;
             const user = users.find(u => String(u.id) === String(userId));
@@ -2710,6 +2806,259 @@ async function renderAdminAccountsSection() {
     } catch (error) {
         container.querySelector('#admin-users-list').textContent = `Fout: ${error.message}`;
     }
+}
+
+// ===== SETTINGS TAB: PLANNING =====
+function renderSettingsPlanning(container) {
+    const rules = DataStore.settings.rules;
+
+    container.innerHTML = `
+        <!-- Planning regels -->
+        <div class="settings-card" id="settings-rules">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Planning regels</h3>
+                    <p class="settings-card-subtitle">Regels voor rust en minimale bezetting.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="form-group">
+                    <label for="rule-min-hours">Minimum uren tussen diensten:</label>
+                    <div class="input-with-unit">
+                        <input type="number" id="rule-min-hours" class="form-input" value="${rules.minHoursBetweenShifts}" min="0" max="24" />
+                        <span class="unit">uur</span>
+                    </div>
+                    <span class="form-hint">Wettelijk minimum is 11 uur</span>
+                </div>
+                <div class="form-group">
+                    <label for="rule-min-staff-day">Minimum bezetting overdag (per team):</label>
+                    <div class="input-with-unit">
+                        <input type="number" id="rule-min-staff-day" class="form-input" value="${rules.minStaffingDay}" min="0" max="10" />
+                        <span class="unit">personen</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="rule-min-staff-night">Minimum bezetting nacht (totaal):</label>
+                    <div class="input-with-unit">
+                        <input type="number" id="rule-min-staff-night" class="form-input" value="${rules.minStaffingNight}" min="0" max="10" />
+                        <span class="unit">personen</span>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="saveRules()">Regels opslaan</button>
+            </div>
+        </div>
+
+        <!-- Vakantiewerking -->
+        <div class="settings-card" id="settings-holidays" style="margin-top: 24px;">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Vakantiewerking</h3>
+                    <p class="settings-card-subtitle">Regels en periodes voor vakantieplanning.</p>
+                </div>
+                <div class="settings-card-actions">
+                    <button class="btn btn-sm btn-secondary" onclick="openAddHolidayModal()">+ Periode</button>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="info-box info">
+                    <p>Tijdens schoolvakanties: <strong>Vlot 1 en Vlot 2 worden samengevoegd</strong> tot 1 leefgroep. Begeleiders van beide teams werken samen.</p>
+                </div>
+
+                <div class="holiday-rules-section">
+                    <h4>Vakantie bezetting</h4>
+                    <p class="form-help-text">Minimum aantal begeleiders (Vlot 1 + Vlot 2 samen) tijdens vakantie:</p>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="holiday-min-staff-day">Min. bezetting dag:</label>
+                            <input type="number" id="holiday-min-staff-day" class="form-input" value="${DataStore.settings.holidayRules?.minStaffingDay || 2}" min="0" max="10" />
+                        </div>
+                        <div class="form-group">
+                            <label for="holiday-min-staff-night">Min. bezetting nacht:</label>
+                            <input type="number" id="holiday-min-staff-night" class="form-input" value="${DataStore.settings.holidayRules?.minStaffingNight || 1}" min="0" max="10" />
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="saveHolidayRules()">Regels opslaan</button>
+                </div>
+
+                <div class="holiday-periods-section" style="margin-top: 20px;">
+                    <h4>Vakantieperiodes</h4>
+                    <div class="holiday-periods-list" id="holiday-periods-list">
+                        ${renderHolidayPeriods()}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ===== SETTINGS TAB: ROOSTER =====
+function renderSettingsRooster(container) {
+    container.innerHTML = `
+        <!-- Bi-weekly rooster -->
+        <div class="settings-card" id="settings-biweekly">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Bi-weekly Patroon</h3>
+                    <p class="settings-card-subtitle">Week 1 en Week 2 wisselen elkaar af.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="info-box info">
+                    <p><strong>Week 1</strong> = weekend GESLOTEN (vrij 18:00 - ma 7:30)</p>
+                    <p><strong>Week 2</strong> = weekend OPEN</p>
+                    <p class="current-setting">Huidige Week 1 start: <strong>${formatDate(DataStore.settings.biWeeklyReferenceDate)}</strong></p>
+                </div>
+                <div class="form-group">
+                    <label for="biweekly-reference-date">Referentie maandag voor Week 1:</label>
+                    <div class="input-with-button">
+                        <input type="date" id="biweekly-reference-date" class="form-input" value="${DataStore.settings.biWeeklyReferenceDate}" />
+                        <button class="btn btn-primary" onclick="updateBiWeeklyReference()">Opslaan</button>
+                    </div>
+                    <span class="form-hint">Selecteer altijd een maandag</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Weekendverantwoordelijke rotatie -->
+        <div class="settings-card" id="settings-rotation" style="margin-top: 24px;">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Weekendverantwoordelijke Rotatie</h3>
+                    <p class="settings-card-subtitle">Automatische toewijzing tijdens open weekenden.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <p class="form-help-text">Tijdens open weekenden (Week 2) wordt automatisch een verantwoordelijke aangeduid. De rotatie gaat om de beurt door medewerkers van de geselecteerde teams.</p>
+
+                <div class="eligible-teams-compact" style="margin-top: 16px;">
+                    ${renderEligibleTeamsCheckboxes()}
+                </div>
+
+                <div class="rotation-form" style="margin-top: 16px;">
+                    ${renderRotationSettingsCompact()}
+                </div>
+
+                <div class="upcoming-section" style="margin-top: 24px;">
+                    <h4>Komende open weekenden</h4>
+                    <div class="upcoming-responsibles">
+                        ${renderUpcomingResponsibles()}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ===== SETTINGS TAB: TEAMS =====
+function renderSettingsTeams(container) {
+    container.innerHTML = `
+        <!-- Teams configuratie -->
+        <div class="settings-card" id="settings-teams">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Teams</h3>
+                    <p class="settings-card-subtitle">Beheer teamnamen en kleuren.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="teams-list" id="teams-config">
+                    ${renderTeamsConfig()}
+                </div>
+            </div>
+        </div>
+
+        <!-- Dienst templates -->
+        <div class="settings-card" id="settings-templates" style="margin-top: 24px;">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Dienst templates</h3>
+                    <p class="settings-card-subtitle">Standaard diensten voor snelle planning.</p>
+                </div>
+                <div class="settings-card-actions">
+                    <button class="btn btn-sm btn-secondary" onclick="openAddTemplateModal()">+ Nieuw</button>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="templates-list" id="shift-templates-config">
+                    ${renderTemplatesConfig()}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ===== SETTINGS TAB: SYSTEEM =====
+function renderSettingsSystem(container) {
+    container.innerHTML = `
+        <!-- Data beheer -->
+        <div class="settings-card" id="settings-data">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Data beheer</h3>
+                    <p class="settings-card-subtitle">Backup, import en reset van de data.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="info-box neutral">
+                    <p>Alle data wordt lokaal opgeslagen in je browser (LocalStorage).</p>
+                    <p>Exporteer regelmatig een backup om dataverlies te voorkomen.</p>
+                </div>
+                <div class="data-stats">
+                    <div class="stat-item">
+                        <span class="stat-value">${DataStore.employees.length}</span>
+                        <span class="stat-label">Medewerkers</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value">${DataStore.shifts.length}</span>
+                        <span class="stat-label">Diensten</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value">${DataStore.availability.length}</span>
+                        <span class="stat-label">Afwezigheden</span>
+                    </div>
+                </div>
+                <div class="button-group">
+                    <button class="btn btn-secondary" onclick="exportData()">Exporteer</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeer</button>
+                    <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importData(event)">
+                </div>
+                <div class="danger-zone">
+                    <h4>Gevarenzone</h4>
+                    <p>Deze actie kan niet ongedaan worden gemaakt!</p>
+                    <button class="btn btn-danger" onclick="resetData()">Alle data wissen</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- App info -->
+        <div class="settings-card" id="settings-about" style="margin-top: 24px;">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Over de app</h3>
+                    <p class="settings-card-subtitle">Versie en korte uitleg.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="app-info">
+                    <div class="app-logo">Het Vlot</div>
+                    <p class="app-subtitle">Roosterplanning Applicatie</p>
+                    <div class="app-version">Versie 1.0.0</div>
+                    <p class="app-description">
+                        Een planning tool voor Het Vlot om diensten, medewerkers en beschikbaarheid te beheren.
+                    </p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function ensureTeamsLoaded() {
+    if (AppState.apiTeams && AppState.apiTeams.length > 0) {
+        return AppState.apiTeams;
+    }
+    const data = await apiFetch('/teams');
+    AppState.apiTeams = data.teams || [];
+    return AppState.apiTeams;
 }
 
 function renderTeamsConfig() {
