@@ -11,13 +11,53 @@ function cloneSettings(settings) {
     return JSON.parse(JSON.stringify(settings));
 }
 
+function normalizeSettings(settings) {
+    const defaults = cloneSettings(DEFAULT_SETTINGS);
+    const merged = { ...defaults, ...(settings || {}) };
+
+    if (!merged.teams || typeof merged.teams !== 'object') {
+        merged.teams = defaults.teams || {};
+    } else if (defaults.teams) {
+        merged.teams = { ...defaults.teams, ...merged.teams };
+    }
+    if (!merged.shiftTemplates || typeof merged.shiftTemplates !== 'object' || Object.keys(merged.shiftTemplates).length === 0) {
+        merged.shiftTemplates = defaults.shiftTemplates || {};
+    } else if (defaults.shiftTemplates) {
+        merged.shiftTemplates = { ...defaults.shiftTemplates, ...merged.shiftTemplates };
+    }
+    if (!merged.rules || typeof merged.rules !== 'object') {
+        merged.rules = defaults.rules || {};
+    } else if (defaults.rules) {
+        merged.rules = { ...defaults.rules, ...merged.rules };
+    }
+    if (!Array.isArray(merged.holidayPeriods)) {
+        merged.holidayPeriods = defaults.holidayPeriods || [];
+    }
+    if (!merged.holidayRules || typeof merged.holidayRules !== 'object') {
+        merged.holidayRules = defaults.holidayRules || {};
+    } else if (defaults.holidayRules) {
+        merged.holidayRules = { ...defaults.holidayRules, ...merged.holidayRules };
+    }
+    if (!merged.responsibleRotation || typeof merged.responsibleRotation !== 'object') {
+        merged.responsibleRotation = defaults.responsibleRotation || {};
+    } else if (defaults.responsibleRotation) {
+        merged.responsibleRotation = { ...defaults.responsibleRotation, ...merged.responsibleRotation };
+        merged.responsibleRotation.assignments = {
+            ...(defaults.responsibleRotation.assignments || {}),
+            ...(merged.responsibleRotation.assignments || {})
+        };
+    }
+
+    return merged;
+}
+
 // Globale data store
 const DataStore = {
     employees: [],
     shifts: [],
     availability: [],
     swapRequests: [],
-    settings: cloneSettings(DEFAULT_SETTINGS)
+    settings: normalizeSettings(DEFAULT_SETTINGS)
 };
 
 // ===== STORAGE FUNCTIES =====
@@ -48,7 +88,9 @@ function loadFromStorage() {
         if (shifts) DataStore.shifts = JSON.parse(shifts);
         if (availability) DataStore.availability = JSON.parse(availability);
         if (swapRequests) DataStore.swapRequests = JSON.parse(swapRequests);
-        if (settings) DataStore.settings = { ...DataStore.settings, ...JSON.parse(settings) };
+        if (settings) {
+            DataStore.settings = normalizeSettings({ ...DataStore.settings, ...JSON.parse(settings) });
+        }
 
         return true;
     } catch (error) {
