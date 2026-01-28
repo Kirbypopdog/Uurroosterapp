@@ -77,7 +77,7 @@ const DataStore = {
 // ===== API HELPER =====
 
 async function dataApiFetch(path, options = {}) {
-    const token = localStorage.getItem('authToken');
+    const token = sessionStorage.getItem('hetvlot_token');
     const headers = {
         'Content-Type': 'application/json',
         ...(token ? { 'Authorization': `Bearer ${token}` } : {})
