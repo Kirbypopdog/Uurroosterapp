@@ -158,13 +158,10 @@ app.get('/teams', requireAuth, async (req, res) => {
 
 app.get('/users', requireAuth, async (req, res) => {
   try {
-    const { role, team_id } = req.user;
+    const { role } = req.user;
     let query = 'SELECT id, name, email, role, team_id FROM users';
     const params = [];
-    if (role === 'teamverantwoordelijke') {
-      query += ' WHERE team_id = $1';
-      params.push(team_id);
-    } else if (role === 'medewerker') {
+    if (role === 'medewerker') {
       query += ' WHERE id = $1';
       params.push(req.user.id);
     }

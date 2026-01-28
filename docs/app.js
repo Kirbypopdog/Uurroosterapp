@@ -56,6 +56,30 @@ async function apiFetch(path, options = {}) {
     return data;
 }
 
+async function syncEmployeeAccountLinks() {
+    if (!AppState.currentUser || !Array.isArray(DataStore.employees)) return;
+    try {
+        const data = await apiFetch('/users');
+        const users = data.users || [];
+        if (users.length === 0) return;
+        const usersByEmail = new Map(users.map(user => [String(user.email || '').toLowerCase(), user]));
+        let changed = false;
+        DataStore.employees = DataStore.employees.map(emp => {
+            const email = String(emp.email || '').toLowerCase();
+            const linked = usersByEmail.get(email);
+            if (!linked) return emp;
+            if (emp.user_id === linked.id) return emp;
+            changed = true;
+            return { ...emp, user_id: linked.id };
+        });
+        if (changed) {
+            saveToStorage();
+        }
+    } catch (error) {
+        console.warn('Kon accounts niet koppelen:', error.message);
+    }
+}
+
 function initDOM() {
     DOM.loginContainer = document.getElementById('login-container');
     DOM.appContainer = document.getElementById('app-container');
@@ -365,6 +389,10 @@ async function handleLogin(e) {
         AppState.authToken = data.token;
         sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
         sessionStorage.setItem('hetvlot_token', data.token);
+        if (typeof window.initializeData === 'function') {
+            await window.initializeData();
+        }
+        await syncEmployeeAccountLinks();
         showApp();
     } catch (error) {
         alert('Ongeldige gebruikersnaam of wachtwoord');
@@ -390,6 +418,10 @@ async function checkSession() {
         const data = await apiFetch('/me');
         AppState.currentUser = data.user;
         sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
+        if (typeof window.initializeData === 'function') {
+            await window.initializeData();
+        }
+        await syncEmployeeAccountLinks();
         showApp();
     } catch (error) {
         handleLogout();
@@ -415,8 +447,16 @@ function applyRoleVisibility() {
     const role = AppState.currentUser?.role || 'medewerker';
     const allowedViews = new Set(['planning', 'profile']);
 
-    if (role === 'teamverantwoordelijke' || role === 'hoofdverantwoordelijke') {
+    if (role === 'medewerker') {
         allowedViews.add('employees');
+        allowedViews.add('availability');
+        allowedViews.add('swaps');
+    }
+    if (role === 'hoofdverantwoordelijke') {
+        allowedViews.add('employees');
+        allowedViews.add('availability');
+        allowedViews.add('swaps');
+        allowedViews.add('settings');
     }
     if (role === 'admin') {
         allowedViews.add('employees');
@@ -434,6 +474,12 @@ function applyRoleVisibility() {
     if (!allowedViews.has(AppState.currentView)) {
         AppState.currentView = 'planning';
     }
+
+    const hideTeamFilters = role === 'medewerker';
+    const planningFilters = document.getElementById('team-toggles');
+    const employeeFilters = document.getElementById('employee-team-toggles');
+    if (planningFilters) planningFilters.style.display = hideTeamFilters ? 'none' : '';
+    if (employeeFilters) employeeFilters.style.display = hideTeamFilters ? 'none' : '';
 }
 
 function switchView(viewName) {
@@ -1391,12 +1437,21 @@ function deleteShiftConfirm(shiftId) {
 }
 
 function renderEmployees() {
+    const role = AppState.currentUser?.role || 'medewerker';
     const employees = getAllEmployees();
 
     // Groepeer medewerkers per team - alleen zichtbare teams
     const teams = DataStore.settings.teams;
-    const teamOrder = ['vlot1', 'vlot2', 'cargo', 'overkoepelend', 'jobstudent']
+    const baseTeamOrder = ['vlot1', 'vlot2', 'cargo', 'overkoepelend', 'jobstudent']
         .filter(t => AppState.visibleEmployeeTeams.includes(t));
+    let teamOrder = baseTeamOrder;
+
+    if (role === 'medewerker') {
+        const userTeam = AppState.currentUser?.team_id
+            || employees.find(emp => emp.user_id === AppState.currentUser?.id)?.mainTeam
+            || employees.find(emp => emp.email && emp.email.toLowerCase() === String(AppState.currentUser?.email || '').toLowerCase())?.mainTeam;
+        teamOrder = userTeam ? baseTeamOrder.filter(teamId => teamId === userTeam) : [];
+    }
     const employeesByTeam = {};
 
     teamOrder.forEach(teamKey => {
@@ -1428,17 +1483,19 @@ function renderEmployees() {
         html += `</div></div>`;
     });
 
-    if (employees.length === 0) {
+    if (employees.length === 0 || teamOrder.length === 0) {
         html = '<p>Nog geen medewerkers toegevoegd.</p>';
     }
 
     DOM.employeesList.innerHTML = html;
-    document.querySelectorAll('.employee-card').forEach(card => {
-        card.addEventListener('click', () => {
-            const employeeId = parseFloat(card.dataset.employeeId);
-            openEditEmployeeModal(employeeId);
+    if (role !== 'medewerker') {
+        document.querySelectorAll('.employee-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const employeeId = parseFloat(card.dataset.employeeId);
+                openEditEmployeeModal(employeeId);
+            });
         });
-    });
+    }
     document.querySelectorAll('.week-nav-btn').forEach(btn => {
         btn.addEventListener('click', (event) => {
             event.stopPropagation();
@@ -1471,39 +1528,120 @@ function renderProfile() {
     const user = AppState.currentUser;
     if (!user) return;
 
+    const roleLabels = {
+        admin: 'Admin',
+        hoofdverantwoordelijke: 'Hoofdverantwoordelijke',
+        medewerker: 'Medewerker'
+    };
+    const role = roleLabels[user.role] || user.role || 'Onbekend';
+    const roleClass = roleLabels[user.role] ? user.role : 'medewerker';
+    const teamId = user.team_id || user.mainTeam;
+    const teamName = teamId && DataStore.settings.teams?.[teamId]
+        ? DataStore.settings.teams[teamId].name
+        : 'Niet gekoppeld';
+    const accessMap = {
+        admin: 'Alle paginas + instellingen + accountbeheer',
+        hoofdverantwoordelijke: 'Alle paginas + instellingen (zonder accountbeheer)',
+        medewerker: 'Alle paginas behalve instellingen'
+    };
+    const accessSummary = accessMap[user.role] || 'Planning + profiel';
+
     DOM.profileContent.innerHTML = `
-        <div class="settings-card">
-            <div class="settings-card-header">
-                <h3><span class="settings-icon">👤</span> Mijn profiel</h3>
+        <div class="profile-grid">
+            <div class="settings-card">
+                <div class="settings-card-header">
+                    <h3><span class="settings-icon">👤</span> Mijn profiel</h3>
+                </div>
+                <div class="settings-card-body">
+                    <form id="profile-form">
+                        <div class="form-group">
+                            <label for="profile-name">Naam</label>
+                            <input type="text" id="profile-name" value="${escapeHtml(user.name)}" required />
+                        </div>
+                        <div class="form-group">
+                            <label for="profile-email">E-mailadres</label>
+                            <input type="email" id="profile-email" value="${escapeHtml(user.email)}" required />
+                            <span class="form-hint">Dit e-mailadres gebruik je om in te loggen.</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="profile-password">Nieuw wachtwoord</label>
+                            <input type="password" id="profile-password" placeholder="Laat leeg om niet te wijzigen" />
+                            <span class="form-hint">Minstens 8 tekens als je wijzigt.</span>
+                        </div>
+                        <div id="profile-message" class="form-message info" aria-live="polite">
+                            Werk je gegevens bij en druk op Opslaan.
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">Opslaan</button>
+                        </div>
+                    </form>
+                </div>
             </div>
-            <div class="settings-card-body">
-                <form id="profile-form">
-                    <div class="form-group">
-                        <label for="profile-name">Naam</label>
-                        <input type="text" id="profile-name" value="${escapeHtml(user.name)}" required />
+
+            <div class="settings-card">
+                <div class="settings-card-header">
+                    <h3><span class="settings-icon">🔎</span> Account overzicht</h3>
+                </div>
+                <div class="settings-card-body">
+                    <div class="profile-meta">
+                        <div class="profile-meta-row">
+                            <span class="profile-meta-label">Rol</span>
+                            <span class="profile-meta-value role-${roleClass}">${escapeHtml(role)}</span>
+                        </div>
+                        <div class="profile-meta-row">
+                            <span class="profile-meta-label">Hoofdteam</span>
+                            <span class="profile-meta-value">${escapeHtml(teamName)}</span>
+                        </div>
+                        <div class="profile-meta-row">
+                            <span class="profile-meta-label">Toegang</span>
+                            <span class="profile-meta-value">${escapeHtml(accessSummary)}</span>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="profile-email">Email</label>
-                        <input type="email" id="profile-email" value="${escapeHtml(user.email)}" required />
-                    </div>
-                    <div class="form-group">
-                        <label for="profile-password">Nieuw wachtwoord</label>
-                        <input type="password" id="profile-password" placeholder="Laat leeg om niet te wijzigen" />
-                    </div>
-                    <button type="submit" class="btn btn-primary">Opslaan</button>
-                </form>
+                </div>
             </div>
         </div>
     `;
 
     const form = document.getElementById('profile-form');
+    const message = document.getElementById('profile-message');
+    const submitBtn = form.querySelector('button[type="submit"]');
+
+    const setMessage = (text, type = 'info') => {
+        message.textContent = text;
+        message.className = `form-message ${type}`;
+    };
+
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
         const name = document.getElementById('profile-name').value.trim();
         const email = document.getElementById('profile-email').value.trim();
         const password = document.getElementById('profile-password').value;
 
+        if (!name) {
+            setMessage('Vul een naam in.', 'error');
+            return;
+        }
+        const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+        if (!emailRegex.test(email)) {
+            setMessage('Vul een geldig e-mailadres in.', 'error');
+            return;
+        }
+        if (password && password.length < 8) {
+            setMessage('Je nieuwe wachtwoord moet minstens 8 tekens zijn.', 'error');
+            return;
+        }
+
+        const hasChanges = name !== user.name
+            || email.toLowerCase() !== String(user.email || '').toLowerCase()
+            || Boolean(password);
+        if (!hasChanges) {
+            setMessage('Geen wijzigingen om op te slaan.', 'info');
+            return;
+        }
+
         try {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Opslaan...';
             const payload = { name, email };
             if (password) payload.password = password;
             const data = await apiFetch('/me', {
@@ -1512,9 +1650,13 @@ function renderProfile() {
             });
             AppState.currentUser = data.user;
             sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
-            alert('Profiel opgeslagen');
+            document.getElementById('profile-password').value = '';
+            setMessage('Profiel opgeslagen.', 'success');
         } catch (error) {
-            alert(`Opslaan mislukt: ${error.message}`);
+            setMessage(`Opslaan mislukt: ${error.message}`, 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Opslaan';
         }
     });
 }
@@ -1889,7 +2031,8 @@ function switchWeekTab(weekNumber) {
 function renderAvailability() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
-    const employees = getAllEmployees(true);
+    const role = AppState.currentUser?.role || 'medewerker';
+    let employees = getAllEmployees(true);
     const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
 
     const absenceLabels = {
@@ -1901,7 +2044,19 @@ function renderAvailability() {
     };
 
     // Group employees by team (same order as Timeline)
-    const teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'];
+    let teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'];
+    if (role === 'medewerker') {
+        const userTeam = AppState.currentUser?.team_id
+            || employees.find(emp => emp.user_id === AppState.currentUser?.id)?.mainTeam
+            || employees.find(emp => emp.email && emp.email.toLowerCase() === String(AppState.currentUser?.email || '').toLowerCase())?.mainTeam;
+        if (userTeam) {
+            teamOrder = teamOrder.filter(teamId => teamId === userTeam);
+            employees = employees.filter(emp => emp.mainTeam === userTeam);
+        } else {
+            teamOrder = [];
+            employees = [];
+        }
+    }
     const employeesByTeam = {};
     teamOrder.forEach(team => {
         employeesByTeam[team] = employees.filter(emp => emp.mainTeam === team);
@@ -2087,14 +2242,26 @@ function renderSettings() {
     const role = AppState.currentUser?.role;
 
     let html = `
+    <div class="settings-header">
+        <div>
+            <h2>Instellingen</h2>
+            <p class="settings-subtitle">Open alleen de kaarten die je nodig hebt. Zo blijft het overzichtelijk.</p>
+        </div>
+    </div>
     <div class="settings-grid">
         <!-- Linker kolom -->
         <div class="settings-column">
 
+            <div id="settings-accounts-slot"></div>
+
             <!-- Bi-weekly rooster & Weekendverantwoordelijke -->
-            <div class="settings-card">
+            <div class="settings-card is-collapsible" id="settings-biweekly" data-collapsible="true" data-open="true">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">📅</span> Bi-weekly Rooster & Weekend</h3>
+                    <div class="settings-card-title">
+                        <h3><span class="settings-icon">📅</span> Rooster & Weekend</h3>
+                        <p class="settings-card-subtitle">Week 1 start + weekendverantwoordelijke rotatie.</p>
+                    </div>
+                    <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Verberg</button>
                 </div>
                 <div class="settings-card-body">
                     <div class="info-box info">
@@ -2138,9 +2305,13 @@ function renderSettings() {
             </div>
 
             <!-- Planning regels -->
-            <div class="settings-card">
+            <div class="settings-card is-collapsible" id="settings-rules" data-collapsible="true" data-open="true">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">⚙️</span> Planning Regels</h3>
+                    <div class="settings-card-title">
+                        <h3><span class="settings-icon">⚙️</span> Planning regels</h3>
+                        <p class="settings-card-subtitle">Regels voor rust en minimale bezetting.</p>
+                    </div>
+                    <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Verberg</button>
                 </div>
                 <div class="settings-card-body">
                     <div class="form-group">
@@ -2170,10 +2341,16 @@ function renderSettings() {
             </div>
 
             <!-- Vakantiewerking -->
-            <div class="settings-card">
+            <div class="settings-card is-collapsible" id="settings-holidays" data-collapsible="true" data-open="false">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">🏖️</span> Vakantiewerking</h3>
-                    <button class="btn btn-sm btn-secondary" onclick="openAddHolidayModal()">+ Periode</button>
+                    <div class="settings-card-title">
+                        <h3><span class="settings-icon">🏖️</span> Vakantiewerking</h3>
+                        <p class="settings-card-subtitle">Regels en periodes voor vakantieplanning.</p>
+                    </div>
+                    <div class="settings-card-actions">
+                        <button class="btn btn-sm btn-secondary" onclick="openAddHolidayModal()">+ Periode</button>
+                        <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
+                    </div>
                 </div>
                 <div class="settings-card-body">
                     <div class="info-box info">
@@ -2208,9 +2385,13 @@ function renderSettings() {
             </div>
 
             <!-- Data beheer -->
-            <div class="settings-card">
+            <div class="settings-card is-collapsible" id="settings-data" data-collapsible="true" data-open="false">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">💾</span> Data Beheer</h3>
+                    <div class="settings-card-title">
+                        <h3><span class="settings-icon">💾</span> Data beheer</h3>
+                        <p class="settings-card-subtitle">Backup, import en reset van de data.</p>
+                    </div>
+                    <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
                 </div>
                 <div class="settings-card-body">
                     <div class="info-box neutral">
@@ -2255,9 +2436,13 @@ function renderSettings() {
         <div class="settings-column">
 
             <!-- Teams configuratie -->
-            <div class="settings-card">
+            <div class="settings-card is-collapsible" id="settings-teams" data-collapsible="true" data-open="false">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">👥</span> Teams</h3>
+                    <div class="settings-card-title">
+                        <h3><span class="settings-icon">👥</span> Teams</h3>
+                        <p class="settings-card-subtitle">Beheer teamnamen en kleuren.</p>
+                    </div>
+                    <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
                 </div>
                 <div class="settings-card-body">
                     <div class="teams-list" id="teams-config">
@@ -2267,10 +2452,16 @@ function renderSettings() {
             </div>
 
             <!-- Dienst templates -->
-            <div class="settings-card">
+            <div class="settings-card is-collapsible" id="settings-templates" data-collapsible="true" data-open="false">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">🕐</span> Dienst Templates</h3>
-                    <button class="btn btn-sm btn-secondary" onclick="openAddTemplateModal()">+ Nieuw</button>
+                    <div class="settings-card-title">
+                        <h3><span class="settings-icon">🕐</span> Dienst templates</h3>
+                        <p class="settings-card-subtitle">Standaard diensten voor snelle planning.</p>
+                    </div>
+                    <div class="settings-card-actions">
+                        <button class="btn btn-sm btn-secondary" onclick="openAddTemplateModal()">+ Nieuw</button>
+                        <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
+                    </div>
                 </div>
                 <div class="settings-card-body">
                     <div class="templates-list" id="shift-templates-config">
@@ -2280,9 +2471,13 @@ function renderSettings() {
             </div>
 
             <!-- App info -->
-            <div class="settings-card">
+            <div class="settings-card is-collapsible" id="settings-about" data-collapsible="true" data-open="false">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">ℹ️</span> Over de App</h3>
+                    <div class="settings-card-title">
+                        <h3><span class="settings-icon">ℹ️</span> Over de app</h3>
+                        <p class="settings-card-subtitle">Versie en korte uitleg.</p>
+                    </div>
+                    <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
                 </div>
                 <div class="settings-card-body">
                     <div class="app-info">
@@ -2301,6 +2496,8 @@ function renderSettings() {
 
     settingsContent.innerHTML = html;
 
+    setupSettingsCollapsibles();
+
     if (role === 'admin') {
         renderAdminAccountsSection();
     }
@@ -2318,16 +2515,38 @@ async function ensureTeamsLoaded() {
 async function renderAdminAccountsSection() {
     const settingsContent = DOM.settingsView.querySelector('.settings-content');
     const container = document.createElement('div');
-    container.className = 'settings-card';
+    container.className = 'settings-card is-collapsible';
+    container.id = 'settings-accounts';
+    container.dataset.collapsible = 'true';
+    container.dataset.open = 'true';
     container.innerHTML = `
         <div class="settings-card-header">
-            <h3><span class="settings-icon">🔐</span> Accountbeheer</h3>
+            <div class="settings-card-title">
+                <h3><span class="settings-icon">🔐</span> Accountbeheer</h3>
+                <p class="settings-card-subtitle">Gebruikers, rollen en reset wachtwoorden.</p>
+            </div>
+            <button class="btn btn-secondary btn-sm settings-toggle-btn" type="button">Toon</button>
         </div>
         <div class="settings-card-body">
+            <div class="admin-users-intro">
+                <p>Beheer rollen en teams per gebruiker. Gebruik "Reset wachtwoord" enkel wanneer nodig.</p>
+            </div>
+            <div class="admin-filter-bar">
+                <input type="text" id="admin-user-search" class="form-input" placeholder="Zoek op naam of email" />
+                <select id="admin-team-filter" class="form-input">
+                    <option value="">Alle teams</option>
+                </select>
+            </div>
             <div id="admin-users-list">Laden...</div>
         </div>
     `;
-    settingsContent.appendChild(container);
+    const slot = document.getElementById('settings-accounts-slot');
+    if (slot) {
+        slot.replaceWith(container);
+    } else {
+        settingsContent.prepend(container);
+    }
+    setupSettingsCollapsibles(container);
 
     try {
         const teams = await ensureTeamsLoaded();
@@ -2341,31 +2560,58 @@ async function renderAdminAccountsSection() {
         const roleOptions = `
             <option value="admin">Admin</option>
             <option value="hoofdverantwoordelijke">Hoofdverantwoordelijke</option>
-            <option value="teamverantwoordelijke">Teamverantwoordelijke</option>
             <option value="medewerker">Medewerker</option>
         `;
 
         const rows = users.map(user => `
-            <div class="admin-user-row" data-user-id="${user.id}">
-                <div class="admin-user-main">
-                    <div class="admin-user-name">${escapeHtml(user.name)}</div>
-                    <div class="admin-user-email">${escapeHtml(user.email)}</div>
+            <div class="admin-user-row is-collapsed" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email)}" data-team="${user.team_id || ''}" data-role="${user.role}">
+                <div class="admin-user-header">
+                    <div>
+                        <div class="admin-user-name">${escapeHtml(user.name)}</div>
+                        <div class="admin-user-email">${escapeHtml(user.email)}</div>
+                    </div>
+                    <div class="admin-user-header-actions">
+                        <div class="admin-user-role-pill">${escapeHtml(user.role)}</div>
+                        <button type="button" class="btn btn-sm btn-secondary admin-user-toggle">Details</button>
+                    </div>
                 </div>
-                <div class="admin-user-controls">
-                    <select class="admin-role-select">
-                        ${roleOptions}
-                    </select>
-                    <select class="admin-team-select">
-                        ${teamOptions}
-                    </select>
-                    <button class="btn btn-sm btn-primary admin-save-btn">Opslaan</button>
-                    <button class="btn btn-sm btn-secondary admin-reset-btn">Reset wachtwoord</button>
+                <div class="admin-user-details">
+                    <div class="admin-user-controls">
+                        <div class="admin-field">
+                            <label>Rol</label>
+                            <div class="role-pill-group">
+                            <button type="button" class="role-pill-btn" data-role="admin">Admin</button>
+                            <button type="button" class="role-pill-btn" data-role="hoofdverantwoordelijke">Hoofd</button>
+                            <button type="button" class="role-pill-btn" data-role="medewerker">Medewerker</button>
+                            </div>
+                            <select class="admin-role-select role-select-hidden">
+                                ${roleOptions}
+                            </select>
+                        </div>
+                        <div class="admin-field">
+                            <label>Team</label>
+                            <select class="admin-team-select">
+                                ${teamOptions}
+                            </select>
+                        </div>
+                        <div class="admin-actions">
+                            <button class="btn btn-sm btn-primary admin-save-btn">Opslaan</button>
+                            <button class="btn btn-sm btn-secondary admin-reset-btn">Reset wachtwoord</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         `).join('');
 
         const list = container.querySelector('#admin-users-list');
         list.innerHTML = rows || '<p>Geen accounts gevonden.</p>';
+
+        const teamFilter = container.querySelector('#admin-team-filter');
+        if (teamFilter) {
+            teamFilter.innerHTML = ['<option value="">Alle teams</option>']
+                .concat(teams.map(team => `<option value="${team.id}">${escapeHtml(team.name)}</option>`))
+                .join('');
+        }
 
         container.querySelectorAll('.admin-user-row').forEach(row => {
             const userId = row.dataset.userId;
@@ -2375,6 +2621,31 @@ async function renderAdminAccountsSection() {
             const teamSelect = row.querySelector('.admin-team-select');
             roleSelect.value = user.role;
             teamSelect.value = user.team_id || '';
+            const roleButtons = Array.from(row.querySelectorAll('.role-pill-btn'));
+            const rolePill = row.querySelector('.admin-user-role-pill');
+            const syncRoleButtons = (role) => {
+                roleButtons.forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.role === role);
+                });
+                if (rolePill) rolePill.textContent = role;
+                row.dataset.role = role;
+            };
+            syncRoleButtons(user.role);
+            roleButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const nextRole = btn.dataset.role;
+                    roleSelect.value = nextRole;
+                    syncRoleButtons(nextRole);
+                });
+            });
+
+            const toggleBtn = row.querySelector('.admin-user-toggle');
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    const isCollapsed = row.classList.toggle('is-collapsed');
+                    toggleBtn.textContent = isCollapsed ? 'Details' : 'Verberg';
+                });
+            }
 
             row.querySelector('.admin-save-btn').addEventListener('click', async () => {
                 try {
@@ -2404,6 +2675,27 @@ async function renderAdminAccountsSection() {
                 }
             });
         });
+
+        const applyFilters = () => {
+            const searchValue = (container.querySelector('#admin-user-search')?.value || '').toLowerCase().trim();
+            const teamValue = container.querySelector('#admin-team-filter')?.value || '';
+            container.querySelectorAll('.admin-user-row').forEach(row => {
+                const name = (row.dataset.name || '').toLowerCase();
+                const email = (row.dataset.email || '').toLowerCase();
+                const team = row.dataset.team || '';
+                const matchSearch = !searchValue || name.includes(searchValue) || email.includes(searchValue);
+                const matchTeam = !teamValue || team === teamValue;
+                row.classList.toggle('is-hidden', !(matchSearch && matchTeam));
+            });
+        };
+
+        const searchInput = container.querySelector('#admin-user-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', applyFilters);
+        }
+        if (teamFilter) {
+            teamFilter.addEventListener('change', applyFilters);
+        }
     } catch (error) {
         container.querySelector('#admin-users-list').textContent = `Fout: ${error.message}`;
     }
@@ -2835,7 +3127,8 @@ function renderRotationSettingsCompact() {
     const rotation = DataStore.settings.responsibleRotation || {};
     const eligible = getEligibleEmployeesForResponsible();
 
-    const currentStart = rotation.rotationStart || '';
+    const referenceDate = DataStore.settings.biWeeklyReferenceDate || '';
+    const currentStart = rotation.rotationStart || referenceDate;
     const currentEmployee = String(rotation.rotationStartEmployee || '');
 
     let employeeOptions = '<option value="">-- Kies eerste persoon --</option>';
@@ -2858,10 +3151,6 @@ function renderRotationSettingsCompact() {
     ${statusHtml}
     <div class="form-row compact">
         <div class="form-group">
-            <label for="rotation-start-date">Startdatum:</label>
-            <input type="date" id="rotation-start-date" class="form-input" value="${currentStart}" />
-        </div>
-        <div class="form-group">
             <label for="rotation-start-employee">Eerste:</label>
             <select id="rotation-start-employee" class="form-input">
                 ${employeeOptions}
@@ -2872,14 +3161,13 @@ function renderRotationSettingsCompact() {
 }
 
 function saveRotationSettings() {
-    const dateInput = document.getElementById('rotation-start-date');
     const employeeSelect = document.getElementById('rotation-start-employee');
 
-    const startDate = dateInput.value;
+    const startDate = DataStore.settings.biWeeklyReferenceDate;
     const employeeId = employeeSelect.value;
 
     if (!startDate) {
-        alert('Selecteer een startdatum');
+        alert('Stel eerst de Week 1 startdatum in');
         return;
     }
 
@@ -2968,10 +3256,34 @@ function updateBiWeeklyReference() {
     }
 
     DataStore.settings.biWeeklyReferenceDate = selectedDate;
+    if (!DataStore.settings.responsibleRotation) {
+        DataStore.settings.responsibleRotation = { eligibleTeams: [], assignments: {} };
+    }
+    DataStore.settings.responsibleRotation.rotationStart = selectedDate;
     saveToStorage();
     renderSettings();
     renderPlanning(); // Update the current week display
     alert('✅ Referentie datum voor Week 1 is bijgewerkt!');
+}
+
+function setupSettingsCollapsibles(scope = document) {
+    const cards = [];
+    if (scope?.classList?.contains('settings-card') && scope?.dataset?.collapsible) {
+        cards.push(scope);
+    }
+    cards.push(...scope.querySelectorAll('.settings-card[data-collapsible]'));
+    cards.forEach(card => {
+        const btn = card.querySelector('.settings-toggle-btn');
+        if (!btn) return;
+        const isOpen = card.dataset.open === 'true';
+        card.classList.toggle('is-collapsed', !isOpen);
+        btn.textContent = isOpen ? 'Verberg' : 'Toon';
+        btn.addEventListener('click', () => {
+            const nowCollapsed = !card.classList.toggle('is-collapsed');
+            card.dataset.open = nowCollapsed ? 'false' : 'true';
+            btn.textContent = nowCollapsed ? 'Toon' : 'Verberg';
+        });
+    });
 }
 
 // ===== AFWEZIGHEID MODAL =====
