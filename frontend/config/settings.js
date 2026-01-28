@@ -1,7 +1,12 @@
 // ===== GECENTRALISEERDE SETTINGS =====
 // Deze file is de centrale plek voor alle standaard instellingen.
 
-window.API_BASE = window.API_BASE || 'http://localhost:3001';
+// Automatisch detecteren: lokaal = localhost, productie = Render URL
+if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    window.API_BASE = 'http://localhost:3001';
+} else {
+    window.API_BASE = 'https://uurrooster-app.onrender.com';
+}
 
 window.DEFAULT_SETTINGS = {
     // Referentie datum voor bi-weekly rooster (Week 1 begint op deze maandag)
