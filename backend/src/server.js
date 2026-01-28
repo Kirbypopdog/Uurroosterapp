@@ -585,6 +585,22 @@ app.post('/import', requireAuth, async (req, res) => {
   }
 });
 
+// Reset all data (admin only)
+app.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    // Delete in correct order due to foreign keys
+    await pool.query('DELETE FROM availability');
+    await pool.query('DELETE FROM shifts');
+    await pool.query('DELETE FROM employees');
+    await pool.query('DELETE FROM settings');
+
+    res.json({ ok: true, message: 'Alle data gewist' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`API running on :${PORT}`);
 });

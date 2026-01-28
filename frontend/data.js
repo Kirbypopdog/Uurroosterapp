@@ -956,8 +956,22 @@ function loadFromStorage() {
     return true;
 }
 
-function resetData() {
-    alert('Data reset is niet beschikbaar in de database versie. Neem contact op met de administrator.');
+async function resetData() {
+    if (!confirm('Weet je zeker dat je ALLE data wilt verwijderen?\n\nDit verwijdert alle medewerkers, diensten en afwezigheden.\nDit kan niet ongedaan worden gemaakt!')) {
+        return;
+    }
+
+    if (!confirm('LAATSTE WAARSCHUWING: Alle data wordt permanent verwijderd. Doorgaan?')) {
+        return;
+    }
+
+    try {
+        await dataApiFetch('/reset-data', { method: 'DELETE' });
+        alert('Alle data is gewist. De pagina wordt herladen.');
+        location.reload();
+    } catch (error) {
+        alert('Fout bij wissen: ' + error.message);
+    }
 }
 
 // ===== INITIALISATIE =====
