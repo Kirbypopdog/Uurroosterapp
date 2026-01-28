@@ -4207,50 +4207,83 @@ function sanitizeImportedData(rawData) {
 
 async function importData(event) {
     const file = event.target.files[0];
-    if (!file) return;
+    if (!file) {
+        console.log('Geen bestand geselecteerd');
+        return;
+    }
+
+    console.log('Bestand geselecteerd:', file.name);
 
     const reader = new FileReader();
     reader.onload = async (e) => {
         try {
+            console.log('Bestand gelezen, parsing JSON...');
             const data = JSON.parse(e.target.result);
-            const sanitized = sanitizeImportedData(data);
+            console.log('Data parsed:', data);
 
-            if (!confirm('Data importeren naar de database? Dit voegt medewerkers toe.')) {
+            // Direct gebruik van backup data (zonder strikte sanitization)
+            const employees = data.employees || [];
+            console.log('Gevonden medewerkers:', employees.length);
+
+            if (employees.length === 0) {
+                alert('Geen medewerkers gevonden in backup bestand');
+                return;
+            }
+
+            if (!confirm(`${employees.length} medewerkers gevonden. Importeren naar de database?`)) {
                 return;
             }
 
             // Import employees via API
             let imported = 0;
-            for (const emp of sanitized.employees) {
+            let errors = [];
+
+            for (const emp of employees) {
                 try {
+                    console.log('Importeren:', emp.name);
                     await apiFetch('/employees', {
                         method: 'POST',
                         body: JSON.stringify({
-                            name: emp.name,
-                            email: emp.email,
-                            mainTeam: emp.mainTeam,
-                            extraTeams: emp.extraTeams,
-                            contractHours: emp.contractHours,
-                            active: emp.active,
-                            weekScheduleWeek1: emp.weekScheduleWeek1,
-                            weekScheduleWeek2: emp.weekScheduleWeek2
+                            name: emp.name || 'Onbekend',
+                            email: emp.email || null,
+                            mainTeam: emp.mainTeam || null,
+                            extraTeams: Array.isArray(emp.extraTeams) ? emp.extraTeams : [],
+                            contractHours: Number(emp.contractHours) || 0,
+                            active: emp.active !== false,
+                            weekScheduleWeek1: Array.isArray(emp.weekScheduleWeek1) ? emp.weekScheduleWeek1 : [],
+                            weekScheduleWeek2: Array.isArray(emp.weekScheduleWeek2) ? emp.weekScheduleWeek2 : []
                         })
                     });
                     imported++;
+                    console.log('Geïmporteerd:', emp.name);
                 } catch (err) {
                     console.error('Fout bij importeren medewerker:', emp.name, err);
+                    errors.push(emp.name);
                 }
             }
 
-            alert(`${imported} medewerkers geïmporteerd!`);
-            // Reload data from API
-            await loadDataFromAPI();
+            if (errors.length > 0) {
+                alert(`${imported} medewerkers geïmporteerd.\n\nFouten bij: ${errors.join(', ')}`);
+            } else {
+                alert(`${imported} medewerkers succesvol geïmporteerd!`);
+            }
+
+            // Reload page to show new data
             location.reload();
         } catch (error) {
+            console.error('Import error:', error);
             alert('Fout bij importeren: ' + error.message);
         }
     };
+
+    reader.onerror = (error) => {
+        console.error('FileReader error:', error);
+        alert('Fout bij lezen van bestand');
+    };
+
     reader.readAsText(file);
+    // Reset file input zodat hetzelfde bestand opnieuw gekozen kan worden
+    event.target.value = '';
 }
 
 // Make functions available globally for inline onclick handlers
