@@ -89,7 +89,7 @@ const USERS = [
 
 // DOM Elements
 const DOM = {};
-const API_BASE = window.API_BASE || 'http://localhost:3001';
+const API_BASE = window.API_BASE || 'https://uurrooster-app.onrender.com';
 
 function escapeHtml(value) {
     return String(value)
