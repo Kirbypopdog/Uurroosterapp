@@ -2631,6 +2631,7 @@ function renderSettingsAccounts(container) {
                     <h3>Accountbeheer</h3>
                     <p class="settings-card-subtitle">Gebruikers, rollen en reset wachtwoorden.</p>
                 </div>
+                <button type="button" class="btn btn-primary" id="add-user-btn">+ Nieuwe gebruiker</button>
             </div>
             <div class="settings-card-body">
                 <div class="admin-users-intro">
@@ -2803,9 +2804,91 @@ async function loadAdminUsers(container) {
         if (teamFilter) {
             teamFilter.addEventListener('change', applyFilters);
         }
+
+        // Add user button
+        const addUserBtn = container.querySelector('#add-user-btn');
+        if (addUserBtn) {
+            addUserBtn.addEventListener('click', () => showAddUserModal(teams));
+        }
     } catch (error) {
         container.querySelector('#admin-users-list').textContent = `Fout: ${error.message}`;
     }
+}
+
+function showAddUserModal(teams) {
+    const teamOptions = teams.map(team => `<option value="${team.id}">${escapeHtml(team.name)}</option>`).join('');
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3>Nieuwe gebruiker</h3>
+                <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="add-user-form">
+                    <div class="form-group">
+                        <label for="new-user-name">Naam</label>
+                        <input type="text" id="new-user-name" class="form-input" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-email">Email</label>
+                        <input type="email" id="new-user-email" class="form-input" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-password">Wachtwoord</label>
+                        <input type="password" id="new-user-password" class="form-input" required minlength="6" />
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-role">Rol</label>
+                        <select id="new-user-role" class="form-input" required>
+                            <option value="medewerker">Medewerker</option>
+                            <option value="teamverantwoordelijke">Teamverantwoordelijke</option>
+                            <option value="hoofdverantwoordelijke">Hoofdverantwoordelijke</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-team">Team</label>
+                        <select id="new-user-team" class="form-input">
+                            <option value="">(geen team)</option>
+                            ${teamOptions}
+                        </select>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Annuleren</button>
+                        <button type="submit" class="btn btn-primary">Aanmaken</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const form = modal.querySelector('#add-user-form');
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = form.querySelector('#new-user-name').value.trim();
+        const email = form.querySelector('#new-user-email').value.trim();
+        const password = form.querySelector('#new-user-password').value;
+        const role = form.querySelector('#new-user-role').value;
+        const team_id = form.querySelector('#new-user-team').value || null;
+
+        try {
+            await apiFetch('/admin/users', {
+                method: 'POST',
+                body: JSON.stringify({ name, email, password, role, team_id })
+            });
+            modal.remove();
+            showToast('Gebruiker aangemaakt', 'success');
+            // Refresh accounts list
+            renderSettingsAccounts(document.querySelector('#settings-content'));
+        } catch (err) {
+            showToast(err.message || 'Fout bij aanmaken', 'error');
+        }
+    });
 }
 
 // ===== SETTINGS TAB: PLANNING =====

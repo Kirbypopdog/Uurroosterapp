@@ -186,6 +186,31 @@ app.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
+  const { name, email, password, role, team_id } = req.body || {};
+  if (!name || !email || !password || !role) {
+    return res.status(400).json({ error: 'Naam, email, wachtwoord en rol zijn verplicht' });
+  }
+  try {
+    // Check if email already exists
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'Email bestaat al' });
+    }
+    const passwordHash = await bcrypt.hash(password, 12);
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password_hash, role, team_id)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name, email, role, team_id`,
+      [name, email.toLowerCase(), passwordHash, role, team_id || null]
+    );
+    res.status(201).json({ user: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = Number(req.params.id);
   const { role, team_id, name, email } = req.body || {};
