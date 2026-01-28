@@ -2817,12 +2817,14 @@ function showAddUserModal(teams) {
     const teamOptions = teams.map(team => `<option value="${team.id}">${escapeHtml(team.name)}</option>`).join('');
 
     const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
+    modal.className = 'modal';
+    modal.id = 'add-user-modal';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
-        <div class="modal" style="max-width: 450px;">
+        <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
-                <h3>Nieuwe gebruiker</h3>
-                <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+                <h2>Nieuwe gebruiker</h2>
+                <button class="modal-close" onclick="document.getElementById('add-user-modal').remove()">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="add-user-form">
@@ -2854,8 +2856,8 @@ function showAddUserModal(teams) {
                             ${teamOptions}
                         </select>
                     </div>
-                    <div class="form-actions">
-                        <button type="button" class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Annuleren</button>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('add-user-modal').remove()">Annuleren</button>
                         <button type="submit" class="btn btn-primary">Aanmaken</button>
                     </div>
                 </form>
