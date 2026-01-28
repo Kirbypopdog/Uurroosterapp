@@ -521,9 +521,8 @@ async function handleLogin(e) {
         AppState.authToken = data.token;
         sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
         sessionStorage.setItem('hetvlot_token', data.token);
-        if (typeof window.initializeData === 'function') {
-            await window.initializeData();
-        }
+        // Load data from database
+        await loadDataFromAPI();
         await syncEmployeeAccountLinks();
         showApp();
     } catch (error) {
@@ -550,9 +549,8 @@ async function checkSession() {
         const data = await apiFetch('/me');
         AppState.currentUser = data.user;
         sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
-        if (typeof window.initializeData === 'function') {
-            await window.initializeData();
-        }
+        // Load data from database
+        await loadDataFromAPI();
         await syncEmployeeAccountLinks();
         showApp();
     } catch (error) {
@@ -4207,26 +4205,47 @@ function sanitizeImportedData(rawData) {
     return { employees, shifts, availability, settings };
 }
 
-function importData(event) {
+async function importData(event) {
     const file = event.target.files[0];
     if (!file) return;
+
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
         try {
             const data = JSON.parse(e.target.result);
             const sanitized = sanitizeImportedData(data);
-            if (confirm('Data importeren? Dit overschrijft huidige data!')) {
-                DataStore.employees = sanitized.employees;
-                DataStore.shifts = sanitized.shifts;
-                DataStore.availability = sanitized.availability;
-                DataStore.settings = sanitizeSettings({
-                    ...DataStore.settings,
-                    ...sanitized.settings
-                });
-                saveToStorage();
-                alert('Data geïmporteerd!');
-                location.reload();
+
+            if (!confirm('Data importeren naar de database? Dit voegt medewerkers toe.')) {
+                return;
             }
+
+            // Import employees via API
+            let imported = 0;
+            for (const emp of sanitized.employees) {
+                try {
+                    await apiFetch('/employees', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            name: emp.name,
+                            email: emp.email,
+                            mainTeam: emp.mainTeam,
+                            extraTeams: emp.extraTeams,
+                            contractHours: emp.contractHours,
+                            active: emp.active,
+                            weekScheduleWeek1: emp.weekScheduleWeek1,
+                            weekScheduleWeek2: emp.weekScheduleWeek2
+                        })
+                    });
+                    imported++;
+                } catch (err) {
+                    console.error('Fout bij importeren medewerker:', emp.name, err);
+                }
+            }
+
+            alert(`${imported} medewerkers geïmporteerd!`);
+            // Reload data from API
+            await loadDataFromAPI();
+            location.reload();
         } catch (error) {
             alert('Fout bij importeren: ' + error.message);
         }

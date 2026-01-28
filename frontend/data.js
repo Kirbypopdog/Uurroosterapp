@@ -1,5 +1,6 @@
 // ===== DATA MANAGEMENT SYSTEEM =====
 // Dit bestand beheert alle data voor Het Vlot roosterplanning
+// Alle data wordt opgeslagen in de PostgreSQL database via de API
 
 const DEFAULT_SETTINGS = window.DEFAULT_SETTINGS || {};
 
@@ -20,7 +21,6 @@ function cloneSettings(settings) {
     if (typeof structuredClone === 'function') {
         return structuredClone(settings);
     }
-
     return JSON.parse(JSON.stringify(settings));
 }
 
@@ -64,109 +64,141 @@ function normalizeSettings(settings) {
     return merged;
 }
 
-// Globale data store
+// Globale data store (in-memory cache van database data)
 const DataStore = {
     employees: [],
     shifts: [],
     availability: [],
     swapRequests: [],
-    settings: normalizeSettings(DEFAULT_SETTINGS)
+    settings: normalizeSettings(DEFAULT_SETTINGS),
+    _loaded: false
 };
 
-// ===== STORAGE FUNCTIES =====
+// ===== API HELPER =====
 
-function saveToStorage() {
-    try {
-        localStorage.setItem('hetvlot_employees', JSON.stringify(DataStore.employees));
-        localStorage.setItem('hetvlot_shifts', JSON.stringify(DataStore.shifts));
-        localStorage.setItem('hetvlot_availability', JSON.stringify(DataStore.availability));
-        localStorage.setItem('hetvlot_swapRequests', JSON.stringify(DataStore.swapRequests));
-        localStorage.setItem('hetvlot_settings', JSON.stringify(DataStore.settings));
-        return true;
-    } catch (error) {
-        console.error('Fout bij opslaan:', error);
-        return false;
+async function dataApiFetch(path, options = {}) {
+    const token = localStorage.getItem('authToken');
+    const headers = {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    };
+
+    const response = await fetch(`${window.API_BASE}${path}`, {
+        ...options,
+        headers: { ...headers, ...(options.headers || {}) }
+    });
+
+    if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${response.status}`);
     }
+
+    return response.json();
 }
 
-function loadFromStorage() {
-    try {
-        const employees = localStorage.getItem('hetvlot_employees');
-        const shifts = localStorage.getItem('hetvlot_shifts');
-        const availability = localStorage.getItem('hetvlot_availability');
-        const swapRequests = localStorage.getItem('hetvlot_swapRequests');
-        const settings = localStorage.getItem('hetvlot_settings');
+// ===== LOAD DATA FROM API =====
 
-        if (employees) DataStore.employees = JSON.parse(employees);
-        if (shifts) DataStore.shifts = JSON.parse(shifts);
-        if (availability) DataStore.availability = JSON.parse(availability);
-        if (swapRequests) DataStore.swapRequests = JSON.parse(swapRequests);
-        if (settings) {
-            DataStore.settings = normalizeSettings({ ...DataStore.settings, ...JSON.parse(settings) });
-        }
+async function loadDataFromAPI() {
+    try {
+        // Load all data in parallel
+        const [employeesData, shiftsData, availabilityData, settingsData] = await Promise.all([
+            dataApiFetch('/employees').catch(() => ({ employees: [] })),
+            dataApiFetch('/shifts').catch(() => ({ shifts: [] })),
+            dataApiFetch('/availability').catch(() => ({ availability: [] })),
+            dataApiFetch('/settings').catch(() => ({ settings: {} }))
+        ]);
+
+        DataStore.employees = employeesData.employees || [];
+        DataStore.shifts = (shiftsData.shifts || []).map(s => ({
+            ...s,
+            date: typeof s.date === 'string' ? s.date.split('T')[0] : s.date
+        }));
+        DataStore.availability = (availabilityData.availability || []).map(a => ({
+            ...a,
+            date: typeof a.date === 'string' ? a.date.split('T')[0] : a.date,
+            key: `${a.employeeId}_${typeof a.date === 'string' ? a.date.split('T')[0] : a.date}`
+        }));
+
+        // Merge API settings with defaults
+        const apiSettings = settingsData.settings || {};
+        DataStore.settings = normalizeSettings({
+            ...DataStore.settings,
+            ...apiSettings.general,
+            rules: apiSettings.rules || DataStore.settings.rules,
+            holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
+            holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
+            responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation
+        });
+
+        DataStore._loaded = true;
+        console.log('Data geladen van API:', {
+            employees: DataStore.employees.length,
+            shifts: DataStore.shifts.length,
+            availability: DataStore.availability.length
+        });
 
         return true;
     } catch (error) {
-        console.error('Fout bij laden:', error);
+        console.error('Fout bij laden van API:', error);
         return false;
-    }
-}
-
-function resetData() {
-    if (confirm('Weet je zeker dat je alle data wilt verwijderen? Dit kan niet ongedaan worden gemaakt.')) {
-        localStorage.removeItem('hetvlot_employees');
-        localStorage.removeItem('hetvlot_shifts');
-        localStorage.removeItem('hetvlot_availability');
-        localStorage.removeItem('hetvlot_swapRequests');
-        localStorage.removeItem('hetvlot_settings');
-        location.reload();
     }
 }
 
 // ===== MEDEWERKERS FUNCTIES =====
 
-function addEmployee(employeeData) {
-    const employee = {
-        id: Date.now() + Math.random(),
-        name: employeeData.name,
-        email: employeeData.email || '',
-        mainTeam: employeeData.mainTeam,
-        extraTeams: employeeData.extraTeams || [],
-        contractHours: employeeData.contractHours || 0,
-        active: employeeData.active !== false,
-        weekScheduleWeek1: employeeData.weekScheduleWeek1 || employeeData.weekSchedule || [], // Week 1 rooster (backward compatibility)
-        weekScheduleWeek2: employeeData.weekScheduleWeek2 || [], // Week 2 rooster
-        createdAt: new Date().toISOString()
-    };
-
-    DataStore.employees.push(employee);
-    saveToStorage();
-    return employee;
-}
-
-function updateEmployee(id, updates) {
-    const index = DataStore.employees.findIndex(e => e.id === id);
-    if (index !== -1) {
-        DataStore.employees[index] = { ...DataStore.employees[index], ...updates };
-        saveToStorage();
-        return DataStore.employees[index];
+async function addEmployee(employeeData) {
+    try {
+        const data = await dataApiFetch('/employees', {
+            method: 'POST',
+            body: JSON.stringify(employeeData)
+        });
+        const employee = data.employee;
+        DataStore.employees.push(employee);
+        return employee;
+    } catch (error) {
+        console.error('Fout bij toevoegen medewerker:', error);
+        throw error;
     }
-    return null;
 }
 
-function deleteEmployee(id) {
-    const index = DataStore.employees.findIndex(e => e.id === id);
-    if (index !== -1) {
-        DataStore.employees.splice(index, 1);
+async function updateEmployee(id, updates) {
+    try {
+        const index = DataStore.employees.findIndex(e => e.id === id);
+        if (index === -1) return null;
+
+        const currentEmployee = DataStore.employees[index];
+        const updatedData = { ...currentEmployee, ...updates };
+
+        const data = await dataApiFetch(`/employees/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(updatedData)
+        });
+
+        DataStore.employees[index] = data.employee;
+        return data.employee;
+    } catch (error) {
+        console.error('Fout bij bijwerken medewerker:', error);
+        throw error;
+    }
+}
+
+async function deleteEmployee(id) {
+    try {
+        await dataApiFetch(`/employees/${id}`, { method: 'DELETE' });
+
+        const index = DataStore.employees.findIndex(e => e.id === id);
+        if (index !== -1) {
+            DataStore.employees.splice(index, 1);
+        }
+        // Remove related shifts and availability from cache
         DataStore.shifts = DataStore.shifts.filter(shift => shift.employeeId !== id);
-        DataStore.availability = DataStore.availability.filter(entry => String(entry.employeeId) !== String(id));
-        DataStore.swapRequests = DataStore.swapRequests.filter(request =>
-            String(request.fromEmployeeId) !== String(id) && String(request.toEmployeeId) !== String(id)
-        );
-        saveToStorage();
+        DataStore.availability = DataStore.availability.filter(entry => entry.employeeId !== id);
+
         return true;
+    } catch (error) {
+        console.error('Fout bij verwijderen medewerker:', error);
+        throw error;
     }
-    return false;
 }
 
 function getEmployee(id) {
@@ -184,48 +216,67 @@ function getEmployeesByTeam(teamId, includeExtra = true) {
     return DataStore.employees.filter(e => {
         if (!e.active) return false;
         if (e.mainTeam === teamId) return true;
-        if (includeExtra && e.extraTeams.includes(teamId)) return true;
+        if (includeExtra && e.extraTeams && e.extraTeams.includes(teamId)) return true;
         return false;
     });
 }
 
 // ===== DIENSTEN FUNCTIES =====
 
-function addShift(shiftData) {
-    const shift = {
-        id: Date.now() + Math.random(),
-        employeeId: shiftData.employeeId,
-        team: shiftData.team,
-        date: shiftData.date,
-        startTime: shiftData.startTime,
-        endTime: shiftData.endTime,
-        notes: shiftData.notes || '',
-        createdAt: new Date().toISOString()
-    };
-
-    DataStore.shifts.push(shift);
-    saveToStorage();
-    return shift;
-}
-
-function updateShift(id, updates) {
-    const index = DataStore.shifts.findIndex(s => s.id === id);
-    if (index !== -1) {
-        DataStore.shifts[index] = { ...DataStore.shifts[index], ...updates };
-        saveToStorage();
-        return DataStore.shifts[index];
+async function addShift(shiftData) {
+    try {
+        const data = await dataApiFetch('/shifts', {
+            method: 'POST',
+            body: JSON.stringify(shiftData)
+        });
+        const shift = {
+            ...data.shift,
+            date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date
+        };
+        DataStore.shifts.push(shift);
+        return shift;
+    } catch (error) {
+        console.error('Fout bij toevoegen dienst:', error);
+        throw error;
     }
-    return null;
 }
 
-function deleteShift(id) {
-    const index = DataStore.shifts.findIndex(s => s.id === id);
-    if (index !== -1) {
-        DataStore.shifts.splice(index, 1);
-        saveToStorage();
+async function updateShift(id, updates) {
+    try {
+        const data = await dataApiFetch(`/shifts/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(updates)
+        });
+
+        const shift = {
+            ...data.shift,
+            date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date
+        };
+
+        const index = DataStore.shifts.findIndex(s => s.id === id);
+        if (index !== -1) {
+            DataStore.shifts[index] = shift;
+        }
+        return shift;
+    } catch (error) {
+        console.error('Fout bij bijwerken dienst:', error);
+        throw error;
+    }
+}
+
+async function deleteShift(id) {
+    try {
+        await dataApiFetch(`/shifts/${id}`, { method: 'DELETE' });
+
+        const index = DataStore.shifts.findIndex(s => s.id === id);
+        if (index !== -1) {
+            DataStore.shifts.splice(index, 1);
+        }
         return true;
+    } catch (error) {
+        console.error('Fout bij verwijderen dienst:', error);
+        throw error;
     }
-    return false;
 }
 
 function getShift(id) {
@@ -240,13 +291,20 @@ function getShiftsByDateRange(startDate, endDate) {
     return DataStore.shifts.filter(s => s.date >= startDate && s.date <= endDate);
 }
 
-function removeShiftsInDateRange(startDate, endDate) {
-    const originalCount = DataStore.shifts.length;
-    DataStore.shifts = DataStore.shifts.filter(shift => shift.date < startDate || shift.date > endDate);
-    if (DataStore.shifts.length !== originalCount) {
-        saveToStorage();
+async function removeShiftsInDateRange(startDate, endDate) {
+    try {
+        const data = await dataApiFetch(`/shifts?startDate=${startDate}&endDate=${endDate}`, {
+            method: 'DELETE'
+        });
+
+        // Update local cache
+        DataStore.shifts = DataStore.shifts.filter(shift => shift.date < startDate || shift.date > endDate);
+
+        return data.deleted || 0;
+    } catch (error) {
+        console.error('Fout bij verwijderen diensten:', error);
+        throw error;
     }
-    return originalCount - DataStore.shifts.length;
 }
 
 function getShiftsByEmployee(employeeId, startDate = null, endDate = null) {
@@ -268,45 +326,36 @@ function getShiftsByTeam(teamId, startDate = null, endDate = null) {
 // ===== WEEKROOSTER FUNCTIES =====
 
 function getWeekNumber(date) {
-    // Bepaal of een datum Week 1 of Week 2 is op basis van de referentie datum (bi-weekly patroon)
     const referenceDate = parseDateOnly(DataStore.settings.biWeeklyReferenceDate);
     referenceDate.setHours(0, 0, 0, 0);
     const currentDate = parseDateOnly(date);
     currentDate.setHours(0, 0, 0, 0);
 
-    // Zet beide datums op maandag van hun week
     const refMonday = getMonday(referenceDate);
     refMonday.setHours(0, 0, 0, 0);
     const currMonday = getMonday(currentDate);
     currMonday.setHours(0, 0, 0, 0);
 
-    // Bereken aantal weken verschil
     const diffTime = currMonday.getTime() - refMonday.getTime();
     const diffWeeks = Math.round(diffTime / (1000 * 60 * 60 * 24 * 7));
 
-    // Week 1 = even aantal weken verschil, Week 2 = oneven
     return (diffWeeks % 2 === 0) ? 1 : 2;
 }
 
 function getISOWeekNumber(date) {
-    // Geeft het echte ISO weeknummer terug (1-53)
     const d = parseDateOnly(date);
     d.setHours(0, 0, 0, 0);
-    // Donderdag van dezelfde week bepaalt het weeknummer
     d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
-    // Week 1 is de week met 4 januari
     const week1 = new Date(d.getFullYear(), 0, 4);
-    // Bereken weeknummer
     return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
-function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
+async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
     const employee = getEmployee(employeeId);
     if (!employee) {
         return [];
     }
 
-    // Check of er überhaupt roosters zijn ingesteld
     const hasWeek1 = employee.weekScheduleWeek1 && employee.weekScheduleWeek1.length > 0;
     const hasWeek2 = employee.weekScheduleWeek2 && employee.weekScheduleWeek2.length > 0;
 
@@ -318,115 +367,117 @@ function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
     const end = new Date(endDate);
     const createdShifts = [];
 
-    // Loop door alle dagen in de periode
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dayOfWeek = d.getDay(); // 0 = zondag, 1 = maandag, etc.
+        const dayOfWeek = d.getDay();
         const dateStr = formatDateYYYYMMDD(d);
 
-        // Check of er al een dienst is op deze dag
         const existingShifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
         if (existingShifts.length > 0) {
-            continue; // Skip als er al een dienst is
+            continue;
         }
 
-        // Check of medewerker afwezig is
         const absence = getAvailability(employeeId, dateStr);
         if (absence && absence.type) {
-            continue; // Skip als medewerker afwezig is
+            continue;
         }
 
-        // Bepaal welke week het is
         const weekNumber = getWeekNumber(dateStr);
         const weekSchedule = weekNumber === 1 ? employee.weekScheduleWeek1 : employee.weekScheduleWeek2;
 
-        // Zoek vast rooster voor deze dag
         const scheduleForDay = weekSchedule.find(s => s.dayOfWeek === dayOfWeek);
         if (scheduleForDay && scheduleForDay.enabled) {
-            // Maak dienst aan
-            const shift = {
-                id: Date.now() + Math.random(),
-                employeeId: employeeId,
-                team: scheduleForDay.team || employee.mainTeam,
-                date: dateStr,
-                startTime: scheduleForDay.startTime,
-                endTime: scheduleForDay.endTime,
-                notes: `Automatisch ingepland via weekrooster (Week ${weekNumber})`,
-                createdAt: new Date().toISOString()
-            };
-
-            DataStore.shifts.push(shift);
-            createdShifts.push(shift);
+            try {
+                const shift = await addShift({
+                    employeeId: employeeId,
+                    team: scheduleForDay.team || employee.mainTeam,
+                    date: dateStr,
+                    startTime: scheduleForDay.startTime,
+                    endTime: scheduleForDay.endTime,
+                    notes: `Automatisch ingepland via weekrooster (Week ${weekNumber})`
+                });
+                createdShifts.push(shift);
+            } catch (error) {
+                console.error('Fout bij aanmaken shift:', error);
+            }
         }
-    }
-
-    if (createdShifts.length > 0) {
-        saveToStorage();
     }
 
     return createdShifts;
 }
 
-function applyWeekScheduleForAllEmployees(startDate, endDate) {
+async function applyWeekScheduleForAllEmployees(startDate, endDate) {
     const employees = getAllEmployees(true);
     let totalShifts = 0;
 
-    employees.forEach(emp => {
-        const shifts = applyWeekScheduleForEmployee(emp.id, startDate, endDate);
+    for (const emp of employees) {
+        const shifts = await applyWeekScheduleForEmployee(emp.id, startDate, endDate);
         totalShifts += shifts.length;
-    });
+    }
 
     return totalShifts;
 }
 
 // ===== AFWEZIGHEID FUNCTIES =====
-// Geen data = beschikbaar (standaard)
-// Alleen opslaan als iemand NIET beschikbaar is
 
 function getAvailability(employeeId, date) {
-    // Zoek op employeeId en date apart (robuuster dan key matching)
     return DataStore.availability.find(a =>
         String(a.employeeId) === String(employeeId) && a.date === date
     );
 }
 
-function setAvailability(employeeId, date, absenceData) {
-    const key = `${employeeId}_${date}`;
-
-    // Als geen type opgegeven, verwijder de afwezigheid
+async function setAvailability(employeeId, date, absenceData) {
     if (!absenceData.type) {
         return removeAvailability(employeeId, date);
     }
 
-    const index = DataStore.availability.findIndex(a => a.key === key);
+    try {
+        const data = await dataApiFetch('/availability', {
+            method: 'POST',
+            body: JSON.stringify({
+                employeeId,
+                date,
+                type: absenceData.type,
+                reason: absenceData.reason || ''
+            })
+        });
 
-    const absence = {
-        key: key,
-        employeeId: employeeId,
-        date: date,
-        type: absenceData.type, // verlof, ziek, overuren, vorming, andere
-        reason: absenceData.reason || '',
-        updatedAt: new Date().toISOString()
-    };
+        const absence = {
+            ...data.availability,
+            date: typeof data.availability.date === 'string' ? data.availability.date.split('T')[0] : data.availability.date,
+            key: `${employeeId}_${date}`
+        };
 
-    if (index !== -1) {
-        DataStore.availability[index] = absence;
-    } else {
-        DataStore.availability.push(absence);
+        // Update cache
+        const index = DataStore.availability.findIndex(a => a.key === absence.key);
+        if (index !== -1) {
+            DataStore.availability[index] = absence;
+        } else {
+            DataStore.availability.push(absence);
+        }
+
+        return absence;
+    } catch (error) {
+        console.error('Fout bij instellen afwezigheid:', error);
+        throw error;
     }
-
-    saveToStorage();
-    return absence;
 }
 
-function removeAvailability(employeeId, date) {
-    const key = `${employeeId}_${date}`;
-    const index = DataStore.availability.findIndex(a => a.key === key);
-    if (index !== -1) {
-        DataStore.availability.splice(index, 1);
-        saveToStorage();
+async function removeAvailability(employeeId, date) {
+    try {
+        await dataApiFetch(`/availability?employeeId=${employeeId}&date=${date}`, {
+            method: 'DELETE'
+        });
+
+        const key = `${employeeId}_${date}`;
+        const index = DataStore.availability.findIndex(a => a.key === key);
+        if (index !== -1) {
+            DataStore.availability.splice(index, 1);
+        }
         return true;
+    } catch (error) {
+        console.error('Fout bij verwijderen afwezigheid:', error);
+        throw error;
     }
-    return false;
 }
 
 function getAvailabilityForWeek(employeeId, weekStartDate) {
@@ -435,6 +486,34 @@ function getAvailabilityForWeek(employeeId, weekStartDate) {
         date: date,
         availability: getAvailability(employeeId, date)
     }));
+}
+
+// ===== SETTINGS FUNCTIES =====
+
+async function saveSettings(key, value) {
+    try {
+        await dataApiFetch(`/settings/${key}`, {
+            method: 'PUT',
+            body: JSON.stringify({ value })
+        });
+        return true;
+    } catch (error) {
+        console.error('Fout bij opslaan settings:', error);
+        throw error;
+    }
+}
+
+async function saveRulesSettings() {
+    await saveSettings('rules', DataStore.settings.rules);
+}
+
+async function saveHolidaySettings() {
+    await saveSettings('holidayPeriods', DataStore.settings.holidayPeriods);
+    await saveSettings('holidayRules', DataStore.settings.holidayRules);
+}
+
+async function saveResponsibleRotationSettings() {
+    await saveSettings('responsibleRotation', DataStore.settings.responsibleRotation);
 }
 
 // ===== UREN BEREKENING =====
@@ -452,7 +531,6 @@ function getShiftEndDateTime(shift) {
 
     const endDT = parseDateTime(shift.date, shift.endTime);
 
-    // Als eindtijd kleiner is dan starttijd, is het de volgende dag
     if (endHours < startHours) {
         endDT.setDate(endDT.getDate() + 1);
     }
@@ -467,7 +545,6 @@ function calculateShiftHours(shift) {
     const diffMs = end - start;
     let hours = diffMs / (1000 * 60 * 60);
 
-    // Nachturen tussen 23:00 en 07:00 tellen niet mee (slapende nacht)
     const sleepStart = parseDateTime(shift.date, '23:00');
     const sleepEnd = parseDateTime(shift.date, '07:00');
     sleepEnd.setDate(sleepEnd.getDate() + 1);
@@ -507,10 +584,7 @@ function getEmployeeHoursThisMonth(employeeId, date) {
     const year = d.getFullYear();
     const month = d.getMonth();
 
-    // First day of month
     const startDate = formatDateYYYYMMDD(new Date(year, month, 1));
-
-    // Last day of month
     const endDate = formatDateYYYYMMDD(new Date(year, month + 1, 0));
 
     return getEmployeeHoursInPeriod(employeeId, startDate, endDate);
@@ -521,28 +595,23 @@ function getEmployeeHoursThisMonth(employeeId, date) {
 function getStaffingForTimeSlot(date, startHour, endHour) {
     const shifts = getShiftsByDate(date);
 
-    // Filter shifts that overlap with this time slot
     const relevantShifts = shifts.filter(shift => {
         const shiftStart = parseInt(shift.startTime.split(':')[0]);
         const shiftEnd = parseInt(shift.endTime.split(':')[0]);
 
-        // Handle overnight shifts
         let adjustedShiftEnd = shiftEnd;
         if (shiftEnd < shiftStart) {
             adjustedShiftEnd = shiftEnd + 24;
         }
 
-        // Handle time slot that spans midnight
         let adjustedSlotEnd = endHour;
         if (endHour > 24) {
             adjustedSlotEnd = endHour;
         }
 
-        // Check if shift overlaps with time slot
         return (shiftStart < adjustedSlotEnd && adjustedShiftEnd > startHour);
     });
 
-    // Group by team
     const byTeam = {
         vlot1: [],
         vlot2: [],
@@ -572,13 +641,10 @@ function checkStaffingWarnings(date, timeSlot) {
     const dayOfWeek = d.getDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
-    // Check if location is closed
     if (!isWeekendOpen(date) && isWeekend) {
-        return warnings; // Don't warn for closed days
+        return warnings;
     }
 
-    // Morning rush (07:00-13:00): minimum 2 across Vlot 1 + Vlot 2
-    // Note: overkoepelend en jobstudent tellen niet mee (geen directe begeleiding)
     if (timeSlot.start === 7 || timeSlot.start === 10) {
         const vlotStaff = staffing.byTeam.vlot1.length + staffing.byTeam.vlot2.length;
         if (vlotStaff < 2) {
@@ -590,8 +656,6 @@ function checkStaffingWarnings(date, timeSlot) {
         }
     }
 
-    // Evening (16:00-22:00): minimum 2 per Vlot
-    // Note: overkoepelend en jobstudent tellen niet mee (geen directe begeleiding)
     if (timeSlot.start === 16 || timeSlot.start === 19) {
         if (staffing.byTeam.vlot1.length < 2) {
             warnings.push({
@@ -609,8 +673,6 @@ function checkStaffingWarnings(date, timeSlot) {
         }
     }
 
-    // Night (22:00-07:00): exactly 1 per Vlot
-    // Note: overkoepelend en jobstudent tellen niet mee (geen directe begeleiding)
     if (timeSlot.start === 22) {
         if (staffing.byTeam.vlot1.length > 1) {
             warnings.push({
@@ -627,7 +689,6 @@ function checkStaffingWarnings(date, timeSlot) {
             });
         }
 
-        // Check minimum
         if (staffing.byTeam.vlot1.length === 0) {
             warnings.push({
                 type: 'understaffed',
@@ -653,29 +714,23 @@ function isWeekendOpen(date) {
     const d = parseDateOnly(date);
     const dayOfWeek = d.getDay();
 
-    // Tuesday-Thursday - not part of weekend, always open
     if (dayOfWeek >= 2 && dayOfWeek <= 4) {
         return true;
     }
 
-    // Determine which week the date falls in
-    // For Friday/Monday, we need to check the Saturday of that weekend
     let checkDate = date;
     if (dayOfWeek === 5) {
-        // Friday - check tomorrow (Saturday) to determine week
         const saturday = new Date(d);
         saturday.setDate(d.getDate() + 1);
         checkDate = formatDateYYYYMMDD(saturday);
     } else if (dayOfWeek === 1) {
-        // Monday - check previous Saturday to determine week
         const saturday = new Date(d);
         saturday.setDate(d.getDate() - 2);
         checkDate = formatDateYYYYMMDD(saturday);
     }
 
-    // Week 1 = weekend GESLOTEN, Week 2 = weekend OPEN
     const weekNumber = getWeekNumber(checkDate);
-    return weekNumber === 2; // Open if Week 2, closed if Week 1
+    return weekNumber === 2;
 }
 
 // ===== VAKANTIE FUNCTIES =====
@@ -702,7 +757,7 @@ function getHolidayPeriod(date) {
     });
 }
 
-function addHolidayPeriod(name, startDate, endDate) {
+async function addHolidayPeriod(name, startDate, endDate) {
     const period = {
         id: Date.now(),
         name: name,
@@ -710,29 +765,28 @@ function addHolidayPeriod(name, startDate, endDate) {
         endDate: endDate
     };
     DataStore.settings.holidayPeriods.push(period);
-    saveToStorage();
+    await saveHolidaySettings();
     return period;
 }
 
-function removeHolidayPeriod(id) {
+async function removeHolidayPeriod(id) {
     const index = DataStore.settings.holidayPeriods.findIndex(p => p.id === id);
     if (index !== -1) {
         DataStore.settings.holidayPeriods.splice(index, 1);
-        saveToStorage();
+        await saveHolidaySettings();
         return true;
     }
     return false;
 }
 
-function updateHolidayRules(rules) {
+async function updateHolidayRules(rules) {
     DataStore.settings.holidayRules = { ...DataStore.settings.holidayRules, ...rules };
-    saveToStorage();
+    await saveHolidaySettings();
 }
 
 // ===== WEEKEND/VAKANTIE VERANTWOORDELIJKE =====
 
 function getEligibleEmployeesForResponsible() {
-    // Haal medewerkers op die in aanmerking komen (vlot1, vlot2, cargo)
     const eligibleTeams = DataStore.settings.responsibleRotation?.eligibleTeams || ['vlot1', 'vlot2', 'cargo'];
     return DataStore.employees.filter(emp =>
         emp.active && eligibleTeams.includes(emp.mainTeam)
@@ -742,14 +796,13 @@ function getEligibleEmployeesForResponsible() {
 function getMondayOfWeek(date) {
     const d = new Date(date);
     const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Sunday
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
     d.setDate(diff);
     d.setHours(0, 0, 0, 0);
     return d;
 }
 
 function getWeekendResponsible(weekStartDate) {
-    // weekStartDate = maandag van de week waarvoor iemand verantwoordelijk is
     const dateKey = formatDateYYYYMMDD(weekStartDate);
     const assignments = DataStore.settings.responsibleRotation?.assignments || {};
 
@@ -760,34 +813,28 @@ function getWeekendResponsible(weekStartDate) {
 }
 
 function getOrCalculateResponsible(weekStartDate) {
-    // Eerst kijken of er een handmatige toewijzing is
     const manual = getWeekendResponsible(weekStartDate);
     if (manual) return manual;
 
-    // Anders automatisch berekenen op basis van rotatie
     const rotation = DataStore.settings.responsibleRotation;
     if (!rotation?.rotationStart || !rotation?.rotationStartEmployee) {
-        return null; // Geen rotatie ingesteld
+        return null;
     }
 
     const eligible = getEligibleEmployeesForResponsible();
     if (eligible.length === 0) return null;
 
-    // Vind de startpersoon in de lijst (compare as strings to avoid precision issues)
     const startEmployeeId = String(rotation.rotationStartEmployee);
     const startIndex = eligible.findIndex(e => String(e.id) === startEmployeeId);
     if (startIndex === -1) return eligible[0];
 
-    // Tel hoeveel OPEN weekenden/vakanties er zijn tussen start en deze week
     const startDate = new Date(rotation.rotationStart);
     startDate.setHours(0, 0, 0, 0);
     const targetDate = new Date(weekStartDate);
     targetDate.setHours(0, 0, 0, 0);
 
-    // Voor de startdatum: geen verantwoordelijke
     if (targetDate < startDate) return null;
 
-    // Tel hoeveel open weekenden er VOOR deze week zijn geweest (niet inclusief deze week)
     let count = 0;
     const current = new Date(startDate);
 
@@ -798,13 +845,11 @@ function getOrCalculateResponsible(weekStartDate) {
         current.setDate(current.getDate() + 7);
     }
 
-    // Bereken wie er aan de beurt is
     const currentIndex = (startIndex + count) % eligible.length;
     return eligible[currentIndex];
 }
 
-function setRotationStart(startDate, employeeId) {
-    // Stel de rotatie start in - vanaf deze datum met deze persoon
+async function setRotationStart(startDate, employeeId) {
     if (!DataStore.settings.responsibleRotation) {
         DataStore.settings.responsibleRotation = {
             eligibleTeams: ['vlot1', 'vlot2', 'cargo'],
@@ -812,13 +857,11 @@ function setRotationStart(startDate, employeeId) {
         };
     }
     DataStore.settings.responsibleRotation.rotationStart = formatDateYYYYMMDD(startDate);
-    // Store as string to prevent JSON precision issues
     DataStore.settings.responsibleRotation.rotationStartEmployee = String(employeeId);
-    saveToStorage();
+    await saveResponsibleRotationSettings();
 }
 
-function setWeekendResponsible(weekStartDate, employeeId) {
-    // Handmatige override voor een specifieke week
+async function setWeekendResponsible(weekStartDate, employeeId) {
     const dateKey = formatDateYYYYMMDD(weekStartDate);
     if (!DataStore.settings.responsibleRotation) {
         DataStore.settings.responsibleRotation = {
@@ -827,27 +870,24 @@ function setWeekendResponsible(weekStartDate, employeeId) {
         };
     }
     DataStore.settings.responsibleRotation.assignments[dateKey] = employeeId;
-    saveToStorage();
+    await saveResponsibleRotationSettings();
 }
 
-function removeWeekendResponsible(weekStartDate) {
+async function removeWeekendResponsible(weekStartDate) {
     const dateKey = formatDateYYYYMMDD(weekStartDate);
     if (DataStore.settings.responsibleRotation?.assignments) {
         delete DataStore.settings.responsibleRotation.assignments[dateKey];
-        saveToStorage();
+        await saveResponsibleRotationSettings();
     }
 }
 
 function isWeekendOrHolidayWeek(weekStartDate) {
-    // Gebruikt bi-weekly logica: Week 2 = open weekend
     const monday = parseDateOnly(weekStartDate);
     monday.setHours(0, 0, 0, 0);
 
-    // Check bi-weekly patroon: Week 2 = weekend open
     const biWeeklyNumber = getWeekNumber(monday);
     const isOpenWeekend = biWeeklyNumber === 2;
 
-    // Check ook vakantie (elke dag van de week)
     let hasHoliday = false;
     for (let i = 0; i < 7; i++) {
         const day = new Date(monday);
@@ -880,13 +920,13 @@ function formatDate(date) {
 }
 
 function formatTime(time) {
-    return time; // Already in HH:MM format
+    return time;
 }
 
 function getMonday(date) {
     const d = parseDateOnly(date);
     const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
     d.setDate(diff);
     return d;
 }
@@ -903,110 +943,22 @@ function getWeekDates(date) {
     return dates;
 }
 
-// ===== DEMO DATA =====
+// ===== LEGACY COMPATIBILITY =====
+// These functions are kept for compatibility but do nothing with localStorage
 
-function generateDemoData() {
-    // Echte medewerkers van Het Vlot
-    const demoEmployees = [
-        // Vlot 1 team (residential unit 1)
-        { name: 'Quinten', email: 'quinten@hetvlot.be', mainTeam: 'vlot1', extraTeams: [], contractHours: 32, active: true },
-        { name: 'Elias', email: 'elias@hetvlot.be', mainTeam: 'vlot1', extraTeams: [], contractHours: 40, active: true },
-        { name: 'Victor Bey', email: 'victor.bey@hetvlot.be', mainTeam: 'vlot1', extraTeams: [], contractHours: 40, active: true },
-        { name: 'Chloé', email: 'chloe@hetvlot.be', mainTeam: 'vlot1', extraTeams: [], contractHours: 40, active: true },
+function saveToStorage() {
+    // No-op - data is saved via API
+    return true;
+}
 
-        // Vlot 2 team (residential unit 2)
-        { name: 'Victor G', email: 'victor.g@hetvlot.be', mainTeam: 'vlot2', extraTeams: [], contractHours: 40, active: true },
-        { name: 'Chelsea', email: 'chelsea@hetvlot.be', mainTeam: 'vlot2', extraTeams: [], contractHours: 40, active: true },
-        { name: 'Sam', email: 'sam@hetvlot.be', mainTeam: 'vlot2', extraTeams: [], contractHours: 40, active: true },
-        { name: 'Thomas', email: 'thomas@hetvlot.be', mainTeam: 'vlot2', extraTeams: [], contractHours: 40, active: true },
+function loadFromStorage() {
+    // No-op - data is loaded via API
+    return true;
+}
 
-        // Cargo team (day program / dagbesteding)
-        { name: 'Stéfanie', email: 'stefanie@hetvlot.be', mainTeam: 'cargo', extraTeams: [], contractHours: 40, active: true },
-        { name: 'Marie', email: 'marie@hetvlot.be', mainTeam: 'cargo', extraTeams: [], contractHours: 40, active: true },
-        { name: 'Camille', email: 'camille@hetvlot.be', mainTeam: 'cargo', extraTeams: [], contractHours: 40, active: true },
-
-        // Leadership/Management (overkoepelend) - alleen kantoorwerk, geen begeleiding
-        { name: 'Axel', email: 'axel@hetvlot.be', mainTeam: 'overkoepelend', extraTeams: [], contractHours: 40, active: true },
-        { name: 'Karen', email: 'karen@hetvlot.be', mainTeam: 'overkoepelend', extraTeams: [], contractHours: 40, active: true },
-
-        // Jobstudenten/Stagiairs
-        { name: 'Yana', email: 'yana@hetvlot.be', mainTeam: 'jobstudent', extraTeams: ['vlot1', 'vlot2', 'cargo'], contractHours: 20, active: true }
-    ];
-
-    demoEmployees.forEach(emp => addEmployee(emp));
-
-    // Demo diensten voor deze week
-    const today = new Date();
-    const weekDates = getWeekDates(today);
-    const employees = getAllEmployees(true);
-    const teams = ['vlot1', 'vlot2', 'cargo'];
-
-    weekDates.forEach((date, dayIndex) => {
-        // Skip als weekend gesloten is
-        const d = new Date(date);
-        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-        if (isWeekend && !isWeekendOpen(date)) {
-            return;
-        }
-
-        teams.forEach(team => {
-            const teamEmployees = getEmployeesByTeam(team);
-            if (teamEmployees.length === 0) return;
-
-            // Vroege dienst
-            const vroegEmployee = teamEmployees[Math.floor(Math.random() * teamEmployees.length)];
-            addShift({
-                employeeId: vroegEmployee.id,
-                team: team,
-                date: date,
-                startTime: '07:30',
-                endTime: '16:00',
-                notes: ''
-            });
-
-            // Late dienst
-            const laatEmployee = teamEmployees[Math.floor(Math.random() * teamEmployees.length)];
-            addShift({
-                employeeId: laatEmployee.id,
-                team: team,
-                date: date,
-                startTime: '16:00',
-                endTime: '23:00',
-                notes: ''
-            });
-        });
-
-        // Nachtdienst (overkoepelend - 1 persoon voor alle teams)
-        const nachtEmployee = employees[Math.floor(Math.random() * employees.length)];
-        addShift({
-            employeeId: nachtEmployee.id,
-            team: 'overkoepelend',
-            date: date,
-            startTime: '23:00',
-            endTime: '09:00',
-            notes: 'Nachtdienst voor alle teams'
-        });
-    });
-
-    console.log('Demo data aangemaakt!');
+function resetData() {
+    alert('Data reset is niet beschikbaar in de database versie. Neem contact op met de administrator.');
 }
 
 // ===== INITIALISATIE =====
-
-function initializeData() {
-    const loaded = loadFromStorage();
-
-    // Als er geen data is, maak demo data aan
-    if (!loaded || DataStore.employees.length === 0) {
-        console.log('Geen data gevonden, demo data wordt aangemaakt...');
-        generateDemoData();
-    } else {
-        console.log('Data geladen:', {
-            employees: DataStore.employees.length,
-            shifts: DataStore.shifts.length
-        });
-    }
-}
-
-// Start direct
-initializeData();
+// Data wordt geladen via loadDataFromAPI() na login in app.js
