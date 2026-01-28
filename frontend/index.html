@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Het Vlot - Roosterplanning</title>
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -34,14 +34,19 @@
         <!-- Navigatie -->
         <nav class="main-nav">
             <div class="nav-left">
-                <h1 class="app-title">Het Vlot - Roosterplanning</h1>
+                <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu">
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                </button>
+                <h1 class="app-title">Het Vlot</h1>
             </div>
-            <div class="nav-center">
+            <div class="nav-center" id="nav-menu">
                 <button class="nav-btn active" data-view="planning">Planning</button>
                 <button class="nav-btn" data-view="employees">Medewerkers</button>
                 <button class="nav-btn" data-view="profile">Profiel</button>
-                <button class="nav-btn" data-view="availability">Verlof & Afwezigheid</button>
-                <button class="nav-btn" data-view="swaps">Dienstenruil</button>
+                <button class="nav-btn" data-view="availability">Verlof</button>
+                <button class="nav-btn" data-view="swaps">Ruilen</button>
                 <button class="nav-btn" data-view="settings">Instellingen</button>
             </div>
             <div class="nav-right">
@@ -77,6 +82,17 @@
             </div>
 
             <div id="validation-alerts" class="alerts-container"></div>
+
+            <!-- Mobile day navigation (alleen zichtbaar op mobiel) -->
+            <div id="mobile-day-nav" class="mobile-day-nav">
+                <button id="mobile-prev-day" class="btn btn-sm">&larr;</button>
+                <div id="mobile-day-display" class="mobile-day-display">
+                    <span class="mobile-day-name">Ma</span>
+                    <span class="mobile-day-date">1 jan</span>
+                    <input type="date" id="mobile-date-picker" class="mobile-date-picker">
+                </div>
+                <button id="mobile-next-day" class="btn btn-sm">&rarr;</button>
+            </div>
 
             <div id="roster-calendar" class="calendar-container"></div>
         </div>
@@ -130,23 +146,15 @@
             <div class="view-header">
                 <h2>Instellingen</h2>
             </div>
-            <div class="settings-content">
-                <div class="settings-section">
-                    <h3>Teams configuratie</h3>
-                    <div id="teams-config"></div>
-                </div>
-                <div class="settings-section">
-                    <h3>Planning regels</h3>
-                    <div id="rules-config"></div>
-                </div>
-                <div class="settings-section">
-                    <h3>Weekend patroon</h3>
-                    <div id="weekend-config"></div>
-                </div>
-                <div class="settings-section">
-                    <h3>Dienst templates</h3>
-                    <div id="shift-templates-config"></div>
-                </div>
+            <div class="settings-tabs">
+                <button class="settings-tab active" data-settings-tab="accounts">Accounts</button>
+                <button class="settings-tab" data-settings-tab="planning">Planning</button>
+                <button class="settings-tab" data-settings-tab="rooster">Rooster</button>
+                <button class="settings-tab" data-settings-tab="teams">Teams</button>
+                <button class="settings-tab" data-settings-tab="systeem">Systeem</button>
+            </div>
+            <div class="settings-content" id="settings-tab-content">
+                <!-- Dynamically rendered based on active tab -->
             </div>
         </div>
 
