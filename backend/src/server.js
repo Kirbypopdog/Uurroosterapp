@@ -557,33 +557,44 @@ app.post('/import', requireAuth, async (req, res) => {
   }
 
   const { employees, shifts, availability, settings } = req.body || {};
+  const results = { imported: 0, skipped: 0, errors: [] };
 
-  try {
-    // Import employees
-    if (Array.isArray(employees)) {
-      for (const emp of employees) {
+  // Import employees
+  if (Array.isArray(employees)) {
+    for (const emp of employees) {
+      try {
+        // Validate team exists if specified
+        let mainTeam = emp.mainTeam || null;
+        if (mainTeam) {
+          const teamCheck = await pool.query('SELECT id FROM teams WHERE id = $1', [mainTeam]);
+          if (teamCheck.rows.length === 0) {
+            mainTeam = null; // Set to null if team doesn't exist
+          }
+        }
+
         await pool.query(`
           INSERT INTO employees (name, email, main_team, extra_teams, contract_hours, active, week_schedule_week1, week_schedule_week2)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          ON CONFLICT DO NOTHING
         `, [
           emp.name,
           emp.email || null,
-          emp.mainTeam || null,
+          mainTeam,
           emp.extraTeams || [],
           emp.contractHours || 0,
           emp.active !== false,
           emp.weekScheduleWeek1 || [],
           emp.weekScheduleWeek2 || []
         ]);
+        results.imported++;
+      } catch (err) {
+        console.error(`Error importing ${emp.name}:`, err.message);
+        results.errors.push({ name: emp.name, error: err.message });
+        results.skipped++;
       }
     }
-
-    res.json({ ok: true, imported: { employees: employees?.length || 0 } });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
   }
+
+  res.json({ ok: true, results });
 });
 
 // Reset all data (admin only)
