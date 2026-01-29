@@ -314,7 +314,7 @@ app.put('/employees/:id', requireAuth, async (req, res) => {
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2",
                 created_at as "createdAt"
-    `, [name, email || null, mainTeam || null, extraTeams || [], contractHours || 0, active !== false, JSON.stringify(weekScheduleWeek1 || []), JSON.stringify(weekScheduleWeek2 || []), id]);
+    `, [name, email || null, mainTeam || null, extraTeams || [], contractHours || 0, active !== false, weekScheduleWeek1 || [], weekScheduleWeek2 || [], id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Medewerker niet gevonden' });
     }
