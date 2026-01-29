@@ -2910,11 +2910,11 @@ function showAddUserModal(teams) {
                 body: JSON.stringify({ name, email, password, role, team_id, employee_id: employee_id ? Number(employee_id) : null })
             });
             modal.remove();
-            showToast('Gebruiker aangemaakt', 'success');
+            alert('Gebruiker aangemaakt!');
             // Refresh accounts list
             renderSettingsAccounts(document.querySelector('#settings-content'));
         } catch (err) {
-            showToast(err.message || 'Fout bij aanmaken', 'error');
+            alert('Fout bij aanmaken: ' + (err.message || 'Onbekende fout'));
         }
     });
 }
@@ -4084,7 +4084,6 @@ async function runMigration() {
         // Reload data to see the fixed weekSchedules
         await loadDataFromAPI();
         renderPlanning();
-        showToast('Data opnieuw geladen', 'success');
     } catch (error) {
         alert('Migratie mislukt: ' + error.message);
     }
