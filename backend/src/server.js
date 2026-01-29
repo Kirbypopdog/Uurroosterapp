@@ -280,6 +280,23 @@ app.post('/employees', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Naam is verplicht' });
   }
   try {
+    // Validate team exists if specified
+    let validMainTeam = mainTeam || null;
+    if (validMainTeam) {
+      const teamCheck = await pool.query('SELECT id FROM teams WHERE id = $1', [validMainTeam]);
+      if (teamCheck.rows.length === 0) {
+        console.log(`Team ${validMainTeam} does not exist, setting to null for employee ${name}`);
+        validMainTeam = null;
+      }
+    }
+
+    // Filter extraTeams to only include valid teams
+    let validExtraTeams = [];
+    if (Array.isArray(extraTeams) && extraTeams.length > 0) {
+      const teamsResult = await pool.query('SELECT id FROM teams WHERE id = ANY($1)', [extraTeams]);
+      validExtraTeams = teamsResult.rows.map(r => r.id);
+    }
+
     const result = await pool.query(`
       INSERT INTO employees (name, email, main_team, extra_teams, contract_hours, active, week_schedule_week1, week_schedule_week2)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -288,11 +305,11 @@ app.post('/employees', requireAuth, async (req, res) => {
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2",
                 created_at as "createdAt"
-    `, [name, email || null, mainTeam || null, extraTeams || [], contractHours || 0, active !== false, weekScheduleWeek1 || [], weekScheduleWeek2 || []]);
+    `, [name, email || null, validMainTeam, validExtraTeams, contractHours || 0, active !== false, weekScheduleWeek1 || [], weekScheduleWeek2 || []]);
     res.status(201).json({ employee: result.rows[0] });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Error creating employee:', err);
+    res.status(500).json({ error: 'Server error: ' + err.message });
   }
 });
 
@@ -674,6 +691,79 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Migration failed: ' + err.message });
+  }
+});
+
+// Seed teams endpoint (admin only)
+app.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
+  const teams = [
+    { id: 'vlot1', name: 'Vlot 1 (Begeleiding)', color: '#3b82f6' },
+    { id: 'vlot2', name: 'Vlot 2 (Begeleiding)', color: '#8b5cf6' },
+    { id: 'cargo', name: 'Cargo (Dagbesteding)', color: '#10b981' },
+    { id: 'overkoepelend', name: 'Overkoepelend (Kantoor)', color: '#f59e0b' },
+    { id: 'jobstudent', name: 'Jobstudenten/Stagiairs', color: '#ec4899' }
+  ];
+
+  try {
+    let created = 0;
+    let updated = 0;
+    for (const team of teams) {
+      const result = await pool.query(
+        `INSERT INTO teams (id, name, color)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, color = EXCLUDED.color
+         RETURNING (xmax = 0) as inserted`,
+        [team.id, team.name, team.color]
+      );
+      if (result.rows[0].inserted) created++;
+      else updated++;
+    }
+    res.json({ ok: true, created, updated, total: teams.length });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Debug endpoint to check database state
+app.get('/admin/debug', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const teams = await pool.query('SELECT * FROM teams ORDER BY id');
+    const employees = await pool.query(`
+      SELECT id, name, main_team,
+             week_schedule_week1, week_schedule_week2,
+             pg_typeof(week_schedule_week1) as type_week1,
+             pg_typeof(week_schedule_week2) as type_week2
+      FROM employees
+      ORDER BY name
+    `);
+
+    const employeeDebug = employees.rows.map(emp => ({
+      id: emp.id,
+      name: emp.name,
+      mainTeam: emp.main_team,
+      weekScheduleWeek1: {
+        type: emp.type_week1,
+        value: emp.week_schedule_week1,
+        isArray: Array.isArray(emp.week_schedule_week1),
+        length: Array.isArray(emp.week_schedule_week1) ? emp.week_schedule_week1.length : 'N/A'
+      },
+      weekScheduleWeek2: {
+        type: emp.type_week2,
+        value: emp.week_schedule_week2,
+        isArray: Array.isArray(emp.week_schedule_week2),
+        length: Array.isArray(emp.week_schedule_week2) ? emp.week_schedule_week2.length : 'N/A'
+      }
+    }));
+
+    res.json({
+      teams: teams.rows,
+      employeeCount: employees.rows.length,
+      employees: employeeDebug
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 

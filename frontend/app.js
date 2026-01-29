@@ -3140,6 +3140,8 @@ function renderSettingsSystem(container) {
                     <h4>Database migratie</h4>
                     <p>Voer database migraties uit om data te repareren (bijv. weekroosters fixen).</p>
                     <button class="btn btn-secondary" onclick="runMigration()">Database migreren</button>
+                    <button class="btn btn-secondary" onclick="seedTeams()" style="margin-left: 8px;">Teams aanmaken</button>
+                    <button class="btn btn-secondary" onclick="showDebugInfo()" style="margin-left: 8px;">Debug info</button>
                 </div>
                 ` : ''}
                 <div class="danger-zone">
@@ -4086,6 +4088,47 @@ async function runMigration() {
         renderPlanning();
     } catch (error) {
         alert('Migratie mislukt: ' + error.message);
+    }
+}
+
+async function seedTeams() {
+    try {
+        const result = await apiFetch('/admin/seed-teams', { method: 'POST' });
+        alert(`Teams aangemaakt!\n\nNieuw: ${result.created}\nBijgewerkt: ${result.updated}\nTotaal: ${result.total}`);
+
+        // Reload data
+        await loadDataFromAPI();
+        renderSettings();
+    } catch (error) {
+        alert('Teams aanmaken mislukt: ' + error.message);
+    }
+}
+
+async function showDebugInfo() {
+    try {
+        const result = await apiFetch('/admin/debug');
+
+        let message = `=== DATABASE DEBUG INFO ===\n\n`;
+        message += `TEAMS (${result.teams.length}):\n`;
+        result.teams.forEach(t => {
+            message += `• ${t.id}: ${t.name}\n`;
+        });
+
+        message += `\nMEDEWERKERS (${result.employeeCount}):\n`;
+        result.employees.forEach(emp => {
+            const w1 = emp.weekScheduleWeek1;
+            const w2 = emp.weekScheduleWeek2;
+            message += `\n${emp.name} (ID: ${emp.id}):\n`;
+            message += `  mainTeam: ${emp.mainTeam || 'GEEN'}\n`;
+            message += `  weekScheduleWeek1: type=${w1.type}, isArray=${w1.isArray}, length=${w1.length}\n`;
+            message += `  weekScheduleWeek2: type=${w2.type}, isArray=${w2.isArray}, length=${w2.length}\n`;
+        });
+
+        console.log(message);
+        console.log('Full debug result:', result);
+        alert(message.substring(0, 2000) + (message.length > 2000 ? '\n\n... (zie console voor volledige output)' : ''));
+    } catch (error) {
+        alert('Debug info ophalen mislukt: ' + error.message);
     }
 }
 
