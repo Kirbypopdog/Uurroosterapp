@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke', 'medewerker')),
   team_id TEXT REFERENCES teams(id),
+  employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   created_at TIMESTAMP DEFAULT NOW()
 );
 

@@ -2816,6 +2816,12 @@ async function loadAdminUsers(container) {
 function showAddUserModal(teams) {
     const teamOptions = teams.map(team => `<option value="${team.id}">${escapeHtml(team.name)}</option>`).join('');
 
+    // Get employees that don't have a linked user yet (for linking)
+    const employees = getAllEmployees(true);
+    const employeeOptions = employees.map(emp =>
+        `<option value="${emp.id}" data-name="${escapeHtml(emp.name)}" data-email="${escapeHtml(emp.email || '')}" data-team="${emp.mainTeam || ''}">${escapeHtml(emp.name)}</option>`
+    ).join('');
+
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'add-user-modal';
@@ -2828,6 +2834,14 @@ function showAddUserModal(teams) {
             </div>
             <div class="modal-body">
                 <form id="add-user-form">
+                    <div class="form-group">
+                        <label for="new-user-employee">Koppel aan medewerker</label>
+                        <select id="new-user-employee" class="form-input">
+                            <option value="">(nieuwe medewerker)</option>
+                            ${employeeOptions}
+                        </select>
+                        <span class="form-hint">Selecteer een bestaande medewerker om te koppelen, of laat leeg voor een nieuwe</span>
+                    </div>
                     <div class="form-group">
                         <label for="new-user-name">Naam</label>
                         <input type="text" id="new-user-name" class="form-input" required />
@@ -2867,9 +2881,23 @@ function showAddUserModal(teams) {
 
     document.body.appendChild(modal);
 
+    // Auto-fill when selecting an employee
+    const employeeSelect = modal.querySelector('#new-user-employee');
+    employeeSelect.addEventListener('change', () => {
+        const selected = employeeSelect.selectedOptions[0];
+        if (selected && selected.value) {
+            form.querySelector('#new-user-name').value = selected.dataset.name || '';
+            form.querySelector('#new-user-email').value = selected.dataset.email || '';
+            if (selected.dataset.team) {
+                form.querySelector('#new-user-team').value = selected.dataset.team;
+            }
+        }
+    });
+
     const form = modal.querySelector('#add-user-form');
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const employee_id = form.querySelector('#new-user-employee').value || null;
         const name = form.querySelector('#new-user-name').value.trim();
         const email = form.querySelector('#new-user-email').value.trim();
         const password = form.querySelector('#new-user-password').value;
@@ -2879,7 +2907,7 @@ function showAddUserModal(teams) {
         try {
             await apiFetch('/admin/users', {
                 method: 'POST',
-                body: JSON.stringify({ name, email, password, role, team_id })
+                body: JSON.stringify({ name, email, password, role, team_id, employee_id: employee_id ? Number(employee_id) : null })
             });
             modal.remove();
             showToast('Gebruiker aangemaakt', 'success');
@@ -3072,6 +3100,8 @@ function renderSettingsTeams(container) {
 
 // ===== SETTINGS TAB: SYSTEEM =====
 function renderSettingsSystem(container) {
+    const isAdmin = AppState.currentUser?.role === 'admin';
+
     container.innerHTML = `
         <!-- Data beheer -->
         <div class="settings-card" id="settings-data">
@@ -3083,7 +3113,7 @@ function renderSettingsSystem(container) {
             </div>
             <div class="settings-card-body">
                 <div class="info-box neutral">
-                    <p>Alle data wordt lokaal opgeslagen in je browser (LocalStorage).</p>
+                    <p>Alle data wordt opgeslagen in de PostgreSQL database.</p>
                     <p>Exporteer regelmatig een backup om dataverlies te voorkomen.</p>
                 </div>
                 <div class="data-stats">
@@ -3105,6 +3135,13 @@ function renderSettingsSystem(container) {
                     <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeer</button>
                     <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importData(event)">
                 </div>
+                ${isAdmin ? `
+                <div class="migration-zone" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                    <h4>Database migratie</h4>
+                    <p>Voer database migraties uit om data te repareren (bijv. weekroosters fixen).</p>
+                    <button class="btn btn-secondary" onclick="runMigration()">Database migreren</button>
+                </div>
+                ` : ''}
                 <div class="danger-zone">
                     <h4>Gevarenzone</h4>
                     <p>Deze actie kan niet ongedaan worden gemaakt!</p>
@@ -4019,6 +4056,38 @@ function exportData() {
     link.download = `hetvlot-backup-${new Date().toISOString().split('T')[0]}.json`;
     link.click();
     URL.revokeObjectURL(url);
+}
+
+async function runMigration() {
+    if (!confirm('Wil je de database migratie uitvoeren?\n\nDit zal:\n- Weekroosters repareren (dubbel-geserialiseerde data)\n- Database schema updaten indien nodig')) {
+        return;
+    }
+
+    try {
+        const result = await apiFetch('/admin/migrate', { method: 'POST' });
+        let message = 'Migratie succesvol!\n\n';
+
+        if (result.results.migrations.length > 0) {
+            message += 'Schema updates:\n' + result.results.migrations.map(m => '• ' + m).join('\n') + '\n\n';
+        }
+
+        if (result.results.fixes.length > 0) {
+            message += 'Data fixes:\n' + result.results.fixes.map(f => '• ' + f).join('\n');
+        }
+
+        if (result.results.migrations.length === 0 && result.results.fixes.length === 0) {
+            message += 'Geen wijzigingen nodig - database is up-to-date.';
+        }
+
+        alert(message);
+
+        // Reload data to see the fixed weekSchedules
+        await loadDataFromAPI();
+        renderPlanning();
+        showToast('Data opnieuw geladen', 'success');
+    } catch (error) {
+        alert('Migratie mislukt: ' + error.message);
+    }
 }
 
 function sanitizeString(value, maxLen = 200) {

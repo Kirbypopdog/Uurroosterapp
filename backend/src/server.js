@@ -177,7 +177,7 @@ app.get('/users', requireAuth, async (req, res) => {
 app.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, name, email, role, team_id FROM users ORDER BY name'
+      'SELECT id, name, email, role, team_id, employee_id FROM users ORDER BY name'
     );
     res.json({ users: result.rows });
   } catch (err) {
@@ -187,7 +187,7 @@ app.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
 });
 
 app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
-  const { name, email, password, role, team_id } = req.body || {};
+  const { name, email, password, role, team_id, employee_id } = req.body || {};
   if (!name || !email || !password || !role) {
     return res.status(400).json({ error: 'Naam, email, wachtwoord en rol zijn verplicht' });
   }
@@ -199,10 +199,10 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
     }
     const passwordHash = await bcrypt.hash(password, 12);
     const result = await pool.query(
-      `INSERT INTO users (name, email, password_hash, role, team_id)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, name, email, role, team_id`,
-      [name, email.toLowerCase(), passwordHash, role, team_id || null]
+      `INSERT INTO users (name, email, password_hash, role, team_id, employee_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, name, email, role, team_id, employee_id`,
+      [name, email.toLowerCase(), passwordHash, role, team_id || null, employee_id || null]
     );
     res.status(201).json({ user: result.rows[0] });
   } catch (err) {
@@ -213,7 +213,7 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
 
 app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = Number(req.params.id);
-  const { role, team_id, name, email } = req.body || {};
+  const { role, team_id, name, email, employee_id } = req.body || {};
   if (!userId || !role) {
     return res.status(400).json({ error: 'Missing fields' });
   }
@@ -223,10 +223,11 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
        SET role = $1,
            team_id = $2,
            name = COALESCE($3, name),
-           email = COALESCE($4, email)
-       WHERE id = $5
-       RETURNING id, name, email, role, team_id`,
-      [role, team_id || null, name, email ? email.toLowerCase() : null, userId]
+           email = COALESCE($4, email),
+           employee_id = $5
+       WHERE id = $6
+       RETURNING id, name, email, role, team_id, employee_id`,
+      [role, team_id || null, name, email ? email.toLowerCase() : null, employee_id || null, userId]
     );
     res.json({ user: result.rows[0] });
   } catch (err) {
@@ -287,7 +288,7 @@ app.post('/employees', requireAuth, async (req, res) => {
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2",
                 created_at as "createdAt"
-    `, [name, email || null, mainTeam || null, extraTeams || [], contractHours || 0, active !== false, JSON.stringify(weekScheduleWeek1 || []), JSON.stringify(weekScheduleWeek2 || [])]);
+    `, [name, email || null, mainTeam || null, extraTeams || [], contractHours || 0, active !== false, weekScheduleWeek1 || [], weekScheduleWeek2 || []]);
     res.status(201).json({ employee: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -572,8 +573,8 @@ app.post('/import', requireAuth, async (req, res) => {
           emp.extraTeams || [],
           emp.contractHours || 0,
           emp.active !== false,
-          JSON.stringify(emp.weekScheduleWeek1 || []),
-          JSON.stringify(emp.weekScheduleWeek2 || [])
+          emp.weekScheduleWeek1 || [],
+          emp.weekScheduleWeek2 || []
         ]);
       }
     }
@@ -598,6 +599,70 @@ app.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Database migration endpoint (admin only)
+app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
+  const results = { migrations: [], fixes: [] };
+
+  try {
+    // Migration 1: Add employee_id column to users if not exists
+    try {
+      await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL');
+      results.migrations.push('Added employee_id column to users table');
+    } catch (e) {
+      if (!e.message.includes('already exists')) {
+        throw e;
+      }
+    }
+
+    // Fix: Double-serialized weekSchedule data
+    const employees = await pool.query('SELECT id, week_schedule_week1, week_schedule_week2 FROM employees');
+    let fixedCount = 0;
+
+    for (const emp of employees.rows) {
+      let week1 = emp.week_schedule_week1;
+      let week2 = emp.week_schedule_week2;
+      let needsUpdate = false;
+
+      // Check if week1 is a string that looks like JSON
+      if (typeof week1 === 'string') {
+        try {
+          week1 = JSON.parse(week1);
+          needsUpdate = true;
+        } catch (e) {
+          week1 = [];
+        }
+      }
+
+      // Check if week2 is a string that looks like JSON
+      if (typeof week2 === 'string') {
+        try {
+          week2 = JSON.parse(week2);
+          needsUpdate = true;
+        } catch (e) {
+          week2 = [];
+        }
+      }
+
+      if (needsUpdate) {
+        await pool.query(
+          'UPDATE employees SET week_schedule_week1 = $1, week_schedule_week2 = $2 WHERE id = $3',
+          [week1, week2, emp.id]
+        );
+        fixedCount++;
+      }
+    }
+
+    if (fixedCount > 0) {
+      results.fixes.push(`Fixed weekSchedule data for ${fixedCount} employees`);
+    }
+
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Migration failed: ' + err.message });
   }
 });
 
