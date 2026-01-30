@@ -14,6 +14,52 @@ const DEFAULT_RESET_PASSWORD = process.env.DEFAULT_RESET_PASSWORD || 'Welkom123!
 app.use(cors());
 app.use(express.json());
 
+// ===== AUTO-MIGRATION ON STARTUP =====
+// Ensures the database schema is up-to-date
+async function ensureSchema() {
+  const client = await pool.connect();
+  try {
+    // Check if new columns exist in users table
+    const colCheck = await client.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'users' AND column_name = 'main_team'
+    `);
+
+    if (colCheck.rows.length === 0) {
+      console.log('Running auto-migration: adding employee columns to users table...');
+
+      // Add new columns
+      const columnsToAdd = [
+        { name: 'main_team', def: 'TEXT REFERENCES teams(id)' },
+        { name: 'extra_teams', def: "TEXT[] DEFAULT '{}'" },
+        { name: 'contract_hours', def: 'NUMERIC DEFAULT 0' },
+        { name: 'active', def: 'BOOLEAN DEFAULT true' },
+        { name: 'week_schedule_week1', def: "JSONB DEFAULT '[]'" },
+        { name: 'week_schedule_week2', def: "JSONB DEFAULT '[]'" }
+      ];
+
+      for (const col of columnsToAdd) {
+        try {
+          await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${col.name} ${col.def}`);
+          console.log(`  Added column: ${col.name}`);
+        } catch (e) {
+          // Column might already exist with different constraints
+          console.log(`  Column ${col.name}: ${e.message}`);
+        }
+      }
+
+      console.log('Auto-migration complete. Run /admin/migrate for full data migration.');
+    }
+  } catch (err) {
+    console.error('Schema check error:', err.message);
+  } finally {
+    client.release();
+  }
+}
+
+// Run schema check on startup
+ensureSchema().catch(console.error);
+
 function signToken(user) {
   return jwt.sign(
     { id: user.id, role: user.role, team_id: user.team_id },
@@ -93,15 +139,26 @@ app.post('/auth/login', async (req, res) => {
     return res.status(400).json({ error: 'Missing fields' });
   }
   try {
-    const result = await pool.query(
-      `SELECT id, name, email, password_hash, role, team_id,
-              main_team as "mainTeam", extra_teams as "extraTeams",
-              contract_hours as "contractHours", active,
-              week_schedule_week1 as "weekScheduleWeek1",
-              week_schedule_week2 as "weekScheduleWeek2"
-       FROM users WHERE email = $1`,
-      [email.toLowerCase()]
-    );
+    // Try new schema first, fall back to old schema if columns don't exist
+    let result;
+    try {
+      result = await pool.query(
+        `SELECT id, name, email, password_hash, role, team_id,
+                main_team as "mainTeam", extra_teams as "extraTeams",
+                contract_hours as "contractHours", active,
+                week_schedule_week1 as "weekScheduleWeek1",
+                week_schedule_week2 as "weekScheduleWeek2"
+         FROM users WHERE email = $1`,
+        [email.toLowerCase()]
+      );
+    } catch (schemaErr) {
+      // Fallback to old schema (before migration)
+      console.log('Using old schema for login (migration not yet run)');
+      result = await pool.query(
+        'SELECT id, name, email, password_hash, role, team_id FROM users WHERE email = $1',
+        [email.toLowerCase()]
+      );
+    }
     const user = result.rows[0];
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -123,15 +180,24 @@ app.post('/auth/login', async (req, res) => {
 
 app.get('/me', requireAuth, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, name, email, role, team_id,
-              main_team as "mainTeam", extra_teams as "extraTeams",
-              contract_hours as "contractHours", active,
-              week_schedule_week1 as "weekScheduleWeek1",
-              week_schedule_week2 as "weekScheduleWeek2"
-       FROM users WHERE id = $1`,
-      [req.user.id]
-    );
+    let result;
+    try {
+      result = await pool.query(
+        `SELECT id, name, email, role, team_id,
+                main_team as "mainTeam", extra_teams as "extraTeams",
+                contract_hours as "contractHours", active,
+                week_schedule_week1 as "weekScheduleWeek1",
+                week_schedule_week2 as "weekScheduleWeek2"
+         FROM users WHERE id = $1`,
+        [req.user.id]
+      );
+    } catch (schemaErr) {
+      // Fallback to old schema
+      result = await pool.query(
+        'SELECT id, name, email, role, team_id FROM users WHERE id = $1',
+        [req.user.id]
+      );
+    }
     const user = result.rows[0];
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -203,31 +269,45 @@ app.get('/teams', requireAuth, async (req, res) => {
 app.get('/users', requireAuth, async (req, res) => {
   try {
     const { role, team_id } = req.user;
-    let query = `
-      SELECT id, name, email, role, team_id,
-             main_team as "mainTeam", extra_teams as "extraTeams",
-             contract_hours as "contractHours", active,
-             week_schedule_week1 as "weekScheduleWeek1",
-             week_schedule_week2 as "weekScheduleWeek2",
-             created_at as "createdAt"
-      FROM users
-    `;
-    const params = [];
 
-    // Role-based filtering
-    if (role === 'medewerker') {
-      // Medewerker sees only themselves
-      query += ' WHERE id = $1';
-      params.push(req.user.id);
-    } else if (role === 'teamverantwoordelijke') {
-      // Team leader sees their team only
-      query += ' WHERE main_team = $1 OR id = $2';
-      params.push(team_id, req.user.id);
+    // Try new schema, fallback to old
+    let result;
+    try {
+      let query = `
+        SELECT id, name, email, role, team_id,
+               main_team as "mainTeam", extra_teams as "extraTeams",
+               contract_hours as "contractHours", active,
+               week_schedule_week1 as "weekScheduleWeek1",
+               week_schedule_week2 as "weekScheduleWeek2",
+               created_at as "createdAt"
+        FROM users
+      `;
+      const params = [];
+
+      // Role-based filtering
+      if (role === 'medewerker') {
+        query += ' WHERE id = $1';
+        params.push(req.user.id);
+      } else if (role === 'teamverantwoordelijke') {
+        query += ' WHERE main_team = $1 OR id = $2';
+        params.push(team_id, req.user.id);
+      }
+
+      query += ' ORDER BY name';
+      result = await pool.query(query, params);
+    } catch (schemaErr) {
+      // Fallback to old schema
+      console.log('Using old schema for /users');
+      let query = 'SELECT id, name, email, role, team_id, created_at as "createdAt" FROM users';
+      if (role === 'medewerker') {
+        query += ' WHERE id = $1 ORDER BY name';
+        result = await pool.query(query, [req.user.id]);
+      } else {
+        query += ' ORDER BY name';
+        result = await pool.query(query);
+      }
     }
-    // Admin and hoofdverantwoordelijke see everyone
 
-    query += ' ORDER BY name';
-    const result = await pool.query(query, params);
     res.json({ users: result.rows });
   } catch (err) {
     console.error(err);
