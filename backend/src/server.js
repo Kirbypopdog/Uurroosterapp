@@ -557,18 +557,37 @@ app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (re
 app.get('/shifts', requireAuth, async (req, res) => {
   const { startDate, endDate } = req.query;
   try {
-    let query = `
-      SELECT id, user_id as "userId", team, date, start_time as "startTime",
-             end_time as "endTime", notes, created_at as "createdAt"
-      FROM shifts
-    `;
-    const params = [];
-    if (startDate && endDate) {
-      query += ' WHERE date >= $1 AND date <= $2';
-      params.push(startDate, endDate);
+    // Try new schema (user_id), fallback to old (employee_id)
+    let result;
+    try {
+      let query = `
+        SELECT id, user_id as "userId", team, date, start_time as "startTime",
+               end_time as "endTime", notes, created_at as "createdAt"
+        FROM shifts
+      `;
+      const params = [];
+      if (startDate && endDate) {
+        query += ' WHERE date >= $1 AND date <= $2';
+        params.push(startDate, endDate);
+      }
+      query += ' ORDER BY date, start_time';
+      result = await pool.query(query, params);
+    } catch (schemaErr) {
+      // Fallback to old schema with employee_id
+      console.log('Using old schema for /shifts (employee_id)');
+      let query = `
+        SELECT id, employee_id as "userId", team, date, start_time as "startTime",
+               end_time as "endTime", notes, created_at as "createdAt"
+        FROM shifts
+      `;
+      const params = [];
+      if (startDate && endDate) {
+        query += ' WHERE date >= $1 AND date <= $2';
+        params.push(startDate, endDate);
+      }
+      query += ' ORDER BY date, start_time';
+      result = await pool.query(query, params);
     }
-    query += ' ORDER BY date, start_time';
-    const result = await pool.query(query, params);
     res.json({ shifts: result.rows });
   } catch (err) {
     console.error(err);
@@ -661,25 +680,51 @@ app.delete('/shifts', requireAuth, async (req, res) => {
 app.get('/availability', requireAuth, async (req, res) => {
   const { startDate, endDate, userId } = req.query;
   try {
-    let query = `
-      SELECT id, user_id as "userId", date, type, reason, updated_at as "updatedAt"
-      FROM availability
-      WHERE 1=1
-    `;
-    const params = [];
-    let paramIndex = 1;
+    // Try new schema (user_id), fallback to old (employee_id)
+    let result;
+    try {
+      let query = `
+        SELECT id, user_id as "userId", date, type, reason, updated_at as "updatedAt"
+        FROM availability
+        WHERE 1=1
+      `;
+      const params = [];
+      let paramIndex = 1;
 
-    if (startDate && endDate) {
-      query += ` AND date >= $${paramIndex} AND date <= $${paramIndex + 1}`;
-      params.push(startDate, endDate);
-      paramIndex += 2;
+      if (startDate && endDate) {
+        query += ` AND date >= $${paramIndex} AND date <= $${paramIndex + 1}`;
+        params.push(startDate, endDate);
+        paramIndex += 2;
+      }
+      if (userId) {
+        query += ` AND user_id = $${paramIndex}`;
+        params.push(userId);
+      }
+      query += ' ORDER BY date';
+      result = await pool.query(query, params);
+    } catch (schemaErr) {
+      // Fallback to old schema with employee_id
+      console.log('Using old schema for /availability (employee_id)');
+      let query = `
+        SELECT id, employee_id as "userId", date, type, reason, updated_at as "updatedAt"
+        FROM availability
+        WHERE 1=1
+      `;
+      const params = [];
+      let paramIndex = 1;
+
+      if (startDate && endDate) {
+        query += ` AND date >= $${paramIndex} AND date <= $${paramIndex + 1}`;
+        params.push(startDate, endDate);
+        paramIndex += 2;
+      }
+      if (userId) {
+        query += ` AND employee_id = $${paramIndex}`;
+        params.push(userId);
+      }
+      query += ' ORDER BY date';
+      result = await pool.query(query, params);
     }
-    if (userId) {
-      query += ` AND user_id = $${paramIndex}`;
-      params.push(userId);
-    }
-    query += ' ORDER BY date';
-    const result = await pool.query(query, params);
     res.json({ availability: result.rows });
   } catch (err) {
     console.error(err);
