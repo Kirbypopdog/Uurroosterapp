@@ -2912,7 +2912,7 @@ function showAddUserModal(teams) {
             modal.remove();
             alert('Gebruiker aangemaakt!');
             // Refresh accounts list
-            renderSettingsAccounts(document.querySelector('#settings-content'));
+            renderSettingsAccounts(document.querySelector('#settings-tab-content'));
         } catch (err) {
             alert('Fout bij aanmaken: ' + (err.message || 'Onbekende fout'));
         }
