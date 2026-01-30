@@ -121,27 +121,9 @@ async function apiFetch(path, options = {}) {
 }
 
 async function syncEmployeeAccountLinks() {
-    if (!AppState.currentUser || !Array.isArray(DataStore.employees)) return;
-    try {
-        const data = await apiFetch('/users');
-        const users = data.users || [];
-        if (users.length === 0) return;
-        const usersByEmail = new Map(users.map(user => [String(user.email || '').toLowerCase(), user]));
-        let changed = false;
-        DataStore.employees = DataStore.employees.map(emp => {
-            const email = String(emp.email || '').toLowerCase();
-            const linked = usersByEmail.get(email);
-            if (!linked) return emp;
-            if (emp.user_id === linked.id) return emp;
-            changed = true;
-            return { ...emp, user_id: linked.id };
-        });
-        if (changed) {
-            saveToStorage();
-        }
-    } catch (error) {
-        console.warn('Kon accounts niet koppelen:', error.message);
-    }
+    // No longer needed - users and employees are now merged
+    // Keeping function signature for backward compatibility
+    return;
 }
 
 function getContrastColor(hexColor) {
@@ -4049,7 +4031,15 @@ function handleRemoveAbsence() {
 }
 
 function exportData() {
-    const dataToExport = {employees: DataStore.employees, shifts: DataStore.shifts, settings: DataStore.settings, exportDate: new Date().toISOString()};
+    // Export users (with schedule data) - also include as 'employees' for backward compatibility
+    const users = DataStore.employees; // Gets non-admin users via getter
+    const dataToExport = {
+        users: users,
+        employees: users, // Backward compatibility
+        shifts: DataStore.shifts,
+        settings: DataStore.settings,
+        exportDate: new Date().toISOString()
+    };
     const dataStr = JSON.stringify(dataToExport, null, 2);
     const dataBlob = new Blob([dataStr], {type: 'application/json'});
     const url = URL.createObjectURL(dataBlob);
@@ -4334,52 +4324,47 @@ async function importData(event) {
             const data = JSON.parse(e.target.result);
             console.log('Data parsed:', data);
 
-            // Direct gebruik van backup data (zonder strikte sanitization)
-            const employees = data.employees || [];
-            console.log('Gevonden medewerkers:', employees.length);
+            // Support both old (employees) and new (users) format
+            const usersToImport = data.users || data.employees || [];
+            console.log('Gevonden gebruikers/medewerkers:', usersToImport.length);
 
-            if (employees.length === 0) {
+            if (usersToImport.length === 0) {
                 alert('Geen medewerkers gevonden in backup bestand');
                 return;
             }
 
-            if (!confirm(`${employees.length} medewerkers gevonden. Importeren naar de database?`)) {
+            if (!confirm(`${usersToImport.length} medewerkers gevonden. Importeren naar de database?\n\nNieuwe medewerkers krijgen het standaard wachtwoord: Welkom123!`)) {
                 return;
             }
 
-            // Import employees via API
-            let imported = 0;
-            let errors = [];
+            // Import via bulk API endpoint
+            const importPayload = {
+                users: usersToImport.map(emp => ({
+                    name: emp.name || 'Onbekend',
+                    email: emp.email || null,
+                    mainTeam: emp.mainTeam || null,
+                    extraTeams: Array.isArray(emp.extraTeams) ? emp.extraTeams : [],
+                    contractHours: Number(emp.contractHours) || 0,
+                    active: emp.active !== false,
+                    weekScheduleWeek1: Array.isArray(emp.weekScheduleWeek1) ? emp.weekScheduleWeek1 : [],
+                    weekScheduleWeek2: Array.isArray(emp.weekScheduleWeek2) ? emp.weekScheduleWeek2 : []
+                }))
+            };
 
-            for (const emp of employees) {
-                try {
-                    console.log('Importeren:', emp.name);
-                    await apiFetch('/employees', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            name: emp.name || 'Onbekend',
-                            email: emp.email || null,
-                            mainTeam: emp.mainTeam || null,
-                            extraTeams: Array.isArray(emp.extraTeams) ? emp.extraTeams : [],
-                            contractHours: Number(emp.contractHours) || 0,
-                            active: emp.active !== false,
-                            weekScheduleWeek1: Array.isArray(emp.weekScheduleWeek1) ? emp.weekScheduleWeek1 : [],
-                            weekScheduleWeek2: Array.isArray(emp.weekScheduleWeek2) ? emp.weekScheduleWeek2 : []
-                        })
-                    });
-                    imported++;
-                    console.log('Geïmporteerd:', emp.name);
-                } catch (err) {
-                    console.error('Fout bij importeren medewerker:', emp.name, err);
-                    errors.push(emp.name);
-                }
+            const result = await apiFetch('/import', {
+                method: 'POST',
+                body: JSON.stringify(importPayload)
+            });
+
+            let message = `${result.results.imported} items geïmporteerd.`;
+            if (result.results.skipped > 0) {
+                message += `\n${result.results.skipped} items overgeslagen.`;
+            }
+            if (result.results.errors && result.results.errors.length > 0) {
+                message += `\n\nFouten:\n${result.results.errors.map(e => `• ${e.name}: ${e.error}`).join('\n')}`;
             }
 
-            if (errors.length > 0) {
-                alert(`${imported} medewerkers geïmporteerd.\n\nFouten bij: ${errors.join(', ')}`);
-            } else {
-                alert(`${imported} medewerkers succesvol geïmporteerd!`);
-            }
+            alert(message);
 
             // Reload page to show new data
             location.reload();

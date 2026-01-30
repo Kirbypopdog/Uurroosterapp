@@ -1,6 +1,10 @@
 // ===== DATA MANAGEMENT SYSTEEM =====
 // Dit bestand beheert alle data voor Het Vlot roosterplanning
 // Alle data wordt opgeslagen in de PostgreSQL database via de API
+//
+// NOTE: Na Optie C migratie zijn employees en users samengevoegd.
+// "Users" bevat nu alle gebruikers met hun rooster/schedule data.
+// De term "employee" wordt nog gebruikt in de UI maar verwijst naar users.
 
 const DEFAULT_SETTINGS = window.DEFAULT_SETTINGS || {};
 
@@ -65,8 +69,17 @@ function normalizeSettings(settings) {
 }
 
 // Globale data store (in-memory cache van database data)
+// NOTE: employees is nu een alias voor users (minus admin users)
 const DataStore = {
-    employees: [],
+    users: [],           // All users with schedule data
+    get employees() {    // Backward compatibility: returns non-admin users
+        return this.users.filter(u => u.role !== 'admin');
+    },
+    set employees(val) { // Allow setting for backward compatibility
+        // When setting employees, merge with existing admin users
+        const admins = this.users.filter(u => u.role === 'admin');
+        this.users = [...admins, ...val.filter(u => u.role !== 'admin')];
+    },
     shifts: [],
     availability: [],
     swapRequests: [],
@@ -100,23 +113,33 @@ async function dataApiFetch(path, options = {}) {
 
 async function loadDataFromAPI() {
     try {
-        // Load all data in parallel
-        const [employeesData, shiftsData, availabilityData, settingsData] = await Promise.all([
-            dataApiFetch('/employees').catch(() => ({ employees: [] })),
+        // Load all data in parallel - users now includes employee/schedule data
+        const [usersData, shiftsData, availabilityData, settingsData] = await Promise.all([
+            dataApiFetch('/users').catch(() => ({ users: [] })),
             dataApiFetch('/shifts').catch(() => ({ shifts: [] })),
             dataApiFetch('/availability').catch(() => ({ availability: [] })),
             dataApiFetch('/settings').catch(() => ({ settings: {} }))
         ]);
 
-        DataStore.employees = employeesData.employees || [];
+        // Users now contain employee/schedule data
+        DataStore.users = usersData.users || [];
+
+        // Shifts now use userId instead of employeeId
         DataStore.shifts = (shiftsData.shifts || []).map(s => ({
             ...s,
-            date: typeof s.date === 'string' ? s.date.split('T')[0] : s.date
+            date: typeof s.date === 'string' ? s.date.split('T')[0] : s.date,
+            // Support both old (employeeId) and new (userId) field names
+            employeeId: s.userId || s.employeeId,
+            userId: s.userId || s.employeeId
         }));
+
+        // Availability now uses userId instead of employeeId
         DataStore.availability = (availabilityData.availability || []).map(a => ({
             ...a,
             date: typeof a.date === 'string' ? a.date.split('T')[0] : a.date,
-            key: `${a.employeeId}_${typeof a.date === 'string' ? a.date.split('T')[0] : a.date}`
+            employeeId: a.userId || a.employeeId,
+            userId: a.userId || a.employeeId,
+            key: `${a.userId || a.employeeId}_${typeof a.date === 'string' ? a.date.split('T')[0] : a.date}`
         }));
 
         // Merge API settings with defaults
@@ -132,7 +155,8 @@ async function loadDataFromAPI() {
 
         DataStore._loaded = true;
         console.log('Data geladen van API:', {
-            employees: DataStore.employees.length,
+            users: DataStore.users.length,
+            employees: DataStore.employees.length, // via getter
             shifts: DataStore.shifts.length,
             availability: DataStore.availability.length
         });
@@ -144,17 +168,25 @@ async function loadDataFromAPI() {
     }
 }
 
-// ===== MEDEWERKERS FUNCTIES =====
+// ===== MEDEWERKERS/USERS FUNCTIES =====
+// Note: These work with users now, but maintain "employee" naming for UI compatibility
 
 async function addEmployee(employeeData) {
     try {
-        const data = await dataApiFetch('/employees', {
+        // Create a user with employee/schedule data
+        const userData = {
+            ...employeeData,
+            password: 'Welkom123!', // Default password
+            role: 'medewerker'
+        };
+
+        const data = await dataApiFetch('/admin/users', {
             method: 'POST',
-            body: JSON.stringify(employeeData)
+            body: JSON.stringify(userData)
         });
-        const employee = data.employee;
-        DataStore.employees.push(employee);
-        return employee;
+        const user = data.user;
+        DataStore.users.push(user);
+        return user;
     } catch (error) {
         console.error('Fout bij toevoegen medewerker:', error);
         throw error;
@@ -163,19 +195,19 @@ async function addEmployee(employeeData) {
 
 async function updateEmployee(id, updates) {
     try {
-        const index = DataStore.employees.findIndex(e => e.id === id);
+        const index = DataStore.users.findIndex(e => e.id === id);
         if (index === -1) return null;
 
-        const currentEmployee = DataStore.employees[index];
-        const updatedData = { ...currentEmployee, ...updates };
+        const currentUser = DataStore.users[index];
+        const updatedData = { ...currentUser, ...updates };
 
-        const data = await dataApiFetch(`/employees/${id}`, {
+        const data = await dataApiFetch(`/users/${id}`, {
             method: 'PUT',
             body: JSON.stringify(updatedData)
         });
 
-        DataStore.employees[index] = data.employee;
-        return data.employee;
+        DataStore.users[index] = data.user;
+        return data.user;
     } catch (error) {
         console.error('Fout bij bijwerken medewerker:', error);
         throw error;
@@ -184,15 +216,15 @@ async function updateEmployee(id, updates) {
 
 async function deleteEmployee(id) {
     try {
-        await dataApiFetch(`/employees/${id}`, { method: 'DELETE' });
+        await dataApiFetch(`/admin/users/${id}`, { method: 'DELETE' });
 
-        const index = DataStore.employees.findIndex(e => e.id === id);
+        const index = DataStore.users.findIndex(e => e.id === id);
         if (index !== -1) {
-            DataStore.employees.splice(index, 1);
+            DataStore.users.splice(index, 1);
         }
         // Remove related shifts and availability from cache
-        DataStore.shifts = DataStore.shifts.filter(shift => shift.employeeId !== id);
-        DataStore.availability = DataStore.availability.filter(entry => entry.employeeId !== id);
+        DataStore.shifts = DataStore.shifts.filter(shift => shift.userId !== id && shift.employeeId !== id);
+        DataStore.availability = DataStore.availability.filter(entry => entry.userId !== id && entry.employeeId !== id);
 
         return true;
     } catch (error) {
@@ -202,19 +234,21 @@ async function deleteEmployee(id) {
 }
 
 function getEmployee(id) {
-    return DataStore.employees.find(e => e.id === id);
+    // Find in all users (employees are non-admin users)
+    return DataStore.users.find(e => e.id === id);
 }
 
 function getAllEmployees(activeOnly = false) {
+    // Get non-admin users (employees)
+    let employees = DataStore.users.filter(u => u.role !== 'admin');
     if (activeOnly) {
-        return DataStore.employees.filter(e => e.active);
+        employees = employees.filter(e => e.active !== false);
     }
-    return DataStore.employees;
+    return employees;
 }
 
 function getEmployeesByTeam(teamId, includeExtra = true) {
-    return DataStore.employees.filter(e => {
-        if (!e.active) return false;
+    return getAllEmployees(true).filter(e => {
         if (e.mainTeam === teamId) return true;
         if (includeExtra && e.extraTeams && e.extraTeams.includes(teamId)) return true;
         return false;
@@ -225,13 +259,22 @@ function getEmployeesByTeam(teamId, includeExtra = true) {
 
 async function addShift(shiftData) {
     try {
+        // Map employeeId to userId for new API
+        const apiData = {
+            ...shiftData,
+            userId: shiftData.userId || shiftData.employeeId
+        };
+        delete apiData.employeeId;
+
         const data = await dataApiFetch('/shifts', {
             method: 'POST',
-            body: JSON.stringify(shiftData)
+            body: JSON.stringify(apiData)
         });
         const shift = {
             ...data.shift,
-            date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date
+            date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date,
+            employeeId: data.shift.userId, // Backward compat
+            userId: data.shift.userId
         };
         DataStore.shifts.push(shift);
         return shift;
@@ -243,14 +286,23 @@ async function addShift(shiftData) {
 
 async function updateShift(id, updates) {
     try {
+        // Map employeeId to userId
+        const apiData = { ...updates };
+        if (apiData.employeeId && !apiData.userId) {
+            apiData.userId = apiData.employeeId;
+        }
+        delete apiData.employeeId;
+
         const data = await dataApiFetch(`/shifts/${id}`, {
             method: 'PUT',
-            body: JSON.stringify(updates)
+            body: JSON.stringify(apiData)
         });
 
         const shift = {
             ...data.shift,
-            date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date
+            date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date,
+            employeeId: data.shift.userId,
+            userId: data.shift.userId
         };
 
         const index = DataStore.shifts.findIndex(s => s.id === id);
@@ -308,7 +360,10 @@ async function removeShiftsInDateRange(startDate, endDate) {
 }
 
 function getShiftsByEmployee(employeeId, startDate = null, endDate = null) {
-    let shifts = DataStore.shifts.filter(s => s.employeeId === employeeId);
+    // Support both employeeId and userId
+    let shifts = DataStore.shifts.filter(s =>
+        s.employeeId === employeeId || s.userId === employeeId
+    );
     if (startDate && endDate) {
         shifts = shifts.filter(s => s.date >= startDate && s.date <= endDate);
     }
@@ -388,7 +443,8 @@ async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
         if (scheduleForDay && scheduleForDay.enabled) {
             try {
                 const shift = await addShift({
-                    employeeId: employeeId,
+                    userId: employeeId, // Use userId
+                    employeeId: employeeId, // Backward compat
                     team: scheduleForDay.team || employee.mainTeam,
                     date: dateStr,
                     startTime: scheduleForDay.startTime,
@@ -420,8 +476,9 @@ async function applyWeekScheduleForAllEmployees(startDate, endDate) {
 // ===== AFWEZIGHEID FUNCTIES =====
 
 function getAvailability(employeeId, date) {
+    // Support both employeeId and userId
     return DataStore.availability.find(a =>
-        String(a.employeeId) === String(employeeId) && a.date === date
+        (String(a.employeeId) === String(employeeId) || String(a.userId) === String(employeeId)) && a.date === date
     );
 }
 
@@ -434,7 +491,7 @@ async function setAvailability(employeeId, date, absenceData) {
         const data = await dataApiFetch('/availability', {
             method: 'POST',
             body: JSON.stringify({
-                employeeId,
+                userId: employeeId, // Use userId for API
                 date,
                 type: absenceData.type,
                 reason: absenceData.reason || ''
@@ -444,7 +501,9 @@ async function setAvailability(employeeId, date, absenceData) {
         const absence = {
             ...data.availability,
             date: typeof data.availability.date === 'string' ? data.availability.date.split('T')[0] : data.availability.date,
-            key: `${employeeId}_${date}`
+            employeeId: data.availability.userId, // Backward compat
+            userId: data.availability.userId,
+            key: `${data.availability.userId}_${date}`
         };
 
         // Update cache
@@ -464,7 +523,7 @@ async function setAvailability(employeeId, date, absenceData) {
 
 async function removeAvailability(employeeId, date) {
     try {
-        await dataApiFetch(`/availability?employeeId=${employeeId}&date=${date}`, {
+        await dataApiFetch(`/availability?userId=${employeeId}&date=${date}`, {
             method: 'DELETE'
         });
 
@@ -788,8 +847,8 @@ async function updateHolidayRules(rules) {
 
 function getEligibleEmployeesForResponsible() {
     const eligibleTeams = DataStore.settings.responsibleRotation?.eligibleTeams || ['vlot1', 'vlot2', 'cargo'];
-    return DataStore.employees.filter(emp =>
-        emp.active && eligibleTeams.includes(emp.mainTeam)
+    return getAllEmployees(true).filter(emp =>
+        eligibleTeams.includes(emp.mainTeam)
     ).sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -957,17 +1016,17 @@ function loadFromStorage() {
 }
 
 async function resetData() {
-    if (!confirm('Weet je zeker dat je ALLE data wilt verwijderen?\n\nDit verwijdert alle medewerkers, diensten en afwezigheden.\nDit kan niet ongedaan worden gemaakt!')) {
+    if (!confirm('Weet je zeker dat je ALLE data wilt verwijderen?\n\nDit verwijdert alle diensten en afwezigheden.\nGebruikers blijven behouden.\nDit kan niet ongedaan worden gemaakt!')) {
         return;
     }
 
-    if (!confirm('LAATSTE WAARSCHUWING: Alle data wordt permanent verwijderd. Doorgaan?')) {
+    if (!confirm('LAATSTE WAARSCHUWING: Alle planning data wordt permanent verwijderd. Doorgaan?')) {
         return;
     }
 
     try {
         await dataApiFetch('/reset-data', { method: 'DELETE' });
-        alert('Alle data is gewist. De pagina wordt herladen.');
+        alert('Alle planning data is gewist. De pagina wordt herladen.');
         location.reload();
     } catch (error) {
         alert('Fout bij wissen: ' + error.message);
