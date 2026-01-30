@@ -297,15 +297,19 @@ app.post('/employees', requireAuth, async (req, res) => {
       validExtraTeams = teamsResult.rows.map(r => r.id);
     }
 
+    // Serialize JSONB data - pg requires JSON strings for JSONB columns with complex data
+    const week1Json = JSON.stringify(weekScheduleWeek1 || []);
+    const week2Json = JSON.stringify(weekScheduleWeek2 || []);
+
     const result = await pool.query(`
       INSERT INTO employees (name, email, main_team, extra_teams, contract_hours, active, week_schedule_week1, week_schedule_week2)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
       RETURNING id, name, email, main_team as "mainTeam", extra_teams as "extraTeams",
                 contract_hours as "contractHours", active,
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2",
                 created_at as "createdAt"
-    `, [name, email || null, validMainTeam, validExtraTeams, contractHours || 0, active !== false, weekScheduleWeek1 || [], weekScheduleWeek2 || []]);
+    `, [name, email || null, validMainTeam, validExtraTeams, contractHours || 0, active !== false, week1Json, week2Json]);
     res.status(201).json({ employee: result.rows[0] });
   } catch (err) {
     console.error('Error creating employee:', err);
@@ -320,18 +324,22 @@ app.put('/employees/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'ID en naam zijn verplicht' });
   }
   try {
+    // Serialize JSONB data
+    const week1Json = JSON.stringify(weekScheduleWeek1 || []);
+    const week2Json = JSON.stringify(weekScheduleWeek2 || []);
+
     const result = await pool.query(`
       UPDATE employees
       SET name = $1, email = $2, main_team = $3, extra_teams = $4,
           contract_hours = $5, active = $6,
-          week_schedule_week1 = $7, week_schedule_week2 = $8
+          week_schedule_week1 = $7::jsonb, week_schedule_week2 = $8::jsonb
       WHERE id = $9
       RETURNING id, name, email, main_team as "mainTeam", extra_teams as "extraTeams",
                 contract_hours as "contractHours", active,
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2",
                 created_at as "createdAt"
-    `, [name, email || null, mainTeam || null, extraTeams || [], contractHours || 0, active !== false, weekScheduleWeek1 || [], weekScheduleWeek2 || [], id]);
+    `, [name, email || null, mainTeam || null, extraTeams || [], contractHours || 0, active !== false, week1Json, week2Json, id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Medewerker niet gevonden' });
     }
@@ -589,9 +597,13 @@ app.post('/import', requireAuth, async (req, res) => {
           }
         }
 
+        // Serialize JSONB data
+        const week1Json = JSON.stringify(emp.weekScheduleWeek1 || []);
+        const week2Json = JSON.stringify(emp.weekScheduleWeek2 || []);
+
         await pool.query(`
           INSERT INTO employees (name, email, main_team, extra_teams, contract_hours, active, week_schedule_week1, week_schedule_week2)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
         `, [
           emp.name,
           emp.email || null,
@@ -599,8 +611,8 @@ app.post('/import', requireAuth, async (req, res) => {
           emp.extraTeams || [],
           emp.contractHours || 0,
           emp.active !== false,
-          emp.weekScheduleWeek1 || [],
-          emp.weekScheduleWeek2 || []
+          week1Json,
+          week2Json
         ]);
         results.imported++;
       } catch (err) {
