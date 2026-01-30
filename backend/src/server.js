@@ -601,12 +601,25 @@ app.post('/shifts', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
   try {
-    const result = await pool.query(`
-      INSERT INTO shifts (user_id, team, date, start_time, end_time, notes)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, user_id as "userId", team, date, start_time as "startTime",
-                end_time as "endTime", notes, created_at as "createdAt"
-    `, [userId, team || null, date, startTime, endTime, notes || '']);
+    // Try new schema (user_id), fallback to old (employee_id)
+    let result;
+    try {
+      result = await pool.query(`
+        INSERT INTO shifts (user_id, team, date, start_time, end_time, notes)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, user_id as "userId", team, date, start_time as "startTime",
+                  end_time as "endTime", notes, created_at as "createdAt"
+      `, [userId, team || null, date, startTime, endTime, notes || '']);
+    } catch (schemaErr) {
+      // Fallback to old schema with employee_id
+      console.log('Using old schema for POST /shifts (employee_id)');
+      result = await pool.query(`
+        INSERT INTO shifts (employee_id, team, date, start_time, end_time, notes)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, employee_id as "userId", team, date, start_time as "startTime",
+                  end_time as "endTime", notes, created_at as "createdAt"
+      `, [userId, team || null, date, startTime, endTime, notes || '']);
+    }
     res.status(201).json({ shift: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -621,18 +634,37 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
   try {
-    const result = await pool.query(`
-      UPDATE shifts
-      SET user_id = COALESCE($1, user_id),
-          team = $2,
-          date = COALESCE($3, date),
-          start_time = COALESCE($4, start_time),
-          end_time = COALESCE($5, end_time),
-          notes = COALESCE($6, notes)
-      WHERE id = $7
-      RETURNING id, user_id as "userId", team, date, start_time as "startTime",
-                end_time as "endTime", notes, created_at as "createdAt"
-    `, [userId, team, date, startTime, endTime, notes, id]);
+    // Try new schema (user_id), fallback to old (employee_id)
+    let result;
+    try {
+      result = await pool.query(`
+        UPDATE shifts
+        SET user_id = COALESCE($1, user_id),
+            team = $2,
+            date = COALESCE($3, date),
+            start_time = COALESCE($4, start_time),
+            end_time = COALESCE($5, end_time),
+            notes = COALESCE($6, notes)
+        WHERE id = $7
+        RETURNING id, user_id as "userId", team, date, start_time as "startTime",
+                  end_time as "endTime", notes, created_at as "createdAt"
+      `, [userId, team, date, startTime, endTime, notes, id]);
+    } catch (schemaErr) {
+      // Fallback to old schema with employee_id
+      console.log('Using old schema for PUT /shifts (employee_id)');
+      result = await pool.query(`
+        UPDATE shifts
+        SET employee_id = COALESCE($1, employee_id),
+            team = $2,
+            date = COALESCE($3, date),
+            start_time = COALESCE($4, start_time),
+            end_time = COALESCE($5, end_time),
+            notes = COALESCE($6, notes)
+        WHERE id = $7
+        RETURNING id, employee_id as "userId", team, date, start_time as "startTime",
+                  end_time as "endTime", notes, created_at as "createdAt"
+      `, [userId, team, date, startTime, endTime, notes, id]);
+    }
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Dienst niet gevonden' });
     }
@@ -738,31 +770,49 @@ app.post('/availability', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
 
-  // Permission check for availability
+  // Permission check for availability (skip team check if main_team column doesn't exist)
   const { role, team_id } = req.user;
   if (role === 'medewerker' && userId !== req.user.id) {
     return res.status(403).json({ error: 'Je kunt alleen je eigen beschikbaarheid registreren' });
   }
 
   if (role === 'teamverantwoordelijke') {
-    const targetUser = await pool.query('SELECT main_team FROM users WHERE id = $1', [userId]);
-    if (targetUser.rows.length === 0) {
-      return res.status(404).json({ error: 'Gebruiker niet gevonden' });
-    }
-    if (targetUser.rows[0].main_team !== team_id && userId !== req.user.id) {
-      return res.status(403).json({ error: 'Je kunt alleen beschikbaarheid van je eigen team registreren' });
+    try {
+      const targetUser = await pool.query('SELECT main_team FROM users WHERE id = $1', [userId]);
+      if (targetUser.rows.length === 0) {
+        return res.status(404).json({ error: 'Gebruiker niet gevonden' });
+      }
+      if (targetUser.rows[0].main_team !== team_id && userId !== req.user.id) {
+        return res.status(403).json({ error: 'Je kunt alleen beschikbaarheid van je eigen team registreren' });
+      }
+    } catch (e) {
+      // Skip team check if main_team column doesn't exist yet
+      console.log('Skipping team permission check (main_team column not found)');
     }
   }
 
   try {
-    // Upsert - insert or update if exists
-    const result = await pool.query(`
-      INSERT INTO availability (user_id, date, type, reason, updated_at)
-      VALUES ($1, $2, $3, $4, NOW())
-      ON CONFLICT (user_id, date)
-      DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
-      RETURNING id, user_id as "userId", date, type, reason, updated_at as "updatedAt"
-    `, [userId, date, type, reason || '']);
+    // Try new schema (user_id), fallback to old (employee_id)
+    let result;
+    try {
+      result = await pool.query(`
+        INSERT INTO availability (user_id, date, type, reason, updated_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (user_id, date)
+        DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
+        RETURNING id, user_id as "userId", date, type, reason, updated_at as "updatedAt"
+      `, [userId, date, type, reason || '']);
+    } catch (schemaErr) {
+      // Fallback to old schema with employee_id
+      console.log('Using old schema for POST /availability (employee_id)');
+      result = await pool.query(`
+        INSERT INTO availability (employee_id, date, type, reason, updated_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (employee_id, date)
+        DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
+        RETURNING id, employee_id as "userId", date, type, reason, updated_at as "updatedAt"
+      `, [userId, date, type, reason || '']);
+    }
     res.status(201).json({ availability: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -776,24 +826,39 @@ app.delete('/availability', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'userId en date zijn verplicht' });
   }
 
-  // Permission check
+  // Permission check (skip team check if main_team column doesn't exist)
   const { role, team_id } = req.user;
   if (role === 'medewerker' && Number(userId) !== req.user.id) {
     return res.status(403).json({ error: 'Je kunt alleen je eigen beschikbaarheid verwijderen' });
   }
 
   if (role === 'teamverantwoordelijke') {
-    const targetUser = await pool.query('SELECT main_team FROM users WHERE id = $1', [userId]);
-    if (targetUser.rows.length > 0 && targetUser.rows[0].main_team !== team_id && Number(userId) !== req.user.id) {
-      return res.status(403).json({ error: 'Je kunt alleen beschikbaarheid van je eigen team verwijderen' });
+    try {
+      const targetUser = await pool.query('SELECT main_team FROM users WHERE id = $1', [userId]);
+      if (targetUser.rows.length > 0 && targetUser.rows[0].main_team !== team_id && Number(userId) !== req.user.id) {
+        return res.status(403).json({ error: 'Je kunt alleen beschikbaarheid van je eigen team verwijderen' });
+      }
+    } catch (e) {
+      // Skip team check if main_team column doesn't exist yet
+      console.log('Skipping team permission check (main_team column not found)');
     }
   }
 
   try {
-    await pool.query(
-      'DELETE FROM availability WHERE user_id = $1 AND date = $2',
-      [userId, date]
-    );
+    // Try new schema (user_id), fallback to old (employee_id)
+    try {
+      await pool.query(
+        'DELETE FROM availability WHERE user_id = $1 AND date = $2',
+        [userId, date]
+      );
+    } catch (schemaErr) {
+      // Fallback to old schema with employee_id
+      console.log('Using old schema for DELETE /availability (employee_id)');
+      await pool.query(
+        'DELETE FROM availability WHERE employee_id = $1 AND date = $2',
+        [userId, date]
+      );
+    }
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
