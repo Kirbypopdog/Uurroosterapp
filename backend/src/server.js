@@ -559,6 +559,7 @@ app.get('/shifts', requireAuth, async (req, res) => {
   try {
     // Try new schema (user_id), fallback to old (employee_id)
     let result;
+    let needsMapping = false;
     try {
       let query = `
         SELECT id, user_id as "userId", team, date, start_time as "startTime",
@@ -573,22 +574,49 @@ app.get('/shifts', requireAuth, async (req, res) => {
       query += ' ORDER BY date, start_time';
       result = await pool.query(query, params);
     } catch (schemaErr) {
-      // Fallback to old schema with employee_id
-      console.log('Using old schema for /shifts (employee_id)');
+      // Fallback to old schema with employee_id - need to map to user_id
+      console.log('Using old schema for /shifts - will map employee_id to user_id');
+      needsMapping = true;
       let query = `
-        SELECT id, employee_id as "userId", team, date, start_time as "startTime",
-               end_time as "endTime", notes, created_at as "createdAt"
-        FROM shifts
+        SELECT s.id, s.employee_id, s.team, s.date, s.start_time as "startTime",
+               s.end_time as "endTime", s.notes, s.created_at as "createdAt",
+               e.email as employee_email
+        FROM shifts s
+        LEFT JOIN employees e ON s.employee_id = e.id
       `;
       const params = [];
       if (startDate && endDate) {
-        query += ' WHERE date >= $1 AND date <= $2';
+        query += ' WHERE s.date >= $1 AND s.date <= $2';
         params.push(startDate, endDate);
       }
-      query += ' ORDER BY date, start_time';
+      query += ' ORDER BY s.date, s.start_time';
       result = await pool.query(query, params);
     }
-    res.json({ shifts: result.rows });
+
+    let shifts = result.rows;
+
+    // If using old schema, map employee_ids to user_ids via email
+    if (needsMapping && shifts.length > 0) {
+      // Get all users to create email -> user_id mapping
+      const usersResult = await pool.query('SELECT id, email FROM users');
+      const emailToUserId = new Map();
+      usersResult.rows.forEach(u => {
+        if (u.email) emailToUserId.set(u.email.toLowerCase(), u.id);
+      });
+
+      shifts = shifts.map(s => ({
+        id: s.id,
+        userId: s.employee_email ? (emailToUserId.get(s.employee_email.toLowerCase()) || s.employee_id) : s.employee_id,
+        team: s.team,
+        date: s.date,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        notes: s.notes,
+        createdAt: s.createdAt
+      }));
+    }
+
+    res.json({ shifts });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -601,7 +629,7 @@ app.post('/shifts', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
   try {
-    // Try new schema (user_id), fallback to old (employee_id)
+    // Try new schema (user_id) first
     let result;
     try {
       result = await pool.query(`
@@ -611,14 +639,32 @@ app.post('/shifts', requireAuth, async (req, res) => {
                   end_time as "endTime", notes, created_at as "createdAt"
       `, [userId, team || null, date, startTime, endTime, notes || '']);
     } catch (schemaErr) {
-      // Fallback to old schema with employee_id
-      console.log('Using old schema for POST /shifts (employee_id)');
+      // Fallback to old schema - need to map user_id to employee_id via email
+      console.log('Using old schema for POST /shifts - mapping user to employee');
+
+      // Get user's email
+      const userResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Gebruiker niet gevonden' });
+      }
+      const userEmail = userResult.rows[0].email;
+
+      // Find matching employee by email
+      const empResult = await pool.query('SELECT id FROM employees WHERE LOWER(email) = LOWER($1)', [userEmail]);
+      if (empResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Geen gekoppelde medewerker gevonden. Voer eerst de migratie uit.' });
+      }
+      const employeeId = empResult.rows[0].id;
+
       result = await pool.query(`
         INSERT INTO shifts (employee_id, team, date, start_time, end_time, notes)
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id, employee_id as "userId", team, date, start_time as "startTime",
                   end_time as "endTime", notes, created_at as "createdAt"
-      `, [userId, team || null, date, startTime, endTime, notes || '']);
+      `, [employeeId, team || null, date, startTime, endTime, notes || '']);
+
+      // Return the original userId for frontend compatibility
+      result.rows[0].userId = userId;
     }
     res.status(201).json({ shift: result.rows[0] });
   } catch (err) {
