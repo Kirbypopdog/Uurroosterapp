@@ -15,6 +15,10 @@ window.DEFAULT_SETTINGS = {
     // Week 2 = weekend OPEN
     biWeeklyReferenceDate: '2025-01-06',
 
+    // Planning horizon - hoe ver vooruit worden automatische diensten gegenereerd
+    planningHorizon: {
+        weeks: 4 // 4 weken vooruit (kan ook 8, 26, 52 of null voor onbeperkt)
+    },
     // Planning regels
     rules: {
         minHoursBetweenShifts: 11,

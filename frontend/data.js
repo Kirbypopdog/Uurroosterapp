@@ -130,7 +130,9 @@ async function loadDataFromAPI() {
             date: typeof s.date === 'string' ? s.date.split('T')[0] : s.date,
             // Support both old (employeeId) and new (userId) field names
             employeeId: s.userId || s.employeeId,
-            userId: s.userId || s.employeeId
+            userId: s.userId || s.employeeId,
+            // Source defaults to 'manual' for old data without source field
+            source: s.source || 'manual'
         }));
 
         // Availability now uses userId instead of employeeId
@@ -274,7 +276,8 @@ async function addShift(shiftData) {
             ...data.shift,
             date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date,
             employeeId: data.shift.userId, // Backward compat
-            userId: data.shift.userId
+            userId: data.shift.userId,
+            source: data.shift.source || 'manual'
         };
         DataStore.shifts.push(shift);
         return shift;
@@ -302,7 +305,8 @@ async function updateShift(id, updates) {
             ...data.shift,
             date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date,
             employeeId: data.shift.userId,
-            userId: data.shift.userId
+            userId: data.shift.userId,
+            source: data.shift.source || 'manual'
         };
 
         const index = DataStore.shifts.findIndex(s => s.id === id);
@@ -355,6 +359,41 @@ async function removeShiftsInDateRange(startDate, endDate) {
         return data.deleted || 0;
     } catch (error) {
         console.error('Fout bij verwijderen diensten:', error);
+        throw error;
+    }
+}
+
+// Remove only auto-generated shifts, preserve manually edited shifts
+async function removeAutoShiftsInDateRange(startDate, endDate) {
+    try {
+        // Get auto shifts in range
+        const autoShifts = DataStore.shifts.filter(shift =>
+            shift.date >= startDate &&
+            shift.date <= endDate &&
+            shift.source === 'auto'
+        );
+
+        // Delete each auto shift via API
+        let deletedCount = 0;
+        for (const shift of autoShifts) {
+            try {
+                await dataApiFetch(`/shifts/${shift.id}`, { method: 'DELETE' });
+                deletedCount++;
+            } catch (e) {
+                console.error(`Fout bij verwijderen auto-shift ${shift.id}:`, e);
+            }
+        }
+
+        // Update local cache - keep manual shifts, remove auto shifts
+        DataStore.shifts = DataStore.shifts.filter(shift =>
+            shift.date < startDate ||
+            shift.date > endDate ||
+            shift.source === 'manual'
+        );
+
+        return deletedCount;
+    } catch (error) {
+        console.error('Fout bij verwijderen auto-diensten:', error);
         throw error;
     }
 }
@@ -449,7 +488,8 @@ async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
                     date: dateStr,
                     startTime: scheduleForDay.startTime,
                     endTime: scheduleForDay.endTime,
-                    notes: `Automatisch ingepland via weekrooster (Week ${weekNumber})`
+                    notes: `Automatisch ingepland via basisrooster (Week ${weekNumber})`,
+                    source: 'auto' // Mark as auto-generated
                 });
                 createdShifts.push(shift);
             } catch (error) {

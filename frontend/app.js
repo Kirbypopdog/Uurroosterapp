@@ -17,41 +17,50 @@ const AppState = {
     apiTeams: [],
     activeSettingsTab: 'accounts',
     mobileDayIndex: 0, // 0=Monday, 1=Tuesday, ..., 6=Sunday (for mobile day view)
-    availabilityMobileDayIndex: 0 // Same for availability view
+    availabilityMobileDayIndex: 0, // Same for availability view
+    simulatedRole: null // For admin testing: simulates different user roles
 };
+
+// Get the effective role (simulated if set, otherwise actual)
+function getEffectiveRole() {
+    // Only admin can simulate roles
+    if (AppState.currentUser?.role === 'admin' && AppState.simulatedRole) {
+        return AppState.simulatedRole;
+    }
+    return AppState.currentUser?.role || 'medewerker';
+}
 
 // ===== PERMISSIONS SYSTEM =====
 const PERMISSIONS = {
     VIEW_ALL_EMPLOYEES: ['admin', 'hoofdverantwoordelijke'],
     EDIT_ALL_EMPLOYEES: ['admin', 'hoofdverantwoordelijke'],
-    EDIT_TEAM_EMPLOYEES: ['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'],
-    ADD_EMPLOYEES: ['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'],
+    // Medewerkergegevens bewerken: alleen admin en hoofdverantwoordelijke
+    // Teamverantwoordelijke mag wel shifts beheren maar niet employee data aanpassen
+    EDIT_TEAM_EMPLOYEES: ['admin', 'hoofdverantwoordelijke'],
+    ADD_EMPLOYEES: ['admin', 'hoofdverantwoordelijke'],
     VIEW_ALL_AVAILABILITY: ['admin', 'hoofdverantwoordelijke'],
     MANAGE_AVAILABILITY: ['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'],
+    // Shifts beheren: teamverantwoordelijke mag wel shifts aanpassen
+    MANAGE_SHIFTS: ['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'],
     CHANGE_SETTINGS: ['admin', 'hoofdverantwoordelijke'],
     MANAGE_ACCOUNTS: ['admin'],
     EXPORT_DATA: ['admin', 'hoofdverantwoordelijke']
 };
 
 function hasPermission(permission) {
-    const role = AppState.currentUser?.role;
+    const role = getEffectiveRole();
     return PERMISSIONS[permission]?.includes(role) || false;
 }
 
 function canManageEmployee(employee) {
-    const role = AppState.currentUser?.role;
-    const userTeam = AppState.currentUser?.team_id;
-
-    if (['admin', 'hoofdverantwoordelijke'].includes(role)) return true;
-    if (role === 'teamverantwoordelijke') {
-        const empTeam = typeof employee === 'object' ? employee.mainTeam : employee;
-        return empTeam === userTeam;
-    }
-    return false;
+    const role = getEffectiveRole();
+    // Alleen admin en hoofdverantwoordelijke mogen medewerkergegevens bewerken
+    // Teamverantwoordelijke mag wel shifts beheren, maar niet employee data
+    return ['admin', 'hoofdverantwoordelijke'].includes(role);
 }
 
 function canManageAvailability(employeeId) {
-    const role = AppState.currentUser?.role;
+    const role = getEffectiveRole();
     const userId = AppState.currentUser?.id;
     const userTeam = AppState.currentUser?.team_id;
 
@@ -65,19 +74,8 @@ function canManageAvailability(employeeId) {
 }
 
 function getVisibleTeamsForRole() {
-    const role = AppState.currentUser?.role;
-    const userTeam = AppState.currentUser?.team_id;
+    // Iedereen met een login kan alle teams zien in de planner
     const allTeams = ['vlot1', 'vlot2', 'cargo', 'overkoepelend', 'jobstudent'];
-
-    if (['admin', 'hoofdverantwoordelijke'].includes(role)) {
-        return allTeams;
-    }
-    if (role === 'teamverantwoordelijke' && userTeam) {
-        return [userTeam];
-    }
-    if (role === 'medewerker' && userTeam) {
-        return [userTeam];
-    }
     return allTeams;
 }
 
@@ -333,6 +331,23 @@ function setupEventListeners() {
     DOM.loginForm.addEventListener('submit', handleLogin);
     DOM.logoutBtn.addEventListener('click', handleLogout);
 
+    // Role switcher for admin testing
+    const roleSwitchSelect = document.getElementById('role-switch-select');
+    if (roleSwitchSelect) {
+        roleSwitchSelect.addEventListener('change', (e) => {
+            const newRole = e.target.value;
+            // If admin is selected, clear the simulation
+            AppState.simulatedRole = (newRole === 'admin') ? null : newRole;
+            // Re-apply role visibility to update UI
+            applyRoleVisibility();
+            // Switch to planning view to avoid being stuck on hidden view
+            switchView('planning');
+            // Re-render current view
+            renderPlanning();
+            console.log(`[Test Mode] Nu werkend als: ${newRole}`);
+        });
+    }
+
     // Mobile menu toggle
     const mobileMenuBtn = document.getElementById('mobile-menu-btn');
     const navMenu = document.getElementById('nav-menu');
@@ -556,13 +571,32 @@ function showApp() {
 }
 
 function applyRoleVisibility() {
-    const role = AppState.currentUser?.role || 'medewerker';
+    const role = getEffectiveRole();
+    const isRealAdmin = AppState.currentUser?.role === 'admin';
     const allowedViews = new Set(['planning', 'profile']);
 
+    // Show/hide role switcher for admin
+    const roleSwitcher = document.getElementById('role-switcher');
+    if (roleSwitcher) {
+        if (isRealAdmin) {
+            roleSwitcher.classList.remove('hidden');
+            const select = document.getElementById('role-switch-select');
+            if (select) {
+                select.value = AppState.simulatedRole || 'admin';
+            }
+        } else {
+            roleSwitcher.classList.add('hidden');
+        }
+    }
+
     // All roles get basic views
-    allowedViews.add('employees');
     allowedViews.add('availability');
     allowedViews.add('swaps');
+
+    // Employees tab: NOT for medewerker role (they manage their schedule via profile)
+    if (role !== 'medewerker') {
+        allowedViews.add('employees');
+    }
 
     // Settings only for hoofdverantwoordelijke and admin
     if (['hoofdverantwoordelijke', 'admin'].includes(role)) {
@@ -593,6 +627,12 @@ function applyRoleVisibility() {
         const visibleTeams = getVisibleTeamsForRole();
         AppState.visibleTeams = visibleTeams;
         AppState.visibleEmployeeTeams = visibleTeams;
+    }
+
+    // Hide "Medewerker toevoegen" button - new employees are created via account management
+    // This button is now obsolete after the employees/users merge
+    if (DOM.addEmployeeBtn) {
+        DOM.addEmployeeBtn.style.display = 'none';
     }
 }
 
@@ -1053,8 +1093,8 @@ function renderTimelineView() {
     let allShifts = [];
     weekDates.forEach(date => {
         let shifts = getShiftsByDate(date);
-        // Filter by visible teams
-        shifts = shifts.filter(s => AppState.visibleTeams.includes(s.team));
+        // Filter by visible teams (include shifts without team)
+        shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
         allShifts = allShifts.concat(shifts);
     });
 
@@ -1074,6 +1114,14 @@ function renderTimelineView() {
             .filter(emp => emp.mainTeam === teamKey)
             .sort((a, b) => a.name.localeCompare(b.name));
     });
+
+    // Add employees without a team to a special "no-team" category
+    const employeesWithoutTeam = employees
+        .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    if (employeesWithoutTeam.length > 0) {
+        employeesByTeam['_no_team'] = employeesWithoutTeam;
+    }
 
     // Time range: 7:00 to 24:00 (midnight)
     const START_HOUR = 7;
@@ -1182,8 +1230,8 @@ function renderTimelineView() {
                     if (!isClosed) {
                         // Get shifts for this employee on this date
                         let shifts = getShiftsByEmployee(emp.id, date, date);
-                        // Filter by visible teams
-                        shifts = shifts.filter(s => AppState.visibleTeams.includes(s.team));
+                        // Filter by visible teams (include shifts without team)
+                        shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
 
                         // Render shifts that start on this day
                         shifts.forEach(shift => {
@@ -1228,6 +1276,12 @@ function renderTimelineView() {
                             }
 
                             let blockClass = `timeline-block team-${shift.team}`;
+                            // Add auto/manual class
+                            if (shift.source === 'auto') {
+                                blockClass += ' shift-auto';
+                            } else {
+                                blockClass += ' shift-manual';
+                            }
                             // Absent conflict has highest priority
                             if (isAbsent) {
                                 blockClass += ' absent-conflict';
@@ -1277,6 +1331,62 @@ function renderTimelineView() {
                 html += '</div>'; // Close row
             });
         });
+
+        // Render employees without a team (if any)
+        const noTeamEmployees = employeesByTeam['_no_team'];
+        if (noTeamEmployees && noTeamEmployees.length > 0) {
+            // Team header row for "No Team"
+            html += `<div class="timeline-team-header team-no-team">
+                <div class="team-header-name">Geen Team</div>
+                <div class="team-header-count">${noTeamEmployees.length} medewerker${noTeamEmployees.length !== 1 ? 's' : ''}</div>
+            </div>`;
+
+            // Employee rows for no-team employees
+            noTeamEmployees.forEach((emp, index) => {
+                const isAlt = index % 2 === 1;
+                html += `<div class="timeline-row ${isAlt ? 'alt' : ''}">`;
+
+                const isResponsible = responsible && String(responsible.id) === String(emp.id);
+                const responsibleBadge = isResponsible ? '<span class="responsible-badge">⭐</span>' : '';
+                const responsibleClass = isResponsible ? ' is-responsible' : '';
+                const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
+
+                const employeeName = escapeHtml(emp.name);
+                html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
+                    ${responsibleBadge}<span class="emp-name">${employeeName}</span>
+                </div>`;
+
+                weekDates.forEach(date => {
+                    const d = parseDateOnly(date);
+                    const dayOfWeek = d.getDay();
+                    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                    const isClosed = isWeekend && !isWeekendOpen(date);
+
+                    let cellClass = 'timeline-day-cell';
+                    if (isWeekend) cellClass += ' weekend';
+                    if (isClosed) cellClass += ' closed';
+
+                    html += `<div class="${cellClass}">`;
+
+                    if (!isClosed) {
+                        let shifts = getShiftsByEmployee(emp.id, date, date);
+                        shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+
+                        shifts.forEach(shift => {
+                            const validation = validateShift(shift, shift.id);
+                            const availability = getAvailability(shift.employeeId, date);
+                            const isAbsent = availability && availability.type;
+                            const blockHtml = renderTimelineBlock(shift, validation, isAbsent);
+                            html += blockHtml;
+                        });
+                    }
+
+                    html += '</div>';
+                });
+
+                html += '</div>'; // Close row
+            });
+        }
     }
 
     html += '</div>'; // Close body
@@ -1287,8 +1397,8 @@ function renderTimelineView() {
 
 function getShiftsForDateAndTimeSlot(date, slotStart, slotEnd) {
     let shifts = getShiftsByDate(date);
-    // Filter by visible teams
-    shifts = shifts.filter(s => AppState.visibleTeams.includes(s.team));
+    // Filter by visible teams (include shifts without team)
+    shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
     shifts = shifts.filter(shift => {
         const [startHour] = shift.startTime.split(':').map(Number);
         const [endHour] = shift.endTime.split(':').map(Number);
@@ -1386,6 +1496,13 @@ function renderShiftBlock(shift, stackInfo = { offset: 0, total: 1, groupShifts:
     // Build CSS class
     let cardClass = `shift-block team-${shift.team}`;
 
+    // Add auto/manual class for visual distinction
+    if (shift.source === 'auto') {
+        cardClass += ' shift-auto';
+    } else {
+        cardClass += ' shift-manual';
+    }
+
     // Check if employee is absent - this is a conflict!
     // Only mark as absent if there's a valid absence type (verlof, ziek, etc.)
     const validAbsenceTypes = ['verlof', 'ziek', 'overuren', 'vorming', 'andere'];
@@ -1430,7 +1547,7 @@ function renderShiftBlock(shift, stackInfo = { offset: 0, total: 1, groupShifts:
             <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
             <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
             ${countBadge}
-            <button class="shift-delete-btn" data-shift-id="${shift.id}">×</button>
+            ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">×</button>` : ''}
         </div>
     </div>`;
 }
@@ -1479,7 +1596,7 @@ function renderShiftCard(shift) {
         <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
         <div class="shift-card-footer">
             <span class="shift-team-badge team-${shift.team}">${escapeHtml(DataStore.settings.teams[shift.team].name)}</span>
-            <button class="shift-delete-btn" data-shift-id="${shift.id}">×</button>
+            ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">×</button>` : ''}
         </div>
     </div>`;
 }
@@ -1508,11 +1625,15 @@ function openAddShiftForEmployee(employeeId, date) {
 }
 
 function openEditShiftModal(shiftId) {
+    // Medewerkers mogen geen shifts bewerken
+    if (!hasPermission('MANAGE_SHIFTS')) {
+        return;
+    }
     const shift = getShift(shiftId);
     if (!shift) return;
     AppState.editingShiftId = shiftId;
     DOM.shiftModalTitle.textContent = 'Dienst bewerken';
-    DOM.shiftDeleteBtn.style.display = 'block';
+    DOM.shiftDeleteBtn.style.display = hasPermission('MANAGE_SHIFTS') ? 'block' : 'none';
     populateEmployeeDropdown();
     DOM.shiftEmployee.value = shift.employeeId;
     DOM.shiftTeam.value = shift.team;
@@ -1585,7 +1706,7 @@ function handleShiftTemplateChange() {
     }
 }
 
-function handleShiftSubmit(e) {
+async function handleShiftSubmit(e) {
     e.preventDefault();
     console.log('Shift submit clicked');
 
@@ -1642,9 +1763,9 @@ function handleShiftSubmit(e) {
             }
         }
         if (AppState.editingShiftId) {
-            updateShift(AppState.editingShiftId, shiftData);
+            await updateShift(AppState.editingShiftId, shiftData);
         } else {
-            addShift(shiftData);
+            await addShift(shiftData);
         }
         closeShiftModal();
         renderPlanning();
@@ -1654,19 +1775,19 @@ function handleShiftSubmit(e) {
     }
 }
 
-function deleteShiftConfirm(shiftId) {
+async function deleteShiftConfirm(shiftId) {
     const shift = getShift(shiftId);
     if (!shift) return;
     const employee = getEmployee(shift.employeeId);
-    const msg = `Dienst verwijderen?\n\n${employee.name}\n${formatDate(shift.date)}\n${shift.startTime} - ${shift.endTime}`;
+    const msg = `Dienst verwijderen?\n\n${employee?.name || 'Onbekend'}\n${formatDate(shift.date)}\n${shift.startTime} - ${shift.endTime}`;
     if (confirm(msg)) {
-        deleteShift(shiftId);
+        await deleteShift(shiftId);
         renderPlanning();
     }
 }
 
 function renderEmployees() {
-    const role = AppState.currentUser?.role || 'medewerker';
+    const role = getEffectiveRole();
     const employees = getAllEmployees();
     // Groepeer medewerkers per team - alleen zichtbare teams
     const teams = DataStore.settings.teams;
@@ -1836,8 +1957,33 @@ function renderProfile() {
                     </div>
                 </div>
             </div>
+
+            <div class="settings-card" style="grid-column: 1 / -1;">
+                <div class="settings-card-header">
+                    <h3><span class="settings-icon">📅</span> Mijn Vast Werkrooster</h3>
+                    <p class="settings-description">Je vaste werktijden per week (bi-weekly patroon)</p>
+                </div>
+                <div class="settings-card-body">
+                    <div class="week-schedule-tabs" id="profile-week-tabs">
+                        <button type="button" class="week-tab active" data-week="1">Week 1 (weekend gesloten)</button>
+                        <button type="button" class="week-tab" data-week="2">Week 2 (weekend open)</button>
+                    </div>
+                    <div id="profile-week-schedule-container" class="week-schedule-container"></div>
+                    <div id="profile-schedule-message" class="form-message info" aria-live="polite">
+                        Klik op een dag om werktijden in te stellen.
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" id="save-profile-schedule-btn" class="btn btn-primary">Rooster Opslaan</button>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
+
+    // Setup week schedule for profile
+    generateProfileWeekScheduleHTML();
+    loadProfileWeekSchedule();
+    setupProfileWeekScheduleListeners();
 
     const form = document.getElementById('profile-form');
     const message = document.getElementById('profile-message');
@@ -1896,6 +2042,256 @@ function renderProfile() {
             submitBtn.textContent = 'Opslaan';
         }
     });
+}
+
+// ===== PROFILE WEEK SCHEDULE FUNCTIONS =====
+
+function generateProfileWeekScheduleHTML() {
+    const container = document.getElementById('profile-week-schedule-container');
+    if (!container) return;
+
+    const dayNames = {
+        1: 'Maandag', 2: 'Dinsdag', 3: 'Woensdag',
+        4: 'Donderdag', 5: 'Vrijdag', 6: 'Zaterdag', 0: 'Zondag'
+    };
+
+    // Build template options
+    const templateOptions = Object.keys(DataStore.settings.shiftTemplates || {}).map(templateId => {
+        const template = DataStore.settings.shiftTemplates[templateId];
+        return `<option value="${templateId}">${escapeHtml(template.name)} (${template.start}-${template.end})</option>`;
+    }).join('');
+
+    function generateWeekHTML(weekNumber, days) {
+        let html = `<div class="week-content ${weekNumber === 1 ? 'active' : ''}" data-profile-week="${weekNumber}">`;
+
+        days.forEach(dayNum => {
+            html += `
+            <div class="week-schedule-day">
+                <label class="week-schedule-label">
+                    <input type="checkbox" class="profile-week-schedule-enabled" data-week="${weekNumber}" data-day="${dayNum}">
+                    <span class="day-name">${dayNames[dayNum]}</span>
+                </label>
+                <select class="profile-week-schedule-template" data-week="${weekNumber}" data-day="${dayNum}" disabled>
+                    <option value="">-- Kies template --</option>
+                    ${templateOptions}
+                    <option value="custom">Aangepast...</option>
+                </select>
+                <div class="week-schedule-times">
+                    <input type="time" class="profile-week-schedule-start" data-week="${weekNumber}" data-day="${dayNum}" disabled>
+                    <span class="time-separator">-</span>
+                    <input type="time" class="profile-week-schedule-end" data-week="${weekNumber}" data-day="${dayNum}" disabled>
+                </div>
+            </div>`;
+        });
+
+        html += '</div>';
+        return html;
+    }
+
+    // Week 1: ma-vr (geen weekend want gesloten)
+    // Week 2: ma-zo (weekend open)
+    container.innerHTML =
+        generateWeekHTML(1, [1, 2, 3, 4, 5]) +
+        generateWeekHTML(2, [1, 2, 3, 4, 5, 6, 0]);
+}
+
+function loadProfileWeekSchedule() {
+    const user = AppState.currentUser;
+    if (!user) return;
+
+    // Load week 1
+    if (user.weekScheduleWeek1) {
+        loadProfileWeekScheduleData(1, user.weekScheduleWeek1);
+    }
+    // Load week 2
+    if (user.weekScheduleWeek2) {
+        loadProfileWeekScheduleData(2, user.weekScheduleWeek2);
+    }
+}
+
+function loadProfileWeekScheduleData(weekNumber, weekSchedule) {
+    if (!Array.isArray(weekSchedule)) return;
+
+    weekSchedule.forEach(daySchedule => {
+        if (!daySchedule.enabled) return;
+
+        const checkbox = document.querySelector(`.profile-week-schedule-enabled[data-week="${weekNumber}"][data-day="${daySchedule.dayOfWeek}"]`);
+        const templateSelect = document.querySelector(`.profile-week-schedule-template[data-week="${weekNumber}"][data-day="${daySchedule.dayOfWeek}"]`);
+        const startInput = document.querySelector(`.profile-week-schedule-start[data-week="${weekNumber}"][data-day="${daySchedule.dayOfWeek}"]`);
+        const endInput = document.querySelector(`.profile-week-schedule-end[data-week="${weekNumber}"][data-day="${daySchedule.dayOfWeek}"]`);
+
+        if (checkbox && templateSelect && startInput && endInput) {
+            checkbox.checked = true;
+            templateSelect.disabled = false;
+            startInput.disabled = false;
+            endInput.disabled = false;
+
+            startInput.value = daySchedule.startTime || '';
+            endInput.value = daySchedule.endTime || '';
+
+            // Try to find matching template
+            const matchedTemplate = Object.keys(DataStore.settings.shiftTemplates || {}).find(templateId => {
+                const template = DataStore.settings.shiftTemplates[templateId];
+                return template.start === daySchedule.startTime && template.end === daySchedule.endTime;
+            });
+
+            if (matchedTemplate) {
+                templateSelect.value = matchedTemplate;
+                startInput.readOnly = true;
+                endInput.readOnly = true;
+            } else {
+                templateSelect.value = 'custom';
+                startInput.readOnly = false;
+                endInput.readOnly = false;
+            }
+        }
+    });
+}
+
+function setupProfileWeekScheduleListeners() {
+    // Tab switching
+    document.querySelectorAll('#profile-week-tabs .week-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const weekNumber = tab.dataset.week;
+            // Update tab active state
+            document.querySelectorAll('#profile-week-tabs .week-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            // Show correct week content
+            document.querySelectorAll('[data-profile-week]').forEach(content => {
+                content.classList.toggle('active', content.dataset.profileWeek === weekNumber);
+            });
+        });
+    });
+
+    // Checkbox listeners
+    document.querySelectorAll('.profile-week-schedule-enabled').forEach(checkbox => {
+        checkbox.addEventListener('change', () => {
+            const weekNumber = checkbox.dataset.week;
+            const dayOfWeek = checkbox.dataset.day;
+            const isEnabled = checkbox.checked;
+
+            const templateSelect = document.querySelector(`.profile-week-schedule-template[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
+            const startInput = document.querySelector(`.profile-week-schedule-start[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
+            const endInput = document.querySelector(`.profile-week-schedule-end[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
+
+            if (templateSelect) templateSelect.disabled = !isEnabled;
+            if (startInput) startInput.disabled = !isEnabled;
+            if (endInput) endInput.disabled = !isEnabled;
+
+            if (!isEnabled) {
+                if (templateSelect) templateSelect.value = '';
+                if (startInput) startInput.value = '';
+                if (endInput) endInput.value = '';
+            }
+        });
+    });
+
+    // Template select listeners
+    document.querySelectorAll('.profile-week-schedule-template').forEach(select => {
+        select.addEventListener('change', () => {
+            const weekNumber = select.dataset.week;
+            const dayOfWeek = select.dataset.day;
+            const templateId = select.value;
+
+            const startInput = document.querySelector(`.profile-week-schedule-start[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
+            const endInput = document.querySelector(`.profile-week-schedule-end[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
+
+            if (templateId && templateId !== 'custom') {
+                const template = DataStore.settings.shiftTemplates[templateId];
+                if (template) {
+                    startInput.value = template.start;
+                    endInput.value = template.end;
+                    startInput.readOnly = true;
+                    endInput.readOnly = true;
+                }
+            } else {
+                startInput.readOnly = false;
+                endInput.readOnly = false;
+            }
+        });
+    });
+
+    // Save button
+    const saveBtn = document.getElementById('save-profile-schedule-btn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveProfileWeekSchedule);
+    }
+}
+
+async function saveProfileWeekSchedule() {
+    const saveBtn = document.getElementById('save-profile-schedule-btn');
+    const message = document.getElementById('profile-schedule-message');
+
+    const setMessage = (text, type = 'info') => {
+        message.textContent = text;
+        message.className = `form-message ${type}`;
+    };
+
+    try {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Opslaan...';
+
+        // Collect week schedule data
+        const weekScheduleWeek1 = getProfileWeekScheduleFromForm(1);
+        const weekScheduleWeek2 = getProfileWeekScheduleFromForm(2);
+
+        // Save via PUT /users/:id (own profile)
+        // Include all required fields (name) plus the schedule data we're updating
+        const data = await apiFetch(`/users/${AppState.currentUser.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+                name: AppState.currentUser.name,
+                email: AppState.currentUser.email,
+                mainTeam: AppState.currentUser.mainTeam,
+                extraTeams: AppState.currentUser.extraTeams,
+                contractHours: AppState.currentUser.contractHours,
+                active: AppState.currentUser.active,
+                weekScheduleWeek1,
+                weekScheduleWeek2
+            })
+        });
+
+        // Update local state
+        AppState.currentUser.weekScheduleWeek1 = weekScheduleWeek1;
+        AppState.currentUser.weekScheduleWeek2 = weekScheduleWeek2;
+        sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+
+        // Also update in DataStore.users
+        const userIndex = DataStore.users.findIndex(u => u.id === AppState.currentUser.id);
+        if (userIndex !== -1) {
+            DataStore.users[userIndex].weekScheduleWeek1 = weekScheduleWeek1;
+            DataStore.users[userIndex].weekScheduleWeek2 = weekScheduleWeek2;
+        }
+
+        setMessage('Werkrooster opgeslagen!', 'success');
+    } catch (error) {
+        setMessage(`Opslaan mislukt: ${error.message}`, 'error');
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Rooster Opslaan';
+    }
+}
+
+function getProfileWeekScheduleFromForm(weekNumber) {
+    const schedule = [];
+    const days = weekNumber === 1 ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6, 0];
+
+    days.forEach(dayNum => {
+        const checkbox = document.querySelector(`.profile-week-schedule-enabled[data-week="${weekNumber}"][data-day="${dayNum}"]`);
+        const startInput = document.querySelector(`.profile-week-schedule-start[data-week="${weekNumber}"][data-day="${dayNum}"]`);
+        const endInput = document.querySelector(`.profile-week-schedule-end[data-week="${weekNumber}"][data-day="${dayNum}"]`);
+
+        if (checkbox && startInput && endInput) {
+            schedule.push({
+                dayOfWeek: dayNum,
+                enabled: checkbox.checked,
+                startTime: startInput.value || '',
+                endTime: endInput.value || ''
+            });
+        }
+    });
+
+    return schedule;
 }
 
 function renderEmployeeCard(emp) {
@@ -2015,7 +2411,7 @@ function closeEmployeeModal() {
     DOM.employeeDeleteBtn.style.display = 'none';
 }
 
-function handleEmployeeSubmit(e) {
+async function handleEmployeeSubmit(e) {
     e.preventDefault();
     const weekScheduleWeek1 = getWeekScheduleFromForm(1);
     const weekScheduleWeek2 = getWeekScheduleFromForm(2);
@@ -2031,15 +2427,15 @@ function handleEmployeeSubmit(e) {
         weekScheduleWeek2: weekScheduleWeek2
     };
     if (AppState.editingEmployeeId) {
-        updateEmployee(AppState.editingEmployeeId, employeeData);
+        await updateEmployee(AppState.editingEmployeeId, employeeData);
     } else {
-        addEmployee(employeeData);
+        await addEmployee(employeeData);
     }
     closeEmployeeModal();
     renderEmployees();
 }
 
-function handleEmployeeDelete() {
+async function handleEmployeeDelete() {
     if (!AppState.editingEmployeeId) return;
     const employee = getEmployee(AppState.editingEmployeeId);
     if (!employee) return;
@@ -2049,34 +2445,46 @@ function handleEmployeeDelete() {
 
     if (!confirm(confirmMsg)) return;
 
-    deleteEmployee(employee.id);
+    await deleteEmployee(employee.id);
     closeEmployeeModal();
     renderEmployees();
     renderPlanning();
 }
 
-// ===== WEEKROOSTER FUNCTIES =====
+// ===== BASISROOSTER FUNCTIES =====
 
-function handleGenerateSchedule() {
+async function handleGenerateSchedule() {
     // Get current week dates
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
     const startDate = weekDates[0];
     const endDate = weekDates[6];
 
-    if (!confirm(`Wil je de weekroosters genereren voor deze week (${formatDate(startDate)} t/m ${formatDate(endDate)})?\\n\\nBestaande diensten in deze week worden verwijderd en opnieuw gegenereerd.`)) {
+    // Count manual shifts that will be preserved
+    const manualShiftsCount = DataStore.shifts.filter(s =>
+        s.date >= startDate && s.date <= endDate && s.source === 'manual'
+    ).length;
+
+    let confirmMsg = `Wil je de basisroosters toepassen voor deze week (${formatDate(startDate)} t/m ${formatDate(endDate)})?`;
+    if (manualShiftsCount > 0) {
+        confirmMsg += `\\n\\n${manualShiftsCount} handmatig aangepaste dienst(en) blijven behouden.`;
+    }
+    confirmMsg += '\\n\\nAlleen automatisch gegenereerde diensten worden opnieuw ingesteld.';
+
+    if (!confirm(confirmMsg)) {
         return;
     }
 
-    const removedShifts = removeShiftsInDateRange(startDate, endDate);
-    const totalShifts = applyWeekScheduleForAllEmployees(startDate, endDate);
+    // Only remove auto-generated shifts, preserve manual shifts
+    const removedShifts = await removeAutoShiftsInDateRange(startDate, endDate);
+    const totalShifts = await applyWeekScheduleForAllEmployees(startDate, endDate);
 
     if (totalShifts > 0 || removedShifts > 0) {
-        const removedLabel = removedShifts > 0 ? ` (${removedShifts} bestaande dienst${removedShifts !== 1 ? 'en' : ''} verwijderd)` : '';
-        alert(`✅ ${totalShifts} dienst${totalShifts !== 1 ? 'en' : ''} automatisch aangemaakt op basis van weekroosters!${removedLabel}`);
+        const removedLabel = removedShifts > 0 ? ` (${removedShifts} automatische dienst${removedShifts !== 1 ? 'en' : ''} vervangen)` : '';
+        alert(`✅ ${totalShifts} dienst${totalShifts !== 1 ? 'en' : ''} aangemaakt op basis van basisroosters!${removedLabel}`);
         renderPlanning();
     } else {
-        alert('Geen nieuwe diensten aangemaakt. Medewerkers hebben geen weekrooster ingesteld.');
+        alert('Geen nieuwe diensten aangemaakt. Controleer of medewerkers een basisrooster hebben ingesteld en actief zijn.');
     }
 }
 
@@ -2271,7 +2679,7 @@ function switchWeekTab(weekNumber) {
 function renderAvailability() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
-    const role = AppState.currentUser?.role || 'medewerker';
+    const role = getEffectiveRole();
     let employees = getAllEmployees(true);
     const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
 
@@ -2385,7 +2793,7 @@ function renderAvailability() {
                 const absence = getAvailability(emp.id, date);
                 const hasShift = getShiftsByEmployee(emp.id, date, date).length > 0;
 
-                // Check of medewerker normaal werkt op deze dag volgens weekrooster
+                // Check of medewerker normaal werkt op deze dag volgens basisrooster
                 const weekNumber = getWeekNumber(date);
                 const weekSchedule = weekNumber === 1 ? emp.weekScheduleWeek1 : emp.weekScheduleWeek2;
                 const scheduledForDay = weekSchedule && weekSchedule.find(s => s.dayOfWeek === dayOfWeek && s.enabled);
@@ -2422,7 +2830,7 @@ function renderAvailability() {
                         // Medewerker heeft een weekrooster maar werkt niet op deze dag
                         statusClass = 'not-scheduled';
                         statusText = 'Vrij';
-                        tooltipText = 'Niet ingepland volgens weekrooster';
+                        tooltipText = 'Niet ingepland volgens basisrooster';
                     } else {
                         statusClass = 'available';
                         statusText = '';
@@ -2588,7 +2996,7 @@ function renderSettingsTabContent(tabName) {
 
 // ===== SETTINGS TAB: ACCOUNTS =====
 function renderSettingsAccounts(container) {
-    const role = AppState.currentUser?.role;
+    const role = getEffectiveRole();
 
     if (role !== 'admin') {
         container.innerHTML = `
@@ -2684,6 +3092,7 @@ async function loadAdminUsers(container) {
                     <div class="admin-actions">
                         <button class="btn btn-sm btn-primary admin-save-btn">Opslaan</button>
                         <button class="btn btn-sm btn-secondary admin-reset-btn">Reset wachtwoord</button>
+                        <button class="btn btn-sm btn-danger admin-delete-btn" title="Account verwijderen">Verwijderen</button>
                     </div>
                     </div>
                 </div>
@@ -2760,6 +3169,31 @@ async function loadAdminUsers(container) {
                     alert(`Wachtwoord gereset naar: ${result.resetPassword}`);
                 } catch (error) {
                     alert(`Reset mislukt: ${error.message}`);
+                }
+            });
+
+            // Delete user button
+            row.querySelector('.admin-delete-btn').addEventListener('click', async () => {
+                // Prevent deleting yourself
+                if (String(userId) === String(AppState.currentUser.id)) {
+                    alert('Je kunt je eigen account niet verwijderen.');
+                    return;
+                }
+
+                const userName = user.name || 'deze gebruiker';
+                const confirmMsg = `Weet je zeker dat je het account van "${userName}" wilt verwijderen?\n\nDit verwijdert ook alle gekoppelde diensten en afwezigheden.\n\nDeze actie kan niet ongedaan worden gemaakt.`;
+
+                if (!confirm(confirmMsg)) return;
+
+                try {
+                    await apiFetch(`/admin/users/${userId}`, {
+                        method: 'DELETE'
+                    });
+                    alert('Account verwijderd');
+                    // Refresh the list
+                    renderSettingsAccounts(document.querySelector('#settings-tab-content'));
+                } catch (error) {
+                    alert(`Verwijderen mislukt: ${error.message}`);
                 }
             });
         });
@@ -2904,10 +3338,35 @@ function showAddUserModal(teams) {
 // ===== SETTINGS TAB: PLANNING =====
 function renderSettingsPlanning(container) {
     const rules = DataStore.settings.rules;
+    const planningHorizon = DataStore.settings.planningHorizon?.weeks || 4;
 
     container.innerHTML = `
+        <!-- Planning horizon -->
+        <div class="settings-card" id="settings-horizon">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Planning horizon</h3>
+                    <p class="settings-card-subtitle">Hoe ver vooruit worden automatische diensten gegenereerd?</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="form-group">
+                    <label for="planning-horizon-select">Horizon:</label>
+                    <select id="planning-horizon-select" class="form-input">
+                        <option value="4" ${planningHorizon === 4 ? 'selected' : ''}>4 weken</option>
+                        <option value="8" ${planningHorizon === 8 ? 'selected' : ''}>8 weken</option>
+                        <option value="26" ${planningHorizon === 26 ? 'selected' : ''}>6 maanden (26 weken)</option>
+                        <option value="52" ${planningHorizon === 52 ? 'selected' : ''}>1 jaar (52 weken)</option>
+                        <option value="unlimited" ${planningHorizon === null || planningHorizon === 'unlimited' ? 'selected' : ''}>Onbeperkt</option>
+                    </select>
+                    <span class="form-hint">Basisroosters worden automatisch toegepast tot deze horizon</span>
+                </div>
+                <button class="btn btn-primary" onclick="savePlanningHorizon()">Horizon opslaan</button>
+            </div>
+        </div>
+
         <!-- Planning regels -->
-        <div class="settings-card" id="settings-rules">
+        <div class="settings-card" id="settings-rules" style="margin-top: 24px;">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Planning regels</h3>
@@ -3082,7 +3541,7 @@ function renderSettingsTeams(container) {
 
 // ===== SETTINGS TAB: SYSTEEM =====
 function renderSettingsSystem(container) {
-    const isAdmin = AppState.currentUser?.role === 'admin';
+    const isAdmin = getEffectiveRole() === 'admin';
 
     container.innerHTML = `
         <!-- Data beheer -->
@@ -3259,6 +3718,27 @@ function saveRules() {
 
     saveToStorage();
     alert('✅ Planning regels zijn opgeslagen!');
+}
+
+async function savePlanningHorizon() {
+    const select = document.getElementById('planning-horizon-select');
+    const value = select.value;
+    const weeks = value === 'unlimited' ? null : parseInt(value);
+
+    DataStore.settings.planningHorizon = { weeks };
+    saveToStorage();
+
+    // Sync to backend
+    try {
+        await apiFetch('/settings/planning_horizon', {
+            method: 'PUT',
+            body: JSON.stringify({ value: { weeks } })
+        });
+        alert('✅ Planning horizon is opgeslagen!');
+    } catch (error) {
+        console.error('Fout bij opslaan planning horizon:', error);
+        alert('✅ Planning horizon is lokaal opgeslagen (server sync mislukt)');
+    }
 }
 
 function openAddTemplateModal() {

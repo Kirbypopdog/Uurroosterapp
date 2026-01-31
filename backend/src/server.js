@@ -50,6 +50,26 @@ async function ensureSchema() {
 
       console.log('Auto-migration complete. Run /admin/migrate for full data migration.');
     }
+
+    // Check if source column exists in shifts table
+    const sourceColCheck = await client.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'shifts' AND column_name = 'source'
+    `);
+
+    if (sourceColCheck.rows.length === 0) {
+      console.log('Adding source column to shifts table...');
+      try {
+        await client.query(`
+          ALTER TABLE shifts
+          ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'
+          CHECK (source IN ('auto', 'manual'))
+        `);
+        console.log('  Added column: source');
+      } catch (e) {
+        console.log(`  Column source: ${e.message}`);
+      }
+    }
   } catch (err) {
     console.error('Schema check error:', err.message);
   } finally {
@@ -460,22 +480,16 @@ app.put('/users/:id', requireAuth, async (req, res) => {
   const { name, email, mainTeam, extraTeams, contractHours, active, weekScheduleWeek1, weekScheduleWeek2 } = req.body || {};
 
   // Permission check: admin/hoofdverantwoordelijke can edit anyone,
-  // teamverantwoordelijke can edit their team, medewerker can only edit themselves
+  // teamverantwoordelijke and medewerker can only edit themselves
   const { role, team_id } = req.user;
 
   if (role === 'medewerker' && userId !== req.user.id) {
     return res.status(403).json({ error: 'Je kunt alleen je eigen profiel bewerken' });
   }
 
-  if (role === 'teamverantwoordelijke') {
-    // Check if target user is in their team
-    const targetUser = await pool.query('SELECT main_team FROM users WHERE id = $1', [userId]);
-    if (targetUser.rows.length === 0) {
-      return res.status(404).json({ error: 'Gebruiker niet gevonden' });
-    }
-    if (targetUser.rows[0].main_team !== team_id && userId !== req.user.id) {
-      return res.status(403).json({ error: 'Je kunt alleen medewerkers van je eigen team bewerken' });
-    }
+  // Teamverantwoordelijke mag alleen eigen profiel bewerken, niet andere medewerkers
+  if (role === 'teamverantwoordelijke' && userId !== req.user.id) {
+    return res.status(403).json({ error: 'Alleen hoofdverantwoordelijke mag medewerkergegevens bewerken' });
   }
 
   if (!name) {
@@ -563,7 +577,7 @@ app.get('/shifts', requireAuth, async (req, res) => {
     try {
       let query = `
         SELECT id, user_id as "userId", team, date, start_time as "startTime",
-               end_time as "endTime", notes, created_at as "createdAt"
+               end_time as "endTime", notes, source, created_at as "createdAt"
         FROM shifts
       `;
       const params = [];
@@ -612,6 +626,7 @@ app.get('/shifts', requireAuth, async (req, res) => {
         startTime: s.startTime,
         endTime: s.endTime,
         notes: s.notes,
+        source: s.source || 'manual',
         createdAt: s.createdAt
       }));
     }
@@ -624,20 +639,22 @@ app.get('/shifts', requireAuth, async (req, res) => {
 });
 
 app.post('/shifts', requireAuth, async (req, res) => {
-  const { userId, team, date, startTime, endTime, notes } = req.body || {};
+  const { userId, team, date, startTime, endTime, notes, source } = req.body || {};
   if (!userId || !date || !startTime || !endTime) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
+  // source defaults to 'manual' if not specified
+  const shiftSource = source === 'auto' ? 'auto' : 'manual';
   try {
     // Try new schema (user_id) first
     let result;
     try {
       result = await pool.query(`
-        INSERT INTO shifts (user_id, team, date, start_time, end_time, notes)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id, user_id as "userId", team, date, start_time as "startTime",
-                  end_time as "endTime", notes, created_at as "createdAt"
-      `, [userId, team || null, date, startTime, endTime, notes || '']);
+                  end_time as "endTime", notes, source, created_at as "createdAt"
+      `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource]);
     } catch (schemaErr) {
       // Fallback to old schema - need to map user_id to employee_id via email
       console.log('Using old schema for POST /shifts - mapping user to employee');
@@ -675,10 +692,13 @@ app.post('/shifts', requireAuth, async (req, res) => {
 
 app.put('/shifts/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
-  const { userId, team, date, startTime, endTime, notes } = req.body || {};
+  const { userId, team, date, startTime, endTime, notes, source } = req.body || {};
   if (!id) {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
+  // When editing, automatically set source to 'manual' to protect from auto-regeneration
+  // Unless explicitly setting to 'auto' (for reset-to-base functionality)
+  const shiftSource = source === 'auto' ? 'auto' : 'manual';
   try {
     // Try new schema (user_id), fallback to old (employee_id)
     let result;
@@ -690,11 +710,12 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
             date = COALESCE($3, date),
             start_time = COALESCE($4, start_time),
             end_time = COALESCE($5, end_time),
-            notes = COALESCE($6, notes)
+            notes = COALESCE($6, notes),
+            source = $8
         WHERE id = $7
         RETURNING id, user_id as "userId", team, date, start_time as "startTime",
-                  end_time as "endTime", notes, created_at as "createdAt"
-      `, [userId, team, date, startTime, endTime, notes, id]);
+                  end_time as "endTime", notes, source, created_at as "createdAt"
+      `, [userId, team, date, startTime, endTime, notes, id, shiftSource]);
     } catch (schemaErr) {
       // Fallback to old schema with employee_id
       console.log('Using old schema for PUT /shifts (employee_id)');
@@ -726,6 +747,13 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
   if (!id) {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
+
+  // Permission check: medewerker cannot delete shifts
+  const { role } = req.user;
+  if (role === 'medewerker') {
+    return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
+  }
+
   try {
     await pool.query('DELETE FROM shifts WHERE id = $1', [id]);
     res.json({ ok: true });
@@ -736,7 +764,8 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
 });
 
 // Bulk delete shifts in date range
-app.delete('/shifts', requireAuth, async (req, res) => {
+// Only supervisors can do bulk delete (admin, hoofdverantwoordelijke, teamverantwoordelijke)
+app.delete('/shifts', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
   const { startDate, endDate } = req.query;
   if (!startDate || !endDate) {
     return res.status(400).json({ error: 'startDate en endDate zijn verplicht' });

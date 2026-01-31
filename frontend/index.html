@@ -50,6 +50,14 @@
                 <button class="nav-btn" data-view="settings">Instellingen</button>
             </div>
             <div class="nav-right">
+                <div id="role-switcher" class="role-switcher hidden">
+                    <select id="role-switch-select">
+                        <option value="admin">Admin</option>
+                        <option value="hoofdverantwoordelijke">Hoofdverantwoordelijke</option>
+                        <option value="teamverantwoordelijke">Teamverantwoordelijke</option>
+                        <option value="medewerker">Medewerker</option>
+                    </select>
+                </div>
                 <span id="current-user" class="user-badge"></span>
                 <button id="logout-btn" class="btn btn-secondary btn-sm">Uitloggen</button>
             </div>
@@ -60,7 +68,7 @@
             <div class="view-header">
                 <h2>Roosterplanning</h2>
                 <div class="header-actions">
-                    <button id="generate-schedule-btn" class="btn btn-success">⚡ Genereer weekroosters</button>
+                    <button id="generate-schedule-btn" class="btn btn-success">⚡ Pas basisroosters toe</button>
                     <button id="add-shift-btn" class="btn btn-primary">+ Dienst toevoegen</button>
                 </div>
             </div>
@@ -310,9 +318,9 @@
                     </div>
                 </div>
 
-                <!-- Vast weekrooster -->
+                <!-- Basisrooster -->
                 <div class="form-section">
-                    <h3>Vast weekrooster (Bi-weekly patroon)</h3>
+                    <h3>Basisrooster (Bi-weekly patroon)</h3>
                     <p class="form-help-text">Stel het 2-weken rooster patroon in. Week 1 en Week 2 wisselen elkaar af. <strong>Week 1 = weekend gesloten</strong>, <strong>Week 2 = weekend open</strong>.</p>
 
                     <!-- Week tabs -->

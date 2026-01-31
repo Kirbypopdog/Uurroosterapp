@@ -288,6 +288,39 @@ textarea {
     gap: 16px;
 }
 
+/* Role Switcher for Testing */
+.role-switcher {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    border: 2px solid #f59e0b;
+    border-radius: var(--radius-md);
+}
+
+.role-switcher::before {
+    content: "🧪";
+    font-size: 14px;
+}
+
+.role-switcher select {
+    padding: 4px 8px;
+    border: 1px solid #f59e0b;
+    border-radius: var(--radius-sm);
+    background: white;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.role-switcher select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
 .user-badge {
     padding: 6px 12px;
     background: var(--bg-color);
@@ -5396,4 +5429,62 @@ textarea {
     .form-group {
         width: 100% !important;
     }
+}
+
+/* ===== AUTO/MANUAL SHIFT STYLING ===== */
+/* Visual distinction between automatically generated and manually edited shifts */
+
+.shift-block.shift-auto,
+.timeline-block.shift-auto {
+    border-left: 3px solid #f59e0b; /* Orange accent for auto-generated */
+}
+
+.shift-block.shift-manual,
+.timeline-block.shift-manual {
+    border-left: 3px solid #10b981; /* Green accent for manually edited */
+}
+
+/* Source indicator badge (optional, shown on hover) */
+.shift-source-badge {
+    font-size: 0.7em;
+    margin-left: 4px;
+    opacity: 0.7;
+}
+
+/* Shift modal source info */
+.shift-source-info {
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+    font-size: 0.9em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.shift-source-info.auto {
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    color: #92400e;
+}
+
+.shift-source-info.manual {
+    background: #d1fae5;
+    border: 1px solid #10b981;
+    color: #065f46;
+}
+
+.shift-source-info .btn-link {
+    background: none;
+    border: none;
+    color: #3b82f6;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+    margin-left: auto;
+    font-size: 0.85em;
+}
+
+.shift-source-info .btn-link:hover {
+    color: #1d4ed8;
 }
