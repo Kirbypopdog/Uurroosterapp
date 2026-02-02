@@ -1917,6 +1917,17 @@ textarea {
     background: linear-gradient(135deg, #ec4899 0%, #be185d 100%);
 }
 
+/* Geen Team - employees without team assignment (warning style) */
+.timeline-team-header.team-no-team {
+    background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
+    border: 2px dashed #475569;
+}
+
+.timeline-team-header.team-no-team .team-header-name::after {
+    content: " ⚠️";
+    font-size: 12px;
+}
+
 .timeline-team-header .team-header-name {
     font-size: 14px;
     font-weight: 700;
@@ -2655,6 +2666,33 @@ textarea {
 .validation-warning.absence {
     background: #fef3c7;
     border-color: #f59e0b;
+}
+
+/* Shift source info in modal */
+.shift-source-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+
+.shift-source-info .source-icon {
+    font-size: 16px;
+}
+
+.shift-source-info.shift-source-auto {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    border: 1px solid #f59e0b;
+    color: #92400e;
+}
+
+.shift-source-info.shift-source-manual {
+    background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+    border: 1px solid #10b981;
+    color: #065f46;
 }
 
 /* ===== SETTINGS VIEW ===== */

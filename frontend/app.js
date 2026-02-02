@@ -1642,12 +1642,27 @@ function openEditShiftModal(shiftId) {
     DOM.shiftEnd.value = shift.endTime;
     DOM.shiftNotes.value = shift.notes || '';
 
+    // Show source info (auto vs manual)
+    const isAutoShift = shift.source === 'auto';
+    let sourceHtml = '';
+    if (isAutoShift) {
+        sourceHtml = `<div class="shift-source-info shift-source-auto">
+            <span class="source-icon">⚡</span>
+            <span class="source-text">Automatisch ingepland via basisrooster</span>
+        </div>`;
+    } else {
+        sourceHtml = `<div class="shift-source-info shift-source-manual">
+            <span class="source-icon">✏️</span>
+            <span class="source-text">Handmatig aangepast (beschermd bij regeneratie)</span>
+        </div>`;
+    }
+
     // Show existing validation issues for this shift
     const validation = validateShift(shift, shift.id);
     const availability = getAvailability(shift.employeeId, shift.date);
     const isAbsent = availability && availability.type;
 
-    let issuesHtml = '';
+    let issuesHtml = sourceHtml;
     if (isAbsent) {
         const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren opnemen', 'vorming': 'Vorming', 'andere': 'Afwezig' };
         const employeeName = escapeHtml(getEmployee(shift.employeeId)?.name || '');
