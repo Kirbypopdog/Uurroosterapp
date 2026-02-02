@@ -3102,6 +3102,14 @@ async function loadAdminUsers(container) {
                 <div class="admin-user-details">
                     <div class="admin-user-controls">
                     <div class="admin-field">
+                        <label>Naam</label>
+                        <input type="text" class="admin-name-input form-input" value="${escapeHtml(user.name)}" />
+                    </div>
+                    <div class="admin-field">
+                        <label>Email</label>
+                        <input type="email" class="admin-email-input form-input" value="${escapeHtml(user.email)}" />
+                    </div>
+                    <div class="admin-field">
                         <label>Rol</label>
                         <div class="role-pill-group">
                             <button type="button" class="role-pill-btn" data-role="admin">Admin</button>
@@ -3176,8 +3184,24 @@ async function loadAdminUsers(container) {
 
             row.querySelector('.admin-save-btn').addEventListener('click', async () => {
                 try {
+                    const nameInput = row.querySelector('.admin-name-input');
+                    const emailInput = row.querySelector('.admin-email-input');
+                    const newName = nameInput.value.trim();
+                    const newEmail = emailInput.value.trim();
                     const newTeamId = teamSelect.value || null;
+
+                    if (!newName) {
+                        alert('Naam is verplicht');
+                        return;
+                    }
+                    if (!newEmail) {
+                        alert('Email is verplicht');
+                        return;
+                    }
+
                     const payload = {
+                        name: newName,
+                        email: newEmail,
                         role: roleSelect.value,
                         team_id: newTeamId,
                         mainTeam: newTeamId // Also update mainTeam for employee grouping
@@ -3191,11 +3215,19 @@ async function loadAdminUsers(container) {
                     if (userIndex !== -1) {
                         DataStore.users[userIndex] = {
                             ...DataStore.users[userIndex],
+                            name: newName,
+                            email: newEmail,
                             role: roleSelect.value,
                             team_id: newTeamId,
                             mainTeam: newTeamId
                         };
                     }
+                    // Update the display in the row header
+                    row.querySelector('.admin-user-name').textContent = newName;
+                    row.querySelector('.admin-user-email').textContent = newEmail;
+                    row.dataset.name = newName;
+                    row.dataset.email = newEmail;
+
                     alert('Account bijgewerkt');
                 } catch (error) {
                     alert(`Opslaan mislukt: ${error.message}`);
