@@ -281,42 +281,35 @@
                 <span class="modal-close">&times;</span>
             </div>
             <form id="employee-form">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="employee-name">Naam *</label>
-                        <input type="text" id="employee-name" required>
+                <!-- Read-only employee info (edit via Profile or Account Management) -->
+                <div class="employee-info-readonly">
+                    <div class="employee-info-row">
+                        <span class="employee-info-label">Naam:</span>
+                        <span id="employee-name-display" class="employee-info-value"></span>
                     </div>
-                    <div class="form-group">
-                        <label for="employee-email">Email</label>
-                        <input type="email" id="employee-email">
+                    <div class="employee-info-row">
+                        <span class="employee-info-label">Email:</span>
+                        <span id="employee-email-display" class="employee-info-value"></span>
                     </div>
-                </div>
-                <div class="form-group">
-                    <label>Hoofdteam *</label>
-                    <select id="employee-main-team" required>
-                        <option value="vlot1">Vlot 1</option>
-                        <option value="vlot2">Vlot 2</option>
-                        <option value="cargo">Cargo</option>
-                        <option value="overkoepelend">Overkoepelend</option>
-                        <option value="jobstudent">Jobstudenten/Stagiairs</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Kan ook werken bij</label>
-                    <div class="form-help-text">Niet nodig: iedereen kan overal ingepland worden.</div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="employee-contract">Contract uren/week</label>
-                        <input type="number" id="employee-contract" min="0" max="40" step="0.5" placeholder="bijv. 32">
+                    <div class="employee-info-row">
+                        <span class="employee-info-label">Team:</span>
+                        <span id="employee-team-display" class="employee-info-value"></span>
                     </div>
-                    <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="employee-active">
-                            Actief
-                        </label>
+                    <div class="employee-info-row">
+                        <span class="employee-info-label">Contract:</span>
+                        <span id="employee-contract-display" class="employee-info-value"></span>
                     </div>
+                    <p class="form-help-text" style="margin-top: 8px; font-size: 12px;">
+                        Persoonsgegevens wijzigen? Ga naar <strong>Profiel</strong> (eigen gegevens) of <strong>Instellingen &gt; Accounts</strong> (admin).
+                    </p>
                 </div>
+
+                <!-- Hidden fields to preserve existing values -->
+                <input type="hidden" id="employee-name">
+                <input type="hidden" id="employee-email">
+                <input type="hidden" id="employee-main-team">
+                <input type="hidden" id="employee-contract">
+                <input type="hidden" id="employee-active" value="true">
 
                 <!-- Basisrooster -->
                 <div class="form-section">

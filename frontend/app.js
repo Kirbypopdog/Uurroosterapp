@@ -2417,12 +2417,22 @@ function openEditEmployeeModal(employeeId) {
     const employee = getEmployee(employeeId);
     if (!employee) return;
     AppState.editingEmployeeId = employeeId;
-    DOM.employeeModalTitle.textContent = 'Medewerker bewerken';
+    DOM.employeeModalTitle.textContent = 'Basisrooster bewerken';
+
+    // Display read-only employee info
+    const teamName = DataStore.settings.teams?.[employee.mainTeam]?.name || employee.mainTeam || '-';
+    document.getElementById('employee-name-display').textContent = employee.name || '-';
+    document.getElementById('employee-email-display').textContent = employee.email || '-';
+    document.getElementById('employee-team-display').textContent = teamName;
+    document.getElementById('employee-contract-display').textContent = employee.contractHours ? `${employee.contractHours} uur/week` : '-';
+
+    // Hidden fields for form submission (preserve existing values)
     DOM.employeeName.value = employee.name;
     DOM.employeeEmail.value = employee.email || '';
     DOM.employeeMainTeam.value = employee.mainTeam;
     DOM.employeeContract.value = employee.contractHours || '';
-    DOM.employeeActive.checked = employee.active;
+    DOM.employeeActive.value = employee.active !== false ? 'true' : 'false';
+
     generateWeekScheduleHTML();
     loadWeekScheduleForm(1, employee.weekScheduleWeek1 || []);
     loadWeekScheduleForm(2, employee.weekScheduleWeek2 || []);
@@ -2449,7 +2459,7 @@ async function handleEmployeeSubmit(e) {
         mainTeam: DOM.employeeMainTeam.value,
         extraTeams: [],
         contractHours: parseFloat(DOM.employeeContract.value) || 0,
-        active: DOM.employeeActive.checked,
+        active: DOM.employeeActive.value === 'true', // Hidden input stores string
         weekScheduleWeek1: weekScheduleWeek1,
         weekScheduleWeek2: weekScheduleWeek2
     };
