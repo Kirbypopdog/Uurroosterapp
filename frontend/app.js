@@ -3331,10 +3331,12 @@ function showEditAccountModal(user, teams, onSave) {
                             ${teamOptions}
                         </select>
                     </div>
-                    <div class="modal-actions">
-                        <button type="button" class="btn btn-danger" id="edit-account-delete-btn" style="margin-right: auto;">Verwijderen</button>
-                        <button type="button" class="btn btn-secondary" id="edit-account-reset-btn">Reset wachtwoord</button>
-                        <button type="submit" class="btn btn-primary">Opslaan</button>
+                    <div class="modal-actions" style="display: flex; justify-content: space-between; gap: 8px;">
+                        <button type="button" class="btn btn-danger" id="edit-account-delete-btn">Verwijderen</button>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="btn btn-secondary" id="edit-account-reset-btn">Reset wachtwoord</button>
+                            <button type="submit" class="btn btn-primary">Opslaan</button>
+                        </div>
                     </div>
                 </form>
             </div>
