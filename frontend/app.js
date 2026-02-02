@@ -2400,7 +2400,8 @@ function openEditEmployeeModal(employeeId) {
     generateWeekScheduleHTML();
     loadWeekScheduleForm(1, employee.weekScheduleWeek1 || []);
     loadWeekScheduleForm(2, employee.weekScheduleWeek2 || []);
-    DOM.employeeDeleteBtn.style.display = 'inline-flex';
+    // Delete button hidden - accounts are managed via Settings > Accounts
+    DOM.employeeDeleteBtn.style.display = 'none';
     DOM.employeeModal.classList.remove('hidden');
 }
 
@@ -3186,11 +3187,10 @@ async function loadAdminUsers(container) {
                 if (!confirm(confirmMsg)) return;
 
                 try {
-                    await apiFetch(`/admin/users/${userId}`, {
-                        method: 'DELETE'
-                    });
+                    // Use deleteEmployee which updates the local cache (DataStore.users, shifts, availability)
+                    await deleteEmployee(Number(userId));
                     alert('Account verwijderd');
-                    // Refresh the list
+                    // Refresh the accounts list in settings
                     renderSettingsAccounts(document.querySelector('#settings-tab-content'));
                 } catch (error) {
                     alert(`Verwijderen mislukt: ${error.message}`);
