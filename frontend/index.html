@@ -288,20 +288,16 @@
                 <input type="hidden" id="employee-contract">
                 <input type="hidden" id="employee-active" value="true">
 
-                <!-- Basisrooster -->
-                <div class="form-section">
-                    <h3>Basisrooster (Bi-weekly patroon)</h3>
-                    <p class="form-help-text">Stel het 2-weken rooster patroon in. Week 1 en Week 2 wisselen elkaar af. <strong>Week 1 = weekend gesloten</strong>, <strong>Week 2 = weekend open</strong>.</p>
+                <p class="form-help-text" style="margin-bottom: 16px;">Week 1 en Week 2 wisselen elkaar af. <strong>Week 1 = weekend gesloten</strong>, <strong>Week 2 = weekend open</strong>.</p>
 
-                    <!-- Week tabs -->
-                    <div class="week-tabs">
-                        <button type="button" class="week-tab active" data-week="1">Week 1 (weekend gesloten)</button>
-                        <button type="button" class="week-tab" data-week="2">Week 2 (weekend open)</button>
-                    </div>
+                <!-- Week tabs -->
+                <div class="week-tabs">
+                    <button type="button" class="week-tab active" data-week="1">Week 1 (weekend gesloten)</button>
+                    <button type="button" class="week-tab" data-week="2">Week 2 (weekend open)</button>
+                </div>
 
-                    <div id="week-schedule-container" class="week-schedule-tabs-content">
-                        <!-- Dynamisch gegenereerd door JavaScript -->
-                    </div>
+                <div id="week-schedule-container" class="week-schedule-tabs-content">
+                    <!-- Dynamisch gegenereerd door JavaScript -->
                 </div>
 
                 <div class="modal-actions">
