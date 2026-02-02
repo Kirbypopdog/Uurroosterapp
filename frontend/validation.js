@@ -71,10 +71,11 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
 
         if (hoursBetween < minHoursBetweenShifts) {
             const employee = getEmployee(employeeId);
+            const employeeName = employee?.name || `Medewerker #${employeeId}`;
             errors.push({
                 type: ValidationRules.ERROR,
                 rule: '11-uur regel',
-                message: `${employee.name} heeft minder dan ${minHoursBetweenShifts} uur rust tussen diensten (${displayHours} uur tussen ${formatDate(existingShift.date)} en ${formatDate(newShift.date)})`,
+                message: `${employeeName} heeft minder dan ${minHoursBetweenShifts} uur rust tussen diensten (${displayHours} uur tussen ${formatDate(existingShift.date)} en ${formatDate(newShift.date)})`,
                 shift1: existingShift,
                 shift2: newShift
             });
@@ -94,10 +95,11 @@ function validateShiftOverlap(employeeId, newShift, excludeShiftId = null) {
     employeeShifts.forEach(existingShift => {
         if (shiftsOverlap(existingShift, newShift)) {
             const employee = getEmployee(employeeId);
+            const employeeName = employee?.name || `Medewerker #${employeeId}`;
             errors.push({
                 type: ValidationRules.ERROR,
                 rule: 'Overlappende diensten',
-                message: `${employee.name} heeft al een dienst op ${formatDate(existingShift.date)} van ${existingShift.startTime} tot ${existingShift.endTime}`,
+                message: `${employeeName} heeft al een dienst op ${formatDate(existingShift.date)} van ${existingShift.startTime} tot ${existingShift.endTime}`,
                 shift1: existingShift,
                 shift2: newShift
             });

@@ -3360,7 +3360,15 @@ function showAddUserModal(teams) {
         try {
             const response = await apiFetch('/admin/users', {
                 method: 'POST',
-                body: JSON.stringify({ name, email, password, role, team_id, employee_id: employee_id ? Number(employee_id) : null })
+                body: JSON.stringify({
+                    name,
+                    email,
+                    password,
+                    role,
+                    team_id,
+                    mainTeam: team_id, // Also set mainTeam for schedule/employee grouping
+                    employee_id: employee_id ? Number(employee_id) : null
+                })
             });
             // Add the new user to the local DataStore cache
             if (response.user) {
@@ -4476,7 +4484,8 @@ function handleAvailabilitySave() {
         // Warn about conflicts
         if (conflictDates.length > 0) {
             const employee = getEmployee(employeeId);
-            const confirmMsg = `⚠️ Let op: ${employee.name} heeft nog ${conflictDates.length} dienst(en) ingepland op deze dagen!\n\nDiensten op: ${conflictDates.map(d => formatDate(d)).join(', ')}\n\nDe afwezigheid wordt geregistreerd, maar de diensten blijven staan. Vergeet niet deze diensten te verwijderen of opnieuw toe te wijzen!\n\nDoorgaan?`;
+            const employeeName = employee?.name || 'Deze medewerker';
+            const confirmMsg = `⚠️ Let op: ${employeeName} heeft nog ${conflictDates.length} dienst(en) ingepland op deze dagen!\n\nDiensten op: ${conflictDates.map(d => formatDate(d)).join(', ')}\n\nDe afwezigheid wordt geregistreerd, maar de diensten blijven staan. Vergeet niet deze diensten te verwijderen of opnieuw toe te wijzen!\n\nDoorgaan?`;
             if (!confirm(confirmMsg)) {
                 return;
             }
@@ -4501,9 +4510,10 @@ function handleAvailabilitySave() {
         renderPlanning(); // Update planning view to show conflicts
 
         const employee = getEmployee(employeeId);
+        const employeeName = employee?.name || 'de medewerker';
         const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid' }[absenceType] || 'Afwezigheid';
 
-        let msg = `${typeName} geregistreerd voor ${employee.name} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
+        let msg = `${typeName} geregistreerd voor ${employeeName} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
         if (conflictDates.length > 0) {
             msg += `\n\n⚠️ Vergeet niet de ${conflictDates.length} conflicterende dienst(en) aan te passen in de planning!`;
         }
