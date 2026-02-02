@@ -3173,14 +3173,26 @@ async function loadAdminUsers(container) {
 
             row.querySelector('.admin-save-btn').addEventListener('click', async () => {
                 try {
+                    const newTeamId = teamSelect.value || null;
                     const payload = {
                         role: roleSelect.value,
-                        team_id: teamSelect.value || null
+                        team_id: newTeamId,
+                        mainTeam: newTeamId // Also update mainTeam for employee grouping
                     };
                     await apiFetch(`/admin/users/${userId}`, {
                         method: 'PATCH',
                         body: JSON.stringify(payload)
                     });
+                    // Update local DataStore cache so changes appear immediately
+                    const userIndex = DataStore.users.findIndex(u => String(u.id) === String(userId));
+                    if (userIndex !== -1) {
+                        DataStore.users[userIndex] = {
+                            ...DataStore.users[userIndex],
+                            role: roleSelect.value,
+                            team_id: newTeamId,
+                            mainTeam: newTeamId
+                        };
+                    }
                     alert('Account bijgewerkt');
                 } catch (error) {
                     alert(`Opslaan mislukt: ${error.message}`);
