@@ -509,6 +509,13 @@ async function handleLogin(e) {
     e.preventDefault();
     const email = DOM.usernameInput.value.trim();
     const password = DOM.passwordInput.value;
+
+    // Prevent double submission
+    const submitBtn = DOM.loginForm.querySelector('button[type="submit"]');
+    if (submitBtn.disabled) return;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Bezig met inloggen...';
+
     try {
         const data = await apiFetch('/auth/login', {
             method: 'POST',
@@ -523,7 +530,11 @@ async function handleLogin(e) {
         await syncEmployeeAccountLinks();
         showApp();
     } catch (error) {
+        console.error('Login error:', error);
         alert('Ongeldige gebruikersnaam of wachtwoord');
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Inloggen';
     }
 }
 
@@ -3286,6 +3297,10 @@ function showAddUserModal(teams) {
                         <input type="password" id="new-user-password" class="form-input" required minlength="6" />
                     </div>
                     <div class="form-group">
+                        <label for="new-user-password-confirm">Bevestig wachtwoord</label>
+                        <input type="password" id="new-user-password-confirm" class="form-input" required minlength="6" />
+                    </div>
+                    <div class="form-group">
                         <label for="new-user-role">Rol</label>
                         <select id="new-user-role" class="form-input" required>
                             <option value="medewerker">Medewerker</option>
@@ -3332,14 +3347,25 @@ function showAddUserModal(teams) {
         const name = form.querySelector('#new-user-name').value.trim();
         const email = form.querySelector('#new-user-email').value.trim();
         const password = form.querySelector('#new-user-password').value;
+        const passwordConfirm = form.querySelector('#new-user-password-confirm').value;
         const role = form.querySelector('#new-user-role').value;
         const team_id = form.querySelector('#new-user-team').value || null;
 
+        // Validate passwords match
+        if (password !== passwordConfirm) {
+            alert('Wachtwoorden komen niet overeen. Probeer opnieuw.');
+            return;
+        }
+
         try {
-            await apiFetch('/admin/users', {
+            const response = await apiFetch('/admin/users', {
                 method: 'POST',
                 body: JSON.stringify({ name, email, password, role, team_id, employee_id: employee_id ? Number(employee_id) : null })
             });
+            // Add the new user to the local DataStore cache
+            if (response.user) {
+                DataStore.users.push(response.user);
+            }
             modal.remove();
             alert('Gebruiker aangemaakt!');
             // Refresh accounts list
