@@ -3088,7 +3088,7 @@ async function loadAdminUsers(container) {
         `;
 
         const rows = users.map(user => `
-            <div class="admin-user-row is-collapsed" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email)}" data-team="${user.team_id || ''}" data-role="${user.role}">
+            <div class="admin-user-row" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email)}" data-team="${user.team_id || ''}" data-role="${user.role}">
                 <div class="admin-user-header">
                     <div>
                         <div class="admin-user-name">${escapeHtml(user.name)}</div>
@@ -3096,42 +3096,7 @@ async function loadAdminUsers(container) {
                     </div>
                     <div class="admin-user-header-actions">
                         <div class="admin-user-role-pill">${escapeHtml(user.role)}</div>
-                        <button type="button" class="btn btn-sm btn-secondary admin-user-toggle">Details</button>
-                    </div>
-                </div>
-                <div class="admin-user-details">
-                    <div class="admin-user-controls">
-                    <div class="admin-field">
-                        <label>Naam</label>
-                        <input type="text" class="admin-name-input form-input" value="${escapeHtml(user.name)}" />
-                    </div>
-                    <div class="admin-field">
-                        <label>Email</label>
-                        <input type="email" class="admin-email-input form-input" value="${escapeHtml(user.email)}" />
-                    </div>
-                    <div class="admin-field">
-                        <label>Rol</label>
-                        <div class="role-pill-group">
-                            <button type="button" class="role-pill-btn" data-role="admin">Admin</button>
-                            <button type="button" class="role-pill-btn" data-role="hoofdverantwoordelijke">Hoofd</button>
-                            <button type="button" class="role-pill-btn" data-role="teamverantwoordelijke">Team</button>
-                            <button type="button" class="role-pill-btn" data-role="medewerker">Medewerker</button>
-                        </div>
-                        <select class="admin-role-select role-select-hidden">
-                            ${roleOptions}
-                        </select>
-                    </div>
-                    <div class="admin-field">
-                        <label>Team</label>
-                        <select class="admin-team-select">
-                            ${teamOptions}
-                        </select>
-                    </div>
-                    <div class="admin-actions">
-                        <button class="btn btn-sm btn-primary admin-save-btn">Opslaan</button>
-                        <button class="btn btn-sm btn-secondary admin-reset-btn">Reset wachtwoord</button>
-                        <button class="btn btn-sm btn-danger admin-delete-btn" title="Account verwijderen">Verwijderen</button>
-                    </div>
+                        <button type="button" class="btn btn-sm btn-secondary admin-edit-btn">Bewerken</button>
                     </div>
                 </div>
             </div>
@@ -3152,123 +3117,17 @@ async function loadAdminUsers(container) {
             const userId = row.dataset.userId;
             const user = users.find(u => String(u.id) === String(userId));
             if (!user) return;
-            const roleSelect = row.querySelector('.admin-role-select');
-            const teamSelect = row.querySelector('.admin-team-select');
-            roleSelect.value = user.role;
-            teamSelect.value = user.team_id || '';
-            const roleButtons = Array.from(row.querySelectorAll('.role-pill-btn'));
-            const rolePill = row.querySelector('.admin-user-role-pill');
-            const syncRoleButtons = (role) => {
-                roleButtons.forEach(btn => {
-                    btn.classList.toggle('active', btn.dataset.role === role);
-                });
-                if (rolePill) rolePill.textContent = role;
-                row.dataset.role = role;
-            };
-            syncRoleButtons(user.role);
-            roleButtons.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const nextRole = btn.dataset.role;
-                    roleSelect.value = nextRole;
-                    syncRoleButtons(nextRole);
-                });
-            });
 
-            const toggleBtn = row.querySelector('.admin-user-toggle');
-            if (toggleBtn) {
-                toggleBtn.addEventListener('click', () => {
-                    const isCollapsed = row.classList.toggle('is-collapsed');
-                    toggleBtn.textContent = isCollapsed ? 'Details' : 'Verberg';
+            // Edit button opens modal
+            const editBtn = row.querySelector('.admin-edit-btn');
+            if (editBtn) {
+                editBtn.addEventListener('click', () => {
+                    showEditAccountModal(user, teams, () => {
+                        // Callback to refresh the list after save
+                        renderSettingsAccounts(document.querySelector('#settings-tab-content'));
+                    });
                 });
             }
-
-            row.querySelector('.admin-save-btn').addEventListener('click', async () => {
-                try {
-                    const nameInput = row.querySelector('.admin-name-input');
-                    const emailInput = row.querySelector('.admin-email-input');
-                    const newName = nameInput.value.trim();
-                    const newEmail = emailInput.value.trim();
-                    const newTeamId = teamSelect.value || null;
-
-                    if (!newName) {
-                        alert('Naam is verplicht');
-                        return;
-                    }
-                    if (!newEmail) {
-                        alert('Email is verplicht');
-                        return;
-                    }
-
-                    const payload = {
-                        name: newName,
-                        email: newEmail,
-                        role: roleSelect.value,
-                        team_id: newTeamId,
-                        mainTeam: newTeamId // Also update mainTeam for employee grouping
-                    };
-                    await apiFetch(`/admin/users/${userId}`, {
-                        method: 'PATCH',
-                        body: JSON.stringify(payload)
-                    });
-                    // Update local DataStore cache so changes appear immediately
-                    const userIndex = DataStore.users.findIndex(u => String(u.id) === String(userId));
-                    if (userIndex !== -1) {
-                        DataStore.users[userIndex] = {
-                            ...DataStore.users[userIndex],
-                            name: newName,
-                            email: newEmail,
-                            role: roleSelect.value,
-                            team_id: newTeamId,
-                            mainTeam: newTeamId
-                        };
-                    }
-                    // Update the display in the row header
-                    row.querySelector('.admin-user-name').textContent = newName;
-                    row.querySelector('.admin-user-email').textContent = newEmail;
-                    row.dataset.name = newName;
-                    row.dataset.email = newEmail;
-
-                    alert('Account bijgewerkt');
-                } catch (error) {
-                    alert(`Opslaan mislukt: ${error.message}`);
-                }
-            });
-
-            row.querySelector('.admin-reset-btn').addEventListener('click', async () => {
-                if (!confirm('Wachtwoord resetten naar standaard?')) return;
-                try {
-                    const result = await apiFetch(`/admin/users/${userId}/reset-password`, {
-                        method: 'POST'
-                    });
-                    alert(`Wachtwoord gereset naar: ${result.resetPassword}`);
-                } catch (error) {
-                    alert(`Reset mislukt: ${error.message}`);
-                }
-            });
-
-            // Delete user button
-            row.querySelector('.admin-delete-btn').addEventListener('click', async () => {
-                // Prevent deleting yourself
-                if (String(userId) === String(AppState.currentUser.id)) {
-                    alert('Je kunt je eigen account niet verwijderen.');
-                    return;
-                }
-
-                const userName = user.name || 'deze gebruiker';
-                const confirmMsg = `Weet je zeker dat je het account van "${userName}" wilt verwijderen?\n\nDit verwijdert ook alle gekoppelde diensten en afwezigheden.\n\nDeze actie kan niet ongedaan worden gemaakt.`;
-
-                if (!confirm(confirmMsg)) return;
-
-                try {
-                    // Use deleteEmployee which updates the local cache (DataStore.users, shifts, availability)
-                    await deleteEmployee(Number(userId));
-                    alert('Account verwijderd');
-                    // Refresh the accounts list in settings
-                    renderSettingsAccounts(document.querySelector('#settings-tab-content'));
-                } catch (error) {
-                    alert(`Verwijderen mislukt: ${error.message}`);
-                }
-            });
         });
 
         const applyFilters = () => {
@@ -3427,6 +3286,147 @@ function showAddUserModal(teams) {
             renderSettingsAccounts(document.querySelector('#settings-tab-content'));
         } catch (err) {
             alert('Fout bij aanmaken: ' + (err.message || 'Onbekende fout'));
+        }
+    });
+}
+
+function showEditAccountModal(user, teams, onSave) {
+    const teamOptions = teams.map(team =>
+        `<option value="${team.id}" ${user.team_id === team.id ? 'selected' : ''}>${escapeHtml(team.name)}</option>`
+    ).join('');
+
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.id = 'edit-account-modal';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h2>Account bewerken</h2>
+                <button class="modal-close" onclick="document.getElementById('edit-account-modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="edit-account-form">
+                    <div class="form-group">
+                        <label for="edit-user-name">Naam</label>
+                        <input type="text" id="edit-user-name" class="form-input" value="${escapeHtml(user.name)}" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-user-email">Email</label>
+                        <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email)}" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-user-role">Rol</label>
+                        <select id="edit-user-role" class="form-input" required>
+                            <option value="medewerker" ${user.role === 'medewerker' ? 'selected' : ''}>Medewerker</option>
+                            <option value="teamverantwoordelijke" ${user.role === 'teamverantwoordelijke' ? 'selected' : ''}>Teamverantwoordelijke</option>
+                            <option value="hoofdverantwoordelijke" ${user.role === 'hoofdverantwoordelijke' ? 'selected' : ''}>Hoofdverantwoordelijke</option>
+                            <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-user-team">Team</label>
+                        <select id="edit-user-team" class="form-input">
+                            <option value="">(geen team)</option>
+                            ${teamOptions}
+                        </select>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-danger" id="edit-account-delete-btn" style="margin-right: auto;">Verwijderen</button>
+                        <button type="button" class="btn btn-secondary" id="edit-account-reset-btn">Reset wachtwoord</button>
+                        <button type="submit" class="btn btn-primary">Opslaan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const form = modal.querySelector('#edit-account-form');
+
+    // Save form
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const newName = form.querySelector('#edit-user-name').value.trim();
+        const newEmail = form.querySelector('#edit-user-email').value.trim();
+        const newRole = form.querySelector('#edit-user-role').value;
+        const newTeamId = form.querySelector('#edit-user-team').value || null;
+
+        if (!newName) {
+            alert('Naam is verplicht');
+            return;
+        }
+        if (!newEmail) {
+            alert('Email is verplicht');
+            return;
+        }
+
+        try {
+            await apiFetch(`/admin/users/${user.id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                    name: newName,
+                    email: newEmail,
+                    role: newRole,
+                    team_id: newTeamId,
+                    mainTeam: newTeamId
+                })
+            });
+
+            // Update local DataStore cache
+            const userIndex = DataStore.users.findIndex(u => String(u.id) === String(user.id));
+            if (userIndex !== -1) {
+                DataStore.users[userIndex] = {
+                    ...DataStore.users[userIndex],
+                    name: newName,
+                    email: newEmail,
+                    role: newRole,
+                    team_id: newTeamId,
+                    mainTeam: newTeamId
+                };
+            }
+
+            modal.remove();
+            alert('Account bijgewerkt');
+            if (onSave) onSave();
+        } catch (error) {
+            alert(`Opslaan mislukt: ${error.message}`);
+        }
+    });
+
+    // Reset password button
+    modal.querySelector('#edit-account-reset-btn').addEventListener('click', async () => {
+        if (!confirm('Wachtwoord resetten naar standaard?')) return;
+        try {
+            const result = await apiFetch(`/admin/users/${user.id}/reset-password`, {
+                method: 'POST'
+            });
+            alert(`Wachtwoord gereset naar: ${result.resetPassword}`);
+        } catch (error) {
+            alert(`Reset mislukt: ${error.message}`);
+        }
+    });
+
+    // Delete button
+    modal.querySelector('#edit-account-delete-btn').addEventListener('click', async () => {
+        // Prevent deleting yourself
+        if (String(user.id) === String(AppState.currentUser.id)) {
+            alert('Je kunt je eigen account niet verwijderen.');
+            return;
+        }
+
+        const confirmMsg = `Weet je zeker dat je het account van "${user.name}" wilt verwijderen?\n\nDit verwijdert ook alle gekoppelde diensten en afwezigheden.\n\nDeze actie kan niet ongedaan worden gemaakt.`;
+
+        if (!confirm(confirmMsg)) return;
+
+        try {
+            await deleteEmployee(Number(user.id));
+            modal.remove();
+            alert('Account verwijderd');
+            if (onSave) onSave();
+        } catch (error) {
+            alert(`Verwijderen mislukt: ${error.message}`);
         }
     });
 }
