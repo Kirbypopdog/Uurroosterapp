@@ -2417,14 +2417,7 @@ function openEditEmployeeModal(employeeId) {
     const employee = getEmployee(employeeId);
     if (!employee) return;
     AppState.editingEmployeeId = employeeId;
-    DOM.employeeModalTitle.textContent = 'Basisrooster bewerken';
-
-    // Display read-only employee info
-    const teamName = DataStore.settings.teams?.[employee.mainTeam]?.name || employee.mainTeam || '-';
-    document.getElementById('employee-name-display').textContent = employee.name || '-';
-    document.getElementById('employee-email-display').textContent = employee.email || '-';
-    document.getElementById('employee-team-display').textContent = teamName;
-    document.getElementById('employee-contract-display').textContent = employee.contractHours ? `${employee.contractHours} uur/week` : '-';
+    DOM.employeeModalTitle.textContent = `Basisrooster: ${employee.name}`;
 
     // Hidden fields for form submission (preserve existing values)
     DOM.employeeName.value = employee.name;
