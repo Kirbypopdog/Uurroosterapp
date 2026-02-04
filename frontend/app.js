@@ -1334,10 +1334,15 @@ function renderTimelineView() {
                             // Escape quotes voor data-tooltip
                             const tooltipText = escapeHtml(titleText);
 
+                            // Only make shift clickable if user can edit it
+                            const canEdit = canUserEditShift(shift);
+                            const clickHandler = canEdit ? `onclick="openEditShiftModal(${shift.id})"` : '';
+                            const cursorStyle = canEdit ? 'cursor: pointer;' : 'cursor: default;';
+
                             html += `<div class="${blockClass}"
                                          data-shift-id="${shift.id}"
-                                         onclick="openEditShiftModal(${shift.id})"
-                                         style="left: ${leftPercent}%; width: ${widthStyle};"
+                                         ${clickHandler}
+                                         style="left: ${leftPercent}%; width: ${widthStyle}; ${cursorStyle}"
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 <span class="block-time">${shift.startTime}-${shift.endTime}</span>
                                 ${isAbsent ? '<span class="absent-badge">⚠️</span>' : ''}
@@ -1661,26 +1666,32 @@ function openAddShiftForEmployee(employeeId, date) {
     DOM.shiftModal.classList.remove('hidden');
 }
 
-function openEditShiftModal(shiftId) {
-    const shift = getShift(shiftId);
-    if (!shift) return;
+function canUserEditShift(shift) {
+    if (!shift || !AppState.currentUser) return false;
 
     const currentRole = getEffectiveRole();
     const currentUserId = AppState.currentUser.id;
     const isOwnShift = shift.userId === currentUserId || shift.employeeId === currentUserId;
 
-    // Determine edit permissions
-    let canEdit = false;
     if (currentRole === 'admin' || currentRole === 'hoofdverantwoordelijke') {
-        canEdit = true;
+        return true;
     } else if (currentRole === 'teamverantwoordelijke') {
         // Can edit shifts from own team
         const userTeam = AppState.currentUser.team_id || AppState.currentUser.mainTeam;
-        canEdit = shift.team === userTeam;
+        return shift.team === userTeam;
     } else if (currentRole === 'medewerker') {
         // Can only edit own shifts
-        canEdit = isOwnShift;
+        return isOwnShift;
     }
+
+    return false;
+}
+
+function openEditShiftModal(shiftId) {
+    const shift = getShift(shiftId);
+    if (!shift) return;
+
+    const canEdit = canUserEditShift(shift);
 
     // Open modal in view or edit mode
     openShiftModal(shift, canEdit);

@@ -152,7 +152,8 @@ async function loadDataFromAPI() {
             rules: apiSettings.rules || DataStore.settings.rules,
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
-            responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation
+            responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
+            planningHorizon: apiSettings.planningHorizon || DataStore.settings.planningHorizon
         });
 
         DataStore._loaded = true;

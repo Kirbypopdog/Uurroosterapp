@@ -697,7 +697,7 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
             start_time = COALESCE($4, start_time),
             end_time = COALESCE($5, end_time),
             notes = COALESCE($6, notes),
-            source = $8
+            source = COALESCE($8, source, 'manual')
         WHERE id = $7
         RETURNING id, user_id as "userId", team, date, start_time as "startTime",
                   end_time as "endTime", notes, source, created_at as "createdAt"
