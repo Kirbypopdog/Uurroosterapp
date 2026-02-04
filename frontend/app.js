@@ -1126,7 +1126,10 @@ function renderTimelineView() {
 
     // Get unique employees with shifts
     const employeeIds = [...new Set(allShifts.map(s => s.employeeId))];
+    console.log('[renderTimelineView] Unique employee IDs:', employeeIds);
+    console.log('[renderTimelineView] Sample shift for debugging:', allShifts[0]);
     let employees = employeeIds.map(id => getEmployee(id)).filter(e => e);
+    console.log('[renderTimelineView] Employees to render:', employees.length);
 
     // Group employees by their main team - only show visible teams
     const teams = DataStore.settings.teams || {};
