@@ -691,31 +691,33 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
     try {
       result = await pool.query(`
         UPDATE shifts
-        SET team = COALESCE($1, team),
-            date = COALESCE($2, date),
-            start_time = COALESCE($3, start_time),
-            end_time = COALESCE($4, end_time),
-            notes = COALESCE($5, notes),
-            source = COALESCE($7, source, 'manual')
-        WHERE id = $6
+        SET user_id = COALESCE($1, user_id),
+            team = COALESCE($2, team),
+            date = COALESCE($3, date),
+            start_time = COALESCE($4, start_time),
+            end_time = COALESCE($5, end_time),
+            notes = COALESCE($6, notes),
+            source = COALESCE($8, source, 'manual')
+        WHERE id = $7
         RETURNING id, user_id as "userId", team, date, start_time as "startTime",
                   end_time as "endTime", notes, source, created_at as "createdAt"
-      `, [team, date, startTime, endTime, notes, id, shiftSource]);
+      `, [userId, team, date, startTime, endTime, notes, id, shiftSource]);
     } catch (schemaErr) {
       // Fallback to old schema with employee_id
       console.log('Using old schema for PUT /shifts (employee_id)');
       console.log('First query failed with:', schemaErr.message);
       result = await pool.query(`
         UPDATE shifts
-        SET team = COALESCE($1, team),
-            date = COALESCE($2, date),
-            start_time = COALESCE($3, start_time),
-            end_time = COALESCE($4, end_time),
-            notes = COALESCE($5, notes)
-        WHERE id = $6
+        SET employee_id = COALESCE($1, employee_id),
+            team = COALESCE($2, team),
+            date = COALESCE($3, date),
+            start_time = COALESCE($4, start_time),
+            end_time = COALESCE($5, end_time),
+            notes = COALESCE($6, notes)
+        WHERE id = $7
         RETURNING id, employee_id as "userId", team, date, start_time as "startTime",
                   end_time as "endTime", notes, 'manual' as source, created_at as "createdAt"
-      `, [team, date, startTime, endTime, notes, id]);
+      `, [userId, team, date, startTime, endTime, notes, id]);
     }
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Dienst niet gevonden' });
