@@ -714,7 +714,7 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
             notes = COALESCE($5, notes)
         WHERE id = $6
         RETURNING id, employee_id as "userId", team, date, start_time as "startTime",
-                  end_time as "endTime", notes, created_at as "createdAt"
+                  end_time as "endTime", notes, 'manual' as source, created_at as "createdAt"
       `, [team, date, startTime, endTime, notes, id]);
     }
     if (result.rows.length === 0) {
