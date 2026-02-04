@@ -1699,6 +1699,8 @@ function openEditShiftModal(shiftId) {
 
 function openShiftModal(shift, canEdit) {
     AppState.editingShiftId = shift.id;
+    console.log('[openShiftModal] Set editingShiftId to:', AppState.editingShiftId);
+    console.log('[openShiftModal] canEdit:', canEdit);
 
     // Set modal title
     DOM.shiftModalTitle.textContent = canEdit ? 'Dienst bewerken' : 'Dienst bekijken';
@@ -1890,15 +1892,26 @@ async function handleShiftSubmit(e) {
                 return;
             }
         }
+
+        console.log('[handleShiftSubmit] About to check editingShiftId:', AppState.editingShiftId);
+        console.log('[handleShiftSubmit] Shift data:', shiftData);
+
         if (AppState.editingShiftId) {
+            console.log('[handleShiftSubmit] Calling updateShift with ID:', AppState.editingShiftId);
             await updateShift(AppState.editingShiftId, shiftData);
+            console.log('[handleShiftSubmit] updateShift completed');
         } else {
+            console.log('[handleShiftSubmit] Calling addShift');
             await addShift(shiftData);
+            console.log('[handleShiftSubmit] addShift completed');
         }
+
+        console.log('[handleShiftSubmit] Closing modal and rendering');
         closeShiftModal();
         renderPlanning();
     } catch (error) {
-        console.error('Error in handleShiftSubmit:', error);
+        console.error('[handleShiftSubmit] Caught error:', error);
+        console.error('[handleShiftSubmit] Error stack:', error.stack);
         DOM.shiftValidationErrors.innerHTML = '<ul><li>Er is een fout opgetreden: ' + error.message + '</li></ul>';
     }
 }
