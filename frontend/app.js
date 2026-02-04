@@ -205,6 +205,7 @@ function initDOM() {
     DOM.shiftNotes = document.getElementById('shift-notes');
     DOM.shiftValidationErrors = document.getElementById('shift-validation-errors');
     DOM.shiftCancelBtn = document.getElementById('shift-cancel-btn');
+    DOM.shiftSubmitBtn = document.getElementById('shift-submit-btn');
     DOM.shiftDeleteBtn = document.getElementById('shift-delete-btn');
     DOM.employeeModal = document.getElementById('employee-modal');
     DOM.employeeForm = document.getElementById('employee-form');
