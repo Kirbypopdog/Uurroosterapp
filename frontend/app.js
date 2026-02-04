@@ -1109,14 +1109,20 @@ function renderTimelineView() {
     const weekDates = getWeekDates(startDateStr);
     const dayNames = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
 
+    console.log('[renderTimelineView] Rendering for week dates:', weekDates);
+    console.log('[renderTimelineView] Total shifts in DataStore:', DataStore.shifts.length);
+
     // Get all employees who have shifts this week
     let allShifts = [];
     weekDates.forEach(date => {
         let shifts = getShiftsByDate(date);
+        console.log(`[renderTimelineView] Found ${shifts.length} shifts for ${date}`);
         // Filter by visible teams (include shifts without team)
         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
         allShifts = allShifts.concat(shifts);
     });
+
+    console.log('[renderTimelineView] Total shifts to render:', allShifts.length);
 
     // Get unique employees with shifts
     const employeeIds = [...new Set(allShifts.map(s => s.employeeId))];
