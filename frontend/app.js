@@ -5,6 +5,7 @@ const AppState = {
     currentUser: null,
     authToken: null,
     currentView: 'planning',
+    schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
     viewMode: 'week',
     visibleTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
@@ -215,7 +216,6 @@ function initDOM() {
     DOM.employeeActive = document.getElementById('employee-active');
     DOM.employeeCancelBtn = document.getElementById('employee-cancel-btn');
     DOM.employeeDeleteBtn = document.getElementById('employee-delete-btn');
-    DOM.generateScheduleBtn = document.getElementById('generate-schedule-btn');
     DOM.warningDetailsModal = document.getElementById('warning-details-modal');
     DOM.warningDetailsList = document.getElementById('warning-details-list');
     DOM.warningDetailsClose = document.getElementById('warning-details-close');
@@ -489,9 +489,6 @@ function setupEventListeners() {
         tab.addEventListener('click', () => switchWeekTab(parseInt(tab.dataset.week)));
     });
 
-    // Generate schedule button
-    DOM.generateScheduleBtn.addEventListener('click', handleGenerateSchedule);
-
     DOM.validationAlerts.addEventListener('click', (event) => {
         const errorChip = event.target.closest('.validation-summary-item.validation-error');
         if (errorChip) {
@@ -528,6 +525,8 @@ async function handleLogin(e) {
         // Load data from database
         await loadDataFromAPI();
         await syncEmployeeAccountLinks();
+        // Auto-apply base schedules after data loads
+        await autoApplyBaseSchedules();
         showApp();
     } catch (error) {
         console.error('Login error:', error);
@@ -560,6 +559,8 @@ async function checkSession() {
         // Load data from database
         await loadDataFromAPI();
         await syncEmployeeAccountLinks();
+        // Auto-apply base schedules after data loads
+        await autoApplyBaseSchedules();
         showApp();
     } catch (error) {
         handleLogout();
@@ -2490,39 +2491,48 @@ async function handleEmployeeDelete() {
 
 // ===== BASISROOSTER FUNCTIES =====
 
-async function handleGenerateSchedule() {
-    // Get current week dates
-    const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
-    const weekDates = getWeekDates(startDateStr);
-    const startDate = weekDates[0];
-    const endDate = weekDates[6];
-
-    // Count manual shifts that will be preserved
-    const manualShiftsCount = DataStore.shifts.filter(s =>
-        s.date >= startDate && s.date <= endDate && s.source === 'manual'
-    ).length;
-
-    let confirmMsg = `Wil je de basisroosters toepassen voor deze week (${formatDate(startDate)} t/m ${formatDate(endDate)})?`;
-    if (manualShiftsCount > 0) {
-        confirmMsg += `\\n\\n${manualShiftsCount} handmatig aangepaste dienst(en) blijven behouden.`;
-    }
-    confirmMsg += '\\n\\nAlleen automatisch gegenereerde diensten worden opnieuw ingesteld.';
-
-    if (!confirm(confirmMsg)) {
-        return;
+async function autoApplyBaseSchedules() {
+    // Skip if already generated in this session
+    if (AppState.schedulesGenerated) {
+        console.log('[Auto Schedule] Already generated this session, skipping');
+        return { created: 0, removed: 0 };
     }
 
-    // Only remove auto-generated shifts, preserve manual shifts
+    console.log('[Auto Schedule] Starting automatic base schedule application...');
+
+    // Get planning horizon setting
+    const horizonWeeks = DataStore.settings.planningHorizon?.weeks || 4;
+
+    // Calculate date range
+    const today = new Date();
+    const startDate = formatDateYYYYMMDD(getMonday(today));
+
+    let endDate;
+    if (horizonWeeks === null || horizonWeeks === 'unlimited') {
+        // Unlimited: generate for 1 year
+        const oneYearLater = new Date(today);
+        oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+        endDate = formatDateYYYYMMDD(oneYearLater);
+    } else {
+        const endDateObj = new Date(today);
+        endDateObj.setDate(endDateObj.getDate() + (horizonWeeks * 7));
+        endDate = formatDateYYYYMMDD(endDateObj);
+    }
+
+    console.log(`[Auto Schedule] Applying base schedules from ${startDate} to ${endDate} (horizon: ${horizonWeeks || 'unlimited'} weeks)`);
+
+    // Remove auto-generated shifts in this range
     const removedShifts = await removeAutoShiftsInDateRange(startDate, endDate);
+
+    // Apply base schedules for all employees
     const totalShifts = await applyWeekScheduleForAllEmployees(startDate, endDate);
 
-    if (totalShifts > 0 || removedShifts > 0) {
-        const removedLabel = removedShifts > 0 ? ` (${removedShifts} automatische dienst${removedShifts !== 1 ? 'en' : ''} vervangen)` : '';
-        alert(`✅ ${totalShifts} dienst${totalShifts !== 1 ? 'en' : ''} aangemaakt op basis van basisroosters!${removedLabel}`);
-        renderPlanning();
-    } else {
-        alert('Geen nieuwe diensten aangemaakt. Controleer of medewerkers een basisrooster hebben ingesteld en actief zijn.');
-    }
+    console.log(`[Auto Schedule] Created ${totalShifts} shifts (replaced ${removedShifts} auto shifts)`);
+
+    // Mark as generated
+    AppState.schedulesGenerated = true;
+
+    return { created: totalShifts, removed: removedShifts };
 }
 
 function generateWeekScheduleHTML() {
@@ -3840,6 +3850,15 @@ async function savePlanningHorizon() {
             body: JSON.stringify({ value: { weeks } })
         });
         alert('✅ Planning horizon is opgeslagen!');
+
+        // Reset flag and re-apply schedules with new horizon
+        AppState.schedulesGenerated = false;
+        await autoApplyBaseSchedules();
+
+        // Refresh planning view if currently visible
+        if (AppState.currentView === 'planning') {
+            renderPlanning();
+        }
     } catch (error) {
         console.error('Fout bij opslaan planning horizon:', error);
         alert('✅ Planning horizon is lokaal opgeslagen (server sync mislukt)');

@@ -293,6 +293,8 @@ app.get('/users', requireAuth, async (req, res) => {
     // Try new schema, fallback to old
     let result;
     try {
+      // Everyone can see all users (visibility is universal)
+      // Edit permissions differ by role (handled separately in POST/PUT/DELETE endpoints)
       let query = `
         SELECT id, name, email, role, team_id,
                main_team as "mainTeam", extra_teams as "extraTeams",
@@ -301,31 +303,15 @@ app.get('/users', requireAuth, async (req, res) => {
                week_schedule_week2 as "weekScheduleWeek2",
                created_at as "createdAt"
         FROM users
+        ORDER BY name
       `;
-      const params = [];
-
-      // Role-based filtering
-      if (role === 'medewerker') {
-        query += ' WHERE id = $1';
-        params.push(req.user.id);
-      } else if (role === 'teamverantwoordelijke') {
-        query += ' WHERE main_team = $1 OR id = $2';
-        params.push(team_id, req.user.id);
-      }
-
-      query += ' ORDER BY name';
-      result = await pool.query(query, params);
+      result = await pool.query(query);
     } catch (schemaErr) {
       // Fallback to old schema
       console.log('Using old schema for /users');
-      let query = 'SELECT id, name, email, role, team_id, created_at as "createdAt" FROM users';
-      if (role === 'medewerker') {
-        query += ' WHERE id = $1 ORDER BY name';
-        result = await pool.query(query, [req.user.id]);
-      } else {
-        query += ' ORDER BY name';
-        result = await pool.query(query);
-      }
+      // Everyone sees all users (no role-based filtering)
+      let query = 'SELECT id, name, email, role, team_id, created_at as "createdAt" FROM users ORDER BY name';
+      result = await pool.query(query);
     }
 
     res.json({ users: result.rows });
@@ -706,7 +692,7 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
       result = await pool.query(`
         UPDATE shifts
         SET user_id = COALESCE($1, user_id),
-            team = $2,
+            team = COALESCE($2, team),
             date = COALESCE($3, date),
             start_time = COALESCE($4, start_time),
             end_time = COALESCE($5, end_time),
@@ -722,7 +708,7 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
       result = await pool.query(`
         UPDATE shifts
         SET employee_id = COALESCE($1, employee_id),
-            team = $2,
+            team = COALESCE($2, team),
             date = COALESCE($3, date),
             start_time = COALESCE($4, start_time),
             end_time = COALESCE($5, end_time),
