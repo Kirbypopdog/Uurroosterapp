@@ -1128,8 +1128,22 @@ function renderTimelineView() {
     const employeeIds = [...new Set(allShifts.map(s => s.employeeId))];
     console.log('[renderTimelineView] Unique employee IDs:', employeeIds);
     console.log('[renderTimelineView] Sample shift for debugging:', allShifts[0]);
+
+    // Debug: check if employee 64 exists
+    console.log('[renderTimelineView] getEmployee(64):', getEmployee(64));
+    console.log('[renderTimelineView] Total users in DataStore:', DataStore.users.length);
+    console.log('[renderTimelineView] User IDs in DataStore:', DataStore.users.map(u => u.id));
+
     let employees = employeeIds.map(id => getEmployee(id)).filter(e => e);
     console.log('[renderTimelineView] Employees to render:', employees.length);
+
+    // Check which employee ID is missing
+    employeeIds.forEach(id => {
+        const emp = getEmployee(id);
+        if (!emp) {
+            console.warn('[renderTimelineView] Missing employee for ID:', id);
+        }
+    });
 
     // Group employees by their main team - only show visible teams
     const teams = DataStore.settings.teams || {};
