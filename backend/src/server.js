@@ -705,6 +705,7 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
     } catch (schemaErr) {
       // Fallback to old schema with employee_id
       console.log('Using old schema for PUT /shifts (employee_id)');
+      console.log('First query failed with:', schemaErr.message);
       result = await pool.query(`
         UPDATE shifts
         SET employee_id = COALESCE($1, employee_id),
@@ -723,8 +724,10 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
     }
     res.json({ shift: result.rows[0] });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('PUT /shifts/:id error:', err);
+    console.error('Error detail:', err.message);
+    console.error('Error code:', err.code);
+    res.status(500).json({ error: 'Server error', detail: err.message });
   }
 });
 
