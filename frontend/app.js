@@ -1627,7 +1627,24 @@ function openAddShiftModal() {
     DOM.shiftValidationErrors.innerHTML = '';
     DOM.shiftDate.value = formatDateYYYYMMDD(new Date());
     DOM.shiftDeleteBtn.style.display = 'none';
+
+    // Populate dropdown with filtered employees
     populateEmployeeDropdown();
+
+    // Auto-select current user for medewerkers and disable dropdown
+    const currentRole = getEffectiveRole();
+    if (currentRole === 'medewerker') {
+        DOM.shiftEmployee.value = AppState.currentUser.id;
+        DOM.shiftEmployee.disabled = true;
+        DOM.shiftEmployee.classList.add('readonly');
+    } else {
+        DOM.shiftEmployee.disabled = false;
+        DOM.shiftEmployee.classList.remove('readonly');
+    }
+
+    // Show submit button, hide delete button
+    DOM.shiftSubmitBtn.style.display = 'inline-block';
+
     DOM.shiftModal.classList.remove('hidden');
 }
 
@@ -1644,22 +1661,70 @@ function openAddShiftForEmployee(employeeId, date) {
 }
 
 function openEditShiftModal(shiftId) {
-    // Medewerkers mogen geen shifts bewerken
-    if (!hasPermission('MANAGE_SHIFTS')) {
-        return;
-    }
     const shift = getShift(shiftId);
     if (!shift) return;
-    AppState.editingShiftId = shiftId;
-    DOM.shiftModalTitle.textContent = 'Dienst bewerken';
-    DOM.shiftDeleteBtn.style.display = hasPermission('MANAGE_SHIFTS') ? 'block' : 'none';
+
+    const currentRole = getEffectiveRole();
+    const currentUserId = AppState.currentUser.id;
+    const isOwnShift = shift.userId === currentUserId || shift.employeeId === currentUserId;
+
+    // Determine edit permissions
+    let canEdit = false;
+    if (currentRole === 'admin' || currentRole === 'hoofdverantwoordelijke') {
+        canEdit = true;
+    } else if (currentRole === 'teamverantwoordelijke') {
+        // Can edit shifts from own team
+        const userTeam = AppState.currentUser.team_id || AppState.currentUser.mainTeam;
+        canEdit = shift.team === userTeam;
+    } else if (currentRole === 'medewerker') {
+        // Can only edit own shifts
+        canEdit = isOwnShift;
+    }
+
+    // Open modal in view or edit mode
+    openShiftModal(shift, canEdit);
+}
+
+function openShiftModal(shift, canEdit) {
+    AppState.editingShiftId = shift.id;
+
+    // Set modal title
+    DOM.shiftModalTitle.textContent = canEdit ? 'Dienst bewerken' : 'Dienst bekijken';
+
+    // Populate employee dropdown
     populateEmployeeDropdown();
-    DOM.shiftEmployee.value = shift.employeeId;
+
+    // Fill form with shift data
+    DOM.shiftEmployee.value = shift.employeeId || shift.userId;
     DOM.shiftTeam.value = shift.team;
     DOM.shiftDate.value = shift.date;
     DOM.shiftStart.value = shift.startTime;
     DOM.shiftEnd.value = shift.endTime;
     DOM.shiftNotes.value = shift.notes || '';
+
+    // Disable/enable form fields based on permissions
+    const formFields = [
+        DOM.shiftEmployee,
+        DOM.shiftTeam,
+        DOM.shiftDate,
+        DOM.shiftStart,
+        DOM.shiftEnd,
+        DOM.shiftNotes
+    ];
+
+    formFields.forEach(field => {
+        if (canEdit) {
+            field.disabled = false;
+            field.classList.remove('readonly');
+        } else {
+            field.disabled = true;
+            field.classList.add('readonly');
+        }
+    });
+
+    // Show/hide action buttons
+    DOM.shiftSubmitBtn.style.display = canEdit ? 'inline-block' : 'none';
+    DOM.shiftDeleteBtn.style.display = canEdit ? 'block' : 'none';
 
     // Show source info (auto vs manual)
     const isAutoShift = shift.source === 'auto';
@@ -1678,13 +1743,13 @@ function openEditShiftModal(shiftId) {
 
     // Show existing validation issues for this shift
     const validation = validateShift(shift, shift.id);
-    const availability = getAvailability(shift.employeeId, shift.date);
+    const availability = getAvailability(shift.employeeId || shift.userId, shift.date);
     const isAbsent = availability && availability.type;
 
     let issuesHtml = sourceHtml;
     if (isAbsent) {
         const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren opnemen', 'vorming': 'Vorming', 'andere': 'Afwezig' };
-        const employeeName = escapeHtml(getEmployee(shift.employeeId)?.name || '');
+        const employeeName = escapeHtml(getEmployee(shift.employeeId || shift.userId)?.name || '');
         issuesHtml += `<div class="validation-warning absence">
             <strong>⚠️ Afwezigheid:</strong> ${employeeName} is afwezig (${absenceLabels[availability.type] || 'Afwezig'})
         </div>`;
@@ -1723,7 +1788,24 @@ function handleShiftDelete() {
 }
 
 function populateEmployeeDropdown() {
-    const employees = getAllEmployees(true);
+    const currentRole = getEffectiveRole();
+    const currentUserId = AppState.currentUser.id;
+    const currentUserTeam = AppState.currentUser.team_id || AppState.currentUser.mainTeam;
+
+    let employees = getAllEmployees(true);
+
+    // Filter based on role
+    if (currentRole === 'medewerker') {
+        // Medewerkers can only create shifts for themselves
+        employees = employees.filter(emp => emp.id === currentUserId);
+    } else if (currentRole === 'teamverantwoordelijke') {
+        // Team leaders can create shifts for their team
+        employees = employees.filter(emp =>
+            emp.mainTeam === currentUserTeam || emp.id === currentUserId
+        );
+    }
+    // Admin and hoofdverantwoordelijke see everyone (no filter)
+
     let html = '<option value="">-- Selecteer medewerker --</option>';
     employees.forEach(emp => {
         html += `<option value="${emp.id}">${escapeHtml(emp.name)}</option>`;
@@ -2520,6 +2602,14 @@ async function autoApplyBaseSchedules() {
     }
 
     console.log(`[Auto Schedule] Applying base schedules from ${startDate} to ${endDate} (horizon: ${horizonWeeks || 'unlimited'} weeks)`);
+
+    // Count employees with base schedules
+    const employees = getAllEmployees(true);
+    const employeesWithSchedule = employees.filter(emp =>
+        (emp.weekScheduleWeek1 && emp.weekScheduleWeek1.length > 0) ||
+        (emp.weekScheduleWeek2 && emp.weekScheduleWeek2.length > 0)
+    );
+    console.log(`[Auto Schedule] Found ${employees.length} active employees, ${employeesWithSchedule.length} with base schedules configured`);
 
     // Remove auto-generated shifts in this range
     const removedShifts = await removeAutoShiftsInDateRange(startDate, endDate);

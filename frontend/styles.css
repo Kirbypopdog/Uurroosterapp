@@ -3244,6 +3244,14 @@ textarea {
     color: #64748b;
 }
 
+.form-input.readonly,
+.form-input:disabled {
+    background-color: #f3f4f6;
+    cursor: not-allowed;
+    opacity: 0.7;
+    color: var(--text-secondary);
+}
+
 .form-hint {
     display: block;
     font-size: 12px;
