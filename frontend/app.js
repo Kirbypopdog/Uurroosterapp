@@ -578,6 +578,11 @@ function showApp() {
     DOM.appContainer.classList.remove('hidden');
     DOM.currentUserSpan.textContent = AppState.currentUser.name;
     applyRoleVisibility();
+    // Restore saved view from localStorage, or use default
+    const savedView = localStorage.getItem('hetvlot_activeView');
+    if (savedView && ['planning', 'employees', 'profile', 'availability', 'swaps', 'settings'].includes(savedView)) {
+        AppState.currentView = savedView;
+    }
     switchView(AppState.currentView);
 }
 
@@ -649,6 +654,8 @@ function applyRoleVisibility() {
 
 function switchView(viewName) {
     AppState.currentView = viewName;
+    // Save to localStorage so we can restore after refresh
+    localStorage.setItem('hetvlot_activeView', viewName);
     DOM.navButtons.forEach(btn => {
         if (btn.dataset.view === viewName) {
             btn.classList.add('active');
@@ -3331,7 +3338,7 @@ function showEditAccountModal(user, teams, onSave) {
                             ${teamOptions}
                         </select>
                     </div>
-                    <div class="modal-actions" style="display: flex; justify-content: space-between; gap: 8px;">
+                    <div class="modal-actions" style="display: flex; justify-content: space-between; gap: 8px; width: 100%;">
                         <button type="button" class="btn btn-danger" id="edit-account-delete-btn">Verwijderen</button>
                         <div style="display: flex; gap: 8px;">
                             <button type="button" class="btn btn-secondary" id="edit-account-reset-btn">Reset wachtwoord</button>
