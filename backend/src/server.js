@@ -421,6 +421,10 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
     const week1Json = weekScheduleWeek1 !== undefined ? JSON.stringify(weekScheduleWeek1) : null;
     const week2Json = weekScheduleWeek2 !== undefined ? JSON.stringify(weekScheduleWeek2) : null;
 
+    // Get old email before updating (for syncing with employees table)
+    const oldUserResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+    const oldEmail = oldUserResult.rows.length > 0 ? oldUserResult.rows[0].email : null;
+
     const result = await pool.query(
       `UPDATE users
        SET role = $1,
@@ -453,6 +457,21 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
         userId
       ]
     );
+
+    // If email changed, also update the employees table to keep them in sync
+    const newEmail = result.rows[0].email;
+    if (email && oldEmail && newEmail && oldEmail.toLowerCase() !== newEmail.toLowerCase()) {
+      try {
+        await pool.query(
+          'UPDATE employees SET email = $1 WHERE LOWER(email) = LOWER($2)',
+          [newEmail, oldEmail]
+        );
+        console.log(`Synced email change from ${oldEmail} to ${newEmail} in employees table`);
+      } catch (empErr) {
+        console.warn('Could not update employees table email (table may not exist or no matching employee):', empErr.message);
+      }
+    }
+
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -486,6 +505,10 @@ app.put('/users/:id', requireAuth, async (req, res) => {
     const week1Json = JSON.stringify(weekScheduleWeek1 || []);
     const week2Json = JSON.stringify(weekScheduleWeek2 || []);
 
+    // Get old email before updating (for syncing with employees table)
+    const oldUserResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+    const oldEmail = oldUserResult.rows.length > 0 ? oldUserResult.rows[0].email : null;
+
     const result = await pool.query(
       `UPDATE users
        SET name = $1,
@@ -508,6 +531,21 @@ app.put('/users/:id', requireAuth, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Gebruiker niet gevonden' });
     }
+
+    // If email changed, also update the employees table to keep them in sync
+    const newEmail = result.rows[0].email;
+    if (oldEmail && newEmail && oldEmail.toLowerCase() !== newEmail.toLowerCase()) {
+      try {
+        await pool.query(
+          'UPDATE employees SET email = $1 WHERE LOWER(email) = LOWER($2)',
+          [newEmail, oldEmail]
+        );
+        console.log(`Synced email change from ${oldEmail} to ${newEmail} in employees table`);
+      } catch (empErr) {
+        console.warn('Could not update employees table email (table may not exist or no matching employee):', empErr.message);
+      }
+    }
+
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
