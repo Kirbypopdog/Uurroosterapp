@@ -706,6 +706,23 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
       // Fallback to old schema with employee_id
       console.log('Using old schema for PUT /shifts (employee_id)');
       console.log('First query failed with:', schemaErr.message);
+
+      // Map userId to employeeId via email
+      let employeeId = null;
+      if (userId) {
+        const userResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+        if (userResult.rows.length > 0) {
+          const userEmail = userResult.rows[0].email;
+          const empResult = await pool.query('SELECT id FROM employees WHERE LOWER(email) = LOWER($1)', [userEmail]);
+          if (empResult.rows.length > 0) {
+            employeeId = empResult.rows[0].id;
+            console.log(`Mapped userId ${userId} to employeeId ${employeeId} via email ${userEmail}`);
+          } else {
+            console.warn(`No employee found for userId ${userId} with email ${userEmail}`);
+          }
+        }
+      }
+
       result = await pool.query(`
         UPDATE shifts
         SET employee_id = COALESCE($1, employee_id),
@@ -715,9 +732,25 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
             end_time = COALESCE($5, end_time),
             notes = COALESCE($6, notes)
         WHERE id = $7
-        RETURNING id, employee_id as "userId", team, date, start_time as "startTime",
+        RETURNING id, employee_id, team, date, start_time as "startTime",
                   end_time as "endTime", notes, 'manual' as source, created_at as "createdAt"
-      `, [userId, team, date, startTime, endTime, notes, id]);
+      `, [employeeId, team, date, startTime, endTime, notes, id]);
+
+      // Map employee_id back to userId via email
+      if (result.rows.length > 0) {
+        const shift = result.rows[0];
+        const empResult = await pool.query('SELECT email FROM employees WHERE id = $1', [shift.employee_id]);
+        if (empResult.rows.length > 0) {
+          const empEmail = empResult.rows[0].email;
+          const userResult = await pool.query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [empEmail]);
+          if (userResult.rows.length > 0) {
+            shift.userId = userResult.rows[0].id;
+            console.log(`Mapped employee_id ${shift.employee_id} back to userId ${shift.userId}`);
+          }
+        }
+        // Remove employee_id from response
+        delete shift.employee_id;
+      }
     }
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Dienst niet gevonden' });
