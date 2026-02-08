@@ -1043,6 +1043,50 @@ function getWeekDates(date) {
     return dates;
 }
 
+// Get first day of month (always 1st of month, 00:00:00)
+function getMonthStart(date) {
+    const d = parseDateOnly(date);
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+// Get all weeks in a month (array of Monday date strings YYYY-MM-DD)
+// Returns 4-6 weeks, starting from Monday before or on month start
+function getMonthWeeks(monthStartDate) {
+    const monthStart = parseDateOnly(monthStartDate);
+    const firstMonday = getMonday(monthStart); // Monday on or before 1st
+
+    // Find last day of month
+    const nextMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+    const lastDay = new Date(nextMonth.getTime() - 1);
+
+    const weeks = [];
+    let currentMonday = new Date(firstMonday);
+
+    // Add weeks until we cover the entire month
+    while (currentMonday <= lastDay) {
+        weeks.push(formatDateYYYYMMDD(currentMonday));
+        currentMonday.setDate(currentMonday.getDate() + 7);
+    }
+
+    return weeks;
+}
+
+// Get all dates in a month (array of date strings YYYY-MM-DD)
+function getMonthDates(monthStartDate) {
+    const weeks = getMonthWeeks(monthStartDate);
+    const dates = [];
+    weeks.forEach(weekStart => {
+        dates.push(...getWeekDates(weekStart));
+    });
+    return dates;
+}
+
+// Format month display (e.g., "februari 2026")
+function formatMonthDisplay(monthStartDate) {
+    const d = parseDateOnly(monthStartDate);
+    return d.toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
+}
+
 // ===== LEGACY COMPATIBILITY =====
 // These functions are kept for compatibility but do nothing with localStorage
 

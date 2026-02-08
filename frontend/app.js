@@ -8,6 +8,8 @@ const AppState = {
     currentView: 'planning',
     schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
+    currentMonthStart: null, // First day of month for month view
+    previousWeekStart: null, // Store week when switching to month view
     viewMode: 'week',
     visibleTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     visibleEmployeeTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
@@ -371,17 +373,21 @@ function setupEventListeners() {
         });
     });
     DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
-    DOM.prevWeekBtn.addEventListener('click', () => changeWeek(-1));
-    DOM.nextWeekBtn.addEventListener('click', () => changeWeek(1));
-    DOM.todayBtn.addEventListener('click', () => {
-        setCurrentWeek(new Date());
-        // Set mobile day to today's day of the week (0=Mon, 6=Sun)
-        const today = new Date();
-        const dayOfWeek = today.getDay();
-        // Convert from JS day (0=Sun, 6=Sat) to our format (0=Mon, 6=Sun)
-        AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        renderPlanning();
+    DOM.prevWeekBtn.addEventListener('click', () => {
+        if (AppState.viewMode === 'month') {
+            changeMonth(-1);
+        } else {
+            changeWeek(-1);
+        }
     });
+    DOM.nextWeekBtn.addEventListener('click', () => {
+        if (AppState.viewMode === 'month') {
+            changeMonth(1);
+        } else {
+            changeWeek(1);
+        }
+    });
+    DOM.todayBtn.addEventListener('click', jumpToToday);
 
     // Mobile day navigation
     if (DOM.mobilePrevDay) {
@@ -755,6 +761,41 @@ function changeWeek(direction) {
     renderPlanning();
 }
 
+// Set current month
+function setCurrentMonth(date) {
+    const d = parseDateOnly(date);
+    d.setDate(1); // Set to 1st of month
+    d.setHours(0, 0, 0, 0);
+    AppState.currentMonthStart = d;
+    updatePeriodDisplay();
+}
+
+// Change month (direction: -1 for previous, 1 for next)
+function changeMonth(direction) {
+    if (!AppState.currentMonthStart) {
+        setCurrentMonth(new Date());
+        return;
+    }
+    const newDate = new Date(AppState.currentMonthStart);
+    newDate.setMonth(newDate.getMonth() + direction);
+    setCurrentMonth(newDate);
+    renderPlanning();
+}
+
+// Jump to today (unified function for both views)
+function jumpToToday() {
+    const today = new Date();
+    if (AppState.viewMode === 'week') {
+        setCurrentWeek(today);
+        // Set mobile day to today
+        const dayOfWeek = today.getDay();
+        AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    } else {
+        setCurrentMonth(today);
+    }
+    renderPlanning();
+}
+
 // ===== MOBILE DAY NAVIGATION =====
 function changeMobileDay(direction) {
     AppState.mobileDayIndex += direction;
@@ -860,7 +901,27 @@ function jumpToAvailabilityDate(date) {
 }
 
 function changeViewMode(mode) {
+    if (mode === AppState.viewMode) return; // Already in this mode
+
+    // Store context before switching
+    if (mode === 'month' && AppState.viewMode === 'week') {
+        // Switching week → month
+        AppState.previousWeekStart = AppState.currentWeekStart;
+        // Set month to the month containing current week
+        setCurrentMonth(AppState.currentWeekStart || new Date());
+    } else if (mode === 'week' && AppState.viewMode === 'month') {
+        // Switching month → week
+        if (AppState.previousWeekStart) {
+            // Restore previous week
+            AppState.currentWeekStart = AppState.previousWeekStart;
+        } else {
+            // Default: use first week of current month
+            setCurrentWeek(AppState.currentMonthStart || new Date());
+        }
+    }
+
     AppState.viewMode = mode;
+
     DOM.viewToggleBtns.forEach(btn => {
         if (btn.dataset.mode === mode) {
             btn.classList.add('active');
@@ -868,21 +929,33 @@ function changeViewMode(mode) {
             btn.classList.remove('active');
         }
     });
+
+    updatePeriodDisplay();
     renderPlanning();
 }
 
 function updatePeriodDisplay() {
-    if (!AppState.currentWeekStart) {
-        setCurrentWeek(new Date());
-        return;
+    if (AppState.viewMode === 'month') {
+        // Month view: show "februari 2026"
+        if (!AppState.currentMonthStart) {
+            setCurrentMonth(new Date());
+            return;
+        }
+        DOM.currentPeriod.textContent = formatMonthDisplay(AppState.currentMonthStart);
+    } else {
+        // Week view: show "Week 6 | 3 februari 2026 - 9 februari 2026"
+        if (!AppState.currentWeekStart) {
+            setCurrentWeek(new Date());
+            return;
+        }
+        const weekEnd = new Date(AppState.currentWeekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const options = { day: 'numeric', month: 'long', year: 'numeric' };
+        const startStr = AppState.currentWeekStart.toLocaleDateString('nl-BE', options);
+        const endStr = weekEnd.toLocaleDateString('nl-BE', options);
+        const weekNumber = getWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart));
+        DOM.currentPeriod.textContent = `Week ${weekNumber} | ${startStr} - ${endStr}`;
     }
-    const weekEnd = new Date(AppState.currentWeekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    const options = { day: 'numeric', month: 'long', year: 'numeric' };
-    const startStr = AppState.currentWeekStart.toLocaleDateString('nl-BE', options);
-    const endStr = weekEnd.toLocaleDateString('nl-BE', options);
-    const weekNumber = getWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart));
-    DOM.currentPeriod.textContent = `Week ${weekNumber} | ${startStr} - ${endStr}`;
 }
 
 function renderPlanning() {
@@ -1126,7 +1199,11 @@ function groupOverlappingShifts(shifts) {
 
 function renderCalendar() {
     try {
-        renderTimelineView();
+        if (AppState.viewMode === 'month') {
+            renderMonthView();
+        } else {
+            renderTimelineView();
+        }
     } catch (error) {
         console.error('Error rendering calendar:', error);
         DOM.rosterCalendar.innerHTML = '<div class="no-shifts-message">Planner kon niet geladen worden. Check de console (F12).</div>';
@@ -1445,6 +1522,258 @@ function renderTimelineView() {
 
     html += '</div>'; // Close body
     html += '</div>'; // Close wrapper
+
+    DOM.rosterCalendar.innerHTML = html;
+}
+
+function renderMonthView() {
+    const monthStart = AppState.currentMonthStart || getMonthStart(new Date());
+    const weeks = getMonthWeeks(monthStart);
+    const allDates = getMonthDates(monthStart);
+
+    // Get all employees with shifts in this month
+    let allShifts = [];
+    allDates.forEach(date => {
+        let shifts = getShiftsByDate(date);
+        shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+        allShifts = allShifts.concat(shifts);
+    });
+
+    const employeeIds = [...new Set(allShifts.map(s => s.employeeId))];
+    let employees = employeeIds.map(id => getEmployee(id)).filter(e => e);
+
+    // Group by team (reuse logic from renderTimelineView)
+    const teams = DataStore.settings.teams || {};
+    const teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
+        .filter(t => AppState.visibleTeams.includes(t));
+    const employeesByTeam = {};
+
+    teamOrder.forEach(teamKey => {
+        employeesByTeam[teamKey] = employees
+            .filter(emp => emp.mainTeam === teamKey)
+            .sort((a, b) => a.name.localeCompare(b.name));
+    });
+
+    // Employees without team
+    const employeesWithoutTeam = employees
+        .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    if (employeesWithoutTeam.length > 0) {
+        employeesByTeam['_no_team'] = employeesWithoutTeam;
+    }
+
+    let html = '<div class="month-view-wrapper">';
+
+    // Header: week rows with dates
+    html += '<div class="month-header">';
+    html += '<div class="month-name-header">Medewerker</div>';
+
+    weeks.forEach((weekStart) => {
+        const weekDates = getWeekDates(weekStart);
+        html += '<div class="month-week-header">';
+
+        weekDates.forEach(date => {
+            const d = parseDateOnly(date);
+            const dayOfWeek = d.getDay();
+            const dayNames = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
+            const dayName = dayNames[dayOfWeek];
+            const dayNum = d.getDate();
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+            const isClosed = isWeekend && !isWeekendOpen(date);
+            const isHoliday = isHolidayPeriod(date);
+
+            // Highlight dates outside current month
+            const currentMonth = monthStart.getMonth();
+            const isCurrentMonth = d.getMonth() === currentMonth;
+
+            let headerClass = 'month-day-header';
+            if (isWeekend) headerClass += ' weekend';
+            if (isClosed) headerClass += ' closed';
+            if (isHoliday) headerClass += ' holiday';
+            if (!isCurrentMonth) headerClass += ' other-month';
+
+            html += `<div class="${headerClass}">
+                <span class="day-name">${dayName}</span>
+                <span class="day-num">${dayNum}</span>
+            </div>`;
+        });
+
+        html += '</div>'; // month-week-header
+    });
+    html += '</div>'; // month-header
+
+    // Body: employee rows with shift badges
+    html += '<div class="month-body">';
+
+    if (employees.length === 0) {
+        html += '<div class="no-shifts-message">Geen diensten deze maand</div>';
+    } else {
+        teamOrder.forEach(teamKey => {
+            const teamEmployees = employeesByTeam[teamKey];
+            if (!teamEmployees || teamEmployees.length === 0) return;
+
+            const team = teams[teamKey] || { name: teamKey };
+            const teamName = escapeHtml(team.name);
+
+            // Team header
+            html += `<div class="month-team-header team-${teamKey}">
+                <div class="team-header-name">${teamName}</div>
+                <div class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</div>
+            </div>`;
+
+            // Employee rows
+            teamEmployees.forEach((emp, index) => {
+                const isAlt = index % 2 === 1;
+                html += `<div class="month-row ${isAlt ? 'alt' : ''}">`;
+
+                const employeeName = escapeHtml(emp.name);
+                html += `<div class="month-employee-cell">
+                    <span class="emp-name">${employeeName}</span>
+                </div>`;
+
+                // Week columns
+                weeks.forEach(weekStart => {
+                    const weekDates = getWeekDates(weekStart);
+                    html += '<div class="month-week-cells">';
+
+                    weekDates.forEach(date => {
+                        const d = parseDateOnly(date);
+                        const dayOfWeek = d.getDay();
+                        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                        const isClosed = isWeekend && !isWeekendOpen(date);
+                        const isCurrentMonth = d.getMonth() === monthStart.getMonth();
+
+                        let cellClass = 'month-day-cell';
+                        if (isWeekend) cellClass += ' weekend';
+                        if (isClosed) cellClass += ' closed';
+                        if (!isCurrentMonth) cellClass += ' other-month';
+
+                        html += `<div class="${cellClass}" data-date="${date}" data-employee="${emp.id}">`;
+
+                        if (!isClosed) {
+                            let shifts = getShiftsByEmployee(emp.id, date, date);
+                            shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+
+                            const maxVisible = 3;
+                            const visibleShifts = shifts.slice(0, maxVisible);
+                            const hiddenCount = Math.max(0, shifts.length - maxVisible);
+
+                            visibleShifts.forEach(shift => {
+                                const timeStr = `${shift.startTime.substring(0, 5)}-${shift.endTime.substring(0, 5)}`;
+                                const validation = validateShift(shift, shift.id);
+                                const hasErrors = validation.errors.length > 0;
+                                const hasWarnings = validation.warnings.length > 0;
+
+                                let badgeClass = `month-shift-badge team-${shift.team}`;
+                                if (hasErrors) badgeClass += ' has-error';
+                                else if (hasWarnings) badgeClass += ' has-warning';
+
+                                const canEdit = canUserEditShift(shift);
+                                const onClick = canEdit ? `onclick="openEditShiftModal('${shift.id}')"` : '';
+
+                                const shiftTeam = teams[shift.team];
+                                const teamNameText = shiftTeam ? shiftTeam.name : shift.team;
+                                const tooltipText = `${timeStr}\\n${teamNameText}${shift.notes ? '\\n' + shift.notes : ''}`;
+
+                                html += `<div class="${badgeClass}" ${onClick} title="${escapeHtml(tooltipText)}">${timeStr}</div>`;
+                            });
+
+                            if (hiddenCount > 0) {
+                                html += `<div class="month-shift-more">+${hiddenCount}</div>`;
+                            }
+                        }
+
+                        html += '</div>'; // month-day-cell
+                    });
+
+                    html += '</div>'; // month-week-cells
+                });
+
+                html += '</div>'; // month-row
+            });
+        });
+
+        // Handle employees without team
+        if (employeesByTeam['_no_team']) {
+            const teamEmployees = employeesByTeam['_no_team'];
+            html += `<div class="month-team-header">
+                <div class="team-header-name">Geen team</div>
+                <div class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</div>
+            </div>`;
+
+            teamEmployees.forEach((emp, index) => {
+                const isAlt = index % 2 === 1;
+                html += `<div class="month-row ${isAlt ? 'alt' : ''}">`;
+
+                const employeeName = escapeHtml(emp.name);
+                html += `<div class="month-employee-cell">
+                    <span class="emp-name">${employeeName}</span>
+                </div>`;
+
+                weeks.forEach(weekStart => {
+                    const weekDates = getWeekDates(weekStart);
+                    html += '<div class="month-week-cells">';
+
+                    weekDates.forEach(date => {
+                        const d = parseDateOnly(date);
+                        const dayOfWeek = d.getDay();
+                        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                        const isClosed = isWeekend && !isWeekendOpen(date);
+                        const isCurrentMonth = d.getMonth() === monthStart.getMonth();
+
+                        let cellClass = 'month-day-cell';
+                        if (isWeekend) cellClass += ' weekend';
+                        if (isClosed) cellClass += ' closed';
+                        if (!isCurrentMonth) cellClass += ' other-month';
+
+                        html += `<div class="${cellClass}">`;
+
+                        if (!isClosed) {
+                            let shifts = getShiftsByEmployee(emp.id, date, date);
+                            shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+
+                            const maxVisible = 3;
+                            const visibleShifts = shifts.slice(0, maxVisible);
+                            const hiddenCount = Math.max(0, shifts.length - maxVisible);
+
+                            visibleShifts.forEach(shift => {
+                                const timeStr = `${shift.startTime.substring(0, 5)}-${shift.endTime.substring(0, 5)}`;
+                                const validation = validateShift(shift, shift.id);
+                                const hasErrors = validation.errors.length > 0;
+                                const hasWarnings = validation.warnings.length > 0;
+
+                                let badgeClass = `month-shift-badge team-${shift.team}`;
+                                if (hasErrors) badgeClass += ' has-error';
+                                else if (hasWarnings) badgeClass += ' has-warning';
+
+                                const canEdit = canUserEditShift(shift);
+                                const onClick = canEdit ? `onclick="openEditShiftModal('${shift.id}')"` : '';
+
+                                const shiftTeam = teams[shift.team];
+                                const teamNameText = shiftTeam ? shiftTeam.name : shift.team;
+                                const tooltipText = `${timeStr}\\n${teamNameText}${shift.notes ? '\\n' + shift.notes : ''}`;
+
+                                html += `<div class="${badgeClass}" ${onClick} title="${escapeHtml(tooltipText)}">${timeStr}</div>`;
+                            });
+
+                            if (hiddenCount > 0) {
+                                html += `<div class="month-shift-more">+${hiddenCount}</div>`;
+                            }
+                        }
+
+                        html += '</div>';
+                    });
+
+                    html += '</div>';
+                });
+
+                html += '</div>';
+            });
+        }
+    }
+
+    html += '</div>'; // month-body
+    html += '</div>'; // month-view-wrapper
 
     DOM.rosterCalendar.innerHTML = html;
 }

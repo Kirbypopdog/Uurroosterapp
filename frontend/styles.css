@@ -589,30 +589,39 @@ textarea {
     background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
 }
 
-.view-toggle {
+.view-toggle-controls {
     display: flex;
     gap: 4px;
     background: var(--bg-color);
     padding: 4px;
     border-radius: var(--radius-md);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
 }
 
 .view-toggle-btn {
-    padding: 6px 16px;
+    padding: 8px 16px;
     border: none;
     background: transparent;
     color: var(--text-secondary);
     font-size: 14px;
+    font-weight: 500;
     cursor: pointer;
     border-radius: var(--radius-sm);
     transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.view-toggle-btn:hover {
+    background: rgba(37, 99, 235, 0.1);
+    color: var(--primary-color);
 }
 
 .view-toggle-btn.active {
-    background: var(--surface-color);
-    color: var(--primary-color);
-    font-weight: 500;
-    box-shadow: var(--shadow-sm);
+    background: var(--primary-color);
+    color: white;
+    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
 }
 
 /* ===== ALERTS ===== */
@@ -2186,6 +2195,233 @@ textarea {
     text-align: center;
     color: var(--text-secondary);
     font-size: 14px;
+}
+
+/* ===== MONTH VIEW ===== */
+.month-view-wrapper {
+    background: var(--surface-color);
+    border-radius: var(--radius-lg);
+    overflow-x: auto;
+    overflow-y: visible;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-color);
+    min-width: 100%;
+}
+
+/* Month header - sticky date headers */
+.month-header {
+    display: flex;
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    color: white;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.month-name-header {
+    width: 160px;
+    min-width: 160px;
+    padding: 12px;
+    font-weight: 600;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    border-right: 2px solid rgba(255,255,255,0.2);
+    position: sticky;
+    left: 0;
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    z-index: 21;
+}
+
+.month-week-header {
+    display: flex;
+    flex: 1;
+}
+
+.month-day-header {
+    flex: 1;
+    min-width: 120px;
+    padding: 8px 4px;
+    text-align: center;
+    border-right: 1px solid rgba(255,255,255,0.2);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.month-day-header .day-name {
+    font-size: 11px;
+    text-transform: uppercase;
+    opacity: 0.9;
+    font-weight: 500;
+}
+
+.month-day-header .day-num {
+    font-size: 16px;
+    font-weight: 700;
+    margin-top: 2px;
+}
+
+.month-day-header.weekend {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.month-day-header.closed {
+    background: rgba(0, 0, 0, 0.2);
+    opacity: 0.6;
+}
+
+.month-day-header.holiday {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.month-day-header.other-month {
+    opacity: 0.4;
+}
+
+/* Month body - scrollable content */
+.month-body {
+    max-height: calc(100vh - 300px);
+    overflow-y: auto;
+}
+
+/* Team headers */
+.month-team-header {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    font-weight: 600;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border-color);
+    background: linear-gradient(135deg, #475569 0%, #334155 100%);
+    color: white;
+    position: sticky;
+    left: 0;
+    z-index: 10;
+}
+
+.month-team-header .team-header-name {
+    flex: 1;
+}
+
+.month-team-header .team-header-count {
+    font-size: 11px;
+    opacity: 0.8;
+}
+
+/* Employee rows */
+.month-row {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.15s;
+    min-height: 80px;
+}
+
+.month-row:hover {
+    background: #f8fafc;
+}
+
+.month-row.alt {
+    background: #f9fafb;
+}
+
+.month-row.alt:hover {
+    background: #f1f3f5;
+}
+
+.month-employee-cell {
+    width: 160px;
+    min-width: 160px;
+    padding: 12px;
+    border-right: 2px solid var(--border-color);
+    font-weight: 500;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    position: sticky;
+    left: 0;
+    background: inherit;
+    z-index: 5;
+}
+
+.month-week-cells {
+    display: flex;
+    flex: 1;
+}
+
+.month-day-cell {
+    flex: 1;
+    min-width: 120px;
+    padding: 6px 4px;
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: stretch;
+}
+
+.month-day-cell.weekend {
+    background: rgba(100, 116, 139, 0.05);
+}
+
+.month-day-cell.closed {
+    background: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 10px,
+        rgba(0, 0, 0, 0.03) 10px,
+        rgba(0, 0, 0, 0.03) 20px
+    );
+    pointer-events: none;
+}
+
+.month-day-cell.other-month {
+    opacity: 0.3;
+}
+
+/* Shift badges in month cells */
+.month-shift-badge {
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.month-shift-badge:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.month-shift-badge.has-error {
+    border: 2px solid var(--danger-color);
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
+.month-shift-badge.has-warning {
+    border: 1px solid var(--warning-color);
+}
+
+.month-shift-more {
+    padding: 4px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text-secondary);
+    background: var(--bg-color);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.month-shift-more:hover {
+    background: var(--primary-color);
+    color: white;
 }
 
 /* ===== SHIFT CARDS ===== */
@@ -4822,6 +5058,61 @@ textarea {
 
     .timeline-day-cell {
         min-height: 32px;
+    }
+
+    /* Month view mobile styles */
+    .view-toggle-controls {
+        width: 100%;
+        justify-content: stretch;
+    }
+
+    .view-toggle-btn {
+        flex: 1;
+        justify-content: center;
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+
+    .month-name-header {
+        width: 80px;
+        min-width: 80px;
+        font-size: 12px;
+        padding: 8px 4px;
+    }
+
+    .month-employee-cell {
+        width: 80px;
+        min-width: 80px;
+        font-size: 11px;
+        padding: 8px 4px;
+    }
+
+    .month-day-header {
+        min-width: 80px;
+        padding: 6px 2px;
+    }
+
+    .month-day-header .day-name {
+        font-size: 9px;
+    }
+
+    .month-day-header .day-num {
+        font-size: 13px;
+    }
+
+    .month-day-cell {
+        min-width: 80px;
+        padding: 4px 2px;
+        gap: 2px;
+    }
+
+    .month-shift-badge {
+        font-size: 9px;
+        padding: 3px 4px;
+    }
+
+    .month-row {
+        min-height: 60px;
     }
 }
 
