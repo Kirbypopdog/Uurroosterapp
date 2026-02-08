@@ -834,8 +834,22 @@ app.get('/availability', requireAuth, async (req, res) => {
     } catch (schemaErr) {
       // Fallback to old schema with employee_id
       console.log('Using old schema for /availability (employee_id)');
+
+      // Map userId to employeeId if provided
+      let employeeId = null;
+      if (userId) {
+        const userResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+        if (userResult.rows.length > 0) {
+          const userEmail = userResult.rows[0].email;
+          const empResult = await pool.query('SELECT id FROM employees WHERE LOWER(email) = LOWER($1)', [userEmail]);
+          if (empResult.rows.length > 0) {
+            employeeId = empResult.rows[0].id;
+          }
+        }
+      }
+
       let query = `
-        SELECT id, employee_id as "userId", date, type, reason, updated_at as "updatedAt"
+        SELECT id, employee_id, date, type, reason, updated_at as "updatedAt"
         FROM availability
         WHERE 1=1
       `;
@@ -847,12 +861,25 @@ app.get('/availability', requireAuth, async (req, res) => {
         params.push(startDate, endDate);
         paramIndex += 2;
       }
-      if (userId) {
+      if (employeeId) {
         query += ` AND employee_id = $${paramIndex}`;
-        params.push(userId);
+        params.push(employeeId);
       }
       query += ' ORDER BY date';
       result = await pool.query(query, params);
+
+      // Map employee_id back to userId for each row
+      for (const row of result.rows) {
+        const empResult = await pool.query('SELECT email FROM employees WHERE id = $1', [row.employee_id]);
+        if (empResult.rows.length > 0) {
+          const empEmail = empResult.rows[0].email;
+          const userResult = await pool.query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [empEmail]);
+          if (userResult.rows.length > 0) {
+            row.userId = userResult.rows[0].id;
+          }
+        }
+        delete row.employee_id;
+      }
     }
     res.json({ availability: result.rows });
   } catch (err) {
@@ -902,13 +929,38 @@ app.post('/availability', requireAuth, async (req, res) => {
     } catch (schemaErr) {
       // Fallback to old schema with employee_id
       console.log('Using old schema for POST /availability (employee_id)');
+
+      // Map userId to employeeId via email
+      let employeeId = null;
+      if (userId) {
+        const userResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+        if (userResult.rows.length > 0) {
+          const userEmail = userResult.rows[0].email;
+          const empResult = await pool.query('SELECT id FROM employees WHERE LOWER(email) = LOWER($1)', [userEmail]);
+          if (empResult.rows.length > 0) {
+            employeeId = empResult.rows[0].id;
+            console.log(`Mapped userId ${userId} to employeeId ${employeeId} for availability`);
+          } else {
+            return res.status(404).json({ error: 'Geen gekoppelde medewerker gevonden voor deze gebruiker' });
+          }
+        } else {
+          return res.status(404).json({ error: 'Gebruiker niet gevonden' });
+        }
+      }
+
       result = await pool.query(`
         INSERT INTO availability (employee_id, date, type, reason, updated_at)
         VALUES ($1, $2, $3, $4, NOW())
         ON CONFLICT (employee_id, date)
         DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
-        RETURNING id, employee_id as "userId", date, type, reason, updated_at as "updatedAt"
-      `, [userId, date, type, reason || '']);
+        RETURNING id, employee_id, date, type, reason, updated_at as "updatedAt"
+      `, [employeeId, date, type, reason || '']);
+
+      // Map employee_id back to userId for response
+      if (result.rows.length > 0) {
+        result.rows[0].userId = userId;
+        delete result.rows[0].employee_id;
+      }
     }
     res.status(201).json({ availability: result.rows[0] });
   } catch (err) {
@@ -951,10 +1003,20 @@ app.delete('/availability', requireAuth, async (req, res) => {
     } catch (schemaErr) {
       // Fallback to old schema with employee_id
       console.log('Using old schema for DELETE /availability (employee_id)');
-      await pool.query(
-        'DELETE FROM availability WHERE employee_id = $1 AND date = $2',
-        [userId, date]
-      );
+
+      // Map userId to employeeId via email
+      const userResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+      if (userResult.rows.length > 0) {
+        const userEmail = userResult.rows[0].email;
+        const empResult = await pool.query('SELECT id FROM employees WHERE LOWER(email) = LOWER($1)', [userEmail]);
+        if (empResult.rows.length > 0) {
+          const employeeId = empResult.rows[0].id;
+          await pool.query(
+            'DELETE FROM availability WHERE employee_id = $1 AND date = $2',
+            [employeeId, date]
+          );
+        }
+      }
     }
     res.json({ ok: true });
   } catch (err) {
