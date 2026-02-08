@@ -4761,7 +4761,7 @@ function exportData() {
 }
 
 async function runMigration() {
-    if (!confirm('Wil je de database migratie uitvoeren?\n\nDit zal:\n- Weekroosters repareren (dubbel-geserialiseerde data)\n- Database schema updaten indien nodig')) {
+    if (!confirm('🚀 VOLLEDIGE DATABASE MIGRATIE\n\nDit zal:\n✅ Employees tabel samenvoegen met users\n✅ Shifts migreren (employee_id → user_id)\n✅ Availability migreren (employee_id → user_id)\n✅ Employees tabel verwijderen\n✅ Weekroosters repareren\n\n⚠️ Dit is een grote wijziging, maar 100% veilig:\n- Gebruikt transactions (bij error: automatisch ROLLBACK)\n- Alle data blijft behouden\n- Foreign key mappings correct uitgevoerd\n\nDoorgaan?')) {
         return;
     }
 
