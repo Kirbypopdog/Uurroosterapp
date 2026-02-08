@@ -4702,16 +4702,20 @@ function handleAvailabilitySave() {
         // Apply absence for each day in range
         let currentDate = parseDateOnly(start);
         let daysSet = 0;
+        const savePromises = [];
 
         while (currentDate <= end) {
             const dateStr = formatDateYYYYMMDD(currentDate);
-            setAvailability(employeeId, dateStr, {
+            savePromises.push(setAvailability(employeeId, dateStr, {
                 type: absenceType,
                 reason: reason
-            });
+            }));
             daysSet++;
             currentDate.setDate(currentDate.getDate() + 1);
         }
+
+        // Wait for all saves to complete before updating UI
+        await Promise.all(savePromises);
 
         closeAvailabilityModal();
         renderAvailability();
