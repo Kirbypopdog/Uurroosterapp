@@ -4744,7 +4744,7 @@ async function handleAvailabilitySave() {
     }
 }
 
-function handleRemoveAbsence() {
+async function handleRemoveAbsence() {
     const employeeId = Number(document.getElementById('absence-employee').value);
     const startDate = document.getElementById('absence-start-date').value;
     const endDate = document.getElementById('absence-end-date').value;
@@ -4770,11 +4770,16 @@ function handleRemoveAbsence() {
 
     // Remove absence for each day in range
     let currentDate = parseDateOnly(start);
+    const removePromises = [];
+
     while (currentDate <= end) {
         const dateStr = formatDateYYYYMMDD(currentDate);
-        removeAvailability(employeeId, dateStr);
+        removePromises.push(removeAvailability(employeeId, dateStr));
         currentDate.setDate(currentDate.getDate() + 1);
     }
+
+    // Wait for all deletions to complete before updating UI
+    await Promise.all(removePromises);
 
     closeAvailabilityModal();
     renderAvailability();
