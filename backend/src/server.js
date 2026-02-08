@@ -1237,8 +1237,10 @@ app.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
 // Run the merge-employees migration
 app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
   const results = { migrations: [], fixes: [] };
+  const client = await pool.connect();
 
   try {
+    await client.query('BEGIN');
     // Step 1: Add employee columns to users if not exist
     const columnsToAdd = [
       { name: 'main_team', def: 'TEXT REFERENCES teams(id)' },
@@ -1251,7 +1253,7 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
 
     for (const col of columnsToAdd) {
       try {
-        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${col.name} ${col.def}`);
+        await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${col.name} ${col.def}`);
         results.migrations.push(`Added column ${col.name} to users`);
       } catch (e) {
         if (!e.message.includes('already exists')) throw e;
@@ -1259,13 +1261,13 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
     }
 
     // Step 2: Check if employees table exists and migrate data
-    const tableCheck = await pool.query(`
+    const tableCheck = await client.query(`
       SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'employees')
     `);
 
     if (tableCheck.rows[0].exists) {
       // Copy employee data to users
-      const updateResult = await pool.query(`
+      const updateResult = await client.query(`
         UPDATE users u
         SET main_team = e.main_team,
             extra_teams = e.extra_teams,
@@ -1281,7 +1283,7 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
 
       // Create users for employees without accounts
       const passwordHash = await bcrypt.hash(DEFAULT_RESET_PASSWORD, 12);
-      const createResult = await pool.query(`
+      const createResult = await client.query(`
         INSERT INTO users (name, email, password_hash, role, team_id, main_team, extra_teams, contract_hours, active, week_schedule_week1, week_schedule_week2)
         SELECT e.name, LOWER(e.email), $1, 'medewerker', e.main_team, e.main_team, e.extra_teams, e.contract_hours, e.active, e.week_schedule_week1, e.week_schedule_week2
         FROM employees e
@@ -1290,10 +1292,77 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
         RETURNING id
       `, [passwordHash]);
       results.migrations.push(`Created ${createResult.rowCount} new user accounts from employees`);
+
+      // Build employee_id to user_id mapping
+      const mappings = await client.query(`
+        SELECT e.id as employee_id, u.id as user_id
+        FROM employees e
+        JOIN users u ON LOWER(u.email) = LOWER(e.email)
+      `);
+      const empToUserMap = new Map(mappings.rows.map(r => [r.employee_id, r.user_id]));
+      results.migrations.push(`Mapped ${empToUserMap.size} employees to users`);
+
+      // Step 3: Migrate shifts table
+      const shiftsColCheck = await client.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'shifts' AND column_name = 'employee_id'
+      `);
+
+      if (shiftsColCheck.rows.length > 0) {
+        // Add user_id column
+        await client.query('ALTER TABLE shifts ADD COLUMN IF NOT EXISTS user_id INTEGER');
+
+        // Update user_id based on employee_id mapping
+        for (const [empId, userId] of empToUserMap) {
+          await client.query('UPDATE shifts SET user_id = $1 WHERE employee_id = $2', [userId, empId]);
+        }
+
+        // Drop old constraint and column
+        await client.query('ALTER TABLE shifts DROP CONSTRAINT IF EXISTS shifts_employee_id_fkey');
+        await client.query('ALTER TABLE shifts DROP COLUMN IF EXISTS employee_id');
+
+        // Add new constraint
+        await client.query('ALTER TABLE shifts ADD CONSTRAINT shifts_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE');
+
+        results.migrations.push('Migrated shifts table to use user_id');
+      }
+
+      // Step 4: Migrate availability table
+      const availColCheck = await client.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'availability' AND column_name = 'employee_id'
+      `);
+
+      if (availColCheck.rows.length > 0) {
+        // Add user_id column
+        await client.query('ALTER TABLE availability ADD COLUMN IF NOT EXISTS user_id INTEGER');
+
+        // Update user_id based on employee_id mapping
+        for (const [empId, userId] of empToUserMap) {
+          await client.query('UPDATE availability SET user_id = $1 WHERE employee_id = $2', [userId, empId]);
+        }
+
+        // Drop old constraints and column
+        await client.query('ALTER TABLE availability DROP CONSTRAINT IF EXISTS availability_employee_id_fkey');
+        await client.query('ALTER TABLE availability DROP CONSTRAINT IF EXISTS availability_employee_id_date_key');
+        await client.query('ALTER TABLE availability DROP COLUMN IF EXISTS employee_id');
+
+        // Add new constraints
+        await client.query('ALTER TABLE availability ADD CONSTRAINT availability_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE');
+        await client.query('ALTER TABLE availability ADD CONSTRAINT availability_user_id_date_key UNIQUE(user_id, date)');
+
+        results.migrations.push('Migrated availability table to use user_id');
+      }
+
+      // Step 5: Drop employees table
+      await client.query('DROP TABLE IF EXISTS employees CASCADE');
+      results.migrations.push('Dropped employees table');
+    } else {
+      results.migrations.push('Employees table does not exist, may have been migrated already');
     }
 
-    // Step 3: Fix double-serialized JSONB data
-    const usersToFix = await pool.query('SELECT id, week_schedule_week1, week_schedule_week2 FROM users');
+    // Step 6: Fix double-serialized JSONB data
+    const usersToFix = await client.query('SELECT id, week_schedule_week1, week_schedule_week2 FROM users');
     let fixedCount = 0;
 
     for (const user of usersToFix.rows) {
@@ -1309,7 +1378,7 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
       }
 
       if (needsUpdate) {
-        await pool.query(
+        await client.query(
           'UPDATE users SET week_schedule_week1 = $1, week_schedule_week2 = $2 WHERE id = $3',
           [week1, week2, user.id]
         );
@@ -1321,10 +1390,16 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
       results.fixes.push(`Fixed weekSchedule data for ${fixedCount} users`);
     }
 
+    await client.query('COMMIT');
+    results.migrations.push('✅ Migration completed successfully!');
+
     res.json({ ok: true, results });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Migration failed: ' + err.message });
+    await client.query('ROLLBACK');
+    console.error('Migration error:', err);
+    res.status(500).json({ error: 'Migration failed: ' + err.message, details: err.stack });
+  } finally {
+    client.release();
   }
 });
 
