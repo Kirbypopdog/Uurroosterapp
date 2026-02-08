@@ -302,8 +302,6 @@ async function updateShift(id, updates) {
             body: JSON.stringify(apiData)
         });
 
-        console.log('[updateShift] Backend response:', data.shift);
-
         const shift = {
             ...data.shift,
             date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date,
@@ -312,15 +310,9 @@ async function updateShift(id, updates) {
             source: data.shift.source || 'manual'
         };
 
-        console.log('[updateShift] Processed shift:', shift);
-        console.log('[updateShift] Shift employeeId:', shift.employeeId, 'userId:', shift.userId);
-
         const index = DataStore.shifts.findIndex(s => s.id === id);
-        console.log('[updateShift] Found shift at index:', index);
         if (index !== -1) {
             DataStore.shifts[index] = shift;
-            console.log('[updateShift] Updated DataStore.shifts[' + index + ']:', DataStore.shifts[index]);
-            console.log('[updateShift] Verify employeeId in DataStore:', DataStore.shifts[index].employeeId);
         }
         return shift;
     } catch (error) {

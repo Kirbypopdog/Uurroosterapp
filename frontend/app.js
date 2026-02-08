@@ -1109,41 +1109,18 @@ function renderTimelineView() {
     const weekDates = getWeekDates(startDateStr);
     const dayNames = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
 
-    console.log('[renderTimelineView] Rendering for week dates:', weekDates);
-    console.log('[renderTimelineView] Total shifts in DataStore:', DataStore.shifts.length);
-
     // Get all employees who have shifts this week
     let allShifts = [];
     weekDates.forEach(date => {
         let shifts = getShiftsByDate(date);
-        console.log(`[renderTimelineView] Found ${shifts.length} shifts for ${date}`);
         // Filter by visible teams (include shifts without team)
         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
         allShifts = allShifts.concat(shifts);
     });
 
-    console.log('[renderTimelineView] Total shifts to render:', allShifts.length);
-
     // Get unique employees with shifts
     const employeeIds = [...new Set(allShifts.map(s => s.employeeId))];
-    console.log('[renderTimelineView] Unique employee IDs:', employeeIds);
-    console.log('[renderTimelineView] Sample shift for debugging:', allShifts[0]);
-
-    // Debug: check if employee 64 exists
-    console.log('[renderTimelineView] getEmployee(64):', getEmployee(64));
-    console.log('[renderTimelineView] Total users in DataStore:', DataStore.users.length);
-    console.log('[renderTimelineView] User IDs in DataStore:', DataStore.users.map(u => u.id));
-
     let employees = employeeIds.map(id => getEmployee(id)).filter(e => e);
-    console.log('[renderTimelineView] Employees to render:', employees.length);
-
-    // Check which employee ID is missing
-    employeeIds.forEach(id => {
-        const emp = getEmployee(id);
-        if (!emp) {
-            console.warn('[renderTimelineView] Missing employee for ID:', id);
-        }
-    });
 
     // Group employees by their main team - only show visible teams
     const teams = DataStore.settings.teams || {};
@@ -1722,8 +1699,6 @@ function openEditShiftModal(shiftId) {
 
 function openShiftModal(shift, canEdit) {
     AppState.editingShiftId = shift.id;
-    console.log('[openShiftModal] Set editingShiftId to:', AppState.editingShiftId);
-    console.log('[openShiftModal] canEdit:', canEdit);
 
     // Set modal title
     DOM.shiftModalTitle.textContent = canEdit ? 'Dienst bewerken' : 'Dienst bekijken';
@@ -1916,25 +1891,16 @@ async function handleShiftSubmit(e) {
             }
         }
 
-        console.log('[handleShiftSubmit] About to check editingShiftId:', AppState.editingShiftId);
-        console.log('[handleShiftSubmit] Shift data:', shiftData);
-
         if (AppState.editingShiftId) {
-            console.log('[handleShiftSubmit] Calling updateShift with ID:', AppState.editingShiftId);
             await updateShift(AppState.editingShiftId, shiftData);
-            console.log('[handleShiftSubmit] updateShift completed');
         } else {
-            console.log('[handleShiftSubmit] Calling addShift');
             await addShift(shiftData);
-            console.log('[handleShiftSubmit] addShift completed');
         }
 
-        console.log('[handleShiftSubmit] Closing modal and rendering');
         closeShiftModal();
         renderPlanning();
     } catch (error) {
-        console.error('[handleShiftSubmit] Caught error:', error);
-        console.error('[handleShiftSubmit] Error stack:', error.stack);
+        console.error('Error in handleShiftSubmit:', error);
         DOM.shiftValidationErrors.innerHTML = '<ul><li>Er is een fout opgetreden: ' + error.message + '</li></ul>';
     }
 }
