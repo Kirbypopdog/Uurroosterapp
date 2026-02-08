@@ -4647,7 +4647,7 @@ function closeAvailabilityModal() {
     modal.classList.add('hidden');
 }
 
-function handleAvailabilitySave() {
+async function handleAvailabilitySave() {
     const employeeId = Number(document.getElementById('absence-employee').value);
     const startDate = document.getElementById('absence-start-date').value;
     const endDate = document.getElementById('absence-end-date').value;
