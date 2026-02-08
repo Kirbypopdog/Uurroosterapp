@@ -4,6 +4,7 @@
 const AppState = {
     currentUser: null,
     authToken: null,
+    isAuthenticating: false, // Prevent concurrent authentication attempts
     currentView: 'planning',
     schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
@@ -505,6 +506,13 @@ function setupEventListeners() {
 
 async function handleLogin(e) {
     e.preventDefault();
+
+    // Prevent concurrent authentication attempts
+    if (AppState.isAuthenticating) {
+        console.log('Authentication already in progress');
+        return;
+    }
+
     const email = DOM.usernameInput.value.trim();
     const password = DOM.passwordInput.value;
 
@@ -513,6 +521,9 @@ async function handleLogin(e) {
     if (submitBtn.disabled) return;
     submitBtn.disabled = true;
     submitBtn.textContent = 'Bezig met inloggen...';
+
+    // Set guard flag
+    AppState.isAuthenticating = true;
 
     try {
         const data = await apiFetch('/auth/login', {
@@ -532,7 +543,19 @@ async function handleLogin(e) {
     } catch (error) {
         console.error('Login error:', error);
         alert('Ongeldige gebruikersnaam of wachtwoord');
+
+        // Clear any existing session to prevent staying logged in with old credentials
+        AppState.currentUser = null;
+        AppState.authToken = null;
+        sessionStorage.removeItem('hetvlot_user');
+        sessionStorage.removeItem('hetvlot_token');
+
+        // Ensure login screen is visible
+        showLogin();
     } finally {
+        // Clear guard flag
+        AppState.isAuthenticating = false;
+
         submitBtn.disabled = false;
         submitBtn.textContent = 'Inloggen';
     }
@@ -547,6 +570,12 @@ function handleLogout() {
 }
 
 async function checkSession() {
+    // Don't check session if login is in progress
+    if (AppState.isAuthenticating) {
+        console.log('Skipping checkSession - authentication in progress');
+        return;
+    }
+
     const savedToken = sessionStorage.getItem('hetvlot_token');
     if (!savedToken) {
         showLogin();
@@ -1671,7 +1700,7 @@ function canUserEditShift(shift) {
 
     const currentRole = getEffectiveRole();
     const currentUserId = AppState.currentUser.id;
-    const isOwnShift = shift.userId === currentUserId || shift.employeeId === currentUserId;
+    const isOwnShift = shift.employeeId === currentUserId;
 
     if (currentRole === 'admin' || currentRole === 'hoofdverantwoordelijke') {
         return true;
@@ -1707,7 +1736,7 @@ function openShiftModal(shift, canEdit) {
     populateEmployeeDropdown();
 
     // Fill form with shift data
-    DOM.shiftEmployee.value = shift.employeeId || shift.userId;
+    DOM.shiftEmployee.value = shift.employeeId;
     DOM.shiftTeam.value = shift.team;
     DOM.shiftDate.value = shift.date;
     DOM.shiftStart.value = shift.startTime;
@@ -1755,13 +1784,13 @@ function openShiftModal(shift, canEdit) {
 
     // Show existing validation issues for this shift
     const validation = validateShift(shift, shift.id);
-    const availability = getAvailability(shift.employeeId || shift.userId, shift.date);
+    const availability = getAvailability(shift.employeeId, shift.date);
     const isAbsent = availability && availability.type;
 
     let issuesHtml = sourceHtml;
     if (isAbsent) {
         const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren opnemen', 'vorming': 'Vorming', 'andere': 'Afwezig' };
-        const employeeName = escapeHtml(getEmployee(shift.employeeId || shift.userId)?.name || '');
+        const employeeName = escapeHtml(getEmployee(shift.employeeId)?.name || '');
         issuesHtml += `<div class="validation-warning absence">
             <strong>⚠️ Afwezigheid:</strong> ${employeeName} is afwezig (${absenceLabels[availability.type] || 'Afwezig'})
         </div>`;
@@ -4696,7 +4725,15 @@ function handleAvailabilitySave() {
         if (conflictDates.length > 0) {
             msg += `\n\n⚠️ Vergeet niet de ${conflictDates.length} conflicterende dienst(en) aan te passen in de planning!`;
         }
+        // Show success message
         alert(msg);
+
+        // Show type-specific reminders
+        if (absenceType === 'ziek') {
+            alert('📞 Bel de personeelsdienst om je ziekte door te geven');
+        } else if (absenceType === 'verlof' || absenceType === 'overuren') {
+            alert('💡 Vergeet niet dit ook in Eureka aan te passen');
+        }
     } catch (error) {
         console.error('Error saving availability:', error);
         alert('Er ging iets mis bij het opslaan: ' + error.message);
