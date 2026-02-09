@@ -322,6 +322,18 @@ const DragHandler = {
             return;
         }
 
+        // Check team permissions for teamverantwoordelijke
+        const role = getEffectiveRole();
+        if (role === 'teamverantwoordelijke') {
+            const userTeamId = AppState.currentUser.team_id;
+            if (targetEmployee.mainTeam !== userTeamId) {
+                console.log('[DragHandler] Teamverantwoordelijke cannot transfer to different team');
+                showToast('Je kan alleen shifts toewijzen aan medewerkers van je eigen team', 'warning');
+                this.cancelDrag();
+                return;
+            }
+        }
+
         // Check if employee has availability/absence on this date
         const availability = getAvailability(targetEmployee.id, targetDate);
         if (availability && availability.type) {

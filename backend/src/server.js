@@ -953,7 +953,7 @@ app.get('/availability', requireAuth, async (req, res) => {
   const { startDate, endDate, userId } = req.query;
   try {
     let query = `
-      SELECT id, user_id as "userId", date, type, reason, updated_at as "updatedAt"
+      SELECT id, user_id as "userId", date::text as date, type, reason, updated_at as "updatedAt"
       FROM availability
       WHERE 1=1
     `;
@@ -1012,7 +1012,7 @@ app.post('/availability', requireAuth, async (req, res) => {
       VALUES ($1, $2, $3, $4, NOW())
       ON CONFLICT (user_id, date)
       DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
-      RETURNING id, user_id as "userId", date, type, reason, updated_at as "updatedAt"
+      RETURNING id, user_id as "userId", date::text as date, type, reason, updated_at as "updatedAt"
     `, [userId, date, type, reason || '']);
 
     res.status(201).json({ availability: result.rows[0] });
@@ -1075,6 +1075,29 @@ app.get('/shift-blocks', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/shift-blocks', requireAuth, async (req, res) => {
+  try {
+    const { user_id, date, reason } = req.body;
+
+    if (!user_id || !date) {
+      return res.status(400).json({ error: 'user_id en date zijn verplicht' });
+    }
+
+    // Create shift block (ON CONFLICT DO NOTHING to make it idempotent)
+    const result = await pool.query(`
+      INSERT INTO shift_blocks (user_id, date, created_by, reason)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (user_id, date) DO NOTHING
+      RETURNING *
+    `, [user_id, date, req.user.id, reason || 'Created via drag & drop']);
+
+    res.json(result.rows[0] || { message: 'Block already exists' });
+  } catch (err) {
+    console.error('Error creating shift block:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.delete('/shift-blocks/:id', requireAuth, requireRole(['admin', 'hoofdverantwoordelijke']), async (req, res) => {
   try {
     const blockId = parseInt(req.params.id, 10);
@@ -1107,12 +1130,12 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
           sr.*,
           u1.name as requester_name,
           u2.name as target_name,
-          s1.date as requester_shift_date,
+          s1.date::text as requester_shift_date,
           s1.start_time as requester_shift_start,
           s1.end_time as requester_shift_end,
           s1.team as requester_shift_team,
           s1.notes as requester_shift_notes,
-          s2.date as target_shift_date,
+          s2.date::text as target_shift_date,
           s2.start_time as target_shift_start,
           s2.end_time as target_shift_end,
           s2.team as target_shift_team,
@@ -1132,12 +1155,12 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
           sr.*,
           u1.name as requester_name,
           u2.name as target_name,
-          s1.date as requester_shift_date,
+          s1.date::text as requester_shift_date,
           s1.start_time as requester_shift_start,
           s1.end_time as requester_shift_end,
           s1.team as requester_shift_team,
           s1.notes as requester_shift_notes,
-          s2.date as target_shift_date,
+          s2.date::text as target_shift_date,
           s2.start_time as target_shift_start,
           s2.end_time as target_shift_end,
           s2.team as target_shift_team,
@@ -1159,12 +1182,12 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
           sr.*,
           u1.name as requester_name,
           u2.name as target_name,
-          s1.date as requester_shift_date,
+          s1.date::text as requester_shift_date,
           s1.start_time as requester_shift_start,
           s1.end_time as requester_shift_end,
           s1.team as requester_shift_team,
           s1.notes as requester_shift_notes,
-          s2.date as target_shift_date,
+          s2.date::text as target_shift_date,
           s2.start_time as target_shift_start,
           s2.end_time as target_shift_end,
           s2.team as target_shift_team,
@@ -1418,6 +1441,7 @@ app.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
 app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
   const { shiftId, message } = req.body;
   const currentUserId = req.user.id;
+  const { role, team_id } = req.user;
 
   if (!shiftId) {
     return res.status(400).json({ error: 'shiftId is verplicht' });
@@ -1428,7 +1452,7 @@ app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Verify shift exists and belongs to current user
+    // Verify shift exists
     const shiftResult = await client.query(
       `SELECT * FROM shifts WHERE id = $1`,
       [shiftId]
@@ -1441,9 +1465,15 @@ app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
 
     const shift = shiftResult.rows[0];
 
-    if (shift.user_id !== currentUserId) {
+    // Permission check: Allow admin, hoofdverantwoordelijke, teamverantwoordelijke (for their team), or own shifts
+    const isOwnShift = shift.user_id === currentUserId;
+    const isAdmin = role === 'admin';
+    const isHoofdverantwoordelijke = role === 'hoofdverantwoordelijke';
+    const isTeamverantwoordelijkeForShift = role === 'teamverantwoordelijke' && shift.team === team_id;
+
+    if (!isOwnShift && !isAdmin && !isHoofdverantwoordelijke && !isTeamverantwoordelijkeForShift) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Je kunt alleen je eigen shifts aanbieden' });
+      return res.status(403).json({ error: 'Je kunt alleen je eigen shifts aanbieden, tenzij je admin of verantwoordelijke bent' });
     }
 
     // Verify shift is not in the past
@@ -1457,11 +1487,13 @@ app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     }
 
     // Create takeover request
+    // Use shift owner (shift.user_id) as requester, not currentUserId
+    // This ensures auto-cancel can find requests by employee ID when absence is removed
     await client.query(
       `INSERT INTO shift_swap_requests
        (requester_user_id, requester_shift_id, target_user_id, target_shift_id, request_type, message, status)
        VALUES ($1, $2, NULL, NULL, 'takeover', $3, 'pending')`,
-      [currentUserId, shiftId, message || null]
+      [shift.user_id, shiftId, message || null]
     );
 
     await client.query('COMMIT');
@@ -1716,11 +1748,18 @@ app.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
 app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
   const swapId = req.params.id;
   const currentUserId = req.user.id;
+  const { role, team_id } = req.user;
 
   try {
-    // Fetch swap request
+    // Fetch swap request with team info
     const swapResult = await pool.query(
-      'SELECT * FROM shift_swap_requests WHERE id = $1',
+      `SELECT sr.*,
+              s1.team as requester_team,
+              s2.team as target_team
+       FROM shift_swap_requests sr
+       LEFT JOIN shifts s1 ON sr.requester_shift_id = s1.id
+       LEFT JOIN shifts s2 ON sr.target_shift_id = s2.id
+       WHERE sr.id = $1`,
       [swapId]
     );
 
@@ -1730,9 +1769,15 @@ app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
 
     const swap = swapResult.rows[0];
 
-    // Only requester can cancel
-    if (swap.requester_user_id !== currentUserId) {
-      return res.status(403).json({ error: 'Alleen de aanvrager kan dit verzoek annuleren' });
+    // Permission check: Allow requester, admin, hoofdverantwoordelijke, or teamverantwoordelijke (for their team)
+    const isRequester = swap.requester_user_id === currentUserId;
+    const isAdmin = role === 'admin';
+    const isHoofdverantwoordelijke = role === 'hoofdverantwoordelijke';
+    const isTeamverantwoordelijkeForRequest = role === 'teamverantwoordelijke' &&
+      (swap.requester_team === team_id || swap.target_team === team_id);
+
+    if (!isRequester && !isAdmin && !isHoofdverantwoordelijke && !isTeamverantwoordelijkeForRequest) {
+      return res.status(403).json({ error: 'Alleen de aanvrager of een verantwoordelijke kan dit verzoek annuleren' });
     }
 
     // Only pending requests can be cancelled
