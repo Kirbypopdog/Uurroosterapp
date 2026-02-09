@@ -82,6 +82,7 @@ const DataStore = {
     },
     shifts: [],
     availability: [],
+    shiftBlocks: [],
     swapRequests: [],
     settings: normalizeSettings(DEFAULT_SETTINGS),
     _loaded: false
@@ -114,10 +115,11 @@ async function dataApiFetch(path, options = {}) {
 async function loadDataFromAPI() {
     try {
         // Load all data in parallel - users now includes employee/schedule data
-        const [usersData, shiftsData, availabilityData, settingsData] = await Promise.all([
+        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData] = await Promise.all([
             dataApiFetch('/users').catch(() => ({ users: [] })),
             dataApiFetch('/shifts').catch(() => ({ shifts: [] })),
             dataApiFetch('/availability').catch(() => ({ availability: [] })),
+            dataApiFetch('/shift-blocks').catch(() => []),
             dataApiFetch('/settings').catch(() => ({ settings: {} }))
         ]);
 
@@ -144,6 +146,12 @@ async function loadDataFromAPI() {
             key: `${a.userId || a.employeeId}_${typeof a.date === 'string' ? a.date.split('T')[0] : a.date}`
         }));
 
+        // Shift blocks (prevents auto-regeneration of deleted shifts)
+        DataStore.shiftBlocks = (Array.isArray(shiftBlocksData) ? shiftBlocksData : []).map(b => ({
+            ...b,
+            date: typeof b.date === 'string' ? b.date.split('T')[0] : b.date
+        }));
+
         // Merge API settings with defaults
         const apiSettings = settingsData.settings || {};
         DataStore.settings = normalizeSettings({
@@ -161,7 +169,8 @@ async function loadDataFromAPI() {
             users: DataStore.users.length,
             employees: DataStore.employees.length, // via getter
             shifts: DataStore.shifts.length,
-            availability: DataStore.availability.length
+            availability: DataStore.availability.length,
+            shiftBlocks: DataStore.shiftBlocks.length
         });
 
         return true;
@@ -323,14 +332,37 @@ async function updateShift(id, updates) {
     }
 }
 
+// Fetch shift blocks from backend and update DataStore
+async function fetchShiftBlocks() {
+    try {
+        const data = await dataApiFetch('/shift-blocks').catch(() => []);
+
+        // Normalize shift blocks data (ensure date format is YYYY-MM-DD)
+        DataStore.shiftBlocks = (Array.isArray(data) ? data : []).map(b => ({
+            ...b,
+            date: typeof b.date === 'string' ? b.date.split('T')[0] : b.date
+        }));
+
+        return DataStore.shiftBlocks;
+    } catch (error) {
+        console.error('Error fetching shift blocks:', error);
+        return [];
+    }
+}
+
 async function deleteShift(id) {
     try {
         await dataApiFetch(`/shifts/${id}`, { method: 'DELETE' });
 
+        // Remove shift from local DataStore
         const index = DataStore.shifts.findIndex(s => s.id === id);
         if (index !== -1) {
             DataStore.shifts.splice(index, 1);
         }
+
+        // Refresh shift blocks (backend creates a block when shift is deleted)
+        await fetchShiftBlocks();
+
         return true;
     } catch (error) {
         console.error('Fout bij verwijderen dienst:', error);
@@ -377,10 +409,11 @@ async function removeAutoShiftsInDateRange(startDate, endDate) {
         );
 
         // Delete each auto shift via API
+        // Pass skipBlock=true to prevent creating shift_blocks during system cleanup
         let deletedCount = 0;
         for (const shift of autoShifts) {
             try {
-                await dataApiFetch(`/shifts/${shift.id}`, { method: 'DELETE' });
+                await dataApiFetch(`/shifts/${shift.id}?skipBlock=true`, { method: 'DELETE' });
                 deletedCount++;
             } catch (e) {
                 console.error(`Fout bij verwijderen auto-shift ${shift.id}:`, e);
@@ -476,6 +509,14 @@ async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
 
         const absence = getAvailability(employeeId, dateStr);
         if (absence && absence.type) {
+            continue;
+        }
+
+        // Skip if there's a shift block for this user/date (from deleted shifts)
+        const isBlocked = DataStore.shiftBlocks.some(
+            block => block.user_id === employeeId && block.date === dateStr
+        );
+        if (isBlocked) {
             continue;
         }
 

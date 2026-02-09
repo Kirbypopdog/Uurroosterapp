@@ -580,6 +580,27 @@ function setupEventListeners() {
             openWarningDetailsModal();
         }
     });
+
+    // Event delegation for inline delete buttons on shift cards
+    document.addEventListener('click', async (e) => {
+        if (e.target.classList.contains('shift-delete-btn')) {
+            e.stopPropagation(); // Prevent opening the shift modal
+            const shiftId = parseInt(e.target.dataset.shiftId, 10);
+            if (!shiftId) return;
+
+            const shift = getShift(shiftId);
+            if (!shift) return;
+
+            // Check permissions before allowing delete
+            if (!canUserEditShift(shift)) {
+                alert('Je hebt geen rechten om deze dienst te verwijderen');
+                return;
+            }
+
+            // Call handleShiftDelete with the shift ID and wait for completion
+            await handleShiftDelete(shiftId);
+        }
+    });
 }
 
 async function handleLogin(e) {
@@ -2098,7 +2119,6 @@ function openAddShiftForEmployee(employeeId, date) {
 
 function canUserEditShift(shift) {
     if (!shift || !AppState.currentUser) {
-        console.log('[canUserEditShift] No shift or no current user');
         return false;
     }
 
@@ -2106,33 +2126,17 @@ function canUserEditShift(shift) {
     const currentUserId = AppState.currentUser.id;
     const isOwnShift = shift.employeeId === currentUserId || shift.userId === currentUserId;
 
-    console.log('[canUserEditShift] Checking permissions:', {
-        shiftId: shift.id,
-        currentRole,
-        currentUserId,
-        shiftEmployeeId: shift.employeeId,
-        shiftUserId: shift.userId,
-        isOwnShift,
-        shiftTeam: shift.team,
-        userTeam: AppState.currentUser.team_id || AppState.currentUser.mainTeam
-    });
-
     if (currentRole === 'admin' || currentRole === 'hoofdverantwoordelijke') {
-        console.log('[canUserEditShift] Admin/Hoofdverantwoordelijke → CAN EDIT');
         return true;
     } else if (currentRole === 'teamverantwoordelijke') {
         // Can edit shifts from own team
         const userTeam = AppState.currentUser.team_id || AppState.currentUser.mainTeam;
-        const canEdit = shift.team === userTeam;
-        console.log('[canUserEditShift] Teamverantwoordelijke →', canEdit ? 'CAN EDIT' : 'CANNOT EDIT');
-        return canEdit;
+        return shift.team === userTeam;
     } else if (currentRole === 'medewerker') {
         // Can only edit own shifts
-        console.log('[canUserEditShift] Medewerker →', isOwnShift ? 'CAN EDIT' : 'CANNOT EDIT');
         return isOwnShift;
     }
 
-    console.log('[canUserEditShift] No role match → CANNOT EDIT');
     return false;
 }
 
@@ -2285,12 +2289,29 @@ function closeShiftModal() {
     AppState.editingShiftId = null;
 }
 
-function handleShiftDelete() {
-    if (!AppState.editingShiftId) return;
+async function handleShiftDelete(shiftId = null) {
+    // Check if shiftId is an event object (from modal button click) or a number (from inline button)
+    const isEvent = shiftId && typeof shiftId === 'object' && 'target' in shiftId;
 
-    if (confirm('Weet je zeker dat je deze dienst wilt verwijderen?')) {
-        deleteShift(AppState.editingShiftId);
-        closeShiftModal();
+    // Use provided shiftId (if it's a number) or fall back to AppState.editingShiftId
+    const idToDelete = (isEvent || !shiftId) ? AppState.editingShiftId : shiftId;
+    if (!idToDelete) return;
+
+    // Get shift details for confirmation message
+    const shift = getShift(idToDelete);
+    const shiftDescription = shift
+        ? `de dienst van ${shift.employeeName || 'deze medewerker'} op ${shift.date}`
+        : 'deze dienst';
+
+    if (confirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?`)) {
+        // Wait for deletion to complete before re-rendering
+        await deleteShift(idToDelete);
+
+        // Close modal only if deleting from modal (when shiftId is event or null)
+        if (isEvent || !shiftId) {
+            closeShiftModal();
+        }
+
         renderPlanning();
     }
 }

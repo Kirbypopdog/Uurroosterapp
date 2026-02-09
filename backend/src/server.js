@@ -191,6 +191,38 @@ async function ensureSchema() {
         console.log(`  Error adding columns: ${e.message}`);
       }
     }
+
+    // Check if shift_blocks table exists
+    const blocksTableCheck = await client.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'shift_blocks'
+    `);
+
+    if (blocksTableCheck.rows.length === 0) {
+      console.log('Creating shift_blocks table...');
+      try {
+        await client.query(`
+          CREATE TABLE shift_blocks (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            date DATE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by INTEGER REFERENCES users(id),
+            reason TEXT,
+            UNIQUE(user_id, date)
+          );
+        `);
+        console.log('  Created table: shift_blocks');
+
+        // Create index for better query performance
+        await client.query(`
+          CREATE INDEX IF NOT EXISTS idx_shift_blocks_user_date ON shift_blocks(user_id, date);
+        `);
+        console.log('  Created index: idx_shift_blocks_user_date');
+      } catch (e) {
+        console.log(`  Error creating shift_blocks table: ${e.message}`);
+      }
+    }
   } catch (err) {
     console.error('Schema check error:', err.message);
   } finally {
@@ -635,6 +667,7 @@ app.put('/users/:id', requireAuth, async (req, res) => {
        SET name = $1,
            email = $2,
            main_team = $3,
+           team_id = $3,
            extra_teams = $4,
            contract_hours = $5,
            active = $6,
@@ -746,6 +779,7 @@ app.post('/shifts', requireAuth, async (req, res) => {
   const shiftSource = source === 'auto' ? 'auto' : 'manual';
 
   try {
+    // Insert the new shift
     const result = await pool.query(`
       INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -753,7 +787,18 @@ app.post('/shifts', requireAuth, async (req, res) => {
                 end_time as "endTime", notes, source, created_at as "createdAt"
     `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource]);
 
-    res.status(201).json({ shift: result.rows[0] });
+    const newShift = result.rows[0];
+
+    // Remove shift block ONLY if a MANUAL shift is created (manual overrides the block)
+    // Auto shifts should NOT remove blocks (they should respect blocks and not be created at all)
+    if (shiftSource === 'manual') {
+      await pool.query(
+        'DELETE FROM shift_blocks WHERE user_id = $1 AND date = $2',
+        [userId, date]
+      );
+    }
+
+    res.status(201).json({ shift: newShift });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -802,9 +847,10 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
   }
 
   try {
-    // Get full shift details for permission check
+    // Get full shift details for permission check (including date for shift_blocks)
+    // Cast date to text to avoid timezone conversion issues
     const shiftResult = await pool.query(
-      'SELECT id, user_id, team, source FROM shifts WHERE id = $1',
+      'SELECT id, user_id, team, source, date::text as date FROM shifts WHERE id = $1',
       [id]
     );
 
@@ -816,9 +862,7 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
     const { role, id: userId, team_id: userTeam } = req.user;
 
     // AUTO shifts can be deleted by anyone (they're temporary/regenerated)
-    if (shift.source === 'auto') {
-      // Skip permission checks for AUTO shifts
-    } else {
+    if (shift.source !== 'auto') {
       // Permission checks for MANUAL shifts based on role
       if (role === 'admin' || role === 'hoofdverantwoordelijke') {
         // Admin/hoofdverantwoordelijke can delete anything
@@ -837,10 +881,27 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
       }
     }
 
+    // Delete the shift
     await pool.query('DELETE FROM shifts WHERE id = $1', [id]);
+
+    // Create shift block to prevent auto-regeneration
+    // Check if caller wants to skip block creation (for system cleanup operations)
+    const skipBlock = req.query.skipBlock === 'true';
+
+    if (!skipBlock) {
+      // USER-INITIATED deletion (via UI) - always create block for both manual AND auto shifts
+      // ON CONFLICT DO NOTHING ensures idempotency (safe to call multiple times)
+      // Cast $2 to date explicitly to avoid timezone conversion issues
+      await pool.query(`
+        INSERT INTO shift_blocks (user_id, date, created_by, reason)
+        VALUES ($1, $2::date, $3, $4)
+        ON CONFLICT (user_id, date) DO NOTHING
+      `, [shift.user_id, shift.date, req.user.id, `${shift.source} shift deleted by user`]);
+    }
+
     res.json({ ok: true });
   } catch (err) {
-    console.error(err);
+    console.error('ERROR in DELETE /shifts/:id:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -971,6 +1032,38 @@ app.delete('/availability', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== SHIFT BLOCKS API =====
+
+app.get('/shift-blocks', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT sb.id, sb.user_id, sb.date::text as date, sb.created_at, sb.created_by, sb.reason, u.name as created_by_name
+      FROM shift_blocks sb
+      LEFT JOIN users u ON sb.created_by = u.id
+      ORDER BY sb.date DESC, sb.user_id
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching shift blocks:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/shift-blocks/:id', requireAuth, requireRole(['admin', 'hoofdverantwoordelijke']), async (req, res) => {
+  try {
+    const blockId = parseInt(req.params.id, 10);
+    if (!blockId) {
+      return res.status(400).json({ error: 'ID is verplicht' });
+    }
+
+    await pool.query('DELETE FROM shift_blocks WHERE id = $1', [blockId]);
+    res.json({ message: 'Shift block removed successfully' });
+  } catch (err) {
+    console.error('Error deleting shift block:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -1963,6 +2056,17 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
 
     if (fixedCount > 0) {
       results.fixes.push(`Fixed weekSchedule data for ${fixedCount} users`);
+    }
+
+    // Step 7: Sync team_id with main_team for all users
+    const teamSyncResult = await client.query(`
+      UPDATE users
+      SET team_id = main_team
+      WHERE team_id IS NULL OR team_id != main_team OR (team_id IS NOT NULL AND main_team IS NULL)
+      RETURNING id
+    `);
+    if (teamSyncResult.rowCount > 0) {
+      results.fixes.push(`Synced team_id with main_team for ${teamSyncResult.rowCount} users`);
     }
 
     await client.query('COMMIT');
