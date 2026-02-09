@@ -4437,7 +4437,7 @@ function attachSwapActionListeners() {
                     try {
                         await acceptTakeoverRequest(requestId, notes);
                         // Reload shifts to see the newly acquired shift
-                        await getShifts();
+                        await loadDataFromAPI();
                         alert('✅ Shift overgenomen! Je kunt hem nu zien in je planning.');
                         switchView('planning'); // Go to planning to see the new shift
                     } catch (error) {
