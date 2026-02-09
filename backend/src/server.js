@@ -85,8 +85,9 @@ async function ensureSchema() {
             id SERIAL PRIMARY KEY,
             requester_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             requester_shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
-            target_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            target_shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+            target_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            target_shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
+            request_type TEXT NOT NULL DEFAULT 'swap' CHECK (request_type IN ('swap', 'takeover')),
             status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead')),
             message TEXT,
             response_notes TEXT,
@@ -98,9 +99,7 @@ async function ensureSchema() {
             lead_responded_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT NOW(),
             responded_at TIMESTAMP,
-            responded_by INTEGER REFERENCES users(id),
-            CONSTRAINT different_shifts CHECK (requester_shift_id != target_shift_id),
-            CONSTRAINT different_users CHECK (requester_user_id != target_user_id)
+            responded_by INTEGER REFERENCES users(id)
           );
         `);
         console.log('  Created table: shift_swap_requests');
