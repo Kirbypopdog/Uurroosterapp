@@ -3319,8 +3319,9 @@ async function saveProfileWeekSchedule() {
         }
 
         // Reset auto-schedule flag and regenerate with new base schedule
+        // Start from next week to preserve this week's manual edits
         AppState.schedulesGenerated = false;
-        await autoApplyBaseSchedules();
+        await autoApplyBaseSchedules(true); // fromNextWeek = true
 
         // Refresh planning view if currently visible
         if (AppState.currentView === 'planning') {
@@ -3503,8 +3504,9 @@ async function handleEmployeeSubmit(e) {
     renderEmployees();
 
     // Reset auto-schedule flag and regenerate with new base schedule
+    // Start from next week to preserve this week's manual edits
     AppState.schedulesGenerated = false;
-    await autoApplyBaseSchedules();
+    await autoApplyBaseSchedules(true); // fromNextWeek = true
 
     // Refresh planning view if currently visible
     if (AppState.currentView === 'planning') {
@@ -3530,9 +3532,9 @@ async function handleEmployeeDelete() {
 
 // ===== BASISROOSTER FUNCTIES =====
 
-async function autoApplyBaseSchedules() {
-    // Skip if already generated in this session
-    if (AppState.schedulesGenerated) {
+async function autoApplyBaseSchedules(fromNextWeek = false) {
+    // Skip if already generated in this session (unless forcing from next week)
+    if (AppState.schedulesGenerated && !fromNextWeek) {
         console.log('[Auto Schedule] Already generated this session, skipping');
         return { created: 0, removed: 0 };
     }
@@ -3544,7 +3546,16 @@ async function autoApplyBaseSchedules() {
 
     // Calculate date range
     const today = new Date();
-    const startDate = formatDateYYYYMMDD(getMonday(today));
+    let startDate;
+    if (fromNextWeek) {
+        // Start from next Monday (preserve current week's manual edits)
+        const nextMonday = getMonday(today);
+        nextMonday.setDate(nextMonday.getDate() + 7);
+        startDate = formatDateYYYYMMDD(nextMonday);
+    } else {
+        // Start from current Monday
+        startDate = formatDateYYYYMMDD(getMonday(today));
+    }
 
     let endDate;
     if (horizonWeeks === null || horizonWeeks === 'unlimited') {
@@ -5336,8 +5347,9 @@ async function savePlanningHorizon() {
         alert('✅ Planning horizon is opgeslagen!');
 
         // Reset flag and re-apply schedules with new horizon
+        // Start from next week to preserve this week's manual edits
         AppState.schedulesGenerated = false;
-        await autoApplyBaseSchedules();
+        await autoApplyBaseSchedules(true); // fromNextWeek = true
 
         // Refresh planning view if currently visible
         if (AppState.currentView === 'planning') {
