@@ -597,6 +597,15 @@ async function getSwapRequests() {
     try {
         const data = await dataApiFetch('/swap-requests');
         DataStore.swapRequests = data.swapRequests || [];
+        console.log(`[getSwapRequests] Received ${DataStore.swapRequests.length} swap requests from backend`);
+        if (DataStore.swapRequests.length > 0) {
+            console.log('[getSwapRequests] First request:', {
+                id: DataStore.swapRequests[0].id,
+                request_type: DataStore.swapRequests[0].request_type,
+                status: DataStore.swapRequests[0].status,
+                requester_name: DataStore.swapRequests[0].requester_name
+            });
+        }
         return DataStore.swapRequests;
     } catch (error) {
         console.error('Fout bij ophalen swap requests:', error);

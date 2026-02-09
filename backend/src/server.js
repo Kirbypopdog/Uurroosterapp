@@ -1050,6 +1050,15 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
     }
 
     const result = await pool.query(query, params);
+    console.log(`[GET /swap-requests] User ${req.user.name} (ID: ${req.user.id}, role: ${role}): Found ${result.rows.length} requests`);
+    if (result.rows.length > 0) {
+      console.log(`[GET /swap-requests] First request:`, {
+        id: result.rows[0].id,
+        request_type: result.rows[0].request_type,
+        status: result.rows[0].status,
+        requester: result.rows[0].requester_name
+      });
+    }
     res.json({ swapRequests: result.rows });
   } catch (err) {
     console.error('GET /swap-requests error:', err);
