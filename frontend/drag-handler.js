@@ -93,6 +93,7 @@ const DragHandler = {
             // Check permissions
             if (!canUserEditShift(shift)) {
                 console.log('[DragHandler] User cannot edit this shift');
+                showToast('Je hebt geen rechten om deze shift te bewerken', 'warning');
                 return;
             }
 
