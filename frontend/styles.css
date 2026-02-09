@@ -1862,7 +1862,7 @@ textarea {
     background: #f1f5f9;
     border-bottom: 1px solid var(--border-color);
     position: sticky;
-    top: 73px; /* Height of .timeline-header (fine-tuned) */
+    top: 72px; /* Exact height of .timeline-header (measured: 72px) */
     z-index: 15; /* Below header (20), above content */
     box-shadow: 0 2px 6px rgba(0,0,0,0.2); /* DEBUG: shadow to see if sticky works */
 }
@@ -1910,7 +1910,7 @@ textarea {
     color: white;
     font-weight: 600;
     position: sticky;
-    top: 105px; /* After header (73px) + scale row (~32px) */
+    top: 93px; /* After header (72px) + scale row (21px) */
     z-index: 10; /* Below scale, above rows and shift blocks */
 }
 
