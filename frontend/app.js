@@ -3318,27 +3318,7 @@ async function saveProfileWeekSchedule() {
             DataStore.users[userIndex].weekScheduleWeek2 = weekScheduleWeek2;
         }
 
-        setMessage('Werkrooster opgeslagen!', 'success');
-
-        // Ask user when to apply the new schedule
-        const applySchedule = confirm('✅ Basisrooster opgeslagen!\n\nWil je bestaande diensten vervangen door het nieuwe basisrooster?\n\n• JA = Verwijder auto-diensten en maak nieuwe aan\n• NEE = Alleen toekomstige lege dagen worden ingevuld');
-
-        if (applySchedule) {
-            const fromNextWeek = confirm('Vanaf wanneer toepassen?\n\n• JA = Vanaf volgende week (huidige week behouden)\n• NEE = Vanaf deze week');
-
-            // Reset auto-schedule flag and regenerate with new base schedule
-            AppState.schedulesGenerated = false;
-            await autoApplyBaseSchedules(fromNextWeek);
-
-            // Refresh planning view if currently visible
-            if (AppState.currentView === 'planning') {
-                renderPlanning();
-            }
-
-            alert(fromNextWeek ?
-                '✅ Basisrooster toegepast vanaf volgende week!' :
-                '✅ Basisrooster toegepast vanaf deze week!');
-        }
+        setMessage('✅ Basisrooster opgeslagen!\n\nℹ️ Tip: Handmatige diensten blijven behouden.\nAlleen AUTO-diensten worden vervangen bij regeneratie.', 'success');
     } catch (error) {
         setMessage(`Opslaan mislukt: ${error.message}`, 'error');
     } finally {
@@ -3512,26 +3492,6 @@ async function handleEmployeeSubmit(e) {
     }
     closeEmployeeModal();
     renderEmployees();
-
-    // Ask user when to apply the new schedule
-    const applySchedule = confirm('✅ Medewerker opgeslagen!\n\nWil je bestaande diensten vervangen door het nieuwe basisrooster?\n\n• JA = Verwijder auto-diensten en maak nieuwe aan\n• NEE = Alleen toekomstige lege dagen worden ingevuld');
-
-    if (applySchedule) {
-        const fromNextWeek = confirm('Vanaf wanneer toepassen?\n\n• JA = Vanaf volgende week (huidige week behouden)\n• NEE = Vanaf deze week');
-
-        // Reset auto-schedule flag and regenerate with new base schedule
-        AppState.schedulesGenerated = false;
-        await autoApplyBaseSchedules(fromNextWeek);
-
-        // Refresh planning view if currently visible
-        if (AppState.currentView === 'planning') {
-            renderPlanning();
-        }
-
-        alert(fromNextWeek ?
-            '✅ Basisrooster toegepast vanaf volgende week!' :
-            '✅ Basisrooster toegepast vanaf deze week!');
-    }
 }
 
 async function handleEmployeeDelete() {
@@ -3552,9 +3512,9 @@ async function handleEmployeeDelete() {
 
 // ===== BASISROOSTER FUNCTIES =====
 
-async function autoApplyBaseSchedules(fromNextWeek = false) {
-    // Skip if already generated in this session (unless forcing from next week)
-    if (AppState.schedulesGenerated && !fromNextWeek) {
+async function autoApplyBaseSchedules() {
+    // Skip if already generated in this session
+    if (AppState.schedulesGenerated) {
         console.log('[Auto Schedule] Already generated this session, skipping');
         return { created: 0, removed: 0 };
     }
@@ -3566,16 +3526,7 @@ async function autoApplyBaseSchedules(fromNextWeek = false) {
 
     // Calculate date range
     const today = new Date();
-    let startDate;
-    if (fromNextWeek) {
-        // Start from next Monday (preserve current week's manual edits)
-        const nextMonday = getMonday(today);
-        nextMonday.setDate(nextMonday.getDate() + 7);
-        startDate = formatDateYYYYMMDD(nextMonday);
-    } else {
-        // Start from current Monday
-        startDate = formatDateYYYYMMDD(getMonday(today));
-    }
+    const startDate = formatDateYYYYMMDD(getMonday(today));
 
     let endDate;
     if (horizonWeeks === null || horizonWeeks === 'unlimited') {
@@ -5367,9 +5318,8 @@ async function savePlanningHorizon() {
         alert('✅ Planning horizon is opgeslagen!');
 
         // Reset flag and re-apply schedules with new horizon
-        // Start from next week to preserve this week's manual edits
         AppState.schedulesGenerated = false;
-        await autoApplyBaseSchedules(true); // fromNextWeek = true
+        await autoApplyBaseSchedules();
 
         // Refresh planning view if currently visible
         if (AppState.currentView === 'planning') {
