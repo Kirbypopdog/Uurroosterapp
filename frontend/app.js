@@ -3318,17 +3318,27 @@ async function saveProfileWeekSchedule() {
             DataStore.users[userIndex].weekScheduleWeek2 = weekScheduleWeek2;
         }
 
-        // Reset auto-schedule flag and regenerate with new base schedule
-        // Start from next week to preserve this week's manual edits
-        AppState.schedulesGenerated = false;
-        await autoApplyBaseSchedules(true); // fromNextWeek = true
-
-        // Refresh planning view if currently visible
-        if (AppState.currentView === 'planning') {
-            renderPlanning();
-        }
-
         setMessage('Werkrooster opgeslagen!', 'success');
+
+        // Ask user when to apply the new schedule
+        const applySchedule = confirm('✅ Basisrooster opgeslagen!\n\nWil je bestaande diensten vervangen door het nieuwe basisrooster?\n\n• JA = Verwijder auto-diensten en maak nieuwe aan\n• NEE = Alleen toekomstige lege dagen worden ingevuld');
+
+        if (applySchedule) {
+            const fromNextWeek = confirm('Vanaf wanneer toepassen?\n\n• JA = Vanaf volgende week (huidige week behouden)\n• NEE = Vanaf deze week');
+
+            // Reset auto-schedule flag and regenerate with new base schedule
+            AppState.schedulesGenerated = false;
+            await autoApplyBaseSchedules(fromNextWeek);
+
+            // Refresh planning view if currently visible
+            if (AppState.currentView === 'planning') {
+                renderPlanning();
+            }
+
+            alert(fromNextWeek ?
+                '✅ Basisrooster toegepast vanaf volgende week!' :
+                '✅ Basisrooster toegepast vanaf deze week!');
+        }
     } catch (error) {
         setMessage(`Opslaan mislukt: ${error.message}`, 'error');
     } finally {
@@ -3503,14 +3513,24 @@ async function handleEmployeeSubmit(e) {
     closeEmployeeModal();
     renderEmployees();
 
-    // Reset auto-schedule flag and regenerate with new base schedule
-    // Start from next week to preserve this week's manual edits
-    AppState.schedulesGenerated = false;
-    await autoApplyBaseSchedules(true); // fromNextWeek = true
+    // Ask user when to apply the new schedule
+    const applySchedule = confirm('✅ Medewerker opgeslagen!\n\nWil je bestaande diensten vervangen door het nieuwe basisrooster?\n\n• JA = Verwijder auto-diensten en maak nieuwe aan\n• NEE = Alleen toekomstige lege dagen worden ingevuld');
 
-    // Refresh planning view if currently visible
-    if (AppState.currentView === 'planning') {
-        renderPlanning();
+    if (applySchedule) {
+        const fromNextWeek = confirm('Vanaf wanneer toepassen?\n\n• JA = Vanaf volgende week (huidige week behouden)\n• NEE = Vanaf deze week');
+
+        // Reset auto-schedule flag and regenerate with new base schedule
+        AppState.schedulesGenerated = false;
+        await autoApplyBaseSchedules(fromNextWeek);
+
+        // Refresh planning view if currently visible
+        if (AppState.currentView === 'planning') {
+            renderPlanning();
+        }
+
+        alert(fromNextWeek ?
+            '✅ Basisrooster toegepast vanaf volgende week!' :
+            '✅ Basisrooster toegepast vanaf deze week!');
     }
 }
 
