@@ -1214,10 +1214,8 @@ function updatePeriodDisplay() {
 }
 
 function renderPlanning() {
-    // Save scroll position before re-rendering
-    // The actual scroll is on .timeline-body element, not window
-    const timelineBody = document.querySelector('.timeline-body');
-    const savedScrollTop = timelineBody ? timelineBody.scrollTop : 0;
+    // Save window scroll position before re-rendering
+    const savedScrollY = window.scrollY || document.documentElement.scrollTop;
 
     if (!AppState.currentWeekStart) {
         setCurrentWeek(new Date());
@@ -1229,12 +1227,9 @@ function renderPlanning() {
     // Set mobile day attribute after calendar is rendered
     updateTimelineMobileDayAttribute();
 
-    // Restore scroll position after DOM updates
+    // Restore window scroll position after DOM updates
     requestAnimationFrame(() => {
-        const newTimelineBody = document.querySelector('.timeline-body');
-        if (newTimelineBody) {
-            newTimelineBody.scrollTop = savedScrollTop;
-        }
+        window.scrollTo(0, savedScrollY);
     });
 }
 

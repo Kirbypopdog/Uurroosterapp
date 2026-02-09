@@ -1861,6 +1861,9 @@ textarea {
     grid-template-columns: 140px repeat(7, minmax(160px, 1fr));
     background: #f1f5f9;
     border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 60px; /* Height of .timeline-header */
+    z-index: 15; /* Below header (20), above content */
 }
 
 .timeline-scale-label {
@@ -1893,8 +1896,7 @@ textarea {
 }
 
 .timeline-body {
-    max-height: calc(100vh - 320px);
-    overflow-y: auto;
+    /* No max-height, no overflow - let page scroll naturally */
 }
 
 /* Team group headers */
@@ -1907,8 +1909,8 @@ textarea {
     color: white;
     font-weight: 600;
     position: sticky;
-    top: 0;
-    z-index: 20; /* Hoger dan nachtblokken zodat ze erachter verdwijnen bij scrollen */
+    top: 100px; /* After header (60px) + scale row (40px) */
+    z-index: 10; /* Below scale, above rows and shift blocks */
 }
 
 .timeline-team-header.team-vlot1 {
