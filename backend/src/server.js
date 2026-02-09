@@ -815,21 +815,26 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
     const shift = shiftResult.rows[0];
     const { role, id: userId, team_id: userTeam } = req.user;
 
-    // Permission checks based on role
-    if (role === 'admin' || role === 'hoofdverantwoordelijke') {
-      // Admin/hoofdverantwoordelijke can delete anything
-    } else if (role === 'teamverantwoordelijke') {
-      // Teamverantwoordelijke can only delete shifts from own team
-      if (shift.team !== userTeam) {
-        return res.status(403).json({ error: 'Je kunt alleen diensten van je eigen team verwijderen' });
-      }
-    } else if (role === 'medewerker') {
-      // Medewerker can only delete own shifts
-      if (shift.user_id !== userId) {
-        return res.status(403).json({ error: 'Je kunt alleen je eigen diensten verwijderen' });
-      }
+    // AUTO shifts can be deleted by anyone (they're temporary/regenerated)
+    if (shift.source === 'auto') {
+      // Skip permission checks for AUTO shifts
     } else {
-      return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
+      // Permission checks for MANUAL shifts based on role
+      if (role === 'admin' || role === 'hoofdverantwoordelijke') {
+        // Admin/hoofdverantwoordelijke can delete anything
+      } else if (role === 'teamverantwoordelijke') {
+        // Teamverantwoordelijke can only delete shifts from own team
+        if (shift.team !== userTeam) {
+          return res.status(403).json({ error: 'Je kunt alleen diensten van je eigen team verwijderen' });
+        }
+      } else if (role === 'medewerker') {
+        // Medewerker can only delete own shifts
+        if (shift.user_id !== userId) {
+          return res.status(403).json({ error: 'Je kunt alleen je eigen diensten verwijderen' });
+        }
+      } else {
+        return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
+      }
     }
 
     await pool.query('DELETE FROM shifts WHERE id = $1', [id]);
