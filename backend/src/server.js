@@ -1016,7 +1016,7 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
         JOIN shifts s1 ON sr.requester_shift_id = s1.id
         LEFT JOIN shifts s2 ON sr.target_shift_id = s2.id
         LEFT JOIN users resp ON sr.responded_by = resp.id
-        WHERE s1.team = $1 OR s2.team = $1 OR (sr.request_type = 'takeover' AND s1.team = $1)
+        WHERE s1.team = $1 OR s2.team = $1 OR sr.request_type = 'takeover'
         ORDER BY sr.created_at DESC
       `;
       params = [team_id];
