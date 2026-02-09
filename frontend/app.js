@@ -77,6 +77,51 @@ function canManageAvailability(employeeId) {
     return false;
 }
 
+// ===== SWAP REQUEST PERMISSIONS =====
+
+function canRequestSwap(shift) {
+    // Only shift owner can request swap
+    const currentUser = AppState.currentUser;
+    if (!currentUser || !shift) return false;
+    return shift.userId === currentUser.id;
+}
+
+function canApproveSwap(swapRequest) {
+    const role = getEffectiveRole();
+    const currentUser = AppState.currentUser;
+
+    if (!currentUser || !swapRequest) return false;
+
+    // Admin/hoofdverantwoordelijke: all swaps
+    if (['admin', 'hoofdverantwoordelijke'].includes(role)) return true;
+
+    // Teamverantwoordelijke: only their team
+    if (role === 'teamverantwoordelijke') {
+        const userTeam = currentUser.teamId || currentUser.mainTeam;
+        return swapRequest.requester_shift_team === userTeam ||
+               swapRequest.target_shift_team === userTeam;
+    }
+
+    return false;
+}
+
+function canCancelSwap(swapRequest) {
+    const currentUser = AppState.currentUser;
+    if (!currentUser || !swapRequest) return false;
+
+    return swapRequest.requester_user_id === currentUser.id &&
+           swapRequest.status === 'pending';
+}
+
+function canTargetRespondToSwap(swapRequest) {
+    // Target user can approve/reject pending swap requests
+    const currentUser = AppState.currentUser;
+    if (!currentUser || !swapRequest) return false;
+
+    return swapRequest.target_user_id === currentUser.id &&
+           swapRequest.status === 'pending';
+}
+
 function getVisibleTeamsForRole() {
     // Iedereen met een login kan alle teams zien in de planner
     const allTeams = ['vlot1', 'vlot2', 'cargo', 'overkoepelend', 'jobstudent'];
@@ -490,6 +535,33 @@ function setupEventListeners() {
     });
     DOM.employeeModal.addEventListener('click', (e) => {
         if (e.target === DOM.employeeModal) closeEmployeeModal();
+    });
+
+    // Swap request modal event listeners
+    document.getElementById('swap-request-modal-close').addEventListener('click', closeSwapRequestModal);
+    document.getElementById('swap-request-cancel-btn').addEventListener('click', closeSwapRequestModal);
+    document.getElementById('swap-request-submit-btn').addEventListener('click', handleSwapRequestSubmit);
+    document.getElementById('swap-target-employee').addEventListener('change', handleSwapTargetEmployeeChange);
+    document.getElementById('swap-target-shift').addEventListener('change', handleSwapTargetShiftChange);
+    document.getElementById('swap-request-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'swap-request-modal') closeSwapRequestModal();
+    });
+
+    // Swap review modal event listeners
+    document.getElementById('swap-review-modal-close').addEventListener('click', closeSwapReviewModal);
+    document.getElementById('swap-review-cancel-btn').addEventListener('click', closeSwapReviewModal);
+    document.getElementById('swap-review-approve-btn').addEventListener('click', handleSwapApprove);
+    document.getElementById('swap-review-reject-btn').addEventListener('click', handleSwapReject);
+    document.getElementById('swap-review-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'swap-review-modal') closeSwapReviewModal();
+    });
+
+    // Takeover request modal event listeners
+    document.getElementById('takeover-request-modal-close').addEventListener('click', closeTakeoverRequestModal);
+    document.getElementById('takeover-request-cancel-btn').addEventListener('click', closeTakeoverRequestModal);
+    document.getElementById('takeover-request-submit-btn').addEventListener('click', handleTakeoverRequestSubmit);
+    document.getElementById('takeover-request-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'takeover-request-modal') closeTakeoverRequestModal();
     });
 
     // Week tabs (static in HTML)
@@ -2096,6 +2168,53 @@ function openShiftModal(shift, canEdit) {
     DOM.shiftSubmitBtn.style.display = canEdit ? 'inline-block' : 'none';
     DOM.shiftDeleteBtn.style.display = canEdit ? 'block' : 'none';
 
+    // Add "Ruilen" button if user can request swap
+    const existingSwapBtn = document.getElementById('shift-swap-btn');
+    if (existingSwapBtn) existingSwapBtn.remove();
+
+    if (canRequestSwap(shift)) {
+        const swapBtn = document.createElement('button');
+        swapBtn.type = 'button';
+        swapBtn.id = 'shift-swap-btn';
+        swapBtn.className = 'btn btn-secondary';
+        swapBtn.textContent = 'Ruilen';
+        swapBtn.style.marginRight = 'auto';
+        swapBtn.addEventListener('click', () => {
+            closeShiftModal();
+            openSwapRequestModal(shift);
+        });
+
+        // Insert before submit button
+        const modalActions = DOM.shiftSubmitBtn.parentElement;
+        modalActions.insertBefore(swapBtn, modalActions.firstChild);
+    }
+
+    // Add "Iemand zoeken" button for takeover requests
+    const existingTakeoverBtn = document.getElementById('shift-takeover-btn');
+    if (existingTakeoverBtn) existingTakeoverBtn.remove();
+
+    if (canRequestSwap(shift)) {
+        const takeoverBtn = document.createElement('button');
+        takeoverBtn.type = 'button';
+        takeoverBtn.id = 'shift-takeover-btn';
+        takeoverBtn.className = 'btn btn-primary';
+        takeoverBtn.textContent = 'Iemand zoeken';
+        takeoverBtn.style.marginRight = '8px';
+        takeoverBtn.addEventListener('click', () => {
+            closeShiftModal();
+            openTakeoverRequestModal(shift);
+        });
+
+        // Insert after "Ruilen" button
+        const modalActions = DOM.shiftSubmitBtn.parentElement;
+        const swapBtn = document.getElementById('shift-swap-btn');
+        if (swapBtn) {
+            modalActions.insertBefore(takeoverBtn, swapBtn.nextSibling);
+        } else {
+            modalActions.insertBefore(takeoverBtn, modalActions.firstChild);
+        }
+    }
+
     // Show source info (auto vs manual)
     const isAutoShift = shift.source === 'auto';
     let sourceHtml = '';
@@ -2154,6 +2273,454 @@ function handleShiftDelete() {
         deleteShift(AppState.editingShiftId);
         closeShiftModal();
         renderPlanning();
+    }
+}
+
+// ===== SWAP REQUEST MODAL FUNCTIES =====
+
+let swapRequestState = {
+    requesterShift: null,
+    targetEmployeeId: null,
+    targetShiftId: null
+};
+
+function openSwapRequestModal(shift) {
+    swapRequestState.requesterShift = shift;
+    swapRequestState.targetEmployeeId = null;
+    swapRequestState.targetShiftId = null;
+
+    // Show requester shift preview
+    const requesterPreview = document.getElementById('swap-requester-shift-preview');
+    requesterPreview.innerHTML = formatShiftPreview(shift);
+
+    // Clear target preview
+    const targetPreview = document.getElementById('swap-target-shift-preview');
+    targetPreview.innerHTML = '<p style="color: #94a3b8;">Selecteer eerst een collega en shift</p>';
+
+    // Populate employee dropdown (exclude current user)
+    const employeeSelect = document.getElementById('swap-target-employee');
+    let employees = getAllEmployees(true).filter(emp => emp.id !== shift.userId);
+    let html = '<option value="">-- Selecteer collega --</option>';
+    employees.forEach(emp => {
+        html += `<option value="${emp.id}">${escapeHtml(emp.name)}</option>`;
+    });
+    employeeSelect.innerHTML = html;
+
+    // Reset target shift dropdown
+    const shiftSelect = document.getElementById('swap-target-shift');
+    shiftSelect.innerHTML = '<option value="">-- Selecteer eerst een collega --</option>';
+    shiftSelect.disabled = true;
+
+    // Clear message and validation
+    document.getElementById('swap-message').value = '';
+    document.getElementById('swap-validation-display').style.display = 'none';
+
+    // Show modal
+    document.getElementById('swap-request-modal').classList.remove('hidden');
+}
+
+function closeSwapRequestModal() {
+    document.getElementById('swap-request-modal').classList.add('hidden');
+    swapRequestState = { requesterShift: null, targetEmployeeId: null, targetShiftId: null };
+}
+
+function formatShiftPreview(shift) {
+    const employee = getEmployee(shift.employeeId || shift.userId);
+    const employeeName = employee ? escapeHtml(employee.name) : 'Onbekend';
+    const team = escapeHtml(shift.team || shift.teamId || '');
+    const date = formatDate(shift.date);
+    const time = `${shift.startTime} - ${shift.endTime}`;
+
+    return `
+        <p><strong>Medewerker:</strong> ${employeeName}</p>
+        <p><strong>Team:</strong> ${team}</p>
+        <p><strong>Datum:</strong> ${date}</p>
+        <p><strong>Tijd:</strong> ${time}</p>
+        ${shift.notes ? `<p><strong>Notities:</strong> ${escapeHtml(shift.notes)}</p>` : ''}
+    `;
+}
+
+async function handleSwapTargetEmployeeChange() {
+    const employeeId = parseInt(document.getElementById('swap-target-employee').value);
+    const shiftSelect = document.getElementById('swap-target-shift');
+
+    if (!employeeId) {
+        shiftSelect.innerHTML = '<option value="">-- Selecteer eerst een collega --</option>';
+        shiftSelect.disabled = true;
+        swapRequestState.targetEmployeeId = null;
+        swapRequestState.targetShiftId = null;
+        document.getElementById('swap-target-shift-preview').innerHTML = '<p style="color: #94a3b8;">Selecteer eerst een collega en shift</p>';
+        return;
+    }
+
+    swapRequestState.targetEmployeeId = employeeId;
+
+    // Get shifts for this employee (future shifts only)
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    const employeeShifts = DataStore.shifts
+        .filter(s => s.userId === employeeId && new Date(s.date) >= now)
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    if (employeeShifts.length === 0) {
+        shiftSelect.innerHTML = '<option value="">Geen toekomstige shifts beschikbaar</option>';
+        shiftSelect.disabled = true;
+        return;
+    }
+
+    let html = '<option value="">-- Selecteer shift --</option>';
+    employeeShifts.forEach(shift => {
+        const dateStr = formatDate(shift.date);
+        const timeStr = `${shift.startTime} - ${shift.endTime}`;
+        html += `<option value="${shift.id}">${dateStr} | ${timeStr} | ${shift.team || shift.teamId}</option>`;
+    });
+
+    shiftSelect.innerHTML = html;
+    shiftSelect.disabled = false;
+}
+
+function handleSwapTargetShiftChange() {
+    const shiftId = parseInt(document.getElementById('swap-target-shift').value);
+
+    if (!shiftId) {
+        swapRequestState.targetShiftId = null;
+        document.getElementById('swap-target-shift-preview').innerHTML = '<p style="color: #94a3b8;">Selecteer een shift</p>';
+        document.getElementById('swap-validation-display').style.display = 'none';
+        return;
+    }
+
+    swapRequestState.targetShiftId = shiftId;
+    const targetShift = getShift(shiftId);
+
+    if (targetShift) {
+        // Show target shift preview
+        document.getElementById('swap-target-shift-preview').innerHTML = formatShiftPreview(targetShift);
+
+        // Run validation
+        runSwapValidation();
+    }
+}
+
+function runSwapValidation() {
+    if (!swapRequestState.requesterShift || !swapRequestState.targetShiftId) {
+        return;
+    }
+
+    const requesterShift = swapRequestState.requesterShift;
+    const targetShift = getShift(swapRequestState.targetShiftId);
+
+    if (!targetShift) return;
+
+    const validation = validateSwapRequest({
+        requesterShift: requesterShift,
+        targetShift: targetShift,
+        requesterUserId: requesterShift.userId,
+        targetUserId: targetShift.userId
+    });
+
+    const validationDisplay = document.getElementById('swap-validation-display');
+    validationDisplay.style.display = 'block';
+    validationDisplay.className = '';
+
+    if (!validation.isValid) {
+        validationDisplay.classList.add('has-errors');
+        validationDisplay.innerHTML = `
+            <div class="validation-errors">
+                <strong>❌ Fouten:</strong>
+                <ul>${validation.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+            </div>
+        `;
+    } else if (validation.hasWarnings) {
+        validationDisplay.classList.add('has-warnings');
+        validationDisplay.innerHTML = `
+            <div class="validation-warnings">
+                <strong>⚠️ Waarschuwingen:</strong>
+                <ul>${validation.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
+            </div>
+            <p style="margin-top: 0.5rem; color: #92400e;">Je kunt dit verzoek indienen, maar een verantwoordelijke moet het goedkeuren.</p>
+        `;
+    } else {
+        validationDisplay.classList.add('is-valid');
+        validationDisplay.innerHTML = `
+            <div class="validation-success">
+                <strong>✅ Geen problemen gevonden</strong>
+                <p style="margin-top: 0.5rem;">Deze ruil kan worden ingediend voor goedkeuring.</p>
+            </div>
+        `;
+    }
+}
+
+async function handleSwapRequestSubmit() {
+    if (!swapRequestState.requesterShift || !swapRequestState.targetShiftId) {
+        alert('Selecteer eerst een collega en een shift om te ruilen');
+        return;
+    }
+
+    // Get validation result
+    const requesterShift = swapRequestState.requesterShift;
+    const targetShift = getShift(swapRequestState.targetShiftId);
+
+    const validation = validateSwapRequest({
+        requesterShift: requesterShift,
+        targetShift: targetShift,
+        requesterUserId: requesterShift.userId,
+        targetUserId: targetShift.userId
+    });
+
+    if (!validation.isValid) {
+        alert('Deze ruil kan niet worden ingediend vanwege fouten. Zie de validatie hierboven.');
+        return;
+    }
+
+    const message = document.getElementById('swap-message').value.trim();
+
+    try {
+        await createSwapRequest({
+            requesterShiftId: requesterShift.id,
+            targetShiftId: targetShift.id,
+            message: message || null
+        });
+
+        alert('✅ Ruilverzoek succesvol ingediend!');
+        closeSwapRequestModal();
+
+        // Switch to swaps view to show the new request
+        switchView('swaps');
+    } catch (error) {
+        console.error('Error creating swap request:', error);
+        alert('❌ Fout bij indienen ruilverzoek: ' + (error.message || 'Onbekende fout'));
+    }
+}
+
+// ===== SWAP REVIEW MODAL FUNCTIES =====
+
+let swapReviewState = {
+    swapRequestId: null
+};
+
+function openSwapReviewModal(swapId) {
+    const swapRequest = DataStore.swapRequests.find(sr => sr.id === swapId);
+
+    if (!swapRequest) {
+        alert('Ruilverzoek niet gevonden');
+        return;
+    }
+
+    swapReviewState.swapRequestId = swapId;
+
+    // Fill request info
+    document.getElementById('swap-review-requester').textContent = swapRequest.requester_name;
+    document.getElementById('swap-review-created').textContent = new Date(swapRequest.created_at).toLocaleDateString('nl-NL', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+
+    // Fill shift previews
+    document.getElementById('swap-review-requester-name').textContent = swapRequest.requester_name;
+    document.getElementById('swap-review-target-name').textContent = swapRequest.target_name;
+
+    const requesterShift = {
+        employeeId: swapRequest.requester_user_id,
+        userId: swapRequest.requester_user_id,
+        team: swapRequest.requester_shift_team,
+        date: swapRequest.requester_shift_date,
+        startTime: swapRequest.requester_shift_start,
+        endTime: swapRequest.requester_shift_end
+    };
+
+    const targetShift = {
+        employeeId: swapRequest.target_user_id,
+        userId: swapRequest.target_user_id,
+        team: swapRequest.target_shift_team,
+        date: swapRequest.target_shift_date,
+        startTime: swapRequest.target_shift_start,
+        endTime: swapRequest.target_shift_end
+    };
+
+    document.getElementById('swap-review-requester-shift').innerHTML = formatShiftPreview(requesterShift);
+    document.getElementById('swap-review-target-shift').innerHTML = formatShiftPreview(targetShift);
+
+    // Show message if present
+    const messageGroup = document.getElementById('swap-review-message-group');
+    const messageDisplay = document.getElementById('swap-review-message');
+
+    if (swapRequest.message) {
+        messageGroup.style.display = 'block';
+        messageDisplay.textContent = swapRequest.message;
+    } else {
+        messageGroup.style.display = 'none';
+    }
+
+    // Run validation
+    const fullRequesterShift = getShift(swapRequest.requester_shift_id);
+    const fullTargetShift = getShift(swapRequest.target_shift_id);
+
+    if (fullRequesterShift && fullTargetShift) {
+        const validation = validateSwapRequest({
+            requesterShift: fullRequesterShift,
+            targetShift: fullTargetShift,
+            requesterUserId: swapRequest.requester_user_id,
+            targetUserId: swapRequest.target_user_id
+        });
+
+        const validationDisplay = document.getElementById('swap-review-validation');
+
+        if (!validation.isValid) {
+            validationDisplay.className = 'has-errors';
+            validationDisplay.innerHTML = `
+                <div class="validation-errors">
+                    <strong>❌ Fouten:</strong>
+                    <ul>${validation.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+                </div>
+                <p style="margin-top: 0.5rem; color: #991b1b; font-weight: 500;">
+                    Deze ruil kan niet worden goedgekeurd vanwege bovenstaande fouten.
+                </p>
+            `;
+        } else if (validation.hasWarnings) {
+            validationDisplay.className = 'has-warnings';
+            validationDisplay.innerHTML = `
+                <div class="validation-warnings">
+                    <strong>⚠️ Waarschuwingen:</strong>
+                    <ul>${validation.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
+                </div>
+                <p style="margin-top: 0.5rem; color: #92400e;">
+                    Je kunt deze ruil goedkeuren ondanks de waarschuwingen.
+                </p>
+            `;
+        } else {
+            validationDisplay.className = 'is-valid';
+            validationDisplay.innerHTML = `
+                <div class="validation-success">
+                    <strong>✅ Geen problemen gevonden</strong>
+                    <p style="margin-top: 0.5rem;">Deze ruil kan veilig worden goedgekeurd.</p>
+                </div>
+            `;
+        }
+    }
+
+    // Clear response notes
+    document.getElementById('swap-response-notes').value = '';
+    document.getElementById('swap-response-notes-required').style.display = 'none';
+
+    // Show modal
+    document.getElementById('swap-review-modal').classList.remove('hidden');
+}
+
+function closeSwapReviewModal() {
+    document.getElementById('swap-review-modal').classList.add('hidden');
+    swapReviewState.swapRequestId = null;
+}
+
+async function handleSwapApprove() {
+    if (!swapReviewState.swapRequestId) return;
+
+    const responseNotes = document.getElementById('swap-response-notes').value.trim();
+
+    if (!confirm('Weet je zeker dat je deze ruil wilt goedkeuren?')) {
+        return;
+    }
+
+    try {
+        await approveSwapRequest(swapReviewState.swapRequestId, responseNotes || null);
+        alert('✅ Ruil goedgekeurd en uitgevoerd!');
+        closeSwapReviewModal();
+        renderSwaps();
+        renderPlanning(); // Refresh planning view to show swapped shifts
+    } catch (error) {
+        console.error('Error approving swap:', error);
+        alert('❌ Fout bij goedkeuren: ' + (error.message || 'Onbekende fout'));
+    }
+}
+
+async function handleSwapReject() {
+    if (!swapReviewState.swapRequestId) return;
+
+    const responseNotes = document.getElementById('swap-response-notes').value.trim();
+
+    if (!responseNotes) {
+        alert('⚠️ Voeg een reden toe bij afwijzing');
+        document.getElementById('swap-response-notes-required').style.display = 'inline';
+        return;
+    }
+
+    if (!confirm('Weet je zeker dat je deze ruil wilt afwijzen?')) {
+        return;
+    }
+
+    try {
+        await rejectSwapRequest(swapReviewState.swapRequestId, responseNotes);
+        alert('✅ Ruil afgewezen');
+        closeSwapReviewModal();
+        renderSwaps();
+    } catch (error) {
+        console.error('Error rejecting swap:', error);
+        alert('❌ Fout bij afwijzen: ' + (error.message || 'Onbekende fout'));
+    }
+}
+
+// ===== TAKEOVER REQUEST MODAL FUNCTIES =====
+
+let takeoverRequestState = {
+    shiftToGiveAway: null
+};
+
+function openTakeoverRequestModal(shift) {
+    takeoverRequestState.shiftToGiveAway = shift;
+
+    // Get team name
+    const teamName = shift.team && DataStore.settings.teams?.[shift.team]
+        ? DataStore.settings.teams[shift.team].name
+        : shift.team || 'Onbekend team';
+
+    // Show shift preview
+    const previewHtml = `
+        <div class="shift-card">
+            <div class="shift-card-header">
+                <span class="shift-team">${escapeHtml(teamName)}</span>
+                <span class="shift-date">${formatDate(shift.date)}</span>
+            </div>
+            <div class="shift-card-body">
+                <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
+                ${shift.notes ? `<div class="shift-notes">${escapeHtml(shift.notes)}</div>` : ''}
+            </div>
+        </div>
+    `;
+    document.getElementById('takeover-shift-preview').innerHTML = previewHtml;
+
+    // Clear message
+    document.getElementById('takeover-message').value = '';
+
+    // Show modal
+    document.getElementById('takeover-request-modal').classList.remove('hidden');
+}
+
+function closeTakeoverRequestModal() {
+    document.getElementById('takeover-request-modal').classList.add('hidden');
+    takeoverRequestState.shiftToGiveAway = null;
+}
+
+async function handleTakeoverRequestSubmit() {
+    if (!takeoverRequestState.shiftToGiveAway) {
+        alert('Geen shift geselecteerd');
+        return;
+    }
+
+    const message = document.getElementById('takeover-message').value.trim();
+
+    try {
+        await createTakeoverRequest(takeoverRequestState.shiftToGiveAway.id, message || null);
+        alert('✅ Verzoek succesvol ingediend! Collega\'s kunnen deze shift nu overnemen.');
+        closeTakeoverRequestModal();
+
+        // Switch to swaps view to show the new request
+        switchView('swaps');
+    } catch (error) {
+        console.error('Error creating takeover request:', error);
+        alert('❌ Fout bij indienen verzoek: ' + (error.message || 'Onbekende fout'));
     }
 }
 
@@ -3439,8 +4006,443 @@ function renderAvailability() {
     });
 }
 
-function renderSwaps() {
-    DOM.swapsView.querySelector('#swaps-list').innerHTML = `<div style="padding: 40px; text-align: center; color: #64748b;"><h3>Dienstenruil systeem</h3><p>Deze functie wordt binnenkort toegevoegd.</p><p>Hier kunnen medewerkers verzoeken indienen om diensten te ruilen.</p></div>`;
+async function renderSwaps() {
+    const swapsList = DOM.swapsView.querySelector('#swaps-list');
+
+    if (!swapsList) {
+        console.error('swaps-list element not found');
+        return;
+    }
+
+    try {
+        // Fetch swap requests
+        await getSwapRequests();
+
+        const swapRequests = DataStore.swapRequests || [];
+        const currentUser = AppState.currentUser;
+        const role = getEffectiveRole();
+
+        // Add safety check for currentUser
+        if (!currentUser) {
+            swapsList.innerHTML = `<div style="padding: 40px; text-align: center;">
+                <p>Je moet ingelogd zijn om ruilverzoeken te zien.</p>
+            </div>`;
+            return;
+        }
+
+        // Separate requests by category
+        const targetPendingRequests = swapRequests.filter(sr => canTargetRespondToSwap(sr));
+        const pendingRequests = swapRequests.filter(sr => sr.status === 'pending' && canApproveSwap(sr));
+        // Mijn verzoeken: only show requests where I am the REQUESTER (not target)
+        const myRequests = swapRequests.filter(sr =>
+            sr.requester_user_id === currentUser.id
+        );
+        const historyRequests = swapRequests.filter(sr =>
+            sr.status !== 'pending' && canApproveSwap(sr)
+        ).slice(0, 10); // Show last 10
+        // Open takeover requests: available to everyone except the requester
+        const openTakeoverRequests = swapRequests.filter(sr =>
+            sr.request_type === 'takeover' &&
+            sr.status === 'pending' &&
+            sr.requester_user_id !== currentUser.id
+        );
+
+        let html = '<div class="swaps-container">';
+
+        // Section 1: Voor mij (target approval)
+        if (targetPendingRequests.length > 0) {
+            html += `<div class="swap-section swap-section-target">
+                <h3>
+                    Voor mij
+                    <span class="swap-section-count">${targetPendingRequests.length}</span>
+                </h3>
+                <p style="font-size: 0.9rem; color: #64748b; margin-top: -0.5rem; margin-bottom: 1rem;">
+                    Deze collega's willen graag met jou ruilen
+                </p>`;
+
+            targetPendingRequests.forEach(sr => {
+                html += renderSwapRequestCard(sr, 'target');
+            });
+
+            html += `</div>`;
+        }
+
+        // Section 1.5: Beschikbare shifts (open takeover requests)
+        if (openTakeoverRequests.length > 0) {
+            html += `<div class="swap-section swap-section-available">
+                <h3>
+                    Beschikbare shifts
+                    <span class="swap-section-count">${openTakeoverRequests.length}</span>
+                </h3>
+                <p style="font-size: 0.9rem; color: #64748b; margin-top: -0.5rem; margin-bottom: 1rem;">
+                    Collega's zoeken iemand om hun shift over te nemen
+                </p>`;
+
+            openTakeoverRequests.forEach(sr => {
+                html += renderTakeoverRequestCard(sr);
+            });
+
+            html += `</div>`;
+        }
+
+        // Section 2: Pending requests (for lead approvers only - hidden for now)
+        if (false && canApproveSwap({ requester_shift_team: 'any', target_shift_team: 'any' })) {
+            html += `<div class="swap-section">
+                <h3>
+                    Te beoordelen
+                    ${pendingRequests.length > 0 ? `<span class="swap-section-count">${pendingRequests.length}</span>` : ''}
+                </h3>`;
+
+            if (pendingRequests.length === 0) {
+                html += `<div class="swap-empty-state">
+                    <p>Geen openstaande ruilverzoeken</p>
+                </div>`;
+            } else {
+                pendingRequests.forEach(sr => {
+                    html += renderSwapRequestCard(sr, 'approve');
+                });
+            }
+
+            html += `</div>`;
+        }
+
+        // Section 3: My requests (for everyone)
+        html += `<div class="swap-section">
+            <h3>Mijn verzoeken</h3>`;
+
+        if (myRequests.length === 0) {
+            html += `<div class="swap-empty-state">
+                <p>Je hebt nog geen ruilverzoeken ingediend</p>
+                <p style="font-size: 0.9rem; margin-top: 1rem;">Ga naar Planning en klik op een van je shifts om een ruil aan te vragen</p>
+            </div>`;
+        } else {
+            myRequests.forEach(sr => {
+                // Render based on request type
+                if (sr.request_type === 'takeover') {
+                    html += renderTakeoverRequestCard(sr, 'view');
+                } else {
+                    html += renderSwapRequestCard(sr, 'view');
+                }
+            });
+        }
+
+        html += `</div>`;
+
+        // Section 4: History (for lead approvers only - hidden for now)
+        if (false && canApproveSwap({ requester_shift_team: 'any', target_shift_team: 'any' })) {
+            html += `<div class="swap-section">
+                <h3>Geschiedenis (laatste 10)</h3>`;
+
+            if (historyRequests.length === 0) {
+                html += `<div class="swap-empty-state">
+                    <p>Geen verwerkte verzoeken</p>
+                </div>`;
+            } else {
+                historyRequests.forEach(sr => {
+                    html += renderSwapRequestCard(sr, 'history');
+                });
+            }
+
+            html += `</div>`;
+        }
+
+        html += '</div>';
+
+        swapsList.innerHTML = html;
+
+        // Attach event listeners to action buttons
+        attachSwapActionListeners();
+
+    } catch (error) {
+        console.error('Error rendering swaps:', error);
+        swapsList.innerHTML = `<div style="padding: 40px; text-align: center; color: #e11d48;">
+            <h3>❌ Fout bij laden ruilverzoeken</h3>
+            <p>${escapeHtml(error.message || 'Onbekende fout')}</p>
+        </div>`;
+    }
+}
+
+function renderSwapRequestCard(swapRequest, mode) {
+    const statusLabels = {
+        'pending': 'In behandeling',
+        'approved': 'Goedgekeurd',
+        'rejected': 'Afgewezen',
+        'cancelled': 'Geannuleerd'
+    };
+
+    const createdDate = new Date(swapRequest.created_at).toLocaleDateString('nl-NL', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+
+    let actionsHtml = '';
+
+    if (mode === 'target' && swapRequest.status === 'pending') {
+        actionsHtml = `
+            <div class="swap-request-actions" style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-primary btn-target-approve-swap" data-swap-id="${swapRequest.id}">
+                    ✓ Accepteren
+                </button>
+                <button class="btn btn-danger btn-target-reject-swap" data-swap-id="${swapRequest.id}">
+                    ✗ Afwijzen
+                </button>
+            </div>
+        `;
+    } else if (mode === 'approve' && swapRequest.status === 'pending') {
+        actionsHtml = `
+            <div class="swap-request-actions">
+                <button class="btn btn-secondary btn-review-swap" data-swap-id="${swapRequest.id}">
+                    Beoordelen
+                </button>
+            </div>
+        `;
+    } else if (mode === 'view' && swapRequest.status === 'pending' && canCancelSwap(swapRequest)) {
+        actionsHtml = `
+            <div class="swap-request-actions">
+                <button class="btn btn-danger btn-cancel-swap" data-swap-id="${swapRequest.id}">
+                    Annuleren
+                </button>
+            </div>
+        `;
+    }
+
+    let responseHtml = '';
+    if (swapRequest.status !== 'pending' && swapRequest.response_notes) {
+        responseHtml = `
+            <div class="swap-request-message">
+                <strong>Reactie:</strong> ${escapeHtml(swapRequest.response_notes)}
+                ${swapRequest.responded_by_name ? `<br><small>Door ${escapeHtml(swapRequest.responded_by_name)}</small>` : ''}
+            </div>
+        `;
+    }
+
+    let messageHtml = '';
+    if (swapRequest.message) {
+        messageHtml = `
+            <div class="swap-request-message">
+                <strong>Bericht:</strong> ${escapeHtml(swapRequest.message)}
+            </div>
+        `;
+    }
+
+    return `
+        <div class="swap-request-card">
+            <div class="swap-request-header">
+                <h4>${escapeHtml(swapRequest.requester_name)} ⇄ ${escapeHtml(swapRequest.target_name)}</h4>
+                <span class="swap-status-badge status-${swapRequest.status}">
+                    ${statusLabels[swapRequest.status] || swapRequest.status}
+                </span>
+            </div>
+            <div class="swap-request-body">
+                <div class="swap-request-shift">
+                    <strong>${escapeHtml(swapRequest.requester_name)}</strong>
+                    ${formatDate(swapRequest.requester_shift_date)} |
+                    ${swapRequest.requester_shift_start} - ${swapRequest.requester_shift_end} |
+                    ${escapeHtml(swapRequest.requester_shift_team || '')}
+                </div>
+                <div class="swap-request-arrow">⇄</div>
+                <div class="swap-request-shift">
+                    <strong>${escapeHtml(swapRequest.target_name)}</strong>
+                    ${formatDate(swapRequest.target_shift_date)} |
+                    ${swapRequest.target_shift_start} - ${swapRequest.target_shift_end} |
+                    ${escapeHtml(swapRequest.target_shift_team || '')}
+                </div>
+            </div>
+            ${messageHtml}
+            ${responseHtml}
+            <p style="font-size: 0.85rem; color: #64748b; margin: 0.5rem 0 0 0;">
+                Aangevraagd op ${createdDate}
+            </p>
+            ${actionsHtml}
+        </div>
+    `;
+}
+
+function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
+    const statusLabels = {
+        'pending': 'Beschikbaar',
+        'approved': 'Overgenomen',
+        'rejected': 'Afgewezen',
+        'cancelled': 'Geannuleerd'
+    };
+
+    const createdDate = new Date(takeoverRequest.created_at).toLocaleDateString('nl-NL', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+
+    const shift = takeoverRequest.requester_shift_id ? {
+        date: takeoverRequest.requester_shift_date,
+        startTime: takeoverRequest.requester_shift_start,
+        endTime: takeoverRequest.requester_shift_end,
+        team: takeoverRequest.requester_shift_team,
+        notes: takeoverRequest.requester_shift_notes
+    } : null;
+
+    if (!shift) {
+        return ''; // Skip if shift data is missing
+    }
+
+    // Get team name
+    const teamName = shift.team && DataStore.settings.teams?.[shift.team]
+        ? DataStore.settings.teams[shift.team].name
+        : shift.team || 'Onbekend team';
+
+    let messageHtml = '';
+    if (takeoverRequest.message) {
+        messageHtml = `
+            <div class="swap-request-message">
+                <strong>Bericht:</strong> ${escapeHtml(takeoverRequest.message)}
+            </div>
+        `;
+    }
+
+    // Actions based on mode
+    let actionsHtml = '';
+    if (mode === 'available' && takeoverRequest.status === 'pending') {
+        // Show "Overnemen" button for available shifts
+        actionsHtml = `
+            <div class="swap-request-actions">
+                <button class="btn btn-success btn-accept-takeover" data-request-id="${takeoverRequest.id}">
+                    ✓ Overnemen
+                </button>
+            </div>
+        `;
+    } else if (mode === 'view' && takeoverRequest.status === 'pending' && canCancelSwap(takeoverRequest)) {
+        // Show "Annuleren" button for own pending requests
+        actionsHtml = `
+            <div class="swap-request-actions">
+                <button class="btn btn-danger btn-cancel-swap" data-swap-id="${takeoverRequest.id}">
+                    Annuleren
+                </button>
+            </div>
+        `;
+    }
+
+    // Status badge
+    const statusClass = takeoverRequest.status === 'pending' ? 'status-available' : `status-${takeoverRequest.status}`;
+    const statusLabel = statusLabels[takeoverRequest.status] || takeoverRequest.status;
+
+    // Title based on mode
+    const title = mode === 'view'
+        ? 'Je zoekt iemand voor deze shift'
+        : `${escapeHtml(takeoverRequest.requester_name)} zoekt iemand`;
+
+    return `
+        <div class="swap-request-card takeover-card">
+            <div class="swap-request-header">
+                <h4>${title}</h4>
+                <span class="swap-status-badge ${statusClass}">${statusLabel}</span>
+            </div>
+            <div class="swap-request-body">
+                <div class="takeover-shift-info">
+                    <strong>Shift:</strong>
+                    ${formatDate(shift.date)} |
+                    ${shift.startTime} - ${shift.endTime} |
+                    ${escapeHtml(teamName)}
+                    ${shift.notes ? `<br><em>${escapeHtml(shift.notes)}</em>` : ''}
+                </div>
+            </div>
+            ${messageHtml}
+            <p style="font-size: 0.85rem; color: #64748b; margin: 0.5rem 0 0 0;">
+                Geplaatst op ${createdDate}
+            </p>
+            ${actionsHtml}
+        </div>
+    `;
+}
+
+function attachSwapActionListeners() {
+    // Target approve buttons
+    document.querySelectorAll('.btn-target-approve-swap').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const swapId = parseInt(btn.dataset.swapId);
+            const notes = prompt('Wil je een bericht toevoegen? (optioneel)');
+            // Allow empty notes for approval (user might cancel the prompt)
+            if (notes !== null) { // User didn't cancel
+                try {
+                    await targetApproveSwapRequest(swapId, notes);
+                    alert('✅ Ruil geaccepteerd! De shifts zijn omgewisseld.');
+                    switchView('planning'); // Go to planning to see the result
+                } catch (error) {
+                    console.error('Error approving swap:', error);
+                    alert('❌ Fout bij accepteren: ' + (error.message || 'Onbekende fout'));
+                }
+            }
+        });
+    });
+
+    // Target reject buttons
+    document.querySelectorAll('.btn-target-reject-swap').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const swapId = parseInt(btn.dataset.swapId);
+            const notes = prompt('Waarom wijs je dit ruilverzoek af? (verplicht)');
+            if (notes && notes.trim() !== '') {
+                try {
+                    await targetRejectSwapRequest(swapId, notes);
+                    alert('Ruil afgewezen');
+                    renderSwaps();
+                } catch (error) {
+                    console.error('Error rejecting swap:', error);
+                    alert('❌ Fout bij afwijzen: ' + (error.message || 'Onbekende fout'));
+                }
+            } else if (notes !== null) {
+                alert('Je moet een reden opgeven om het verzoek af te wijzen');
+            }
+        });
+    });
+
+    // Review buttons (for future lead approval)
+    document.querySelectorAll('.btn-review-swap').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const swapId = parseInt(btn.dataset.swapId);
+            openSwapReviewModal(swapId);
+        });
+    });
+
+    // Cancel buttons
+    document.querySelectorAll('.btn-cancel-swap').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const swapId = parseInt(btn.dataset.swapId);
+            if (confirm('Weet je zeker dat je dit ruilverzoek wilt annuleren?')) {
+                try {
+                    await cancelSwapRequest(swapId);
+                    alert('✅ Ruilverzoek geannuleerd');
+                    renderSwaps();
+                } catch (error) {
+                    console.error('Error cancelling swap:', error);
+                    alert('❌ Fout bij annuleren: ' + (error.message || 'Onbekende fout'));
+                }
+            }
+        });
+    });
+
+    // Accept takeover buttons
+    document.querySelectorAll('.btn-accept-takeover').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const requestId = parseInt(btn.dataset.requestId);
+            const notes = prompt('Wil je een bericht toevoegen? (optioneel)');
+
+            if (notes !== null) { // User didn't cancel
+                if (confirm('Weet je zeker dat je deze shift wilt overnemen?')) {
+                    try {
+                        await acceptTakeoverRequest(requestId, notes);
+                        alert('✅ Shift overgenomen! Je kunt hem nu zien in je planning.');
+                        switchView('planning'); // Go to planning to see the new shift
+                    } catch (error) {
+                        console.error('Error accepting takeover:', error);
+                        alert('❌ Fout bij overnemen: ' + (error.message || 'Onbekende fout'));
+                    }
+                }
+            }
+        });
+    });
 }
 
 function renderSettings() {
@@ -5061,6 +6063,70 @@ async function handleAvailabilitySave() {
         // Show success message
         alert(msg);
 
+        // Auto-create takeover requests for shifts during sick leave or vacation
+        if ((absenceType === 'ziek' || absenceType === 'verlof') && conflictDates.length > 0) {
+            try {
+                console.log('[Auto-create] Starting takeover request creation');
+                console.log('[Auto-create] Conflict dates:', conflictDates);
+
+                const affectedShifts = [];
+                for (const dateStr of conflictDates) {
+                    const shifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
+                    console.log(`[Auto-create] Date ${dateStr}: Found ${shifts.length} shift(s)`, shifts.map(s => ({ id: s.id, date: s.date, start: s.startTime, end: s.endTime })));
+                    affectedShifts.push(...shifts);
+                }
+
+                console.log('[Auto-create] Total affected shifts:', affectedShifts.length, affectedShifts.map(s => ({ id: s.id, date: s.date })));
+
+                if (affectedShifts.length > 0) {
+                    const confirmTakeover = confirm(
+                        `Je hebt ${affectedShifts.length} dienst(en) op deze dagen.\n\n` +
+                        `Wil je deze automatisch beschikbaar stellen zodat collega's ze kunnen overnemen?\n\n` +
+                        `(Ze verschijnen in "Beschikbare shifts" op de Ruilen pagina)`
+                    );
+
+                    if (confirmTakeover) {
+                        let createdCount = 0;
+                        let failedCount = 0;
+                        const createPromises = [];
+                        const defaultMessage = absenceType === 'ziek'
+                            ? 'Ik ben ziek, wie kan mijn shift overnemen?'
+                            : 'Ik heb verlof, wie kan mijn shift overnemen?';
+
+                        for (const shift of affectedShifts) {
+                            console.log(`[Auto-create] Creating takeover request for shift ${shift.id}...`);
+                            createPromises.push(
+                                createTakeoverRequest(shift.id, defaultMessage)
+                                    .then(() => {
+                                        createdCount++;
+                                        console.log(`[Auto-create] ✓ Success for shift ${shift.id}`);
+                                    })
+                                    .catch(err => {
+                                        failedCount++;
+                                        console.error(`[Auto-create] ✗ Failed for shift ${shift.id}:`, err);
+                                    })
+                            );
+                        }
+
+                        await Promise.all(createPromises);
+
+                        console.log(`[Auto-create] Complete: ${createdCount} created, ${failedCount} failed`);
+
+                        if (createdCount > 0) {
+                            alert(`✅ ${createdCount} takeover verzoek(en) aangemaakt!\n\nCollega's kunnen deze shifts nu overnemen via de Ruilen pagina.`);
+                        }
+                    } else {
+                        console.log('[Auto-create] User cancelled takeover creation');
+                    }
+                } else {
+                    console.log('[Auto-create] No affected shifts found');
+                }
+            } catch (error) {
+                console.error('[Auto-create] Error creating takeover requests:', error);
+                // Don't block the flow if takeover creation fails
+            }
+        }
+
         // Show type-specific reminders
         if (absenceType === 'ziek') {
             alert('📞 Bel de personeelsdienst om je ziekte door te geven');
@@ -5109,6 +6175,60 @@ async function handleRemoveAbsence() {
 
     // Wait for all deletions to complete before updating UI
     await Promise.all(removePromises);
+
+    // Cancel any pending takeover requests for shifts on these dates
+    try {
+        console.log('[Auto-cancel] Starting auto-cancel for removed absence');
+        console.log('[Auto-cancel] Employee ID:', employeeId);
+        console.log('[Auto-cancel] Date range:', formatDateYYYYMMDD(start), 'to', formatDateYYYYMMDD(end));
+
+        await getSwapRequests(); // Refresh swap requests
+        console.log('[Auto-cancel] Total swap requests in DataStore:', DataStore.swapRequests.length);
+
+        const affectedShifts = [];
+
+        // Find all shifts for this employee in the date range
+        let checkDate = parseDateOnly(start);
+        while (checkDate <= end) {
+            const dateStr = formatDateYYYYMMDD(checkDate);
+            const shifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
+            console.log(`[Auto-cancel] Date ${dateStr}: Found ${shifts.length} shift(s)`, shifts.map(s => ({ id: s.id, userId: s.userId })));
+            affectedShifts.push(...shifts);
+            checkDate.setDate(checkDate.getDate() + 1);
+        }
+
+        console.log('[Auto-cancel] Total affected shifts:', affectedShifts.length, affectedShifts.map(s => s.id));
+
+        // Find and cancel pending takeover requests for these shifts
+        const requestsToCancel = DataStore.swapRequests.filter(sr =>
+            sr.request_type === 'takeover' &&
+            sr.status === 'pending' &&
+            sr.requester_user_id === employeeId &&
+            affectedShifts.some(shift => shift.id === sr.requester_shift_id)
+        );
+
+        console.log('[Auto-cancel] Pending takeover requests for this employee:', DataStore.swapRequests.filter(sr => sr.requester_user_id === employeeId && sr.request_type === 'takeover').length);
+        console.log('[Auto-cancel] Requests to cancel:', requestsToCancel.length, requestsToCancel.map(sr => ({ id: sr.id, shiftId: sr.requester_shift_id })));
+
+        if (requestsToCancel.length > 0) {
+            const cancelPromises = requestsToCancel.map(sr => {
+                console.log(`[Auto-cancel] Cancelling request ${sr.id} for shift ${sr.requester_shift_id}...`);
+                return cancelSwapRequest(sr.id)
+                    .then(() => console.log(`[Auto-cancel] ✓ Cancelled request ${sr.id}`))
+                    .catch(err => {
+                        console.error(`[Auto-cancel] ✗ Failed to cancel request ${sr.id}:`, err);
+                    });
+            });
+            await Promise.all(cancelPromises);
+
+            console.log(`[Auto-cancel] Complete: ${requestsToCancel.length} takeover request(s) cancelled`);
+        } else {
+            console.log('[Auto-cancel] No requests to cancel');
+        }
+    } catch (error) {
+        console.error('[Auto-cancel] Error cancelling takeover requests:', error);
+        // Don't block the flow if cancellation fails
+    }
 
     closeAvailabilityModal();
     renderAvailability();

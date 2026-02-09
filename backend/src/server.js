@@ -70,6 +70,128 @@ async function ensureSchema() {
         console.log(`  Column source: ${e.message}`);
       }
     }
+
+    // Check if shift_swap_requests table exists
+    const swapTableCheck = await client.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'shift_swap_requests'
+    `);
+
+    if (swapTableCheck.rows.length === 0) {
+      console.log('Creating shift_swap_requests table...');
+      try {
+        await client.query(`
+          CREATE TABLE shift_swap_requests (
+            id SERIAL PRIMARY KEY,
+            requester_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            requester_shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+            target_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            target_shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead')),
+            message TEXT,
+            response_notes TEXT,
+            target_approved BOOLEAN DEFAULT NULL,
+            target_response_notes TEXT,
+            target_responded_at TIMESTAMP,
+            lead_approved BOOLEAN DEFAULT NULL,
+            lead_response_notes TEXT,
+            lead_responded_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT NOW(),
+            responded_at TIMESTAMP,
+            responded_by INTEGER REFERENCES users(id),
+            CONSTRAINT different_shifts CHECK (requester_shift_id != target_shift_id),
+            CONSTRAINT different_users CHECK (requester_user_id != target_user_id)
+          );
+        `);
+        console.log('  Created table: shift_swap_requests');
+
+        // Create indexes for better query performance
+        await client.query(`
+          CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON shift_swap_requests(status);
+        `);
+        await client.query(`
+          CREATE INDEX IF NOT EXISTS idx_swap_requests_requester ON shift_swap_requests(requester_user_id);
+        `);
+        await client.query(`
+          CREATE INDEX IF NOT EXISTS idx_swap_requests_target ON shift_swap_requests(target_user_id);
+        `);
+        console.log('  Created indexes for shift_swap_requests');
+      } catch (e) {
+        console.log(`  Error creating shift_swap_requests table: ${e.message}`);
+      }
+    } else {
+      // Migration: Add target and lead approval columns if they don't exist
+      console.log('Checking for target/lead approval columns...');
+      try {
+        // Check if target_approved column exists
+        const targetApprovedCheck = await client.query(`
+          SELECT column_name FROM information_schema.columns
+          WHERE table_name = 'shift_swap_requests' AND column_name = 'target_approved'
+        `);
+
+        if (targetApprovedCheck.rows.length === 0) {
+          console.log('  Adding target/lead approval columns...');
+          await client.query(`
+            ALTER TABLE shift_swap_requests
+            ADD COLUMN target_approved BOOLEAN DEFAULT NULL,
+            ADD COLUMN target_response_notes TEXT,
+            ADD COLUMN target_responded_at TIMESTAMP,
+            ADD COLUMN lead_approved BOOLEAN DEFAULT NULL,
+            ADD COLUMN lead_response_notes TEXT,
+            ADD COLUMN lead_responded_at TIMESTAMP;
+          `);
+          console.log('  Added target/lead approval columns');
+
+          // Update CHECK constraint to include new status
+          await client.query(`
+            ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS shift_swap_requests_status_check;
+          `);
+          await client.query(`
+            ALTER TABLE shift_swap_requests
+            ADD CONSTRAINT shift_swap_requests_status_check
+            CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead'));
+          `);
+          console.log('  Updated status constraint');
+        }
+
+        // Check if request_type column exists
+        const requestTypeCheck = await client.query(`
+          SELECT column_name FROM information_schema.columns
+          WHERE table_name = 'shift_swap_requests' AND column_name = 'request_type'
+        `);
+
+        if (requestTypeCheck.rows.length === 0) {
+          console.log('  Adding request_type column...');
+          await client.query(`
+            ALTER TABLE shift_swap_requests
+            ADD COLUMN request_type TEXT DEFAULT 'swap' CHECK (request_type IN ('swap', 'takeover'));
+          `);
+
+          // Make target columns nullable for takeover requests
+          await client.query(`
+            ALTER TABLE shift_swap_requests
+            ALTER COLUMN target_user_id DROP NOT NULL,
+            ALTER COLUMN target_shift_id DROP NOT NULL;
+          `);
+
+          // Drop constraints that don't apply to takeover requests
+          await client.query(`
+            ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS different_shifts;
+          `);
+          await client.query(`
+            ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS different_users;
+          `);
+
+          // Add conditional constraints (only for swap requests)
+          // Note: PostgreSQL doesn't support conditional CHECK constraints easily,
+          // so we'll validate in the application layer
+
+          console.log('  Added request_type column and updated constraints');
+        }
+      } catch (e) {
+        console.log(`  Error adding columns: ${e.message}`);
+      }
+    }
   } catch (err) {
     console.error('Schema check error:', err.message);
   } finally {
@@ -597,7 +719,7 @@ app.get('/shifts', requireAuth, async (req, res) => {
 
   try {
     let query = `
-      SELECT id, user_id as "userId", user_id as "employeeId", team, date, start_time as "startTime",
+      SELECT id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
              end_time as "endTime", notes, source, created_at as "createdAt"
       FROM shifts
     `;
@@ -628,7 +750,7 @@ app.post('/shifts', requireAuth, async (req, res) => {
     const result = await pool.query(`
       INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, user_id as "userId", user_id as "employeeId", team, date, start_time as "startTime",
+      RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
                 end_time as "endTime", notes, source, created_at as "createdAt"
     `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource]);
 
@@ -660,7 +782,7 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
           notes = COALESCE($6, notes),
           source = COALESCE($8, source, 'manual')
       WHERE id = $7
-      RETURNING id, user_id as "userId", user_id as "employeeId", team, date, start_time as "startTime",
+      RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
                 end_time as "endTime", notes, source, created_at as "createdAt"
     `, [userId, team, date, startTime, endTime, notes, id, shiftSource]);
 
@@ -680,13 +802,25 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
 
-  // Permission check: medewerker cannot delete shifts
-  const { role } = req.user;
-  if (role === 'medewerker') {
-    return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
-  }
-
   try {
+    // Check if shift is auto-generated
+    const shiftResult = await pool.query('SELECT source FROM shifts WHERE id = $1', [id]);
+
+    if (shiftResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Shift niet gevonden' });
+    }
+
+    const shift = shiftResult.rows[0];
+
+    // Auto-generated shifts can be deleted by anyone (they're temporary)
+    // Manual shifts require elevated permissions
+    if (shift.source !== 'auto') {
+      const { role } = req.user;
+      if (role === 'medewerker') {
+        return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
+      }
+    }
+
     await pool.query('DELETE FROM shifts WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (err) {
@@ -821,6 +955,660 @@ app.delete('/availability', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== SWAP REQUESTS API =====
+
+app.get('/swap-requests', requireAuth, async (req, res) => {
+  const { role, team_id, id: currentUserId } = req.user;
+
+  try {
+    let query;
+    let params = [];
+
+    // Role-based filtering
+    if (['admin', 'hoofdverantwoordelijke'].includes(role)) {
+      // Admin/hoofdverantwoordelijke: alle requests
+      query = `
+        SELECT
+          sr.*,
+          u1.name as requester_name,
+          u2.name as target_name,
+          s1.date as requester_shift_date,
+          s1.start_time as requester_shift_start,
+          s1.end_time as requester_shift_end,
+          s1.team as requester_shift_team,
+          s1.notes as requester_shift_notes,
+          s2.date as target_shift_date,
+          s2.start_time as target_shift_start,
+          s2.end_time as target_shift_end,
+          s2.team as target_shift_team,
+          resp.name as responded_by_name
+        FROM shift_swap_requests sr
+        JOIN users u1 ON sr.requester_user_id = u1.id
+        LEFT JOIN users u2 ON sr.target_user_id = u2.id
+        JOIN shifts s1 ON sr.requester_shift_id = s1.id
+        LEFT JOIN shifts s2 ON sr.target_shift_id = s2.id
+        LEFT JOIN users resp ON sr.responded_by = resp.id
+        ORDER BY sr.created_at DESC
+      `;
+    } else if (role === 'teamverantwoordelijke') {
+      // Teamverantwoordelijke: alleen hun team (including takeover requests)
+      query = `
+        SELECT
+          sr.*,
+          u1.name as requester_name,
+          u2.name as target_name,
+          s1.date as requester_shift_date,
+          s1.start_time as requester_shift_start,
+          s1.end_time as requester_shift_end,
+          s1.team as requester_shift_team,
+          s1.notes as requester_shift_notes,
+          s2.date as target_shift_date,
+          s2.start_time as target_shift_start,
+          s2.end_time as target_shift_end,
+          s2.team as target_shift_team,
+          resp.name as responded_by_name
+        FROM shift_swap_requests sr
+        JOIN users u1 ON sr.requester_user_id = u1.id
+        LEFT JOIN users u2 ON sr.target_user_id = u2.id
+        JOIN shifts s1 ON sr.requester_shift_id = s1.id
+        LEFT JOIN shifts s2 ON sr.target_shift_id = s2.id
+        LEFT JOIN users resp ON sr.responded_by = resp.id
+        WHERE s1.team = $1 OR s2.team = $1 OR (sr.request_type = 'takeover' AND s1.team = $1)
+        ORDER BY sr.created_at DESC
+      `;
+      params = [team_id];
+    } else {
+      // Medewerker: own requests + all open takeover requests
+      query = `
+        SELECT
+          sr.*,
+          u1.name as requester_name,
+          u2.name as target_name,
+          s1.date as requester_shift_date,
+          s1.start_time as requester_shift_start,
+          s1.end_time as requester_shift_end,
+          s1.team as requester_shift_team,
+          s1.notes as requester_shift_notes,
+          s2.date as target_shift_date,
+          s2.start_time as target_shift_start,
+          s2.end_time as target_shift_end,
+          s2.team as target_shift_team,
+          resp.name as responded_by_name
+        FROM shift_swap_requests sr
+        JOIN users u1 ON sr.requester_user_id = u1.id
+        LEFT JOIN users u2 ON sr.target_user_id = u2.id
+        JOIN shifts s1 ON sr.requester_shift_id = s1.id
+        LEFT JOIN shifts s2 ON sr.target_shift_id = s2.id
+        LEFT JOIN users resp ON sr.responded_by = resp.id
+        WHERE sr.requester_user_id = $1 OR sr.target_user_id = $1 OR sr.request_type = 'takeover'
+        ORDER BY sr.created_at DESC
+      `;
+      params = [currentUserId];
+    }
+
+    const result = await pool.query(query, params);
+    res.json({ swapRequests: result.rows });
+  } catch (err) {
+    console.error('GET /swap-requests error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/swap-requests', requireAuth, async (req, res) => {
+  const { requesterShiftId, targetShiftId, message } = req.body;
+  const currentUserId = req.user.id;
+
+  if (!requesterShiftId || !targetShiftId) {
+    return res.status(400).json({ error: 'requesterShiftId en targetShiftId zijn verplicht' });
+  }
+
+  try {
+    // Verify beide shifts bestaan
+    const shiftsResult = await pool.query(
+      'SELECT id, user_id, date FROM shifts WHERE id = $1 OR id = $2',
+      [requesterShiftId, targetShiftId]
+    );
+
+    if (shiftsResult.rows.length !== 2) {
+      return res.status(404).json({ error: 'Een of beide shifts niet gevonden' });
+    }
+
+    const requesterShift = shiftsResult.rows.find(s => s.id === parseInt(requesterShiftId));
+    const targetShift = shiftsResult.rows.find(s => s.id === parseInt(targetShiftId));
+
+    // Verify requester owns requester shift
+    if (requesterShift.user_id !== currentUserId) {
+      return res.status(403).json({ error: 'Je kunt alleen je eigen shifts ruilen' });
+    }
+
+    // Verify different users
+    if (requesterShift.user_id === targetShift.user_id) {
+      return res.status(400).json({ error: 'Je kunt niet met jezelf ruilen' });
+    }
+
+    // Verify shifts not in past
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const requesterDate = new Date(requesterShift.date);
+    const targetDate = new Date(targetShift.date);
+
+    if (requesterDate < now || targetDate < now) {
+      return res.status(400).json({ error: 'Kan geen shifts in het verleden ruilen' });
+    }
+
+    // Create swap request
+    const insertResult = await pool.query(
+      `INSERT INTO shift_swap_requests
+       (requester_user_id, requester_shift_id, target_user_id, target_shift_id, message, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')
+       RETURNING *`,
+      [currentUserId, requesterShiftId, targetShift.user_id, targetShiftId, message || null]
+    );
+
+    res.status(201).json({ swapRequest: insertResult.rows[0] });
+  } catch (err) {
+    console.error('POST /swap-requests error:', err);
+    if (err.code === '23514') { // CHECK constraint violation
+      return res.status(400).json({ error: 'Ongeldige swap request data' });
+    }
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Target approval endpoints
+app.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
+  const swapId = req.params.id;
+  const { responseNotes } = req.body;
+  const { id: currentUserId } = req.user;
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Fetch swap request met shifts info
+    const swapResult = await client.query(
+      `SELECT sr.*,
+              s1.user_id as requester_current_user, s1.team as requester_team, s1.date as requester_date,
+              s1.start_time as requester_start, s1.end_time as requester_end,
+              s2.user_id as target_current_user, s2.team as target_team, s2.date as target_date,
+              s2.start_time as target_start, s2.end_time as target_end
+       FROM shift_swap_requests sr
+       JOIN shifts s1 ON sr.requester_shift_id = s1.id
+       JOIN shifts s2 ON sr.target_shift_id = s2.id
+       WHERE sr.id = $1`,
+      [swapId]
+    );
+
+    if (swapResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Swap request niet gevonden' });
+    }
+
+    const swap = swapResult.rows[0];
+
+    // Verify status is pending
+    if (swap.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Swap request is al verwerkt' });
+    }
+
+    // Permission check: only target user can approve
+    if (swap.target_user_id !== currentUserId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Alleen de doelpersoon kan dit ruilverzoek accepteren' });
+    }
+
+    // Verify shifts not in past
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const requesterDate = new Date(swap.requester_date);
+    const targetDate = new Date(swap.target_date);
+
+    if (requesterDate < now || targetDate < now) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Shifts zijn al voorbij' });
+    }
+
+    // Execute swap: swap user_ids atomically
+    await client.query(
+      `UPDATE shifts SET user_id = $1, source = 'manual' WHERE id = $2`,
+      [swap.target_current_user, swap.requester_shift_id]
+    );
+
+    await client.query(
+      `UPDATE shifts SET user_id = $1, source = 'manual' WHERE id = $2`,
+      [swap.requester_current_user, swap.target_shift_id]
+    );
+
+    // Update swap request status
+    await client.query(
+      `UPDATE shift_swap_requests
+       SET status = 'approved',
+           target_approved = true,
+           target_response_notes = $1,
+           target_responded_at = NOW(),
+           responded_at = NOW(),
+           responded_by = $2
+       WHERE id = $3`,
+      [responseNotes || null, currentUserId, swapId]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({ ok: true, message: 'Swap geaccepteerd en uitgevoerd' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('PUT /swap-requests/:id/target-approve error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
+  const swapId = req.params.id;
+  const { responseNotes } = req.body;
+  const { id: currentUserId } = req.user;
+
+  if (!responseNotes || responseNotes.trim() === '') {
+    return res.status(400).json({ error: 'Reden voor afwijzing is verplicht' });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Fetch swap request
+    const swapResult = await client.query(
+      `SELECT * FROM shift_swap_requests WHERE id = $1`,
+      [swapId]
+    );
+
+    if (swapResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Swap request niet gevonden' });
+    }
+
+    const swap = swapResult.rows[0];
+
+    // Verify status is pending
+    if (swap.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Swap request is al verwerkt' });
+    }
+
+    // Permission check: only target user can reject
+    if (swap.target_user_id !== currentUserId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Alleen de doelpersoon kan dit ruilverzoek afwijzen' });
+    }
+
+    // Update swap request status
+    await client.query(
+      `UPDATE shift_swap_requests
+       SET status = 'rejected',
+           target_approved = false,
+           target_response_notes = $1,
+           target_responded_at = NOW(),
+           responded_at = NOW(),
+           responded_by = $2
+       WHERE id = $3`,
+      [responseNotes, currentUserId, swapId]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({ ok: true, message: 'Swap afgewezen' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('PUT /swap-requests/:id/target-reject error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// Takeover (open shift request) endpoints
+app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
+  const { shiftId, message } = req.body;
+  const currentUserId = req.user.id;
+
+  if (!shiftId) {
+    return res.status(400).json({ error: 'shiftId is verplicht' });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Verify shift exists and belongs to current user
+    const shiftResult = await client.query(
+      `SELECT * FROM shifts WHERE id = $1`,
+      [shiftId]
+    );
+
+    if (shiftResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Shift niet gevonden' });
+    }
+
+    const shift = shiftResult.rows[0];
+
+    if (shift.user_id !== currentUserId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Je kunt alleen je eigen shifts aanbieden' });
+    }
+
+    // Verify shift is not in the past
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const shiftDate = new Date(shift.date);
+
+    if (shiftDate < now) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Shift ligt in het verleden' });
+    }
+
+    // Create takeover request
+    await client.query(
+      `INSERT INTO shift_swap_requests
+       (requester_user_id, requester_shift_id, target_user_id, target_shift_id, request_type, message, status)
+       VALUES ($1, $2, NULL, NULL, 'takeover', $3, 'pending')`,
+      [currentUserId, shiftId, message || null]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({ ok: true, message: 'Open verzoek aangemaakt' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('POST /shift-requests/takeover error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
+  const requestId = req.params.id;
+  const { responseNotes } = req.body;
+  const { id: currentUserId } = req.user;
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Fetch takeover request with shift info
+    const requestResult = await client.query(
+      `SELECT sr.*, s.user_id as current_shift_owner, s.date, s.start_time, s.end_time, s.team
+       FROM shift_swap_requests sr
+       JOIN shifts s ON sr.requester_shift_id = s.id
+       WHERE sr.id = $1`,
+      [requestId]
+    );
+
+    if (requestResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Verzoek niet gevonden' });
+    }
+
+    const request = requestResult.rows[0];
+
+    // Verify it's a takeover request
+    if (request.request_type !== 'takeover') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Dit is geen open verzoek' });
+    }
+
+    // Verify status is pending
+    if (request.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Verzoek is al verwerkt' });
+    }
+
+    // Verify user is not the requester
+    if (request.requester_user_id === currentUserId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Je kunt je eigen verzoek niet accepteren' });
+    }
+
+    // Verify shift is not in the past
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const shiftDate = new Date(request.date);
+
+    if (shiftDate < now) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Shift ligt in het verleden' });
+    }
+
+    // Assign shift to acceptor
+    await client.query(
+      `UPDATE shifts SET user_id = $1, source = 'manual' WHERE id = $2`,
+      [currentUserId, request.requester_shift_id]
+    );
+
+    // Update request status
+    await client.query(
+      `UPDATE shift_swap_requests
+       SET status = 'approved',
+           target_user_id = $1,
+           target_approved = true,
+           target_response_notes = $2,
+           target_responded_at = NOW(),
+           responded_at = NOW(),
+           responded_by = $1
+       WHERE id = $3`,
+      [currentUserId, responseNotes || null, requestId]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({ ok: true, message: 'Shift overgenomen' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('PUT /shift-requests/:id/takeover-accept error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// Lead approval endpoints (for future use)
+app.put('/swap-requests/:id/approve', requireAuth, async (req, res) => {
+  const swapId = req.params.id;
+  const { responseNotes } = req.body;
+  const { role, team_id, id: currentUserId } = req.user;
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Fetch swap request met shifts info
+    const swapResult = await client.query(
+      `SELECT sr.*,
+              s1.user_id as requester_current_user, s1.team as requester_team, s1.date as requester_date,
+              s2.user_id as target_current_user, s2.team as target_team, s2.date as target_date
+       FROM shift_swap_requests sr
+       JOIN shifts s1 ON sr.requester_shift_id = s1.id
+       JOIN shifts s2 ON sr.target_shift_id = s2.id
+       WHERE sr.id = $1`,
+      [swapId]
+    );
+
+    if (swapResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Swap request niet gevonden' });
+    }
+
+    const swap = swapResult.rows[0];
+
+    // Verify status is pending
+    if (swap.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Swap request is al verwerkt' });
+    }
+
+    // Permission check
+    if (!['admin', 'hoofdverantwoordelijke'].includes(role)) {
+      if (role === 'teamverantwoordelijke') {
+        // Must be team of one of the shifts
+        if (swap.requester_team !== team_id && swap.target_team !== team_id) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Je kunt alleen swaps van je eigen team goedkeuren' });
+        }
+      } else {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Geen toestemming om swaps goed te keuren' });
+      }
+    }
+
+    // Verify shifts not in past
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const requesterDate = new Date(swap.requester_date);
+    const targetDate = new Date(swap.target_date);
+
+    if (requesterDate < now || targetDate < now) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Shifts zijn al voorbij' });
+    }
+
+    // Execute swap: swap user_ids atomically
+    await client.query(
+      `UPDATE shifts SET user_id = $1, source = 'manual' WHERE id = $2`,
+      [swap.target_current_user, swap.requester_shift_id]
+    );
+
+    await client.query(
+      `UPDATE shifts SET user_id = $1, source = 'manual' WHERE id = $2`,
+      [swap.requester_current_user, swap.target_shift_id]
+    );
+
+    // Update swap request status
+    await client.query(
+      `UPDATE shift_swap_requests
+       SET status = 'approved', response_notes = $1, responded_at = NOW(), responded_by = $2
+       WHERE id = $3`,
+      [responseNotes || null, currentUserId, swapId]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({ ok: true, message: 'Swap goedgekeurd en uitgevoerd' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('PUT /swap-requests/:id/approve error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
+  const swapId = req.params.id;
+  const { responseNotes } = req.body;
+  const { role, team_id, id: currentUserId } = req.user;
+
+  if (!responseNotes || responseNotes.trim() === '') {
+    return res.status(400).json({ error: 'Reden voor afwijzing is verplicht' });
+  }
+
+  try {
+    // Fetch swap request met shifts info
+    const swapResult = await pool.query(
+      `SELECT sr.*,
+              s1.team as requester_team,
+              s2.team as target_team
+       FROM shift_swap_requests sr
+       JOIN shifts s1 ON sr.requester_shift_id = s1.id
+       JOIN shifts s2 ON sr.target_shift_id = s2.id
+       WHERE sr.id = $1`,
+      [swapId]
+    );
+
+    if (swapResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Swap request niet gevonden' });
+    }
+
+    const swap = swapResult.rows[0];
+
+    // Verify status is pending
+    if (swap.status !== 'pending') {
+      return res.status(400).json({ error: 'Swap request is al verwerkt' });
+    }
+
+    // Permission check (same as approve)
+    if (!['admin', 'hoofdverantwoordelijke'].includes(role)) {
+      if (role === 'teamverantwoordelijke') {
+        if (swap.requester_team !== team_id && swap.target_team !== team_id) {
+          return res.status(403).json({ error: 'Je kunt alleen swaps van je eigen team afwijzen' });
+        }
+      } else {
+        return res.status(403).json({ error: 'Geen toestemming om swaps af te wijzen' });
+      }
+    }
+
+    // Update swap request status
+    await pool.query(
+      `UPDATE shift_swap_requests
+       SET status = 'rejected', response_notes = $1, responded_at = NOW(), responded_by = $2
+       WHERE id = $3`,
+      [responseNotes, currentUserId, swapId]
+    );
+
+    res.json({ ok: true, message: 'Swap afgewezen' });
+  } catch (err) {
+    console.error('PUT /swap-requests/:id/reject error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
+  const swapId = req.params.id;
+  const currentUserId = req.user.id;
+
+  try {
+    // Fetch swap request
+    const swapResult = await pool.query(
+      'SELECT * FROM shift_swap_requests WHERE id = $1',
+      [swapId]
+    );
+
+    if (swapResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Swap request niet gevonden' });
+    }
+
+    const swap = swapResult.rows[0];
+
+    // Only requester can cancel
+    if (swap.requester_user_id !== currentUserId) {
+      return res.status(403).json({ error: 'Alleen de aanvrager kan dit verzoek annuleren' });
+    }
+
+    // Only pending requests can be cancelled
+    if (swap.status !== 'pending') {
+      return res.status(400).json({ error: 'Alleen pending requests kunnen geannuleerd worden' });
+    }
+
+    // Update status to cancelled
+    await pool.query(
+      `UPDATE shift_swap_requests SET status = 'cancelled' WHERE id = $1`,
+      [swapId]
+    );
+
+    res.json({ ok: true, message: 'Swap request geannuleerd' });
+  } catch (err) {
+    console.error('DELETE /swap-requests/:id error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });

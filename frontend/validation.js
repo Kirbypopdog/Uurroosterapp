@@ -59,9 +59,11 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
     const warnings = [];
     const minHoursBetweenShifts = DataStore.settings.rules?.minHoursBetweenShifts || 11;
 
-    // Haal alle diensten van deze medewerker op (behalve de dienst die we aanpassen)
+    // Haal alle diensten van deze medewerker op (behalve de dienst(en) die we aanpassen)
+    // excludeShiftId can be a single ID or an array of IDs
+    const excludeIds = Array.isArray(excludeShiftId) ? excludeShiftId : (excludeShiftId ? [excludeShiftId] : []);
     const employeeShifts = DataStore.shifts.filter(s =>
-        s.employeeId === employeeId && s.id !== excludeShiftId
+        s.employeeId === employeeId && !excludeIds.includes(s.id)
     );
 
     // Check voor elke bestaande dienst
@@ -88,8 +90,10 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
 function validateShiftOverlap(employeeId, newShift, excludeShiftId = null) {
     const errors = [];
 
+    // excludeShiftId can be a single ID or an array of IDs
+    const excludeIds = Array.isArray(excludeShiftId) ? excludeShiftId : (excludeShiftId ? [excludeShiftId] : []);
     const employeeShifts = DataStore.shifts.filter(s =>
-        s.employeeId === employeeId && s.id !== excludeShiftId
+        s.employeeId === employeeId && !excludeIds.includes(s.id)
     );
 
     employeeShifts.forEach(existingShift => {
@@ -443,6 +447,109 @@ function getValidationSummary(startDate, endDate) {
     });
 
     return summary;
+}
+
+// ===== SWAP REQUEST VALIDATIE =====
+
+function validateSwapRequest(swapData) {
+    const { requesterShift, targetShift, requesterUserId, targetUserId } = swapData;
+
+    const result = {
+        isValid: true,
+        hasWarnings: false,
+        errors: [],
+        warnings: []
+    };
+
+    // 1. Verify beide shifts bestaan
+    if (!requesterShift || !targetShift) {
+        result.isValid = false;
+        result.errors.push('Een of beide shifts niet gevonden');
+        return result;
+    }
+
+    // 2. Verify shifts haven't passed
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    const requesterDate = new Date(requesterShift.date);
+    const targetDate = new Date(targetShift.date);
+
+    if (requesterDate < now) {
+        result.isValid = false;
+        result.errors.push('Je eigen shift ligt in het verleden');
+    }
+
+    if (targetDate < now) {
+        result.isValid = false;
+        result.errors.push('De gewenste shift ligt in het verleden');
+    }
+
+    // 3. Check for active leave/sickness on swap dates
+    // Requester getting target shift (on target date)
+    const requesterAvailabilityOnTargetDate = getAvailability(requesterUserId, targetShift.date);
+    if (requesterAvailabilityOnTargetDate && ['ziek', 'verlof'].includes(requesterAvailabilityOnTargetDate.type)) {
+        result.isValid = false;
+        result.errors.push(
+            `Je hebt al ${requesterAvailabilityOnTargetDate.type === 'ziek' ? 'ziekte' : 'verlof'} op ${formatDate(targetShift.date)} (de datum van de gewenste shift)`
+        );
+    }
+
+    // Target getting requester shift (on requester date)
+    const targetAvailabilityOnRequesterDate = getAvailability(targetUserId, requesterShift.date);
+    if (targetAvailabilityOnRequesterDate && ['ziek', 'verlof'].includes(targetAvailabilityOnRequesterDate.type)) {
+        result.isValid = false;
+        result.errors.push(
+            `${DataStore.users.find(u => u.id === targetUserId)?.name || 'De ander'} heeft al ${targetAvailabilityOnRequesterDate.type === 'ziek' ? 'ziekte' : 'verlof'} op ${formatDate(requesterShift.date)}`
+        );
+    }
+
+    // 4. Validate post-swap: requester gets target shift
+    // IMPORTANT: Exclude BOTH shifts being swapped to avoid false positives
+    const excludeShiftIds = [requesterShift.id, targetShift.id];
+
+    const requesterPostSwapShift = {
+        ...targetShift,
+        userId: requesterUserId,
+        employeeId: requesterUserId // Alias for compatibility
+    };
+
+    const requesterValidation = validateShift(requesterPostSwapShift, excludeShiftIds);
+
+    if (!requesterValidation.isValid) {
+        result.isValid = false;
+        result.errors.push(`Na ruilen zou jij een probleem hebben: ${requesterValidation.errors.map(e => e.message).join(', ')}`);
+    }
+
+    if (requesterValidation.hasWarnings) {
+        result.hasWarnings = true;
+        result.warnings.push(`Waarschuwing voor jou na ruilen: ${requesterValidation.warnings.map(w => w.message).join(', ')}`);
+    }
+
+    // 5. Validate post-swap: target gets requester shift
+    const targetPostSwapShift = {
+        ...requesterShift,
+        userId: targetUserId,
+        employeeId: targetUserId // Alias for compatibility
+    };
+
+    const targetValidation = validateShift(targetPostSwapShift, excludeShiftIds);
+
+    if (!targetValidation.isValid) {
+        result.isValid = false;
+        result.errors.push(
+            `Na ruilen zou ${DataStore.users.find(u => u.id === targetUserId)?.name || 'de ander'} een probleem hebben: ${targetValidation.errors.map(e => e.message).join(', ')}`
+        );
+    }
+
+    if (targetValidation.hasWarnings) {
+        result.hasWarnings = true;
+        result.warnings.push(
+            `Waarschuwing voor ${DataStore.users.find(u => u.id === targetUserId)?.name || 'de ander'} na ruilen: ${targetValidation.warnings.map(w => w.message).join(', ')}`
+        );
+    }
+
+    return result;
 }
 
 console.log('Validation systeem geladen');

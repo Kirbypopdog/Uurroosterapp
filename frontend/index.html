@@ -366,6 +366,143 @@
         </div>
     </div>
 
+    <!-- Modal: Dienst Ruilen -->
+    <div id="swap-request-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Dienst Ruilen</h2>
+                <span class="modal-close" id="swap-request-modal-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <!-- Shift Preview -->
+                <div class="swap-shifts-preview">
+                    <div class="swap-shift-card">
+                        <h3>Jouw shift</h3>
+                        <div id="swap-requester-shift-preview"></div>
+                    </div>
+                    <div class="swap-arrow">⇄</div>
+                    <div class="swap-shift-card">
+                        <h3>Gewenste shift</h3>
+                        <div id="swap-target-shift-preview"></div>
+                    </div>
+                </div>
+
+                <!-- Target Selection -->
+                <div class="form-group">
+                    <label for="swap-target-employee">Met wie wil je ruilen? *</label>
+                    <select id="swap-target-employee" class="select-input" required>
+                        <option value="">-- Selecteer collega --</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="swap-target-shift">Welke shift wil je van deze collega? *</label>
+                    <select id="swap-target-shift" class="select-input" required disabled>
+                        <option value="">-- Selecteer eerst een collega --</option>
+                    </select>
+                </div>
+
+                <!-- Message -->
+                <div class="form-group">
+                    <label for="swap-message">Bericht (optioneel)</label>
+                    <textarea id="swap-message" class="form-control" rows="3" placeholder="Bijv: Graag ruilen, familiebezoek"></textarea>
+                </div>
+
+                <!-- Validation Display -->
+                <div id="swap-validation-display" style="display: none;"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="swap-request-cancel-btn">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="swap-request-submit-btn">Verzoek indienen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Ruilverzoek Beoordelen -->
+    <div id="swap-review-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Ruilverzoek Beoordelen</h2>
+                <span class="modal-close" id="swap-review-modal-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <!-- Request Info -->
+                <div id="swap-review-info" class="form-group">
+                    <p><strong>Aangevraagd door:</strong> <span id="swap-review-requester"></span></p>
+                    <p><strong>Datum aanvraag:</strong> <span id="swap-review-created"></span></p>
+                </div>
+
+                <!-- Shift Preview -->
+                <div class="swap-shifts-preview">
+                    <div class="swap-shift-card">
+                        <h3><span id="swap-review-requester-name"></span></h3>
+                        <div id="swap-review-requester-shift"></div>
+                    </div>
+                    <div class="swap-arrow">⇄</div>
+                    <div class="swap-shift-card">
+                        <h3><span id="swap-review-target-name"></span></h3>
+                        <div id="swap-review-target-shift"></div>
+                    </div>
+                </div>
+
+                <!-- Message from requester -->
+                <div class="form-group" id="swap-review-message-group" style="display: none;">
+                    <label>Bericht van aanvrager:</label>
+                    <div id="swap-review-message" class="message-display"></div>
+                </div>
+
+                <!-- Validation Display -->
+                <div id="swap-review-validation" style="margin: 1rem 0;"></div>
+
+                <!-- Response Notes -->
+                <div class="form-group">
+                    <label for="swap-response-notes">Reactie <span id="swap-response-notes-required" style="color: red; display: none;">*</span></label>
+                    <textarea id="swap-response-notes" class="form-control" rows="3" placeholder="Optionele toelichting bij goedkeuring of verplicht bij afwijzing"></textarea>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="swap-review-cancel-btn">Annuleren</button>
+                <button type="button" class="btn btn-danger" id="swap-review-reject-btn">Afwijzen</button>
+                <button type="button" class="btn btn-success" id="swap-review-approve-btn">Goedkeuren</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Iemand Zoeken (Takeover Request) -->
+    <div id="takeover-request-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Iemand Zoeken voor Shift</h2>
+                <span class="modal-close" id="takeover-request-modal-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 1rem; color: #666;">
+                    Je shift wordt beschikbaar gesteld aan alle collega's. Iedereen kan deze overnemen.
+                </p>
+
+                <!-- Shift Preview -->
+                <div class="form-group">
+                    <label>Jouw shift:</label>
+                    <div id="takeover-shift-preview"></div>
+                </div>
+
+                <!-- Message -->
+                <div class="form-group">
+                    <label for="takeover-message">Bericht (optioneel)</label>
+                    <textarea id="takeover-message" class="form-control" rows="3" placeholder="Bijv: Ben ziek, wie kan mijn shift overnemen?"></textarea>
+                </div>
+
+                <p style="margin-top: 1rem; padding: 0.75rem; background: #fef3c7; border-radius: 4px; font-size: 0.9rem;">
+                    💡 Zodra iemand je shift accepteert, krijgt die persoon de shift toegewezen.
+                </p>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="takeover-request-cancel-btn">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="takeover-request-submit-btn">Verzoek plaatsen</button>
+            </div>
+        </div>
+    </div>
+
     <script src="config/settings.js"></script>
     <script src="data.js"></script>
     <script src="validation.js"></script>

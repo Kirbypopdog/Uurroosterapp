@@ -273,6 +273,7 @@ async function addShift(shiftData) {
             method: 'POST',
             body: JSON.stringify(apiData)
         });
+
         const shift = {
             ...data.shift,
             date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date,
@@ -280,6 +281,7 @@ async function addShift(shiftData) {
             userId: data.shift.userId,
             source: data.shift.source || 'manual'
         };
+
         DataStore.shifts.push(shift);
         return shift;
     } catch (error) {
@@ -458,11 +460,12 @@ async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
         return [];
     }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = parseDateOnly(startDate);
+    const end = parseDateOnly(endDate);
     const createdShifts = [];
 
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    // Create date copy properly in local timezone to avoid timezone shifts
+    for (let d = new Date(start.getFullYear(), start.getMonth(), start.getDate()); d <= end; d.setDate(d.getDate() + 1)) {
         const dayOfWeek = d.getDay();
         const dateStr = formatDateYYYYMMDD(d);
 
@@ -483,14 +486,14 @@ async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
         if (scheduleForDay && scheduleForDay.enabled) {
             try {
                 const shift = await addShift({
-                    userId: employeeId, // Use userId
+                    userId: employeeId,
                     employeeId: employeeId, // Backward compat
                     team: scheduleForDay.team || employee.mainTeam,
                     date: dateStr,
                     startTime: scheduleForDay.startTime,
                     endTime: scheduleForDay.endTime,
                     notes: `Automatisch ingepland via basisrooster (Week ${weekNumber})`,
-                    source: 'auto' // Mark as auto-generated
+                    source: 'auto'
                 });
                 createdShifts.push(shift);
             } catch (error) {
@@ -586,6 +589,148 @@ function getAvailabilityForWeek(employeeId, weekStartDate) {
         date: date,
         availability: getAvailability(employeeId, date)
     }));
+}
+
+// ===== SWAP REQUEST FUNCTIES =====
+
+async function getSwapRequests() {
+    try {
+        const data = await dataApiFetch('/swap-requests');
+        DataStore.swapRequests = data.swapRequests || [];
+        return DataStore.swapRequests;
+    } catch (error) {
+        console.error('Fout bij ophalen swap requests:', error);
+        throw error;
+    }
+}
+
+async function createSwapRequest(requestData) {
+    try {
+        const data = await dataApiFetch('/swap-requests', {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+
+        // Refresh swap requests list
+        await getSwapRequests();
+
+        return data.swapRequest;
+    } catch (error) {
+        console.error('Fout bij aanmaken swap request:', error);
+        throw error;
+    }
+}
+
+async function approveSwapRequest(id, responseNotes) {
+    try {
+        await dataApiFetch(`/swap-requests/${id}/approve`, {
+            method: 'PUT',
+            body: JSON.stringify({ responseNotes })
+        });
+
+        // Refresh swap requests (shifts will be reloaded by renderPlanning)
+        await getSwapRequests();
+
+        return true;
+    } catch (error) {
+        console.error('Fout bij goedkeuren swap request:', error);
+        throw error;
+    }
+}
+
+async function rejectSwapRequest(id, responseNotes) {
+    try {
+        await dataApiFetch(`/swap-requests/${id}/reject`, {
+            method: 'PUT',
+            body: JSON.stringify({ responseNotes })
+        });
+
+        // Refresh swap requests list
+        await getSwapRequests();
+
+        return true;
+    } catch (error) {
+        console.error('Fout bij afwijzen swap request:', error);
+        throw error;
+    }
+}
+
+async function cancelSwapRequest(id) {
+    try {
+        await dataApiFetch(`/swap-requests/${id}`, {
+            method: 'DELETE'
+        });
+
+        // Refresh swap requests list
+        await getSwapRequests();
+
+        return true;
+    } catch (error) {
+        console.error('Fout bij annuleren swap request:', error);
+        throw error;
+    }
+}
+
+async function targetApproveSwapRequest(id, responseNotes) {
+    try {
+        await dataApiFetch(`/swap-requests/${id}/target-approve`, {
+            method: 'PUT',
+            body: JSON.stringify({ responseNotes })
+        });
+
+        // Refresh swap requests (shifts will be reloaded by renderPlanning)
+        await getSwapRequests();
+
+        return true;
+    } catch (error) {
+        console.error('Fout bij target approve swap request:', error);
+        throw error;
+    }
+}
+
+async function targetRejectSwapRequest(id, responseNotes) {
+    try {
+        await dataApiFetch(`/swap-requests/${id}/target-reject`, {
+            method: 'PUT',
+            body: JSON.stringify({ responseNotes })
+        });
+
+        // Refresh swap requests list
+        await getSwapRequests();
+
+        return true;
+    } catch (error) {
+        console.error('Fout bij target reject swap request:', error);
+        throw error;
+    }
+}
+
+async function createTakeoverRequest(shiftId, message) {
+    try {
+        await dataApiFetch('/shift-requests/takeover', {
+            method: 'POST',
+            body: JSON.stringify({ shiftId, message })
+        });
+        await getSwapRequests();
+        return true;
+    } catch (error) {
+        console.error('Fout bij aanmaken takeover request:', error);
+        throw error;
+    }
+}
+
+async function acceptTakeoverRequest(id, responseNotes) {
+    try {
+        await dataApiFetch(`/shift-requests/${id}/takeover-accept`, {
+            method: 'PUT',
+            body: JSON.stringify({ responseNotes })
+        });
+        await getSwapRequests();
+        return true;
+    } catch (error) {
+        console.error('Fout bij accepteren takeover:', error);
+        throw error;
+    }
 }
 
 // ===== SETTINGS FUNCTIES =====
@@ -1036,8 +1181,8 @@ function getWeekDates(date) {
 
     const dates = [];
     for (let i = 0; i < 7; i++) {
-        const weekDate = new Date(monday);
-        weekDate.setDate(monday.getDate() + i);
+        // Create a new date in local timezone to avoid timezone shifts
+        const weekDate = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
         dates.push(formatDateYYYYMMDD(weekDate));
     }
     return dates;

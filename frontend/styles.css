@@ -5830,3 +5830,284 @@ textarea {
 .shift-source-info .btn-link:hover {
     color: #1d4ed8;
 }
+
+/* ===== SWAP REQUEST MODALS ===== */
+
+.swap-shifts-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+}
+
+.swap-shift-card {
+    flex: 1;
+    padding: 1rem;
+    background: white;
+    border: 2px solid #cbd5e1;
+    border-radius: 6px;
+}
+
+.swap-shift-card h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #334155;
+    text-align: center;
+}
+
+.swap-shift-card p {
+    margin: 0.25rem 0;
+    font-size: 0.9rem;
+    color: #475569;
+}
+
+.swap-shift-card strong {
+    color: #1e293b;
+}
+
+.swap-arrow {
+    font-size: 2rem;
+    color: #3b82f6;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.swap-request-card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    transition: box-shadow 0.2s;
+}
+
+.swap-request-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.swap-request-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.swap-request-header h4 {
+    margin: 0;
+    font-size: 1rem;
+    color: #1e293b;
+}
+
+.swap-status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.swap-status-badge.status-pending {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.swap-status-badge.status-approved {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.swap-status-badge.status-rejected {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.swap-status-badge.status-cancelled {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.swap-status-badge.status-available {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.swap-request-body {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.swap-request-shift {
+    flex: 1;
+    padding: 0.5rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.swap-request-shift strong {
+    display: block;
+    color: #1e293b;
+    margin-bottom: 0.25rem;
+}
+
+.swap-request-arrow {
+    font-size: 1.5rem;
+    color: #3b82f6;
+}
+
+.swap-request-message {
+    background: #f8fafc;
+    padding: 0.75rem;
+    border-left: 3px solid #3b82f6;
+    border-radius: 4px;
+    margin-bottom: 0.75rem;
+    font-size: 0.9rem;
+    color: #475569;
+    font-style: italic;
+}
+
+.swap-request-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
+.swap-request-actions .btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+}
+
+.swap-section {
+    margin-bottom: 2rem;
+}
+
+.swap-section h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1.25rem;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.swap-section-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    background: #3b82f6;
+    color: white;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0 0.5rem;
+}
+
+.swap-empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #64748b;
+}
+
+.swap-empty-state p {
+    margin: 0.5rem 0;
+    font-size: 1rem;
+}
+
+.message-display {
+    background: #f8fafc;
+    padding: 0.75rem;
+    border-left: 3px solid #3b82f6;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    color: #475569;
+    font-style: italic;
+}
+
+/* Takeover request specific styles */
+.takeover-card {
+    border-left: 4px solid #10b981;
+}
+
+.takeover-shift-info {
+    padding: 0.75rem;
+    background: #f0fdf4;
+    border: 1px solid #d1fae5;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    margin-bottom: 0.75rem;
+}
+
+.takeover-shift-info strong {
+    display: block;
+    color: #1e293b;
+    margin-bottom: 0.25rem;
+}
+
+.takeover-shift-info em {
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+.swap-section-available .swap-section-count {
+    background: #10b981;
+}
+
+#swap-validation-display,
+#swap-review-validation {
+    padding: 0.75rem;
+    border-radius: 4px;
+    margin-top: 1rem;
+}
+
+#swap-validation-display.has-errors,
+#swap-review-validation.has-errors {
+    background: #fee2e2;
+    border: 1px solid #fca5a5;
+}
+
+#swap-validation-display.has-warnings,
+#swap-review-validation.has-warnings {
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+}
+
+#swap-validation-display.is-valid,
+#swap-review-validation.is-valid {
+    background: #d1fae5;
+    border: 1px solid #86efac;
+}
+
+#swap-validation-display ul,
+#swap-review-validation ul {
+    margin: 0.5rem 0 0 0;
+    padding-left: 1.5rem;
+}
+
+#swap-validation-display li,
+#swap-review-validation li {
+    margin: 0.25rem 0;
+    font-size: 0.9rem;
+}
+
+.validation-errors {
+    color: #991b1b;
+}
+
+.validation-warnings {
+    color: #92400e;
+}
+
+.validation-success {
+    color: #065f46;
+}
