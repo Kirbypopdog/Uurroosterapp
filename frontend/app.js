@@ -2097,23 +2097,42 @@ function openAddShiftForEmployee(employeeId, date) {
 }
 
 function canUserEditShift(shift) {
-    if (!shift || !AppState.currentUser) return false;
+    if (!shift || !AppState.currentUser) {
+        console.log('[canUserEditShift] No shift or no current user');
+        return false;
+    }
 
     const currentRole = getEffectiveRole();
     const currentUserId = AppState.currentUser.id;
-    const isOwnShift = shift.employeeId === currentUserId;
+    const isOwnShift = shift.employeeId === currentUserId || shift.userId === currentUserId;
+
+    console.log('[canUserEditShift] Checking permissions:', {
+        shiftId: shift.id,
+        currentRole,
+        currentUserId,
+        shiftEmployeeId: shift.employeeId,
+        shiftUserId: shift.userId,
+        isOwnShift,
+        shiftTeam: shift.team,
+        userTeam: AppState.currentUser.team_id || AppState.currentUser.mainTeam
+    });
 
     if (currentRole === 'admin' || currentRole === 'hoofdverantwoordelijke') {
+        console.log('[canUserEditShift] Admin/Hoofdverantwoordelijke → CAN EDIT');
         return true;
     } else if (currentRole === 'teamverantwoordelijke') {
         // Can edit shifts from own team
         const userTeam = AppState.currentUser.team_id || AppState.currentUser.mainTeam;
-        return shift.team === userTeam;
+        const canEdit = shift.team === userTeam;
+        console.log('[canUserEditShift] Teamverantwoordelijke →', canEdit ? 'CAN EDIT' : 'CANNOT EDIT');
+        return canEdit;
     } else if (currentRole === 'medewerker') {
         // Can only edit own shifts
+        console.log('[canUserEditShift] Medewerker →', isOwnShift ? 'CAN EDIT' : 'CANNOT EDIT');
         return isOwnShift;
     }
 
+    console.log('[canUserEditShift] No role match → CANNOT EDIT');
     return false;
 }
 
