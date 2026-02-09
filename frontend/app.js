@@ -147,6 +147,153 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+// ===== TOAST NOTIFICATION SYSTEM =====
+const ToastManager = {
+    container: null,
+    toasts: [],
+    maxToasts: 5,
+
+    init() {
+        if (!this.container) {
+            this.container = document.createElement('div');
+            this.container.className = 'toast-container';
+            document.body.appendChild(this.container);
+        }
+    },
+
+    show(message, type = 'info', duration = null) {
+        this.init();
+
+        // Auto-duration based on type
+        if (duration === null) {
+            duration = {
+                'success': 3000,
+                'info': 4000,
+                'warning': 5000,
+                'error': 0 // Don't auto-dismiss errors
+            }[type] || 4000;
+        }
+
+        // Remove oldest if at max
+        if (this.toasts.length >= this.maxToasts) {
+            const oldest = this.toasts.shift();
+            this.remove(oldest.id);
+        }
+
+        const id = Date.now() + Math.random();
+        const toast = { id, message, type, duration };
+        this.toasts.push(toast);
+
+        this.render(toast);
+
+        // Auto-dismiss if duration > 0
+        if (duration > 0) {
+            setTimeout(() => this.remove(id), duration);
+        }
+
+        return id;
+    },
+
+    render(toast) {
+        const icons = {
+            success: '✓',
+            error: '✕',
+            warning: '⚠',
+            info: 'ℹ'
+        };
+
+        const el = document.createElement('div');
+        el.className = `toast toast-${toast.type}`;
+        el.dataset.toastId = toast.id;
+        el.innerHTML = `
+            <span class="toast-icon">${icons[toast.type]}</span>
+            <span class="toast-message">${escapeHtml(toast.message)}</span>
+            <button class="toast-close" onclick="ToastManager.remove(${toast.id})">×</button>
+        `;
+
+        this.container.appendChild(el);
+
+        // Trigger animation
+        setTimeout(() => el.classList.add('toast-show'), 10);
+    },
+
+    remove(id) {
+        const el = this.container.querySelector(`[data-toast-id="${id}"]`);
+        if (el) {
+            el.classList.remove('toast-show');
+            el.classList.add('toast-hide');
+            setTimeout(() => {
+                el.remove();
+                this.toasts = this.toasts.filter(t => t.id !== id);
+            }, 300);
+        }
+    }
+};
+
+// Global helper function
+function showToast(message, type = 'info', duration = null) {
+    return ToastManager.show(message, type, duration);
+}
+
+// ===== CONFIRMATION DIALOG SYSTEM =====
+function showConfirm(message, title = 'Bevestig actie') {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('confirm-modal');
+        const titleEl = document.getElementById('confirm-modal-title');
+        const messageEl = document.getElementById('confirm-modal-message');
+        const okBtn = document.getElementById('confirm-modal-ok');
+        const cancelBtn = document.getElementById('confirm-modal-cancel');
+
+        // Set content
+        titleEl.textContent = title;
+        messageEl.textContent = message;
+
+        // Show modal
+        modal.classList.remove('hidden');
+
+        // Handle OK
+        const handleOk = () => {
+            cleanup();
+            resolve(true);
+        };
+
+        // Handle Cancel
+        const handleCancel = () => {
+            cleanup();
+            resolve(false);
+        };
+
+        // Cleanup function
+        const cleanup = () => {
+            modal.classList.add('hidden');
+            okBtn.removeEventListener('click', handleOk);
+            cancelBtn.removeEventListener('click', handleCancel);
+            modal.removeEventListener('click', handleBackdropClick);
+            document.removeEventListener('keydown', handleEscape);
+        };
+
+        // Handle backdrop click
+        const handleBackdropClick = (e) => {
+            if (e.target === modal) {
+                handleCancel();
+            }
+        };
+
+        // Handle Escape key
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                handleCancel();
+            }
+        };
+
+        // Add event listeners
+        okBtn.addEventListener('click', handleOk);
+        cancelBtn.addEventListener('click', handleCancel);
+        modal.addEventListener('click', handleBackdropClick);
+        document.addEventListener('keydown', handleEscape);
+    });
+}
+
 async function apiFetch(path, options = {}) {
     const headers = { ...(options.headers || {}) };
     if (AppState.authToken) {
@@ -650,7 +797,7 @@ async function handleLogin(e) {
         showApp();
     } catch (error) {
         console.error('Login error:', error);
-        alert('Ongeldige gebruikersnaam of wachtwoord');
+        showToast('Ongeldige gebruikersnaam of wachtwoord', 'error');
 
         // Clear any existing session to prevent staying logged in with old credentials
         AppState.currentUser = null;
@@ -769,17 +916,17 @@ function applyRoleVisibility() {
         AppState.currentView = 'planning';
     }
 
-    // Team filters: hide for medewerker, show limited for teamverantwoordelijke
-    const hideTeamFilters = role === 'medewerker';
-    const limitTeamFilters = role === 'teamverantwoordelijke';
-    const planningFilters = document.getElementById('team-toggles');
+    // Team filters:
+    // - Planning view: Always visible (all roles can filter)
+    // - Employee view: Hide only for teamverantwoordelijke (they only see their own team anyway)
     const employeeFilters = document.getElementById('employee-team-toggles');
 
-    if (planningFilters) planningFilters.style.display = hideTeamFilters ? 'none' : '';
-    if (employeeFilters) employeeFilters.style.display = hideTeamFilters ? 'none' : '';
+    if (employeeFilters) {
+        employeeFilters.style.display = role === 'teamverantwoordelijke' ? 'none' : '';
+    }
 
     // For teamverantwoordelijke, limit visible teams to their own
-    if (limitTeamFilters) {
+    if (role === 'teamverantwoordelijke') {
         const visibleTeams = getVisibleTeamsForRole();
         AppState.visibleTeams = visibleTeams;
         AppState.visibleEmployeeTeams = visibleTeams;
@@ -793,6 +940,11 @@ function applyRoleVisibility() {
 }
 
 function switchView(viewName) {
+    // Cleanup drag handlers when switching views
+    if (typeof DragHandler !== 'undefined') {
+        DragHandler.cleanup();
+    }
+
     AppState.currentView = viewName;
     // Save to localStorage so we can restore after refresh
     localStorage.setItem('hetvlot_activeView', viewName);
@@ -1454,9 +1606,26 @@ function renderTimelineView() {
                     if (isWeekend) cellClass += ' weekend';
                     if (isClosed) cellClass += ' closed';
 
-                    html += `<div class="${cellClass}">`;
+                    // Check if there are shifts for this cell (to add has-shifts class)
+                    if (!isClosed) {
+                        let shifts = getShiftsByEmployee(emp.id, date, date);
+                        shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+                        if (shifts.length > 0) cellClass += ' has-shifts';
+                    }
+
+                    html += `<div class="${cellClass}" data-date="${date}">`;
 
                     if (!isClosed) {
+                        // Check if there's a shift block for this employee on this date
+                        const hasShiftBlock = DataStore.shiftBlocks.some(
+                            block => String(block.user_id) === String(emp.id) && block.date === date
+                        );
+
+                        // Show shift block indicator if present
+                        if (hasShiftBlock) {
+                            html += `<div class="shift-block-indicator" data-tooltip="Shift geblokkeerd (auto-schedule overgeslagen)" data-tooltip-pos="top">🚫</div>`;
+                        }
+
                         // Get shifts for this employee on this date
                         let shifts = getShiftsByEmployee(emp.id, date, date);
                         // Filter by visible teams (include shifts without team)
@@ -1553,16 +1722,18 @@ function renderTimelineView() {
 
                             // Only make shift clickable if user can edit it
                             const canEdit = canUserEditShift(shift);
-                            const clickHandler = canEdit ? `onclick="openEditShiftModal(${shift.id})"` : '';
-                            const cursorStyle = canEdit ? 'cursor: pointer;' : 'cursor: default;';
+                            // Remove inline onclick - handled by DragHandler
+                            const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
                             html += `<div class="${blockClass}"
                                          data-shift-id="${shift.id}"
-                                         ${clickHandler}
+                                         data-employee-id="${shift.employeeId}"
+                                         data-date="${shift.date}"
                                          style="left: ${leftPercent}%; width: ${widthStyle}; ${cursorStyle}"
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
+                                ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 <span class="block-time">${shift.startTime}-${shift.endTime}</span>
-                                ${isAbsent ? '<span class="absent-badge">⚠️</span>' : ''}
+                                ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
                     }
@@ -1608,18 +1779,114 @@ function renderTimelineView() {
                     if (isWeekend) cellClass += ' weekend';
                     if (isClosed) cellClass += ' closed';
 
-                    html += `<div class="${cellClass}">`;
+                    // Check if there are shifts for this cell (to add has-shifts class)
+                    if (!isClosed) {
+                        let shiftsCheck = getShiftsByEmployee(emp.id, date, date);
+                        shiftsCheck = shiftsCheck.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+                        if (shiftsCheck.length > 0) cellClass += ' has-shifts';
+                    }
+
+                    html += `<div class="${cellClass}" data-date="${date}">`;
 
                     if (!isClosed) {
                         let shifts = getShiftsByEmployee(emp.id, date, date);
                         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
 
+                        // Render shifts that start on this day
                         shifts.forEach(shift => {
                             const validation = validateShift(shift, shift.id);
                             const availability = getAvailability(shift.employeeId, date);
-                            const isAbsent = availability && availability.type;
-                            const blockHtml = renderTimelineBlock(shift, validation, isAbsent);
-                            html += blockHtml;
+
+                            // Check if employee is absent - this is a conflict!
+                            const validAbsenceTypes = ['verlof', 'ziek', 'overuren', 'vorming', 'andere'];
+                            const isAbsent = availability && availability.type && validAbsenceTypes.includes(availability.type);
+
+                            const [startHour, startMin] = shift.startTime.split(':').map(Number);
+                            const [endHour, endMin] = shift.endTime.split(':').map(Number);
+
+                            // Check if this is an overnight shift
+                            const isOvernight = endHour < startHour;
+
+                            // Calculate position and width
+                            const startFrac = startHour + startMin / 60;
+                            const leftPercent = Math.max(0, ((startFrac - START_HOUR) / TOTAL_HOURS) * 100);
+
+                            let widthPercent;
+                            if (isOvernight) {
+                                // Nachtdienst: bereken totale breedte over beide dagen
+                                const hoursDay1 = END_HOUR - startFrac; // van start tot 24:00
+                                const hoursDay2 = Math.max(0, (endHour + endMin / 60) - START_HOUR); // van 7:00 tot eind
+
+                                // Check if this is Sunday (last day of week view)
+                                if (dayOfWeek === 0) {
+                                    // Sunday: only show the portion until midnight
+                                    const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
+                                    widthPercent = `${widthDay1Percent}%`;
+                                } else {
+                                    // Other days: show full overnight shift spanning two day cells
+                                    const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
+                                    const widthDay2Percent = (hoursDay2 / TOTAL_HOURS) * 100;
+                                    widthPercent = `calc(${widthDay1Percent}% + 4px + ${widthDay2Percent}%)`;
+                                }
+                            } else {
+                                const endFrac = endHour + endMin / 60;
+                                const rightEnd = Math.min(END_HOUR, endFrac);
+                                widthPercent = ((rightEnd - Math.max(startFrac, START_HOUR)) / TOTAL_HOURS) * 100;
+                            }
+
+                            let blockClass = `timeline-block team-${shift.team}`;
+                            // Add auto/manual class
+                            if (shift.source === 'auto') {
+                                blockClass += ' shift-auto';
+                            } else {
+                                blockClass += ' shift-manual';
+                            }
+                            // Absent conflict has highest priority
+                            if (isAbsent) {
+                                blockClass += ' absent-conflict';
+                            } else if (!validation.isValid) {
+                                blockClass += ' error';
+                            } else if (validation.hasWarnings) {
+                                blockClass += ' warning';
+                            }
+                            if (isOvernight) blockClass += ' nacht';
+
+                            // Build title with absence/error/warning info
+                            let titleText = `${shift.startTime} - ${shift.endTime}`;
+                            if (isOvernight) {
+                                titleText += ' (nachtdienst)';
+                            }
+                            if (isAbsent) {
+                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
+                                titleText = `⚠️ CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
+                            }
+                            if (!validation.isValid && validation.errors.length > 0) {
+                                titleText += `\n❌ ${validation.errors.map(e => e.message).join('\n❌ ')}`;
+                            }
+                            if (validation.hasWarnings && validation.warnings.length > 0) {
+                                titleText += `\n⚠️ ${validation.warnings.map(w => w.message).join('\n⚠️ ')}`;
+                            }
+
+                            // Width kan een getal of een calc() string zijn
+                            const widthStyle = typeof widthPercent === 'string' ? widthPercent : `${widthPercent}%`;
+
+                            // Escape quotes voor data-tooltip
+                            const tooltipText = escapeHtml(titleText);
+
+                            // Only make shift clickable if user can edit it
+                            const canEdit = canUserEditShift(shift);
+                            const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
+
+                            html += `<div class="${blockClass}"
+                                         data-shift-id="${shift.id}"
+                                         data-employee-id="${shift.employeeId}"
+                                         data-date="${shift.date}"
+                                         style="left: ${leftPercent}%; width: ${widthStyle}; ${cursorStyle}"
+                                         data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
+                                ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
+                                <span class="block-time">${shift.startTime}-${shift.endTime}</span>
+                                ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
+                            </div>`;
                         });
                     }
 
@@ -1635,6 +1902,11 @@ function renderTimelineView() {
     html += '</div>'; // Close wrapper
 
     DOM.rosterCalendar.innerHTML = html;
+
+    // Initialize drag & drop handlers
+    if (typeof DragHandler !== 'undefined') {
+        DragHandler.init();
+    }
 }
 
 function renderMonthView() {
@@ -2158,6 +2430,27 @@ function canUserEditShift(shift) {
     return false;
 }
 
+function canUserTransferShift(shift) {
+    // Only admin, hoofdverantwoordelijke, and teamverantwoordelijke can transfer shifts between employees
+    // Medewerkers can only resize their own shifts, not transfer them
+    if (!shift || !AppState.currentUser) {
+        return false;
+    }
+
+    const currentRole = getEffectiveRole();
+
+    if (currentRole === 'admin' || currentRole === 'hoofdverantwoordelijke') {
+        return true;
+    } else if (currentRole === 'teamverantwoordelijke') {
+        // Can transfer shifts from own team
+        const userTeam = AppState.currentUser.team_id || AppState.currentUser.mainTeam;
+        return shift.team === userTeam;
+    }
+
+    // Medewerkers cannot transfer shifts
+    return false;
+}
+
 function openEditShiftModal(shiftId) {
     const shift = getShift(shiftId);
     if (!shift) return;
@@ -2295,7 +2588,7 @@ async function handleShiftDelete(shiftId = null) {
         ? `de dienst van ${shift.employeeName || 'deze medewerker'} op ${shift.date}`
         : 'deze dienst';
 
-    if (confirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?`)) {
+    if (await showConfirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?`)) {
         // Wait for deletion to complete before re-rendering
         await deleteShift(idToDelete);
 
@@ -2485,7 +2778,7 @@ function runSwapValidation() {
 
 async function handleSwapRequestSubmit() {
     if (!swapRequestState.requesterShift || !swapRequestState.targetShiftId) {
-        alert('Selecteer eerst een collega en een shift om te ruilen');
+        showToast('Selecteer eerst een collega en een shift om te ruilen', 'warning');
         return;
     }
 
@@ -2501,7 +2794,7 @@ async function handleSwapRequestSubmit() {
     });
 
     if (!validation.isValid) {
-        alert('Deze ruil kan niet worden ingediend vanwege fouten. Zie de validatie hierboven.');
+        showToast('Deze ruil kan niet worden ingediend vanwege fouten. Zie de validatie hierboven.', 'warning');
         return;
     }
 
@@ -2514,14 +2807,14 @@ async function handleSwapRequestSubmit() {
             message: message || null
         });
 
-        alert('✅ Ruilverzoek succesvol ingediend!');
+        showToast('Ruilverzoek succesvol ingediend', 'success');
         closeSwapRequestModal();
 
         // Switch to swaps view to show the new request
         switchView('swaps');
     } catch (error) {
         console.error('Error creating swap request:', error);
-        alert('❌ Fout bij indienen ruilverzoek: ' + (error.message || 'Onbekende fout'));
+        showToast('Fout bij indienen ruilverzoek: ' + (error.message || 'Onbekende fout'), 'error');
     }
 }
 
@@ -2535,7 +2828,7 @@ function openSwapReviewModal(swapId) {
     const swapRequest = DataStore.swapRequests.find(sr => sr.id === swapId);
 
     if (!swapRequest) {
-        alert('Ruilverzoek niet gevonden');
+        showToast('Ruilverzoek niet gevonden', 'warning');
         return;
     }
 
@@ -2652,19 +2945,19 @@ async function handleSwapApprove() {
 
     const responseNotes = document.getElementById('swap-response-notes').value.trim();
 
-    if (!confirm('Weet je zeker dat je deze ruil wilt goedkeuren?')) {
+    if (!await showConfirm('Weet je zeker dat je deze ruil wilt goedkeuren?')) {
         return;
     }
 
     try {
         await approveSwapRequest(swapReviewState.swapRequestId, responseNotes || null);
-        alert('✅ Ruil goedgekeurd en uitgevoerd!');
+        showToast('Ruil goedgekeurd en uitgevoerd', 'success');
         closeSwapReviewModal();
         renderSwaps();
         renderPlanning(); // Refresh planning view to show swapped shifts
     } catch (error) {
         console.error('Error approving swap:', error);
-        alert('❌ Fout bij goedkeuren: ' + (error.message || 'Onbekende fout'));
+        showToast('Fout bij goedkeuren: ' + (error.message || 'Onbekende fout'), 'error');
     }
 }
 
@@ -2674,23 +2967,23 @@ async function handleSwapReject() {
     const responseNotes = document.getElementById('swap-response-notes').value.trim();
 
     if (!responseNotes) {
-        alert('⚠️ Voeg een reden toe bij afwijzing');
+        showToast('Voeg een reden toe bij afwijzing', 'warning');
         document.getElementById('swap-response-notes-required').style.display = 'inline';
         return;
     }
 
-    if (!confirm('Weet je zeker dat je deze ruil wilt afwijzen?')) {
+    if (!await showConfirm('Weet je zeker dat je deze ruil wilt afwijzen?')) {
         return;
     }
 
     try {
         await rejectSwapRequest(swapReviewState.swapRequestId, responseNotes);
-        alert('✅ Ruil afgewezen');
+        showToast('Ruil afgewezen', 'success');
         closeSwapReviewModal();
         renderSwaps();
     } catch (error) {
         console.error('Error rejecting swap:', error);
-        alert('❌ Fout bij afwijzen: ' + (error.message || 'Onbekende fout'));
+        showToast('Fout bij afwijzen: ' + (error.message || 'Onbekende fout'), 'error');
     }
 }
 
@@ -2764,7 +3057,7 @@ function closeTakeoverRequestModal() {
 
 async function handleTakeoverRequestSubmit() {
     if (!takeoverRequestState.shiftToGiveAway) {
-        alert('Geen shift geselecteerd');
+        showToast('Geen shift geselecteerd', 'warning');
         return;
     }
 
@@ -2772,14 +3065,14 @@ async function handleTakeoverRequestSubmit() {
 
     try {
         await createTakeoverRequest(takeoverRequestState.shiftToGiveAway.id, message || null);
-        alert('✅ Verzoek succesvol ingediend! Collega\'s kunnen deze shift nu overnemen.');
+        showToast('Verzoek succesvol ingediend! Collega\'s kunnen deze shift nu overnemen.', 'success');
         closeTakeoverRequestModal();
 
         // Switch to swaps view to show the new request
         switchView('swaps');
     } catch (error) {
         console.error('Error creating takeover request:', error);
-        alert('❌ Fout bij indienen verzoek: ' + (error.message || 'Onbekende fout'));
+        showToast('Fout bij indienen verzoek: ' + (error.message || 'Onbekende fout'), 'error');
     }
 }
 
@@ -2870,7 +3163,7 @@ async function handleShiftSubmit(e) {
                 warningMsg += `- ${warning.message}\n`;
             });
             warningMsg += '\nToch opslaan?';
-            if (!confirm(warningMsg)) {
+            if (!await showConfirm(warningMsg, 'Waarschuwingen')) {
                 return;
             }
         }
@@ -2894,7 +3187,7 @@ async function deleteShiftConfirm(shiftId) {
     if (!shift) return;
     const employee = getEmployee(shift.employeeId);
     const msg = `Dienst verwijderen?\n\n${employee?.name || 'Onbekend'}\n${formatDate(shift.date)}\n${shift.startTime} - ${shift.endTime}`;
-    if (confirm(msg)) {
+    if (await showConfirm(msg, 'Dienst verwijderen?')) {
         await deleteShift(shiftId);
         renderPlanning();
     }
@@ -3579,7 +3872,7 @@ async function handleEmployeeDelete() {
     const relatedShifts = getShiftsByEmployee(employee.id).length;
     const confirmMsg = `Weet je zeker dat je ${employee.name} wilt verwijderen?\n\nDit verwijdert ook ${relatedShifts} dienst${relatedShifts !== 1 ? 'en' : ''} en eventuele afwezigheden.`;
 
-    if (!confirm(confirmMsg)) return;
+    if (!await showConfirm(confirmMsg, 'Medewerker verwijderen')) return;
 
     await deleteEmployee(employee.id);
     closeEmployeeModal();
@@ -4445,11 +4738,11 @@ function attachSwapActionListeners() {
             if (notes !== null) { // User didn't cancel
                 try {
                     await targetApproveSwapRequest(swapId, notes);
-                    alert('✅ Ruil geaccepteerd! De shifts zijn omgewisseld.');
+                    showToast('Ruil geaccepteerd! De shifts zijn omgewisseld.', 'success');
                     switchView('planning'); // Go to planning to see the result
                 } catch (error) {
                     console.error('Error approving swap:', error);
-                    alert('❌ Fout bij accepteren: ' + (error.message || 'Onbekende fout'));
+                    showToast('Fout bij accepteren: ' + (error.message || 'Onbekende fout'), 'error');
                 }
             }
         });
@@ -4463,14 +4756,14 @@ function attachSwapActionListeners() {
             if (notes && notes.trim() !== '') {
                 try {
                     await targetRejectSwapRequest(swapId, notes);
-                    alert('Ruil afgewezen');
+                    showToast('Ruil afgewezen', 'success');
                     renderSwaps();
                 } catch (error) {
                     console.error('Error rejecting swap:', error);
-                    alert('❌ Fout bij afwijzen: ' + (error.message || 'Onbekende fout'));
+                    showToast('Fout bij afwijzen: ' + (error.message || 'Onbekende fout'), 'error');
                 }
             } else if (notes !== null) {
-                alert('Je moet een reden opgeven om het verzoek af te wijzen');
+                showToast('Je moet een reden opgeven om het verzoek af te wijzen', 'warning');
             }
         });
     });
@@ -4487,14 +4780,14 @@ function attachSwapActionListeners() {
     document.querySelectorAll('.btn-cancel-swap').forEach(btn => {
         btn.addEventListener('click', async () => {
             const swapId = parseInt(btn.dataset.swapId);
-            if (confirm('Weet je zeker dat je dit ruilverzoek wilt annuleren?')) {
+            if (await showConfirm('Weet je zeker dat je dit ruilverzoek wilt annuleren?')) {
                 try {
                     await cancelSwapRequest(swapId);
-                    alert('✅ Ruilverzoek geannuleerd');
+                    showToast('Ruilverzoek geannuleerd', 'success');
                     renderSwaps();
                 } catch (error) {
                     console.error('Error cancelling swap:', error);
-                    alert('❌ Fout bij annuleren: ' + (error.message || 'Onbekende fout'));
+                    showToast('Fout bij annuleren: ' + (error.message || 'Onbekende fout'), 'error');
                 }
             }
         });
@@ -4507,16 +4800,16 @@ function attachSwapActionListeners() {
             const notes = prompt('Wil je een bericht toevoegen? (optioneel)');
 
             if (notes !== null) { // User didn't cancel
-                if (confirm('Weet je zeker dat je deze shift wilt overnemen?')) {
+                if (await showConfirm('Weet je zeker dat je deze shift wilt overnemen?')) {
                     try {
                         await acceptTakeoverRequest(requestId, notes);
                         // Reload shifts to see the newly acquired shift
                         await loadDataFromAPI();
-                        alert('✅ Shift overgenomen! Je kunt hem nu zien in je planning.');
+                        showToast('Shift overgenomen! Je kunt hem nu zien in je planning.', 'success');
                         switchView('planning'); // Go to planning to see the new shift
                     } catch (error) {
                         console.error('Error accepting takeover:', error);
-                        alert('❌ Fout bij overnemen: ' + (error.message || 'Onbekende fout'));
+                        showToast('Fout bij overnemen: ' + (error.message || 'Onbekende fout'), 'error');
                     }
                 }
             }
@@ -4819,7 +5112,7 @@ function showAddUserModal(teams) {
 
         // Validate passwords match
         if (password !== passwordConfirm) {
-            alert('Wachtwoorden komen niet overeen. Probeer opnieuw.');
+            showToast('Wachtwoorden komen niet overeen. Probeer opnieuw.', 'warning');
             return;
         }
 
@@ -4841,11 +5134,11 @@ function showAddUserModal(teams) {
                 DataStore.users.push(response.user);
             }
             modal.remove();
-            alert('Gebruiker aangemaakt!');
+            showToast('Gebruiker aangemaakt', 'success');
             // Refresh accounts list
             renderSettingsAccounts(document.querySelector('#settings-tab-content'));
         } catch (err) {
-            alert('Fout bij aanmaken: ' + (err.message || 'Onbekende fout'));
+            showToast('Fout bij aanmaken: ' + (err.message || 'Onbekende fout'), 'error');
         }
     });
 }
@@ -4916,11 +5209,11 @@ function showEditAccountModal(user, teams, onSave) {
         const newTeamId = form.querySelector('#edit-user-team').value || null;
 
         if (!newName) {
-            alert('Naam is verplicht');
+            showToast('Naam is verplicht', 'warning');
             return;
         }
         if (!newEmail) {
-            alert('Email is verplicht');
+            showToast('Email is verplicht', 'warning');
             return;
         }
 
@@ -4950,23 +5243,23 @@ function showEditAccountModal(user, teams, onSave) {
             }
 
             modal.remove();
-            alert('Account bijgewerkt');
+            showToast('Account bijgewerkt', 'success');
             if (onSave) onSave();
         } catch (error) {
-            alert(`Opslaan mislukt: ${error.message}`);
+            showToast(`Opslaan mislukt: ${error.message}`, 'error');
         }
     });
 
     // Reset password button
     modal.querySelector('#edit-account-reset-btn').addEventListener('click', async () => {
-        if (!confirm('Wachtwoord resetten naar standaard?')) return;
+        if (!await showConfirm('Wachtwoord resetten naar standaard?')) return;
         try {
             const result = await apiFetch(`/admin/users/${user.id}/reset-password`, {
                 method: 'POST'
             });
-            alert(`Wachtwoord gereset naar: ${result.resetPassword}`);
+            showToast(`Wachtwoord gereset naar: ${result.resetPassword}`, 'success');
         } catch (error) {
-            alert(`Reset mislukt: ${error.message}`);
+            showToast(`Reset mislukt: ${error.message}`, 'error');
         }
     });
 
@@ -4974,21 +5267,21 @@ function showEditAccountModal(user, teams, onSave) {
     modal.querySelector('#edit-account-delete-btn').addEventListener('click', async () => {
         // Prevent deleting yourself
         if (String(user.id) === String(AppState.currentUser.id)) {
-            alert('Je kunt je eigen account niet verwijderen.');
+            showToast('Je kunt je eigen account niet verwijderen', 'warning');
             return;
         }
 
         const confirmMsg = `Weet je zeker dat je het account van "${user.name}" wilt verwijderen?\n\nDit verwijdert ook alle gekoppelde diensten en afwezigheden.\n\nDeze actie kan niet ongedaan worden gemaakt.`;
 
-        if (!confirm(confirmMsg)) return;
+        if (!await showConfirm(confirmMsg, 'Account verwijderen')) return;
 
         try {
             await deleteEmployee(Number(user.id));
             modal.remove();
-            alert('Account verwijderd');
+            showToast('Account verwijderd', 'success');
             if (onSave) onSave();
         } catch (error) {
-            alert(`Verwijderen mislukt: ${error.message}`);
+            showToast(`Verwijderen mislukt: ${error.message}`, 'error');
         }
     });
 }
@@ -5368,7 +5661,7 @@ async function updateTeamColor(teamId, color) {
             await saveSettings('teams', DataStore.settings.teams);
         } catch (error) {
             console.error('Error saving team color to backend:', error);
-            alert('⚠️ Kleur is lokaal opgeslagen maar backend sync mislukt. Vernieuw de pagina om te synchroniseren.');
+            showToast('Kleur is lokaal opgeslagen maar backend sync mislukt. Vernieuw de pagina om te synchroniseren.', 'warning');
         }
     }
 }
@@ -5383,7 +5676,7 @@ function saveRules() {
     DataStore.settings.rules.minStaffingNight = minStaffNight;
 
     saveToStorage();
-    alert('✅ Planning regels zijn opgeslagen!');
+    showToast('Planning regels zijn opgeslagen', 'success');
 }
 
 async function savePlanningHorizon() {
@@ -5400,7 +5693,7 @@ async function savePlanningHorizon() {
             method: 'PUT',
             body: JSON.stringify({ value: { weeks } })
         });
-        alert('✅ Planning horizon is opgeslagen!');
+        showToast('Planning horizon is opgeslagen', 'success');
 
         // Reset flag and re-apply schedules with new horizon
         AppState.schedulesGenerated = false;
@@ -5412,7 +5705,7 @@ async function savePlanningHorizon() {
         }
     } catch (error) {
         console.error('Fout bij opslaan planning horizon:', error);
-        alert('✅ Planning horizon is lokaal opgeslagen (server sync mislukt)');
+        showToast('Planning horizon is lokaal opgeslagen (server sync mislukt)', 'warning');
     }
 }
 
@@ -5427,11 +5720,11 @@ function editTemplate(templateId) {
     }
 }
 
-function deleteTemplate(templateId) {
+async function deleteTemplate(templateId) {
     const template = DataStore.settings.shiftTemplates[templateId];
     if (!template) return;
 
-    if (confirm(`Weet je zeker dat je de template "${template.name}" wilt verwijderen?`)) {
+    if (await showConfirm(`Weet je zeker dat je de template "${template.name}" wilt verwijderen?`)) {
         delete DataStore.settings.shiftTemplates[templateId];
         saveToStorage();
         renderSettings();
@@ -5502,17 +5795,17 @@ function saveTemplate(originalId) {
     const end = document.getElementById('template-end').value;
 
     if (!id || !name || !start || !end) {
-        alert('Vul alle velden in');
+        showToast('Vul alle velden in', 'warning');
         return;
     }
 
     if (rawId !== id) {
-        alert('Template ID mag enkel letters, cijfers, _ of - bevatten');
+        showToast('Template ID mag enkel letters, cijfers, _ of - bevatten', 'warning');
         return;
     }
 
     if (!originalId && DataStore.settings.shiftTemplates[id]) {
-        alert('Een template met deze ID bestaat al');
+        showToast('Een template met deze ID bestaat al', 'warning');
         return;
     }
 
@@ -5658,12 +5951,12 @@ function saveHolidayPeriod() {
     const end = document.getElementById('holiday-end').value;
 
     if (!name || !start || !end) {
-        alert('Vul alle velden in');
+        showToast('Vul alle velden in', 'warning');
         return;
     }
 
     if (parseDateOnly(end) < parseDateOnly(start)) {
-        alert('Einddatum moet na startdatum liggen');
+        showToast('Einddatum moet na startdatum liggen', 'warning');
         return;
     }
 
@@ -5672,8 +5965,8 @@ function saveHolidayPeriod() {
     renderSettings();
 }
 
-function deleteHolidayPeriod(id) {
-    if (confirm('Weet je zeker dat je deze vakantieperiode wilt verwijderen?')) {
+async function deleteHolidayPeriod(id) {
+    if (await showConfirm('Weet je zeker dat je deze vakantieperiode wilt verwijderen?')) {
         removeHolidayPeriod(id);
         renderSettings();
     }
@@ -5688,7 +5981,7 @@ function saveHolidayRules() {
         minStaffingNight: minStaffNight
     });
 
-    alert('✅ Vakantie instellingen opgeslagen!');
+    showToast('Vakantie instellingen opgeslagen', 'success');
 }
 
 // ===== VERANTWOORDELIJKE SETTINGS FUNCTIES =====
@@ -5719,7 +6012,7 @@ function renderEligibleTeamsCheckboxes() {
 
 function saveEligibleTeams() {
     saveEligibleTeamsQuiet();
-    alert('✅ Teams opgeslagen!');
+    showToast('Teams opgeslagen', 'success');
 }
 
 function saveEligibleTeamsQuiet() {
@@ -5799,19 +6092,19 @@ function saveRotationSettings() {
     const employeeId = employeeSelect.value;
 
     if (!startDate) {
-        alert('Stel eerst de Week 1 startdatum in');
+        showToast('Stel eerst de Week 1 startdatum in', 'warning');
         return;
     }
 
     if (!employeeId) {
-        alert('Selecteer wie begint');
+        showToast('Selecteer wie begint', 'warning');
         return;
     }
 
     // Check if it's a Monday
     const date = parseDateOnly(startDate);
     if (date.getDay() !== 1) {
-        alert('⚠️ Kies een maandag als startdatum');
+        showToast('Kies een maandag als startdatum', 'warning');
         return;
     }
 
@@ -5819,7 +6112,7 @@ function saveRotationSettings() {
     setRotationStart(date, parseFloat(employeeId));
     renderSettings();
     renderPlanning(); // Update planning page too
-    alert('✅ Rotatie ingesteld!');
+    showToast('Rotatie ingesteld', 'success');
 }
 
 function renderUpcomingResponsibles() {
@@ -5875,7 +6168,7 @@ function updateBiWeeklyReference() {
     const selectedDate = dateInput.value;
 
     if (!selectedDate) {
-        alert('Selecteer eerst een datum');
+        showToast('Selecteer eerst een datum', 'warning');
         return;
     }
 
@@ -5884,7 +6177,7 @@ function updateBiWeeklyReference() {
     const dayOfWeek = date.getDay();
 
     if (dayOfWeek !== 1) {
-        alert('⚠️ De geselecteerde datum is geen maandag. Kies een maandag als referentie datum.');
+        showToast('De geselecteerde datum is geen maandag. Kies een maandag als referentie datum.', 'warning');
         return;
     }
 
@@ -5896,7 +6189,7 @@ function updateBiWeeklyReference() {
     saveToStorage();
     renderSettings();
     renderPlanning(); // Update the current week display
-    alert('✅ Referentie datum voor Week 1 is bijgewerkt!');
+    showToast('Referentie datum voor Week 1 is bijgewerkt', 'success');
 }
 
 function setupSettingsCollapsibles(scope = document) {
@@ -6074,32 +6367,40 @@ async function handleAvailabilitySave() {
 
     // Validation
     if (!employeeId) {
-        alert('Selecteer een medewerker');
+        showToast('Selecteer een medewerker', 'warning');
         return;
     }
     if (!startDate || !endDate) {
-        alert('Vul beide datums in');
+        showToast('Vul beide datums in', 'warning');
         return;
     }
     if (!absenceType) {
-        alert('Selecteer een type afwezigheid');
+        showToast('Selecteer een type afwezigheid', 'warning');
         return;
     }
 
-    const start = parseDateOnly(startDate);
-    const end = parseDateOnly(endDate);
-
-    if (end < start) {
-        alert('Einddatum moet na startdatum liggen');
+    // Simple string comparison works for YYYY-MM-DD format
+    if (endDate < startDate) {
+        showToast('Einddatum moet na startdatum liggen', 'warning');
         return;
     }
 
     try {
         // Check for conflicts first
         let conflictDates = [];
-        let checkDate = parseDateOnly(start);
-        while (checkDate <= end) {
-            const dateStr = formatDateYYYYMMDD(checkDate);
+        // Use string dates to avoid timezone conversion issues
+        const startParts = startDate.split('-').map(Number);
+        const endParts = endDate.split('-').map(Number);
+        let checkDate = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+        const endDateObj = new Date(endParts[0], endParts[1] - 1, endParts[2]);
+
+        while (checkDate <= endDateObj) {
+            // Format as YYYY-MM-DD without timezone conversion
+            const year = checkDate.getFullYear();
+            const month = String(checkDate.getMonth() + 1).padStart(2, '0');
+            const day = String(checkDate.getDate()).padStart(2, '0');
+            const dateStr = `${year}-${month}-${day}`;
+
             const shifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
             if (shifts.length > 0) {
                 conflictDates.push(dateStr);
@@ -6112,18 +6413,24 @@ async function handleAvailabilitySave() {
             const employee = getEmployee(employeeId);
             const employeeName = employee?.name || 'Deze medewerker';
             const confirmMsg = `⚠️ Let op: ${employeeName} heeft nog ${conflictDates.length} dienst(en) ingepland op deze dagen!\n\nDiensten op: ${conflictDates.map(d => formatDate(d)).join(', ')}\n\nDe afwezigheid wordt geregistreerd, maar de diensten blijven staan. Vergeet niet deze diensten te verwijderen of opnieuw toe te wijzen!\n\nDoorgaan?`;
-            if (!confirm(confirmMsg)) {
+            if (!await showConfirm(confirmMsg, 'Waarschuwing: conflicterende diensten')) {
                 return;
             }
         }
 
         // Apply absence for each day in range
-        let currentDate = parseDateOnly(start);
+        // Reuse date parsing from conflict check above
+        let currentDate = new Date(startParts[0], startParts[1] - 1, startParts[2]);
         let daysSet = 0;
         const savePromises = [];
 
-        while (currentDate <= end) {
-            const dateStr = formatDateYYYYMMDD(currentDate);
+        while (currentDate <= endDateObj) {
+            // Format as YYYY-MM-DD without timezone conversion
+            const year = currentDate.getFullYear();
+            const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+            const day = String(currentDate.getDate()).padStart(2, '0');
+            const dateStr = `${year}-${month}-${day}`;
+
             savePromises.push(setAvailability(employeeId, dateStr, {
                 type: absenceType,
                 reason: reason
@@ -6144,11 +6451,11 @@ async function handleAvailabilitySave() {
         const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid' }[absenceType] || 'Afwezigheid';
 
         let msg = `${typeName} geregistreerd voor ${employeeName} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
+        showToast(msg, 'success');
+
         if (conflictDates.length > 0) {
-            msg += `\n\n⚠️ Vergeet niet de ${conflictDates.length} conflicterende dienst(en) aan te passen in de planning!`;
+            showToast(`Vergeet niet de ${conflictDates.length} conflicterende dienst(en) aan te passen in de planning!`, 'warning');
         }
-        // Show success message
-        alert(msg);
 
         // Auto-create takeover requests for shifts during sick leave or vacation
         if ((absenceType === 'ziek' || absenceType === 'verlof') && conflictDates.length > 0) {
@@ -6166,10 +6473,11 @@ async function handleAvailabilitySave() {
                 console.log('[Auto-create] Total affected shifts:', affectedShifts.length, affectedShifts.map(s => ({ id: s.id, date: s.date })));
 
                 if (affectedShifts.length > 0) {
-                    const confirmTakeover = confirm(
+                    const confirmTakeover = await showConfirm(
                         `Je hebt ${affectedShifts.length} dienst(en) op deze dagen.\n\n` +
                         `Wil je deze automatisch beschikbaar stellen zodat collega's ze kunnen overnemen?\n\n` +
-                        `(Ze verschijnen in "Beschikbare shifts" op de Ruilen pagina)`
+                        `(Ze verschijnen in "Beschikbare shifts" op de Ruilen pagina)`,
+                        'Shifts beschikbaar stellen?'
                     );
 
                     if (confirmTakeover) {
@@ -6200,7 +6508,7 @@ async function handleAvailabilitySave() {
                         console.log(`[Auto-create] Complete: ${createdCount} created, ${failedCount} failed`);
 
                         if (createdCount > 0) {
-                            alert(`✅ ${createdCount} takeover verzoek(en) aangemaakt!\n\nCollega's kunnen deze shifts nu overnemen via de Ruilen pagina.`);
+                            showToast(`${createdCount} takeover verzoek(en) aangemaakt! Collega's kunnen deze shifts nu overnemen via de Ruilen pagina.`, 'success');
                         }
                     } else {
                         console.log('[Auto-create] User cancelled takeover creation');
@@ -6218,11 +6526,11 @@ async function handleAvailabilitySave() {
         if (absenceType === 'ziek') {
             alert('📞 Bel de personeelsdienst om je ziekte door te geven');
         } else if (absenceType === 'verlof' || absenceType === 'overuren') {
-            alert('💡 Vergeet niet dit ook in Eureka aan te passen');
+            showToast('Vergeet niet dit ook in Eureka aan te passen', 'info');
         }
     } catch (error) {
         console.error('Error saving availability:', error);
-        alert('Er ging iets mis bij het opslaan: ' + error.message);
+        showToast('Er ging iets mis bij het opslaan: ' + error.message, 'error');
     }
 }
 
@@ -6232,7 +6540,7 @@ async function handleRemoveAbsence() {
     const endDate = document.getElementById('absence-end-date').value;
 
     if (!employeeId || !startDate || !endDate) {
-        alert('Geen afwezigheid om te verwijderen');
+        showToast('Geen afwezigheid om te verwijderen', 'warning');
         return;
     }
 
@@ -6240,13 +6548,13 @@ async function handleRemoveAbsence() {
     const end = parseDateOnly(endDate);
 
     if (end < start) {
-        alert('Ongeldige datum range');
+        showToast('Ongeldige datum range', 'warning');
         return;
     }
 
     const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
 
-    if (!confirm(`Afwezigheid verwijderen voor ${days} dag${days !== 1 ? 'en' : ''}?`)) {
+    if (!await showConfirm(`Afwezigheid verwijderen voor ${days} dag${days !== 1 ? 'en' : ''}?`)) {
         return;
     }
 
@@ -6285,6 +6593,18 @@ async function handleRemoveAbsence() {
         }
 
         console.log('[Auto-cancel] Total affected shifts:', affectedShifts.length, affectedShifts.map(s => s.id));
+
+        // Debug: Show all takeover requests for this employee
+        const employeeTakeoverRequests = DataStore.swapRequests.filter(sr =>
+            sr.requester_user_id === employeeId &&
+            sr.request_type === 'takeover' &&
+            sr.status === 'pending'
+        );
+        console.log('[Auto-cancel] All pending takeover requests for employee:', employeeTakeoverRequests.map(sr => ({
+            id: sr.id,
+            requester_shift_id: sr.requester_shift_id,
+            status: sr.status
+        })));
 
         // Find and cancel pending takeover requests for these shifts
         const requestsToCancel = DataStore.swapRequests.filter(sr =>
@@ -6343,7 +6663,7 @@ function exportData() {
 }
 
 async function runMigration() {
-    if (!confirm('🚀 VOLLEDIGE DATABASE MIGRATIE\n\nDit zal:\n✅ Employees tabel samenvoegen met users\n✅ Shifts migreren (employee_id → user_id)\n✅ Availability migreren (employee_id → user_id)\n✅ Employees tabel verwijderen\n✅ Weekroosters repareren\n\n⚠️ Dit is een grote wijziging, maar 100% veilig:\n- Gebruikt transactions (bij error: automatisch ROLLBACK)\n- Alle data blijft behouden\n- Foreign key mappings correct uitgevoerd\n\nDoorgaan?')) {
+    if (!await showConfirm('🚀 VOLLEDIGE DATABASE MIGRATIE\n\nDit zal:\n✅ Employees tabel samenvoegen met users\n✅ Shifts migreren (employee_id → user_id)\n✅ Availability migreren (employee_id → user_id)\n✅ Employees tabel verwijderen\n✅ Weekroosters repareren\n\n⚠️ Dit is een grote wijziging, maar 100% veilig:\n- Gebruikt transactions (bij error: automatisch ROLLBACK)\n- Alle data blijft behouden\n- Foreign key mappings correct uitgevoerd\n\nDoorgaan?', 'Database Migratie')) {
         return;
     }
 
@@ -6363,26 +6683,27 @@ async function runMigration() {
             message += 'Geen wijzigingen nodig - database is up-to-date.';
         }
 
-        alert(message);
+        showToast(message.substring(0, 200), 'success');
+        if (message.length > 200) console.log('[Migratie] Volledige output:', message);
 
         // Reload data to see the fixed weekSchedules
         await loadDataFromAPI();
         renderPlanning();
     } catch (error) {
-        alert('Migratie mislukt: ' + error.message);
+        showToast('Migratie mislukt: ' + error.message, 'error');
     }
 }
 
 async function seedTeams() {
     try {
         const result = await apiFetch('/admin/seed-teams', { method: 'POST' });
-        alert(`Teams aangemaakt!\n\nNieuw: ${result.created}\nBijgewerkt: ${result.updated}\nTotaal: ${result.total}`);
+        showToast(`Teams aangemaakt! Nieuw: ${result.created}, Bijgewerkt: ${result.updated}, Totaal: ${result.total}`, 'success');
 
         // Reload data
         await loadDataFromAPI();
         renderSettings();
     } catch (error) {
-        alert('Teams aanmaken mislukt: ' + error.message);
+        showToast('Teams aanmaken mislukt: ' + error.message, 'error');
     }
 }
 
@@ -6408,9 +6729,9 @@ async function showDebugInfo() {
 
         console.log(message);
         console.log('Full debug result:', result);
-        alert(message.substring(0, 2000) + (message.length > 2000 ? '\n\n... (zie console voor volledige output)' : ''));
+        showToast(message.length > 200 ? 'Debug info getoond in console (F12)' : message, 'info');
     } catch (error) {
-        alert('Debug info ophalen mislukt: ' + error.message);
+        showToast('Debug info ophalen mislukt: ' + error.message, 'error');
     }
 }
 
@@ -6621,11 +6942,11 @@ async function importData(event) {
             console.log('Gevonden gebruikers/medewerkers:', usersToImport.length);
 
             if (usersToImport.length === 0) {
-                alert('Geen medewerkers gevonden in backup bestand');
+                showToast('Geen medewerkers gevonden in backup bestand', 'warning');
                 return;
             }
 
-            if (!confirm(`${usersToImport.length} medewerkers gevonden. Importeren naar de database?\n\nNieuwe medewerkers krijgen het standaard wachtwoord: Welkom123!`)) {
+            if (!await showConfirm(`${usersToImport.length} medewerkers gevonden. Importeren naar de database?\n\nNieuwe medewerkers krijgen het standaard wachtwoord: Welkom123!`, 'Backup importeren')) {
                 return;
             }
 
@@ -6648,27 +6969,28 @@ async function importData(event) {
                 body: JSON.stringify(importPayload)
             });
 
-            let message = `${result.results.imported} items geïmporteerd.`;
+            let message = `${result.results.imported} items geïmporteerd`;
             if (result.results.skipped > 0) {
-                message += `\n${result.results.skipped} items overgeslagen.`;
+                message += `, ${result.results.skipped} items overgeslagen`;
             }
-            if (result.results.errors && result.results.errors.length > 0) {
-                message += `\n\nFouten:\n${result.results.errors.map(e => `• ${e.name}: ${e.error}`).join('\n')}`;
-            }
+            showToast(message, 'success');
 
-            alert(message);
+            if (result.results.errors && result.results.errors.length > 0) {
+                console.error('Import fouten:', result.results.errors);
+                showToast(`${result.results.errors.length} fouten opgetreden. Zie console (F12).`, 'warning');
+            }
 
             // Reload page to show new data
             location.reload();
         } catch (error) {
             console.error('Import error:', error);
-            alert('Fout bij importeren: ' + error.message);
+            showToast('Fout bij importeren: ' + error.message, 'error');
         }
     };
 
     reader.onerror = (error) => {
         console.error('FileReader error:', error);
-        alert('Fout bij lezen van bestand');
+        showToast('Fout bij lezen van bestand', 'error');
     };
 
     reader.readAsText(file);

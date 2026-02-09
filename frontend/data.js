@@ -1297,11 +1297,11 @@ function loadFromStorage() {
 }
 
 async function resetData() {
-    if (!confirm('Weet je zeker dat je ALLE data wilt verwijderen?\n\nDit verwijdert alle diensten en afwezigheden.\nGebruikers blijven behouden.\nDit kan niet ongedaan worden gemaakt!')) {
+    if (!await showConfirm('Weet je zeker dat je ALLE data wilt verwijderen?\n\nDit verwijdert alle diensten en afwezigheden.\nGebruikers blijven behouden.\nDit kan niet ongedaan worden gemaakt!', 'Alle data verwijderen')) {
         return;
     }
 
-    if (!confirm('LAATSTE WAARSCHUWING: Alle planning data wordt permanent verwijderd. Doorgaan?')) {
+    if (!await showConfirm('LAATSTE WAARSCHUWING: Alle planning data wordt permanent verwijderd. Doorgaan?', 'Laatste waarschuwing')) {
         return;
     }
 
@@ -1310,7 +1310,7 @@ async function resetData() {
         alert('Alle planning data is gewist. De pagina wordt herladen.');
         location.reload();
     } catch (error) {
-        alert('Fout bij wissen: ' + error.message);
+        showToast('Fout bij wissen: ' + error.message, 'error');
     }
 }
 

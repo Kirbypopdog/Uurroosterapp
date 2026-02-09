@@ -533,9 +533,26 @@
         </div>
     </div>
 
+    <!-- Confirmation Modal -->
+    <div id="confirm-modal" class="modal hidden">
+        <div class="modal-content confirm-modal-content">
+            <div class="modal-header">
+                <h2 id="confirm-modal-title">Bevestig actie</h2>
+            </div>
+            <div class="modal-body">
+                <p id="confirm-modal-message"></p>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="confirm-modal-cancel">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="confirm-modal-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
     <script src="config/settings.js"></script>
     <script src="data.js"></script>
     <script src="validation.js"></script>
+    <script src="drag-handler.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

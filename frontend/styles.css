@@ -2142,7 +2142,13 @@ textarea {
 }
 
 /* Absent conflict - highest priority - red stripes animation */
-.timeline-block.absent-conflict {
+/* Override all team colors when there's an absence conflict */
+.timeline-block.absent-conflict,
+.timeline-block.team-vlot1.absent-conflict,
+.timeline-block.team-vlot2.absent-conflict,
+.timeline-block.team-cargo.absent-conflict,
+.timeline-block.team-overkoepelend.absent-conflict,
+.timeline-block.team-jobstudent.absent-conflict {
     background: repeating-linear-gradient(
         45deg,
         #fecaca,
@@ -2188,6 +2194,81 @@ textarea {
     padding: 0 4px;
     white-space: nowrap;
     text-shadow: 0 1px 1px rgba(0,0,0,0.2);
+}
+
+/* ===== DRAG & DROP STATES ===== */
+/* Note: Drag & drop styles have been moved to the bottom of this file (around line 6200) */
+
+/* Valid drop target highlighting */
+.timeline-day-cell.drop-target-valid {
+    background-color: rgba(16, 185, 129, 0.1) !important;
+    outline: 2px dashed #10b981;
+    outline-offset: -2px;
+}
+
+.timeline-day-cell.drop-target-invalid {
+    background-color: rgba(239, 68, 68, 0.1) !important;
+    outline: 2px dashed #ef4444;
+    outline-offset: -2px;
+}
+
+/* Resize handles (invisible but interactive) */
+.timeline-block .resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 10px;
+    z-index: 10;
+    cursor: ew-resize;
+}
+
+.timeline-block .resize-handle-start {
+    left: 0;
+}
+
+.timeline-block .resize-handle-end {
+    right: 0;
+}
+
+/* Hover effect for resize handles */
+.timeline-block .resize-handle:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Clickable empty cell hover effect (+ icon) */
+.timeline-day-cell:not(.has-shifts):not(.closed):hover::after {
+    content: '+';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 24px;
+    color: #64748b;
+    opacity: 0.3;
+    pointer-events: none;
+    font-weight: 300;
+}
+
+/* Hide + icon when dragging */
+.timeline-day-cell.drop-target-valid::after,
+.timeline-day-cell.drop-target-invalid::after {
+    display: none;
+}
+
+/* Shift block indicator */
+.shift-block-indicator {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    font-size: 14px;
+    opacity: 0.6;
+    z-index: 5;
+    cursor: help;
+    transition: opacity 0.2s ease;
+}
+
+.shift-block-indicator:hover {
+    opacity: 1;
 }
 
 .no-shifts-message {
@@ -6110,4 +6191,173 @@ textarea {
 
 .validation-success {
     color: #065f46;
+}
+
+/* ===== DRAG & DROP STYLES ===== */
+
+/* Dragging shift block - moves with cursor */
+.timeline-block.is-dragging {
+    opacity: 0.7;
+    z-index: 10000;
+    position: fixed !important;
+    pointer-events: none;
+    cursor: grabbing !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    /* Dimensions will be set via JavaScript to preserve original size */
+}
+
+/* Ghost/placeholder in original position */
+.timeline-block.drag-ghost {
+    opacity: 0.3;
+    border: 2px dashed #64748b;
+    background: transparent !important;
+    pointer-events: none;
+}
+
+/* Valid drop target highlighting */
+.timeline-day-cell.drop-target-valid {
+    background-color: rgba(16, 185, 129, 0.15);
+    outline: 2px solid #10b981;
+    outline-offset: -2px;
+}
+
+/* Invalid drop target highlighting */
+.timeline-day-cell.drop-target-invalid {
+    background-color: rgba(239, 68, 68, 0.15);
+    outline: 2px solid #ef4444;
+    outline-offset: -2px;
+}
+
+/* ===== TOAST NOTIFICATION SYSTEM ===== */
+
+/* Toast Container */
+.toast-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 100000;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 10px;
+    max-width: 400px;
+}
+
+/* Toast Card */
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-left: 4px solid currentColor;
+    opacity: 0;
+    transform: translateX(100%);
+    transition: all 0.3s ease;
+    min-width: 300px;
+}
+
+.toast-show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.toast-hide {
+    opacity: 0;
+    transform: translateX(100%);
+}
+
+/* Toast Types */
+.toast-success {
+    color: #10b981;
+    border-left-color: #10b981;
+}
+
+.toast-error {
+    color: #ef4444;
+    border-left-color: #ef4444;
+}
+
+.toast-warning {
+    color: #f59e0b;
+    border-left-color: #f59e0b;
+}
+
+.toast-info {
+    color: #3b82f6;
+    border-left-color: #3b82f6;
+}
+
+/* Toast Content */
+.toast-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.toast-message {
+    flex: 1;
+    color: #1f2937;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.toast-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: color 0.2s;
+}
+
+.toast-close:hover {
+    color: #1f2937;
+}
+
+/* Mobile Responsive */
+@media (max-width: 767px) {
+    .toast-container {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        max-width: none;
+    }
+
+    .toast {
+        min-width: auto;
+    }
+}
+
+/* ===== CONFIRMATION MODAL ===== */
+
+.confirm-modal-content {
+    max-width: 500px;
+}
+
+.confirm-modal-content .modal-body {
+    padding: 1.5rem;
+    font-size: 1rem;
+    line-height: 1.6;
+    white-space: pre-wrap; /* Preserve newlines in confirmation messages */
+}
+
+.confirm-modal-content .modal-actions {
+    padding: 1rem 1.5rem;
+    gap: 0.75rem;
+}
+
+.confirm-modal-content #confirm-modal-ok {
+    min-width: 100px;
+}
+
+.confirm-modal-content #confirm-modal-cancel {
+    min-width: 100px;
 }

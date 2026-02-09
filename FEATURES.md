@@ -13,6 +13,37 @@
 - [x] Verlof/Overuren alert: "Vergeet niet dit ook in Eureka aan te passen"
 - [x] Fixed: UI now updates immediately after save/delete (async/await fixes)
 
+### Shift Blocks ✅ COMPLETED (2026-02-09)
+- [x] Prevent auto-schedule from regenerating deleted shifts
+- [x] Shift blocks table with user_id + date unique constraint
+- [x] Manual override: creating manual shift removes block
+- [x] System cleanup: skipBlock parameter for bulk operations
+
+### UI/UX Improvements ✅ COMPLETED (2026-02-09)
+- [x] Renamed "Verlof" tab to "Verlof en ziekte"
+- [x] Removed confusing placeholder text from takeover modal
+- [x] Fixed nacht shift overflow on Sunday (truncate at midnight)
+- [x] Combined "Ruilen" and "Iemand zoeken" into "Shift afstaan" with choice modal
+
+### Team Validation ✅ COMPLETED (2026-02-09)
+- [x] Validate team assignments with warnings (flexible approach)
+- [x] Check against mainTeam and extraTeams
+- [x] Clear messaging when employee works for wrong team
+- [x] Allow manual override with admin/teamverantwoordelijke approval
+
+### Settings Persistence ✅ COMPLETED (2026-02-09)
+- [x] Planning horizon persists across page refreshes
+- [x] Team colors save/load from backend database
+- [x] Settings table migration for persistent storage
+- [x] Team colors apply throughout entire app (incl. timeline blocks)
+
+### Diensten Ruil Systeem ✅ COMPLETED
+- [x] Medewerkers kunnen shifts ruilen (swap requests)
+- [x] Medewerkers kunnen shifts beschikbaar stellen (takeover requests)
+- [x] Approval workflow voor team leads
+- [x] Status tracking (pending, approved, rejected, cancelled)
+- [x] Auto-create takeover requests bij ziekte/verlof
+
 ### Code Cleanup
 - [x] Removed email mapping fallback code (post-migration)
 - [x] Simplified shift endpoints (50-70% less code)
@@ -25,18 +56,6 @@
   - Welcome screen voor nieuwe gebruikers
   - Quick actions dashboard
   - Recent activity overview
-
-- [ ] **Maand View**
-  - Maandoverzicht naast bestaande week view
-  - Compacte weergave van hele maand
-  - Navigatie tussen weken/maanden
-
-### Medium Priority
-- [ ] **Diensten Ruil Systeem**
-  - Medewerkers kunnen shifts met elkaar ruilen
-  - Approval workflow (teamverantwoordelijke/hoofdverantwoordelijke)
-  - Notificaties bij ruil verzoeken
-  - Voorwaarden: zelfde team, zelfde functie, etc.
 
 - [ ] **Overuren Logica**
   - Automatisch bijhouden van overuren
@@ -56,11 +75,20 @@
   - Infinite scroll / on-demand loading
   - Voorkomt dat medewerkers verdwijnen na X weken
 
-- [ ] **Drag & Drop Shifts**
-  - Shifts verplaatsen met drag & drop
-  - Visuele feedback tijdens slepen
-  - Validation tijdens drop
-  - Undo optie na drop
+- [ ] **Drag & Drop Shifts** 🚧 IN PROGRESS
+  - ✅ Shifts verplaatsen met drag & drop (basis implementatie)
+  - ✅ Visuele feedback tijdens slepen
+  - ✅ Validation tijdens drop
+  - ✅ Resize shift duration
+  - ✅ Click empty cell to create shift
+  - **Toekomstige uitbreidingen (Future Enhancements):**
+    - [ ] Multi-select: Meerdere shifts tegelijk selecteren en verplaatsen
+    - [ ] Drag to delete: Shift naar prullenbak zone slepen om te verwijderen
+    - [ ] Copy shift: Ctrl+drag om shift te dupliceren
+    - [ ] Drag to different date: Shift naar andere datum slepen (niet alleen andere medewerker)
+    - [ ] Touch gestures: Swipe bewegingen op mobiel voor shift transfer
+    - [ ] Keyboard shortcuts: Pijltjestoetsen om geselecteerde shift te verplaatsen
+    - [ ] Batch operations: Meerdere shifts selecteren, actie toepassen op allen
 
 - [ ] **Team Coverage Heatmap**
   - Visuele weergave van team bezetting
@@ -96,9 +124,12 @@
 
 **Prioriteit Categorieën:**
 1. **Alerts** ✅ - Voltooid
-2. **Views** - Maand view (volgende)
-3. **Shift Management** - Ruilen, overuren
-4. **UX Improvements** - Drag&drop, undo/redo, etc.
+2. **Shift Blocks** ✅ - Voltooid
+3. **Diensten Ruil Systeem** ✅ - Voltooid
+4. **Team Validation** ✅ - Voltooid
+5. **Settings Persistence** ✅ - Voltooid
+6. **Overuren Logica** 📋 - Volgende
+7. **UX Improvements** 📋 - Drag&drop, undo/redo, etc.
 
 ## 📝 Notes
 
@@ -106,6 +137,12 @@
 - Testing is verplicht voordat feature als "done" gemarkeerd wordt
 - Code reviews gebeuren via commits
 - Breaking changes worden duidelijk gecommuniceerd
+
+## ❌ Cancelled Features
+
+### Maand View ❌ CANCELLED
+- Geprobeerd maar werkte niet goed voor de use case
+- Week view blijft de primaire planning interface
 
 ## 🔄 Feature Status Legend
 
@@ -117,4 +154,4 @@
 
 ## 📅 Last Updated
 
-2025-02-08 - Added alert features (ziekte + verlof/overuren)
+2026-02-09 - Added shift blocks, UI improvements, team validation, settings persistence, drag & drop (in progress with future enhancements documented)
