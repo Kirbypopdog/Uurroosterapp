@@ -3318,8 +3318,14 @@ async function saveProfileWeekSchedule() {
             DataStore.users[userIndex].weekScheduleWeek2 = weekScheduleWeek2;
         }
 
-        // Reset auto-schedule flag so it regenerates with new base schedule
+        // Reset auto-schedule flag and regenerate with new base schedule
         AppState.schedulesGenerated = false;
+        await autoApplyBaseSchedules();
+
+        // Refresh planning view if currently visible
+        if (AppState.currentView === 'planning') {
+            renderPlanning();
+        }
 
         setMessage('Werkrooster opgeslagen!', 'success');
     } catch (error) {
