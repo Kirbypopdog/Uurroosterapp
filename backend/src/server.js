@@ -802,22 +802,34 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
   }
 
   try {
-    // Check if shift is auto-generated
-    const shiftResult = await pool.query('SELECT source FROM shifts WHERE id = $1', [id]);
+    // Get full shift details for permission check
+    const shiftResult = await pool.query(
+      'SELECT id, user_id, team, source FROM shifts WHERE id = $1',
+      [id]
+    );
 
     if (shiftResult.rows.length === 0) {
       return res.status(404).json({ error: 'Shift niet gevonden' });
     }
 
     const shift = shiftResult.rows[0];
+    const { role, id: userId, team_id: userTeam } = req.user;
 
-    // Auto-generated shifts can be deleted by anyone (they're temporary)
-    // Manual shifts require elevated permissions
-    if (shift.source !== 'auto') {
-      const { role } = req.user;
-      if (role === 'medewerker') {
-        return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
+    // Permission checks based on role
+    if (role === 'admin' || role === 'hoofdverantwoordelijke') {
+      // Admin/hoofdverantwoordelijke can delete anything
+    } else if (role === 'teamverantwoordelijke') {
+      // Teamverantwoordelijke can only delete shifts from own team
+      if (shift.team !== userTeam) {
+        return res.status(403).json({ error: 'Je kunt alleen diensten van je eigen team verwijderen' });
       }
+    } else if (role === 'medewerker') {
+      // Medewerker can only delete own shifts
+      if (shift.user_id !== userId) {
+        return res.status(403).json({ error: 'Je kunt alleen je eigen diensten verwijderen' });
+      }
+    } else {
+      return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
     }
 
     await pool.query('DELETE FROM shifts WHERE id = $1', [id]);
