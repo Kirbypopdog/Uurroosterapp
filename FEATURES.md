@@ -24,6 +24,7 @@
 - [x] Removed confusing placeholder text from takeover modal
 - [x] Fixed nacht shift overflow on Sunday (truncate at midnight)
 - [x] Combined "Ruilen" and "Iemand zoeken" into "Shift afstaan" with choice modal
+- [x] Scroll position preservation: Planner no longer jumps to top after drag & drop or changes
 
 ### Team Validation ✅ COMPLETED (2026-02-09)
 - [x] Validate team assignments with warnings (flexible approach)
