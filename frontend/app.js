@@ -3501,6 +3501,15 @@ async function handleEmployeeSubmit(e) {
     }
     closeEmployeeModal();
     renderEmployees();
+
+    // Reset auto-schedule flag and regenerate with new base schedule
+    AppState.schedulesGenerated = false;
+    await autoApplyBaseSchedules();
+
+    // Refresh planning view if currently visible
+    if (AppState.currentView === 'planning') {
+        renderPlanning();
+    }
 }
 
 async function handleEmployeeDelete() {
