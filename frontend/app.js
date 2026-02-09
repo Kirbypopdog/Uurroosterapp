@@ -3318,7 +3318,16 @@ async function saveProfileWeekSchedule() {
             DataStore.users[userIndex].weekScheduleWeek2 = weekScheduleWeek2;
         }
 
-        setMessage('✅ Basisrooster opgeslagen!\n\nℹ️ Tip: Handmatige diensten blijven behouden.\nAlleen AUTO-diensten worden vervangen bij regeneratie.', 'success');
+        // Regenerate auto-shifts based on new base schedule
+        AppState.schedulesGenerated = false;
+        await autoApplyBaseSchedules();
+
+        // Refresh planning view if currently visible
+        if (AppState.currentView === 'planning') {
+            renderPlanning();
+        }
+
+        setMessage('✅ Basisrooster opgeslagen en diensten geregenereerd!\n\nℹ️ Handmatige diensten blijven behouden.', 'success');
     } catch (error) {
         setMessage(`Opslaan mislukt: ${error.message}`, 'error');
     } finally {
@@ -3492,6 +3501,15 @@ async function handleEmployeeSubmit(e) {
     }
     closeEmployeeModal();
     renderEmployees();
+
+    // Regenerate auto-shifts based on new base schedule
+    AppState.schedulesGenerated = false;
+    await autoApplyBaseSchedules();
+
+    // Refresh planning view if currently visible
+    if (AppState.currentView === 'planning') {
+        renderPlanning();
+    }
 }
 
 async function handleEmployeeDelete() {
