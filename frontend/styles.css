@@ -766,7 +766,7 @@ textarea {
     background: var(--surface-color);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
-    overflow: hidden;
+    overflow: visible; /* Allow sticky positioning */
 }
 
 .calendar-grid {
@@ -5416,9 +5416,9 @@ textarea {
         max-width: 100% !important;
     }
 
-    /* Prevent horizontal scroll on calendar container */
+    /* Allow sticky positioning on calendar container */
     .calendar-container {
-        overflow: hidden !important;
+        overflow: visible !important;
         width: 100% !important;
         max-width: 100% !important;
     }
