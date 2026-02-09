@@ -1722,8 +1722,7 @@ textarea {
 .timeline-view-wrapper {
     background: var(--surface-color);
     border-radius: var(--radius-lg);
-    overflow-x: auto;
-    overflow-y: visible;
+    overflow: visible; /* Allow sticky positioning to work */
     box-shadow: var(--shadow-sm);
     border: 1px solid var(--border-color);
     min-width: 100%;
@@ -5404,7 +5403,7 @@ textarea {
 
     /* Timeline: show only employee name + 1 selected day */
     .timeline-view-wrapper {
-        overflow: hidden !important;
+        overflow: visible !important; /* Allow sticky positioning */
         width: 100% !important;
         max-width: 100% !important;
     }
