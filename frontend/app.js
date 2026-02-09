@@ -3318,6 +3318,9 @@ async function saveProfileWeekSchedule() {
             DataStore.users[userIndex].weekScheduleWeek2 = weekScheduleWeek2;
         }
 
+        // Reset auto-schedule flag so it regenerates with new base schedule
+        AppState.schedulesGenerated = false;
+
         setMessage('Werkrooster opgeslagen!', 'success');
     } catch (error) {
         setMessage(`Opslaan mislukt: ${error.message}`, 'error');
@@ -4433,6 +4436,8 @@ function attachSwapActionListeners() {
                 if (confirm('Weet je zeker dat je deze shift wilt overnemen?')) {
                     try {
                         await acceptTakeoverRequest(requestId, notes);
+                        // Reload shifts to see the newly acquired shift
+                        await getShifts();
                         alert('✅ Shift overgenomen! Je kunt hem nu zien in je planning.');
                         switchView('planning'); // Go to planning to see the new shift
                     } catch (error) {
