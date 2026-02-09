@@ -1740,6 +1740,7 @@ textarea {
     position: sticky;
     top: 0;
     z-index: 20;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3); /* DEBUG: shadow to see if sticky works */
 }
 
 @media (max-width: 1400px) {
@@ -1863,6 +1864,7 @@ textarea {
     position: sticky;
     top: 60px; /* Height of .timeline-header */
     z-index: 15; /* Below header (20), above content */
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2); /* DEBUG: shadow to see if sticky works */
 }
 
 .timeline-scale-label {
