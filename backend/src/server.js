@@ -223,6 +223,28 @@ async function ensureSchema() {
         console.log(`  Error creating shift_blocks table: ${e.message}`);
       }
     }
+
+    // Check if settings table exists
+    const settingsTableCheck = await client.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'settings'
+    `);
+
+    if (settingsTableCheck.rows.length === 0) {
+      console.log('Creating settings table...');
+      try {
+        await client.query(`
+          CREATE TABLE settings (
+            key TEXT PRIMARY KEY,
+            value JSONB NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+        console.log('  Created table: settings');
+      } catch (e) {
+        console.log(`  Error creating settings table: ${e.message}`);
+      }
+    }
   } catch (err) {
     console.error('Schema check error:', err.message);
   } finally {

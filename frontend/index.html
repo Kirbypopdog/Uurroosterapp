@@ -45,7 +45,7 @@
                 <button class="nav-btn active" data-view="planning">Planning</button>
                 <button class="nav-btn" data-view="employees">Medewerkers</button>
                 <button class="nav-btn" data-view="profile">Profiel</button>
-                <button class="nav-btn" data-view="availability">Verlof</button>
+                <button class="nav-btn" data-view="availability">Verlof en ziekte</button>
                 <button class="nav-btn" data-view="swaps">Ruilen</button>
                 <button class="nav-btn" data-view="settings">Instellingen</button>
             </div>
@@ -468,6 +468,36 @@
         </div>
     </div>
 
+    <!-- Modal: Shift Afstaan Choice -->
+    <div id="shift-afstaan-choice-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>Shift afstaan</h2>
+                <span class="modal-close" id="shift-afstaan-choice-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 1.5rem; color: #666;">
+                    Hoe wil je deze shift afstaan?
+                </p>
+
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <button type="button" class="btn btn-primary" id="choice-swap-btn" style="padding: 16px; text-align: left; display: flex; flex-direction: column; gap: 4px;">
+                        <div style="font-weight: 600; font-size: 16px;">🔄 Ruilen met collega</div>
+                        <div style="font-size: 13px; opacity: 0.9;">Zoek een collega om shifts te ruilen (jij neemt hun shift over)</div>
+                    </button>
+
+                    <button type="button" class="btn btn-secondary" id="choice-takeover-btn" style="padding: 16px; text-align: left; display: flex; flex-direction: column; gap: 4px;">
+                        <div style="font-weight: 600; font-size: 16px;">👋 Iemand zoeken</div>
+                        <div style="font-size: 13px; opacity: 0.9;">Stel je shift beschikbaar voor iedereen (zonder ruilen)</div>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="shift-afstaan-choice-cancel">Annuleren</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Iemand Zoeken (Takeover Request) -->
     <div id="takeover-request-modal" class="modal hidden">
         <div class="modal-content">
@@ -489,7 +519,7 @@
                 <!-- Message -->
                 <div class="form-group">
                     <label for="takeover-message">Bericht (optioneel)</label>
-                    <textarea id="takeover-message" class="form-control" rows="3" placeholder="Bijv: Ben ziek, wie kan mijn shift overnemen?"></textarea>
+                    <textarea id="takeover-message" class="form-control" rows="3" placeholder=""></textarea>
                 </div>
 
                 <p style="margin-top: 1rem; padding: 0.75rem; background: #fef3c7; border-radius: 4px; font-size: 0.9rem;">

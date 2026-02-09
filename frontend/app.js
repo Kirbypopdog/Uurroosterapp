@@ -206,6 +206,7 @@ function applyTeamColors() {
 .team-badge.${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .team-badge-mini.${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.timeline-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-team-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .timeline-team-header.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
@@ -564,6 +565,13 @@ function setupEventListeners() {
         if (e.target.id === 'takeover-request-modal') closeTakeoverRequestModal();
     });
 
+    // Shift afstaan choice modal event listeners
+    document.getElementById('shift-afstaan-choice-close').addEventListener('click', closeShiftAfstaanChoiceModal);
+    document.getElementById('shift-afstaan-choice-cancel').addEventListener('click', closeShiftAfstaanChoiceModal);
+    document.getElementById('shift-afstaan-choice-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'shift-afstaan-choice-modal') closeShiftAfstaanChoiceModal();
+    });
+
     // Week tabs (static in HTML)
     document.querySelectorAll('.week-tab').forEach(tab => {
         tab.addEventListener('click', () => switchWeekTab(parseInt(tab.dataset.week)));
@@ -635,6 +643,7 @@ async function handleLogin(e) {
         sessionStorage.setItem('hetvlot_token', data.token);
         // Load data from database
         await loadDataFromAPI();
+        applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
         // Auto-apply base schedules after data loads
         await autoApplyBaseSchedules();
@@ -687,6 +696,7 @@ async function checkSession() {
         sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
         // Load data from database
         await loadDataFromAPI();
+        applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
         // Auto-apply base schedules after data loads
         await autoApplyBaseSchedules();
@@ -1479,15 +1489,23 @@ function renderTimelineView() {
                                 const hoursDay1 = END_HOUR - startFrac; // van start tot 24:00
                                 const hoursDay2 = Math.max(0, (endHour + endMin / 60) - START_HOUR); // van 7:00 tot eind
 
-                                // Totale uren in percentage van één dag
-                                // We moeten de width berekenen als: dag1 deel + kleine gap + dag2 deel
-                                // De dag cellen zitten naast elkaar, dus 100% = 1 volledige cel
-                                // We gebruiken calc() met een kleine extra voor de grid gap
-                                const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
-                                const widthDay2Percent = (hoursDay2 / TOTAL_HOURS) * 100;
+                                // Check if this is Sunday (last day of week view) - if so, only show day 1 portion
+                                // to prevent overflow outside the visible week
+                                if (dayOfWeek === 0) {
+                                    // Sunday: only show the portion until midnight (don't extend into next week)
+                                    const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
+                                    widthPercent = `${widthDay1Percent}%`;
+                                } else {
+                                    // Other days: show full overnight shift spanning two day cells
+                                    // We moeten de width berekenen als: dag1 deel + kleine gap + dag2 deel
+                                    // De dag cellen zitten naast elkaar, dus 100% = 1 volledige cel
+                                    // We gebruiken calc() met een kleine extra voor de grid gap
+                                    const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
+                                    const widthDay2Percent = (hoursDay2 / TOTAL_HOURS) * 100;
 
-                                // Totaal: dag1 + gap (4px) + dag2
-                                widthPercent = `calc(${widthDay1Percent}% + 4px + ${widthDay2Percent}%)`;
+                                    // Totaal: dag1 + gap (4px) + dag2
+                                    widthPercent = `calc(${widthDay1Percent}% + 4px + ${widthDay2Percent}%)`;
+                                }
                             } else {
                                 const endFrac = endHour + endMin / 60;
                                 const rightEnd = Math.min(END_HOUR, endFrac);
@@ -2191,51 +2209,25 @@ function openShiftModal(shift, canEdit) {
     DOM.shiftSubmitBtn.style.display = canEdit ? 'inline-block' : 'none';
     DOM.shiftDeleteBtn.style.display = canEdit ? 'block' : 'none';
 
-    // Add "Ruilen" button if user can request swap
-    const existingSwapBtn = document.getElementById('shift-swap-btn');
-    if (existingSwapBtn) existingSwapBtn.remove();
+    // Add combined "Shift afstaan" button if user can request swap
+    const existingAfstaanBtn = document.getElementById('shift-afstaan-btn');
+    if (existingAfstaanBtn) existingAfstaanBtn.remove();
 
     if (canRequestSwap(shift)) {
-        const swapBtn = document.createElement('button');
-        swapBtn.type = 'button';
-        swapBtn.id = 'shift-swap-btn';
-        swapBtn.className = 'btn btn-secondary';
-        swapBtn.textContent = 'Ruilen';
-        swapBtn.style.marginRight = 'auto';
-        swapBtn.addEventListener('click', () => {
+        const afstaanBtn = document.createElement('button');
+        afstaanBtn.type = 'button';
+        afstaanBtn.id = 'shift-afstaan-btn';
+        afstaanBtn.className = 'btn btn-primary';
+        afstaanBtn.textContent = 'Shift afstaan';
+        afstaanBtn.style.marginRight = 'auto';
+        afstaanBtn.addEventListener('click', () => {
             closeShiftModal();
-            openSwapRequestModal(shift);
+            openShiftAfstaanChoiceModal(shift);
         });
 
         // Insert before submit button
         const modalActions = DOM.shiftSubmitBtn.parentElement;
-        modalActions.insertBefore(swapBtn, modalActions.firstChild);
-    }
-
-    // Add "Iemand zoeken" button for takeover requests
-    const existingTakeoverBtn = document.getElementById('shift-takeover-btn');
-    if (existingTakeoverBtn) existingTakeoverBtn.remove();
-
-    if (canRequestSwap(shift)) {
-        const takeoverBtn = document.createElement('button');
-        takeoverBtn.type = 'button';
-        takeoverBtn.id = 'shift-takeover-btn';
-        takeoverBtn.className = 'btn btn-primary';
-        takeoverBtn.textContent = 'Iemand zoeken';
-        takeoverBtn.style.marginRight = '8px';
-        takeoverBtn.addEventListener('click', () => {
-            closeShiftModal();
-            openTakeoverRequestModal(shift);
-        });
-
-        // Insert after "Ruilen" button
-        const modalActions = DOM.shiftSubmitBtn.parentElement;
-        const swapBtn = document.getElementById('shift-swap-btn');
-        if (swapBtn) {
-            modalActions.insertBefore(takeoverBtn, swapBtn.nextSibling);
-        } else {
-            modalActions.insertBefore(takeoverBtn, modalActions.firstChild);
-        }
+        modalActions.insertBefore(afstaanBtn, modalActions.firstChild);
     }
 
     // Show source info (auto vs manual)
@@ -2700,6 +2692,33 @@ async function handleSwapReject() {
         console.error('Error rejecting swap:', error);
         alert('❌ Fout bij afwijzen: ' + (error.message || 'Onbekende fout'));
     }
+}
+
+// ===== SHIFT AFSTAAN CHOICE MODAL FUNCTIES =====
+
+let shiftAfstaanChoiceState = {
+    shift: null
+};
+
+function openShiftAfstaanChoiceModal(shift) {
+    shiftAfstaanChoiceState.shift = shift;
+    document.getElementById('shift-afstaan-choice-modal').classList.remove('hidden');
+
+    // Add click handlers for the choice buttons
+    document.getElementById('choice-swap-btn').onclick = () => {
+        closeShiftAfstaanChoiceModal();
+        openSwapRequestModal(shift);
+    };
+
+    document.getElementById('choice-takeover-btn').onclick = () => {
+        closeShiftAfstaanChoiceModal();
+        openTakeoverRequestModal(shift);
+    };
+}
+
+function closeShiftAfstaanChoiceModal() {
+    document.getElementById('shift-afstaan-choice-modal').classList.add('hidden');
+    shiftAfstaanChoiceState.shift = null;
 }
 
 // ===== TAKEOVER REQUEST MODAL FUNCTIES =====
@@ -5338,11 +5357,19 @@ function calculateTemplateDuration(start, end) {
     return `${hours}u${mins}`;
 }
 
-function updateTeamColor(teamId, color) {
+async function updateTeamColor(teamId, color) {
     if (DataStore.settings.teams[teamId]) {
         DataStore.settings.teams[teamId].color = color;
         saveToStorage();
         applyTeamColors();
+
+        // Save to backend
+        try {
+            await saveSettings('teams', DataStore.settings.teams);
+        } catch (error) {
+            console.error('Error saving team color to backend:', error);
+            alert('⚠️ Kleur is lokaal opgeslagen maar backend sync mislukt. Vernieuw de pagina om te synchroniseren.');
+        }
     }
 }
 

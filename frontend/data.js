@@ -157,11 +157,12 @@ async function loadDataFromAPI() {
         DataStore.settings = normalizeSettings({
             ...DataStore.settings,
             ...apiSettings.general,
+            teams: apiSettings.teams || DataStore.settings.teams,
             rules: apiSettings.rules || DataStore.settings.rules,
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
-            planningHorizon: apiSettings.planningHorizon || DataStore.settings.planningHorizon
+            planningHorizon: apiSettings.planning_horizon || DataStore.settings.planningHorizon
         });
 
         DataStore._loaded = true;

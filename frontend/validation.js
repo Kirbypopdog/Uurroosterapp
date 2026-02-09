@@ -127,6 +127,23 @@ function validateTeamAssignment(employeeId, teamId) {
         return { errors, warnings };
     }
 
+    // Check if employee belongs to the assigned team
+    if (teamId) {
+        const mainTeam = employee.mainTeam || employee.main_team;
+        const extraTeams = employee.extraTeams || employee.extra_teams || [];
+        const employeeTeams = [mainTeam, ...extraTeams].filter(t => t);
+
+        if (!employeeTeams.includes(teamId)) {
+            const teamName = DataStore.settings.teams?.[teamId]?.name || teamId;
+            const employeeTeamName = DataStore.settings.teams?.[mainTeam]?.name || mainTeam || 'Onbekend';
+            warnings.push({
+                type: ValidationRules.WARNING,
+                rule: 'Team mismatch',
+                message: `${employee.name} hoort bij ${employeeTeamName}, niet bij ${teamName}. Een teamverantwoordelijke van ${teamName} of admin moet deze shift goedkeuren/aanpassen.`
+            });
+        }
+    }
+
     return { errors, warnings };
 }
 
@@ -362,6 +379,7 @@ function validateShift(shiftData, excludeShiftId = null) {
 
     // 3. Check team toewijzing
     const team = validateTeamAssignment(shiftData.employeeId, shiftData.team);
+    allErrors.push(...team.errors);
     allWarnings.push(...team.warnings);
 
     // 4. Check weekend status
