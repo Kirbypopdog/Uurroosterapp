@@ -5226,7 +5226,7 @@ textarea {
 
     .container, #app-container, .view, main, #planning-view,
     .main-nav, .view-header, .header-actions, .planning-controls {
-        overflow-x: hidden !important;
+        overflow-x: visible !important; /* Allow sticky positioning */
         max-width: 100% !important;
         width: 100% !important;
         box-sizing: border-box !important;
@@ -5317,9 +5317,9 @@ textarea {
         max-width: 100% !important;
     }
 
-    /* Prevent horizontal scroll on planning view */
+    /* Allow sticky positioning on planning view */
     #planning-view {
-        overflow-x: hidden !important;
+        overflow-x: visible !important;
     }
 
     #team-toggles, #employee-team-toggles {
