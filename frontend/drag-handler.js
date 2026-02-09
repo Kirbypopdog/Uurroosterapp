@@ -413,6 +413,11 @@ const DragHandler = {
         console.log('[DragHandler] Starting resize drag (type:', this.state.dragType + ')');
         this.state.isDragging = true;
 
+        // Store original styles to restore on cancel
+        if (this.state.targetElement && this.state.originalStyles === undefined) {
+            this.state.originalStyles = this.state.targetElement.style.cssText;
+        }
+
         // Change cursor
         document.body.style.cursor = 'ew-resize';
     },
@@ -439,9 +444,48 @@ const DragHandler = {
             newEndTime = newTime;
         }
 
-        // Update shift block width visually (will be finalized on mouseup)
-        // For now, just show tooltip
-        // TODO: Add tooltip showing new times
+        // Calculate duration
+        const duration = this.calculateDuration(newStartTime, newEndTime);
+
+        // Don't allow resize if duration would be less than 1 hour
+        if (duration < 1) {
+            return;
+        }
+
+        // Update shift block visual appearance in real-time
+        this.updateShiftBlockVisual(newStartTime, newEndTime);
+    },
+
+    // Update shift block visual appearance during resize
+    updateShiftBlockVisual(startTime, endTime) {
+        if (!this.state.targetElement) return;
+
+        // Parse times
+        const [startHour, startMin] = startTime.split(':').map(Number);
+        const [endHour, endMin] = endTime.split(':').map(Number);
+
+        // Calculate position and width as percentages
+        const startFrac = startHour + startMin / 60;
+        const endFrac = endHour + endMin / 60;
+
+        const START_HOUR = this.constants.START_HOUR;
+        const TOTAL_HOURS = this.constants.TOTAL_HOURS;
+
+        const leftPercent = Math.max(0, ((startFrac - START_HOUR) / TOTAL_HOURS) * 100);
+        const widthPercent = ((endFrac - Math.max(startFrac, START_HOUR)) / TOTAL_HOURS) * 100;
+
+        // Update the visual position/size
+        this.state.targetElement.style.left = `${leftPercent}%`;
+        this.state.targetElement.style.width = `${widthPercent}%`;
+
+        // Update the time label
+        const timeLabel = this.state.targetElement.querySelector('.block-time');
+        if (timeLabel) {
+            timeLabel.textContent = `${startTime}-${endTime}`;
+        }
+
+        // Add visual feedback class
+        this.state.targetElement.classList.add('is-resizing');
     },
 
     // Complete resize drag
@@ -570,7 +614,7 @@ const DragHandler = {
 
         // Remove visual feedback
         if (this.state.targetElement) {
-            this.state.targetElement.classList.remove('is-dragging');
+            this.state.targetElement.classList.remove('is-dragging', 'is-resizing');
         }
 
         if (this.state.ghostElement) {
@@ -595,7 +639,7 @@ const DragHandler = {
 
         // Remove drag classes and restore original styles
         if (this.state.targetElement) {
-            this.state.targetElement.classList.remove('is-dragging');
+            this.state.targetElement.classList.remove('is-dragging', 'is-resizing');
             // Restore original styles completely
             if (this.state.originalStyles !== undefined) {
                 this.state.targetElement.style.cssText = this.state.originalStyles;
