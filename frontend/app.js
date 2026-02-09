@@ -3333,6 +3333,10 @@ function renderProfile() {
                             <input type="password" id="profile-password" placeholder="Laat leeg om niet te wijzigen" />
                             <span class="form-hint">Minstens 8 tekens als je wijzigt.</span>
                         </div>
+                        <div class="form-group">
+                            <label for="profile-password-repeat">Herhaal nieuw wachtwoord</label>
+                            <input type="password" id="profile-password-repeat" placeholder="Herhaal het nieuwe wachtwoord" />
+                        </div>
                         <div id="profile-message" class="form-message info" aria-live="polite">
                             Werk je gegevens bij en druk op Opslaan.
                         </div>
@@ -3406,6 +3410,7 @@ function renderProfile() {
         const name = document.getElementById('profile-name').value.trim();
         const email = document.getElementById('profile-email').value.trim();
         const password = document.getElementById('profile-password').value;
+        const passwordRepeat = document.getElementById('profile-password-repeat').value;
 
         if (!name) {
             setMessage('Vul een naam in.', 'error');
@@ -3418,6 +3423,10 @@ function renderProfile() {
         }
         if (password && password.length < 8) {
             setMessage('Je nieuwe wachtwoord moet minstens 8 tekens zijn.', 'error');
+            return;
+        }
+        if (password !== passwordRepeat) {
+            setMessage('De wachtwoorden komen niet overeen.', 'error');
             return;
         }
 
@@ -3441,6 +3450,7 @@ function renderProfile() {
             AppState.currentUser = data.user;
             sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
             document.getElementById('profile-password').value = '';
+            document.getElementById('profile-password-repeat').value = '';
             setMessage('Profiel opgeslagen.', 'success');
         } catch (error) {
             setMessage(`Opslaan mislukt: ${error.message}`, 'error');
