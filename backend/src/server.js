@@ -1347,7 +1347,7 @@ app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
 app.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
   const requestId = req.params.id;
   const { responseNotes } = req.body;
-  const { id: currentUserId } = req.user;
+  const { id: currentUserId, team_id: acceptorTeam } = req.user;
 
   const client = await pool.connect();
 
@@ -1398,10 +1398,10 @@ app.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => 
       return res.status(400).json({ error: 'Shift ligt in het verleden' });
     }
 
-    // Assign shift to acceptor
+    // Assign shift to acceptor AND update team to acceptor's team
     await client.query(
-      `UPDATE shifts SET user_id = $1, source = 'manual' WHERE id = $2`,
-      [currentUserId, request.requester_shift_id]
+      `UPDATE shifts SET user_id = $1, team = $2, source = 'manual' WHERE id = $3`,
+      [currentUserId, acceptorTeam, request.requester_shift_id]
     );
 
     // Update request status
