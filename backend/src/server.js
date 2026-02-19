@@ -11,7 +11,23 @@ const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const DEFAULT_RESET_PASSWORD = process.env.DEFAULT_RESET_PASSWORD || 'Welkom123!';
 
-app.use(cors());
+// Validate critical env vars in production
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.JWT_SECRET) {
+    console.error('FATAL: JWT_SECRET env var is required in production');
+    process.exit(1);
+  }
+  if (!process.env.DATABASE_URL) {
+    console.error('FATAL: DATABASE_URL env var is required in production');
+    process.exit(1);
+  }
+}
+
+// CORS: restrict to frontend origin in production
+const corsOptions = process.env.FRONTEND_URL
+  ? { origin: process.env.FRONTEND_URL, credentials: true }
+  : {};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // ===== AUTO-MIGRATION ON STARTUP =====
@@ -633,20 +649,6 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
       ]
     );
 
-    // If email changed, also update the employees table to keep them in sync
-    const newEmail = result.rows[0].email;
-    if (email && oldEmail && newEmail && oldEmail.toLowerCase() !== newEmail.toLowerCase()) {
-      try {
-        await pool.query(
-          'UPDATE employees SET email = $1 WHERE LOWER(email) = LOWER($2)',
-          [newEmail, oldEmail]
-        );
-        console.log(`Synced email change from ${oldEmail} to ${newEmail} in employees table`);
-      } catch (empErr) {
-        console.warn('Could not update employees table email (table may not exist or no matching employee):', empErr.message);
-      }
-    }
-
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -706,20 +708,6 @@ app.put('/users/:id', requireAuth, async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Gebruiker niet gevonden' });
-    }
-
-    // If email changed, also update the employees table to keep them in sync
-    const newEmail = result.rows[0].email;
-    if (oldEmail && newEmail && oldEmail.toLowerCase() !== newEmail.toLowerCase()) {
-      try {
-        await pool.query(
-          'UPDATE employees SET email = $1 WHERE LOWER(email) = LOWER($2)',
-          [newEmail, oldEmail]
-        );
-        console.log(`Synced email change from ${oldEmail} to ${newEmail} in employees table`);
-      } catch (empErr) {
-        console.warn('Could not update employees table email (table may not exist or no matching employee):', empErr.message);
-      }
     }
 
     res.json({ user: result.rows[0] });
@@ -868,15 +856,19 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
 
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
     // Get full shift details for permission check (including date for shift_blocks)
     // Cast date to text to avoid timezone conversion issues
-    const shiftResult = await pool.query(
+    const shiftResult = await client.query(
       'SELECT id, user_id, team, source, date::text as date FROM shifts WHERE id = $1',
       [id]
     );
 
     if (shiftResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Shift niet gevonden' });
     }
 
@@ -891,20 +883,23 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
       } else if (role === 'teamverantwoordelijke') {
         // Teamverantwoordelijke can only delete shifts from own team
         if (shift.team !== userTeam) {
+          await client.query('ROLLBACK');
           return res.status(403).json({ error: 'Je kunt alleen diensten van je eigen team verwijderen' });
         }
       } else if (role === 'medewerker') {
         // Medewerker can only delete own shifts
         if (shift.user_id !== userId) {
+          await client.query('ROLLBACK');
           return res.status(403).json({ error: 'Je kunt alleen je eigen diensten verwijderen' });
         }
       } else {
+        await client.query('ROLLBACK');
         return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
       }
     }
 
     // Delete the shift
-    await pool.query('DELETE FROM shifts WHERE id = $1', [id]);
+    await client.query('DELETE FROM shifts WHERE id = $1', [id]);
 
     // Create shift block to prevent auto-regeneration
     // Check if caller wants to skip block creation (for system cleanup operations)
@@ -914,17 +909,21 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
       // USER-INITIATED deletion (via UI) - always create block for both manual AND auto shifts
       // ON CONFLICT DO NOTHING ensures idempotency (safe to call multiple times)
       // Cast $2 to date explicitly to avoid timezone conversion issues
-      await pool.query(`
+      await client.query(`
         INSERT INTO shift_blocks (user_id, date, created_by, reason)
         VALUES ($1, $2::date, $3, $4)
         ON CONFLICT (user_id, date) DO NOTHING
       `, [shift.user_id, shift.date, req.user.id, `${shift.source} shift deleted by user`]);
     }
 
+    await client.query('COMMIT');
     res.json({ ok: true });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('ERROR in DELETE /shifts/:id:', err);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1001,8 +1000,8 @@ app.post('/availability', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Je kunt alleen beschikbaarheid van je eigen team registreren' });
       }
     } catch (e) {
-      // Skip team check if main_team column doesn't exist yet
-      console.log('Skipping team permission check (main_team column not found)');
+      console.error('Team permission check failed:', e.message);
+      return res.status(500).json({ error: 'Fout bij permissiecontrole' });
     }
   }
 
@@ -1041,8 +1040,8 @@ app.delete('/availability', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Je kunt alleen beschikbaarheid van je eigen team verwijderen' });
       }
     } catch (e) {
-      // Skip team check if main_team column doesn't exist yet
-      console.log('Skipping team permission check (main_team column not found)');
+      console.error('Team permission check failed:', e.message);
+      return res.status(500).json({ error: 'Fout bij permissiecontrole' });
     }
   }
 
@@ -1098,7 +1097,7 @@ app.post('/shift-blocks', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/shift-blocks/:id', requireAuth, requireRole(['admin', 'hoofdverantwoordelijke']), async (req, res) => {
+app.delete('/shift-blocks/:id', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'), async (req, res) => {
   try {
     const blockId = parseInt(req.params.id, 10);
     if (!blockId) {
@@ -1171,12 +1170,12 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
         JOIN shifts s1 ON sr.requester_shift_id = s1.id
         LEFT JOIN shifts s2 ON sr.target_shift_id = s2.id
         LEFT JOIN users resp ON sr.responded_by = resp.id
-        WHERE s1.team = $1 OR s2.team = $1 OR sr.request_type = 'takeover'
+        WHERE s1.team = $1 OR s2.team = $1 OR (sr.request_type = 'takeover' AND sr.status = 'pending' AND s1.team = $1)
         ORDER BY sr.created_at DESC
       `;
       params = [team_id];
     } else {
-      // Medewerker: own requests + all open takeover requests
+      // Medewerker: own requests + open takeover requests from own team only
       query = `
         SELECT
           sr.*,
@@ -1198,10 +1197,11 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
         JOIN shifts s1 ON sr.requester_shift_id = s1.id
         LEFT JOIN shifts s2 ON sr.target_shift_id = s2.id
         LEFT JOIN users resp ON sr.responded_by = resp.id
-        WHERE sr.requester_user_id = $1 OR sr.target_user_id = $1 OR sr.request_type = 'takeover'
+        WHERE sr.requester_user_id = $1 OR sr.target_user_id = $1
+              OR (sr.request_type = 'takeover' AND sr.status = 'pending' AND s1.team = $2)
         ORDER BY sr.created_at DESC
       `;
-      params = [currentUserId];
+      params = [currentUserId, team_id];
     }
 
     const result = await pool.query(query, params);
@@ -1293,7 +1293,7 @@ app.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Fetch swap request met shifts info
+    // Fetch swap request met shifts info (FOR UPDATE locks rows to prevent concurrent modification)
     const swapResult = await client.query(
       `SELECT sr.*,
               s1.user_id as requester_current_user, s1.team as requester_team, s1.date as requester_date,
@@ -1303,7 +1303,8 @@ app.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
        FROM shift_swap_requests sr
        JOIN shifts s1 ON sr.requester_shift_id = s1.id
        JOIN shifts s2 ON sr.target_shift_id = s2.id
-       WHERE sr.id = $1`,
+       WHERE sr.id = $1
+       FOR UPDATE OF sr, s1, s2`,
       [swapId]
     );
 
@@ -1518,12 +1519,13 @@ app.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => 
   try {
     await client.query('BEGIN');
 
-    // Fetch takeover request with shift info
+    // Fetch takeover request with shift info (FOR UPDATE locks rows to prevent concurrent modification)
     const requestResult = await client.query(
       `SELECT sr.*, s.user_id as current_shift_owner, s.date, s.start_time, s.end_time, s.team
        FROM shift_swap_requests sr
        JOIN shifts s ON sr.requester_shift_id = s.id
-       WHERE sr.id = $1`,
+       WHERE sr.id = $1
+       FOR UPDATE OF sr, s`,
       [requestId]
     );
 
@@ -1605,7 +1607,7 @@ app.put('/swap-requests/:id/approve', requireAuth, async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Fetch swap request met shifts info
+    // Fetch swap request met shifts info (FOR UPDATE locks rows to prevent concurrent modification)
     const swapResult = await client.query(
       `SELECT sr.*,
               s1.user_id as requester_current_user, s1.team as requester_team, s1.date as requester_date,
@@ -1613,7 +1615,8 @@ app.put('/swap-requests/:id/approve', requireAuth, async (req, res) => {
        FROM shift_swap_requests sr
        JOIN shifts s1 ON sr.requester_shift_id = s1.id
        JOIN shifts s2 ON sr.target_shift_id = s2.id
-       WHERE sr.id = $1`,
+       WHERE sr.id = $1
+       FOR UPDATE OF sr, s1, s2`,
       [swapId]
     );
 
@@ -1953,17 +1956,25 @@ app.post('/import', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'),
 
 // Reset all data (admin only)
 app.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     // Delete in correct order due to foreign keys
-    await pool.query('DELETE FROM availability');
-    await pool.query('DELETE FROM shifts');
-    await pool.query('DELETE FROM settings');
+    await client.query('DELETE FROM shift_swap_requests');
+    await client.query('DELETE FROM shift_blocks');
+    await client.query('DELETE FROM availability');
+    await client.query('DELETE FROM shifts');
+    await client.query('DELETE FROM settings');
     // Note: We don't delete users as that would log everyone out
+    await client.query('COMMIT');
 
     res.json({ ok: true, message: 'Planning data gewist (gebruikers behouden)' });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error(err);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 

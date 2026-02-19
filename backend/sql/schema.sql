@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS shifts (
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,
   notes TEXT DEFAULT '',
+  source TEXT DEFAULT 'manual' CHECK (source IN ('auto', 'manual')),
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -56,10 +57,48 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Shift blocks (prevent auto-regeneration of deleted shifts)
+CREATE TABLE IF NOT EXISTS shift_blocks (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date DATE NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_by INTEGER REFERENCES users(id),
+  reason TEXT,
+  UNIQUE(user_id, date)
+);
+
+-- Shift swap/takeover requests
+CREATE TABLE IF NOT EXISTS shift_swap_requests (
+  id SERIAL PRIMARY KEY,
+  requester_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  requester_shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+  target_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  target_shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
+  request_type TEXT NOT NULL DEFAULT 'swap' CHECK (request_type IN ('swap', 'takeover')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead')),
+  message TEXT,
+  response_notes TEXT,
+  target_approved BOOLEAN DEFAULT NULL,
+  target_response_notes TEXT,
+  target_responded_at TIMESTAMP,
+  lead_approved BOOLEAN DEFAULT NULL,
+  lead_response_notes TEXT,
+  lead_responded_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  responded_at TIMESTAMP,
+  responded_by INTEGER REFERENCES users(id)
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(date);
 CREATE INDEX IF NOT EXISTS idx_shifts_user ON shifts(user_id);
+CREATE INDEX IF NOT EXISTS idx_shifts_team ON shifts(team);
 CREATE INDEX IF NOT EXISTS idx_availability_date ON availability(date);
 CREATE INDEX IF NOT EXISTS idx_availability_user ON availability(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_main_team ON users(main_team);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
+CREATE INDEX IF NOT EXISTS idx_shift_blocks_user_date ON shift_blocks(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON shift_swap_requests(status);
+CREATE INDEX IF NOT EXISTS idx_swap_requests_requester ON shift_swap_requests(requester_user_id);
+CREATE INDEX IF NOT EXISTS idx_swap_requests_target ON shift_swap_requests(target_user_id);

@@ -136,7 +136,8 @@ const USERS = [
 
 // DOM Elements
 const DOM = {};
-const API_BASE = window.API_BASE || 'https://uurrooster-app.onrender.com';
+// API_BASE is set by config/settings.js (loaded before app.js)
+const API_BASE = window.API_BASE;
 
 function escapeHtml(value) {
     return String(value)
@@ -520,7 +521,7 @@ function init() {
         console.log('Session checked');
     } catch (error) {
         console.error('Error during initialization:', error);
-        alert('Er is een fout opgetreden bij het starten van de applicatie. Check de console (F12) voor details.');
+        showToast('Er is een fout opgetreden bij het starten van de applicatie. Check de console (F12) voor details.', 'error');
     }
 }
 
@@ -748,7 +749,7 @@ function setupEventListeners() {
 
             // Check permissions before allowing delete
             if (!canUserEditShift(shift)) {
-                alert('Je hebt geen rechten om deze dienst te verwijderen');
+                showToast('Je hebt geen rechten om deze dienst te verwijderen', 'warning');
                 return;
             }
 
@@ -5817,6 +5818,11 @@ function saveTemplate(originalId) {
         return;
     }
 
+    if (start >= end) {
+        showToast('Starttijd moet voor eindtijd liggen', 'warning');
+        return;
+    }
+
     if (rawId !== id) {
         showToast('Template ID mag enkel letters, cijfers, _ of - bevatten', 'warning');
         return;
@@ -6542,7 +6548,7 @@ async function handleAvailabilitySave() {
 
         // Show type-specific reminders
         if (absenceType === 'ziek') {
-            alert('📞 Bel de personeelsdienst om je ziekte door te geven');
+            showToast('Bel de personeelsdienst om je ziekte door te geven', 'info');
         } else if (absenceType === 'verlof' || absenceType === 'overuren') {
             showToast('Vergeet niet dit ook in Eureka aan te passen', 'info');
         }

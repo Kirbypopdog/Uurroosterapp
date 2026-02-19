@@ -115,13 +115,20 @@ async function dataApiFetch(path, options = {}) {
 async function loadDataFromAPI() {
     try {
         // Load all data in parallel - users now includes employee/schedule data
+        const loadErrors = [];
         const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData] = await Promise.all([
-            dataApiFetch('/users').catch(() => ({ users: [] })),
-            dataApiFetch('/shifts').catch(() => ({ shifts: [] })),
-            dataApiFetch('/availability').catch(() => ({ availability: [] })),
-            dataApiFetch('/shift-blocks').catch(() => []),
-            dataApiFetch('/settings').catch(() => ({ settings: {} }))
+            dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
+            dataApiFetch('/shifts').catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
+            dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
+            dataApiFetch('/shift-blocks').catch(err => { loadErrors.push('shift-blocks'); console.error('[LoadData] Failed to load shift-blocks:', err); return []; }),
+            dataApiFetch('/settings').catch(err => { loadErrors.push('settings'); console.error('[LoadData] Failed to load settings:', err); return { settings: {} }; })
         ]);
+
+        if (loadErrors.length > 0) {
+            if (typeof showToast === 'function') {
+                showToast(`Sommige data kon niet geladen worden: ${loadErrors.join(', ')}`, 'warning');
+            }
+        }
 
         // Users now contain employee/schedule data
         DataStore.users = usersData.users || [];

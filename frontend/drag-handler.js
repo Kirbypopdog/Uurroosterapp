@@ -40,11 +40,17 @@ const DragHandler = {
             return;
         }
 
+        // Store bound references for proper cleanup (bind creates new objects each time)
+        this._boundMouseDown = this.handleMouseDown.bind(this);
+        this._boundMouseMove = this.handleMouseMove.bind(this);
+        this._boundMouseUp = this.handleMouseUp.bind(this);
+        this._boundKeyDown = this.handleKeyDown.bind(this);
+
         // Attach event listeners using event delegation
-        timeline.addEventListener('mousedown', this.handleMouseDown.bind(this));
-        document.addEventListener('mousemove', this.handleMouseMove.bind(this));
-        document.addEventListener('mouseup', this.handleMouseUp.bind(this));
-        document.addEventListener('keydown', this.handleKeyDown.bind(this));
+        timeline.addEventListener('mousedown', this._boundMouseDown);
+        document.addEventListener('mousemove', this._boundMouseMove);
+        document.addEventListener('mouseup', this._boundMouseUp);
+        document.addEventListener('keydown', this._boundKeyDown);
 
         // Store references for cleanup
         this.state.timeline = timeline;
@@ -60,13 +66,13 @@ const DragHandler = {
         console.log('[DragHandler] Cleaning up event listeners');
 
         const timeline = this.state.timeline;
-        if (timeline) {
-            timeline.removeEventListener('mousedown', this.handleMouseDown.bind(this));
+        if (timeline && this._boundMouseDown) {
+            timeline.removeEventListener('mousedown', this._boundMouseDown);
         }
 
-        document.removeEventListener('mousemove', this.handleMouseMove.bind(this));
-        document.removeEventListener('mouseup', this.handleMouseUp.bind(this));
-        document.removeEventListener('keydown', this.handleKeyDown.bind(this));
+        if (this._boundMouseMove) document.removeEventListener('mousemove', this._boundMouseMove);
+        if (this._boundMouseUp) document.removeEventListener('mouseup', this._boundMouseUp);
+        if (this._boundKeyDown) document.removeEventListener('keydown', this._boundKeyDown);
 
         // Reset state
         this.state.initialized = false;
