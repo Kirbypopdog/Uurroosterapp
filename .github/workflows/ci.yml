@@ -6,13 +6,48 @@ on:
     branches: [main]
 
 jobs:
-  basic-checks:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Verify frontend entrypoints
+
+      - name: Verify frontend files exist
         run: |
-          node -e "const fs=require('fs'); fs.accessSync('frontend/index.html'); fs.accessSync('frontend/config/settings.js'); console.log('Frontend files OK');"
+          node -e "
+            const fs = require('fs');
+            const files = [
+              'frontend/index.html',
+              'frontend/app.js',
+              'frontend/data.js',
+              'frontend/validation.js',
+              'frontend/drag-handler.js',
+              'frontend/styles.css',
+              'frontend/config/settings.js'
+            ];
+            files.forEach(f => { fs.accessSync(f); });
+            console.log('Frontend files OK');
+          "
+
+      - name: Check frontend JS syntax
+        run: |
+          node --check frontend/app.js
+          node --check frontend/data.js
+          node --check frontend/validation.js
+          node --check frontend/drag-handler.js
+          node --check frontend/config/settings.js
+          echo "Frontend JS syntax OK"
+
+      - name: Install backend dependencies
+        run: cd backend && npm install
+
+      - name: Check backend JS syntax
+        run: |
+          node --check backend/src/server.js
+          node --check backend/src/db.js
+          echo "Backend JS syntax OK"
+
+      - name: Verify schema.sql exists
+        run: test -f backend/sql/schema.sql && echo "Schema OK"

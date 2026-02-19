@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: uurrooster-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DEFAULT_RESET_PASSWORD
+        sync: false
+      - key: NODE_ENV
+        value: production
+    healthCheckPath: /health
+
+  - type: static
+    name: uurrooster-frontend
+    rootDir: frontend
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache

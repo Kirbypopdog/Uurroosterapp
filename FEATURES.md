@@ -76,12 +76,12 @@
   - Infinite scroll / on-demand loading
   - Voorkomt dat medewerkers verdwijnen na X weken
 
-- [ ] **Drag & Drop Shifts** 🚧 IN PROGRESS
-  - ✅ Shifts verplaatsen met drag & drop (basis implementatie)
-  - ✅ Visuele feedback tijdens slepen
-  - ✅ Validation tijdens drop
-  - ✅ Resize shift duration
-  - ✅ Click empty cell to create shift
+- [x] **Drag & Drop Shifts** ✅ COMPLETED
+  - [x] Shifts verplaatsen met drag & drop
+  - [x] Visuele feedback tijdens slepen
+  - [x] Validation tijdens drop
+  - [x] Resize shift duration
+  - [x] Click empty cell to create shift
   - **Toekomstige uitbreidingen (Future Enhancements):**
     - [ ] Multi-select: Meerdere shifts tegelijk selecteren en verplaatsen
     - [ ] Drag to delete: Shift naar prullenbak zone slepen om te verwijderen
@@ -129,8 +129,9 @@
 3. **Diensten Ruil Systeem** ✅ - Voltooid
 4. **Team Validation** ✅ - Voltooid
 5. **Settings Persistence** ✅ - Voltooid
-6. **Overuren Logica** 📋 - Volgende
-7. **UX Improvements** 📋 - Drag&drop, undo/redo, etc.
+6. **Drag & Drop** ✅ - Voltooid
+7. **Overuren Logica** 📋 - Volgende
+8. **UX Improvements** 📋 - Undo/redo, etc.
 
 ## 📝 Notes
 
@@ -155,4 +156,4 @@
 
 ## 📅 Last Updated
 
-2026-02-09 - Added shift blocks, UI improvements, team validation, settings persistence, drag & drop (in progress with future enhancements documented)
+2026-02-19 - Drag & drop completed, project cleanup & deployment setup (CLAUDE.md, render.yaml, DEPLOY.md)

@@ -5,4 +5,5 @@ backend/node_modules/
 backend/.env
 *.log
 hetvlot-backup-*.json
+*.bak
 .claude/
