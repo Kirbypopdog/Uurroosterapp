@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Het Vlot - Roosterplanning</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -31,9 +34,15 @@
 
     <!-- Hoofdapplicatie -->
     <div id="app-container" class="container hidden">
+        <!-- Sidebar toggle (CSS-only) -->
+        <input type="checkbox" id="sidebar-toggle" class="sidebar-toggle-input" aria-hidden="true">
+
         <!-- Navigatie -->
         <nav class="main-nav">
             <div class="nav-left">
+                <label for="sidebar-toggle" class="sidebar-toggle-label" aria-label="Sidebar inklappen">
+                    <span class="sidebar-toggle-icon"></span>
+                </label>
                 <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu">
                     <span class="hamburger-line"></span>
                     <span class="hamburger-line"></span>
@@ -177,20 +186,7 @@
             </div>
         </div>
 
-        <!-- Footer -->
-        <footer class="app-footer">
-            <div class="footer-content">
-                <div class="footer-brand">
-                    <span class="footer-logo">Het Vlot</span>
-                    <span class="footer-tagline">Roosterplanning</span>
-                </div>
-                <div class="footer-info">
-                    <span>&copy; 2025 Victor Goethals | Voor Het Vlot - De Kade</span>
-                    <span class="footer-divider">|</span>
-                    <span>Versie 1.0</span>
-                </div>
-            </div>
-        </footer>
+        <!-- Footer verwijderd in redesign -->
     </div>
 
     <!-- Modal: Dienst toevoegen/bewerken -->
