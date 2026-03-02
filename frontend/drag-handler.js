@@ -121,14 +121,6 @@ const DragHandler = {
                 dragType = 'resize-end';
             }
 
-            // Additional permission check for transfer operations
-            // Medewerkers can resize their own shifts but cannot transfer them to others
-            if (dragType === 'transfer' && !canUserTransferShift(shift)) {
-                console.log('[DragHandler] User cannot transfer shifts - only resize allowed');
-                showToast('Je kunt alleen je eigen shift tijden aanpassen, niet naar anderen verplaatsen. Gebruik "Shift afstaan" om je shift over te dragen.', 'warning');
-                return;
-            }
-
             // Record start position and time
             this.state.startX = e.clientX;
             this.state.startY = e.clientY;
@@ -169,6 +161,18 @@ const DragHandler = {
 
         // Check if drag threshold exceeded
         if (!this.state.isDragging && distance > this.constants.DRAG_THRESHOLD_PX) {
+            // Permission check for transfer operations (after threshold, not on mousedown)
+            // This allows clicks and resize operations but blocks transfer drags for medewerkers
+            if (this.state.dragType === 'transfer') {
+                const shift = getShift(this.state.dragShiftId);
+                if (shift && !canUserTransferShift(shift)) {
+                    console.log('[DragHandler] User cannot transfer shifts - cancelling drag');
+                    showToast('Je kunt alleen je eigen shift tijden aanpassen, niet naar anderen verplaatsen. Gebruik "Shift afstaan" om je shift over te dragen.', 'warning');
+                    this.cleanup();
+                    return;
+                }
+            }
+
             // Start drag operation
             if (this.state.dragType === 'transfer') {
                 this.startTransferDrag();

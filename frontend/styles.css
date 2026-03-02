@@ -391,6 +391,423 @@ textarea {
     align-items: center;
 }
 
+/* ===== HOME DASHBOARD ===== */
+#home-view {
+    padding: 0;
+}
+
+.home-welcome {
+    background: linear-gradient(135deg, var(--primary-color) 0%, #1e40af 100%);
+    color: white;
+    padding: 28px 24px;
+    border-radius: var(--radius-lg);
+    margin-bottom: 24px;
+}
+
+.home-welcome h2 {
+    font-size: 1.5rem;
+    margin: 0 0 6px 0;
+    font-weight: 600;
+}
+
+.home-welcome-sub {
+    opacity: 0.85;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.home-role-badge {
+    background: rgba(255,255,255,0.2);
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.home-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 24px;
+}
+
+.home-card {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    transition: box-shadow 0.2s ease;
+}
+
+.home-card:hover {
+    box-shadow: var(--shadow-lg);
+}
+
+.home-card-full {
+    grid-column: 1 / -1;
+}
+
+.home-card-shifts {
+    grid-row: span 2;
+}
+
+.home-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 24px;
+    border-bottom: 2px solid var(--bg-color);
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--text-primary);
+    background: linear-gradient(to bottom, white, var(--bg-color));
+}
+
+.home-card-header .card-count {
+    background: var(--primary-color);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    min-width: 28px;
+    text-align: center;
+}
+
+.home-card-body {
+    padding: 20px 24px;
+}
+
+.home-card-empty {
+    color: var(--text-secondary);
+    text-align: center;
+    padding: 24px 16px;
+    font-size: 0.9rem;
+}
+
+/* Shifts list */
+.home-shift-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.home-shift-item:hover {
+    background: white;
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+    transform: translateX(4px);
+}
+
+.home-shift-item:last-child {
+    margin-bottom: 0;
+}
+
+.home-shift-date {
+    min-width: 80px;
+    text-align: center;
+    padding: 8px;
+    background: white;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.home-shift-date-num {
+    display: block;
+    font-weight: 700;
+    font-size: 1.3rem;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
+.home-shift-date .day-name {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+}
+
+.home-shift-time {
+    flex: 1;
+    font-size: 1rem;
+    color: var(--text-primary);
+    font-weight: 600;
+    font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+}
+
+.home-shift-team {
+    font-size: 0.8rem;
+    padding: 6px 14px;
+    border-radius: 20px;
+    color: white;
+    font-weight: 600;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.home-shift-today {
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(37, 99, 235, 0.12));
+    border-color: var(--primary-color);
+    border-width: 2px;
+}
+
+.home-shift-today .home-shift-date {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.home-shift-today .home-shift-date-num,
+.home-shift-today .home-shift-date .day-name {
+    color: white;
+}
+
+/* Quick actions */
+.home-quick-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+}
+
+.home-action-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 18px 12px;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+}
+
+.home-action-btn:hover {
+    border-color: var(--primary-color);
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.05), rgba(37, 99, 235, 0.08));
+    transform: translateY(-3px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+}
+
+.home-action-btn:active {
+    transform: translateY(-1px);
+}
+
+.home-action-icon {
+    font-size: 1.8rem;
+    filter: grayscale(0.2);
+    transition: filter 0.2s ease;
+}
+
+.home-action-btn:hover .home-action-icon {
+    filter: grayscale(0);
+}
+
+/* Requests list */
+.home-request-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    transition: all 0.2s ease;
+}
+
+.home-request-item:hover {
+    background: white;
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+    transform: translateX(4px);
+}
+
+.home-request-item:last-child {
+    margin-bottom: 0;
+}
+
+.home-request-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.home-request-type {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    margin-bottom: 3px;
+}
+
+.home-request-detail {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.home-request-status {
+    font-size: 0.75rem;
+    padding: 5px 12px;
+    border-radius: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.home-request-status.pending {
+    background: rgba(245, 158, 11, 0.15);
+    color: #b45309;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.home-request-status.needs-action {
+    background: rgba(239, 68, 68, 0.15);
+    color: #dc2626;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    animation: pulse-attention 2s ease-in-out infinite;
+}
+
+@keyframes pulse-attention {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Team coverage */
+.home-team-section {
+    margin-bottom: 16px;
+}
+
+.home-team-section:last-child {
+    margin-bottom: 0;
+}
+
+.home-team-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.home-team-color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.home-coverage-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+
+.home-coverage-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    min-width: 70px;
+}
+
+.home-coverage-track {
+    flex: 1;
+    height: 8px;
+    background: var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.home-coverage-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.home-coverage-count {
+    font-size: 0.8rem;
+    font-weight: 600;
+    min-width: 40px;
+    text-align: right;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+    .home-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .home-card-shifts {
+        grid-row: auto;
+    }
+}
+
+@media (max-width: 768px) {
+    .home-welcome {
+        padding: 20px 16px;
+        margin-bottom: 16px;
+    }
+
+    .home-welcome h2 {
+        font-size: 1.25rem;
+    }
+
+    .home-card-header {
+        padding: 14px 16px;
+        font-size: 0.9rem;
+    }
+
+    .home-card-body {
+        padding: 16px;
+    }
+
+    .home-quick-actions {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .home-shift-item {
+        gap: 12px;
+        padding: 12px;
+    }
+
+    .home-shift-date {
+        min-width: 65px;
+        padding: 6px;
+    }
+
+    .home-shift-date-num {
+        font-size: 1.1rem;
+    }
+
+    .home-shift-time {
+        font-size: 0.9rem;
+    }
+
+    .home-shift-team {
+        font-size: 0.75rem;
+        padding: 4px 10px;
+    }
+}
+
 /* ===== PLANNING VIEW ===== */
 .planning-controls {
     display: flex;

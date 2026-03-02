@@ -42,7 +42,8 @@
                 <h1 class="app-title">Het Vlot</h1>
             </div>
             <div class="nav-center" id="nav-menu">
-                <button class="nav-btn active" data-view="planning">Planning</button>
+                <button class="nav-btn active" data-view="home">Home</button>
+                <button class="nav-btn" data-view="planning">Planning</button>
                 <button class="nav-btn" data-view="employees">Medewerkers</button>
                 <button class="nav-btn" data-view="profile">Profiel</button>
                 <button class="nav-btn" data-view="availability">Verlof en ziekte</button>
@@ -63,8 +64,13 @@
             </div>
         </nav>
 
+        <!-- Home View -->
+        <div id="home-view" class="view active">
+            <div id="home-content"></div>
+        </div>
+
         <!-- Planning View -->
-        <div id="planning-view" class="view active">
+        <div id="planning-view" class="view">
             <div class="view-header">
                 <h2>Roosterplanning</h2>
                 <div class="header-actions">

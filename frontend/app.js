@@ -5,7 +5,7 @@ const AppState = {
     currentUser: null,
     authToken: null,
     isAuthenticating: false, // Prevent concurrent authentication attempts
-    currentView: 'planning',
+    currentView: 'home',
     schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
     currentMonthStart: null, // First day of month for month view
@@ -373,6 +373,7 @@ function initDOM() {
     DOM.navButtons = document.querySelectorAll('.nav-btn');
     DOM.logoutBtn = document.getElementById('logout-btn');
     DOM.currentUserSpan = document.getElementById('current-user');
+    DOM.homeView = document.getElementById('home-view');
     DOM.planningView = document.getElementById('planning-view');
     DOM.employeesView = document.getElementById('employees-view');
     DOM.profileView = document.getElementById('profile-view');
@@ -868,7 +869,7 @@ function showApp() {
     applyRoleVisibility();
     // Restore saved view from localStorage, or use default
     const savedView = localStorage.getItem('hetvlot_activeView');
-    if (savedView && ['planning', 'employees', 'profile', 'availability', 'swaps', 'settings'].includes(savedView)) {
+    if (savedView && ['home', 'planning', 'employees', 'profile', 'availability', 'swaps', 'settings'].includes(savedView)) {
         AppState.currentView = savedView;
     }
     switchView(AppState.currentView);
@@ -877,7 +878,7 @@ function showApp() {
 function applyRoleVisibility() {
     const role = getEffectiveRole();
     const isRealAdmin = AppState.currentUser?.role === 'admin';
-    const allowedViews = new Set(['planning', 'profile']);
+    const allowedViews = new Set(['home', 'planning', 'profile']);
 
     // Show/hide role switcher for admin
     const roleSwitcher = document.getElementById('role-switcher');
@@ -914,7 +915,7 @@ function applyRoleVisibility() {
     });
 
     if (!allowedViews.has(AppState.currentView)) {
-        AppState.currentView = 'planning';
+        AppState.currentView = 'home';
     }
 
     // Team filters:
@@ -940,6 +941,309 @@ function applyRoleVisibility() {
     }
 }
 
+// ===== HOME DASHBOARD =====
+
+function renderHome() {
+    const container = document.getElementById('home-content');
+    if (!container) return;
+
+    const user = AppState.currentUser;
+    if (!user) return;
+
+    const role = getEffectiveRole();
+    const isLeadOrAdmin = ['admin', 'hoofdverantwoordelijke'].includes(role);
+    const isTeamLead = role === 'teamverantwoordelijke';
+
+    let html = '';
+    html += renderHomeWelcome(user, role);
+    html += '<div class="home-grid">';
+    html += renderHomeShifts(user);
+    html += renderHomeQuickActions(role);
+    html += renderHomeRequests(user, role);
+    if (isLeadOrAdmin || isTeamLead) {
+        html += renderHomeTeamCoverage(role, user);
+    }
+    html += '</div>';
+
+    container.innerHTML = html;
+
+    // Attach quick action click handlers
+    container.querySelectorAll('.home-action-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const action = btn.dataset.action;
+            if (action === 'add-shift') {
+                switchView('planning');
+                setTimeout(() => { if (typeof openAddShiftModal === 'function') openAddShiftModal(); }, 100);
+            } else if (action === 'request-absence') {
+                switchView('availability');
+            } else if (action === 'request-swap') {
+                switchView('swaps');
+            } else if (action === 'add-employee') {
+                switchView('settings');
+            } else if (action === 'view-planning') {
+                switchView('planning');
+            }
+        });
+    });
+
+    // Attach request click handlers
+    container.querySelectorAll('.home-request-item[data-action="view-swaps"]').forEach(item => {
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', () => switchView('swaps'));
+    });
+}
+
+function renderHomeWelcome(user, role) {
+    const roleLabels = {
+        admin: 'Admin',
+        hoofdverantwoordelijke: 'Hoofdverantwoordelijke',
+        teamverantwoordelijke: 'Teamverantwoordelijke',
+        medewerker: 'Medewerker'
+    };
+    const today = new Date();
+    const dateStr = today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+    return `
+        <div class="home-welcome">
+            <h2>Welkom, ${escapeHtml(user.name)}</h2>
+            <div class="home-welcome-sub">
+                <span>${dateStr}</span>
+                <span class="home-role-badge">${escapeHtml(roleLabels[role] || role)}</span>
+            </div>
+        </div>
+    `;
+}
+
+function renderHomeShifts(user) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const endDate = new Date(today);
+    endDate.setDate(endDate.getDate() + 7);
+
+    const todayStr = formatDateYYYYMMDD(today);
+    const userId = user.id || user.userId;
+
+    const myShifts = DataStore.shifts
+        .filter(s => {
+            const sUserId = s.userId || s.employeeId;
+            return Number(sUserId) === Number(userId);
+        })
+        .filter(s => {
+            const shiftDate = parseDateOnly(s.date);
+            return shiftDate >= today && shiftDate <= endDate;
+        })
+        .sort((a, b) => {
+            const dateCompare = a.date.localeCompare(b.date);
+            if (dateCompare !== 0) return dateCompare;
+            return (a.startTime || a.start_time || '').localeCompare(b.startTime || b.start_time || '');
+        });
+
+    const dayNames = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
+
+    let shiftsHtml = '';
+    if (myShifts.length === 0) {
+        shiftsHtml = '<div class="home-card-empty">Geen diensten gepland voor de komende 7 dagen</div>';
+    } else {
+        shiftsHtml = '<div class="home-card-body">';
+        myShifts.forEach(shift => {
+            const shiftDate = parseDateOnly(shift.date);
+            const dayNum = shiftDate.getDate();
+            const monthShort = shiftDate.toLocaleDateString('nl-BE', { month: 'short' });
+            const dayName = dayNames[shiftDate.getDay()];
+            const startTime = shift.startTime || shift.start_time || '';
+            const endTime = shift.endTime || shift.end_time || '';
+            const isToday = shift.date.split('T')[0] === todayStr;
+            const teamId = shift.team;
+            const teamSettings = DataStore.settings?.teams?.[teamId];
+            const teamName = teamSettings?.name || teamId || '';
+            const teamColor = teamSettings?.color || '#64748b';
+
+            shiftsHtml += `
+                <div class="home-shift-item ${isToday ? 'home-shift-today' : ''}">
+                    <div class="home-shift-date">
+                        <span class="home-shift-date-num">${dayNum}</span>
+                        <span class="day-name">${isToday ? 'Vandaag' : escapeHtml(dayName)}</span>
+                    </div>
+                    <div class="home-shift-time">${escapeHtml(startTime)} – ${escapeHtml(endTime)}</div>
+                    <span class="home-shift-team" style="background:${escapeHtml(teamColor)}">${escapeHtml(teamName)}</span>
+                </div>
+            `;
+        });
+        shiftsHtml += '</div>';
+    }
+
+    return `
+        <div class="home-card home-card-shifts">
+            <div class="home-card-header">
+                Mijn komende diensten
+                ${myShifts.length > 0 ? `<span class="card-count">${myShifts.length}</span>` : ''}
+            </div>
+            ${shiftsHtml}
+        </div>
+    `;
+}
+
+function renderHomeQuickActions(role) {
+    let actions = '';
+
+    if (['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(role)) {
+        actions += `<button class="home-action-btn" data-action="add-shift"><span class="home-action-icon">+</span>Dienst toevoegen</button>`;
+    }
+
+    actions += `<button class="home-action-btn" data-action="view-planning"><span class="home-action-icon">&#128197;</span>Planning bekijken</button>`;
+    actions += `<button class="home-action-btn" data-action="request-absence"><span class="home-action-icon">&#128196;</span>Verlof aanvragen</button>`;
+    actions += `<button class="home-action-btn" data-action="request-swap"><span class="home-action-icon">&#128260;</span>Dienst ruilen</button>`;
+
+    if (['admin', 'hoofdverantwoordelijke'].includes(role)) {
+        actions += `<button class="home-action-btn" data-action="add-employee"><span class="home-action-icon">&#128100;</span>Accounts beheren</button>`;
+    }
+
+    return `
+        <div class="home-card">
+            <div class="home-card-header">Snelle acties</div>
+            <div class="home-card-body">
+                <div class="home-quick-actions">${actions}</div>
+            </div>
+        </div>
+    `;
+}
+
+function renderHomeRequests(user, role) {
+    const userId = Number(user.id || user.userId);
+    const userTeam = user.team_id || user.mainTeam;
+    const isLeadOrAdmin = ['admin', 'hoofdverantwoordelijke'].includes(role);
+    const isTeamLead = role === 'teamverantwoordelijke';
+
+    let pendingRequests = (DataStore.swapRequests || []).filter(r => {
+        if (r.status !== 'pending') return false;
+
+        if (isLeadOrAdmin) return true;
+        if (isTeamLead) {
+            return r.requester_shift_team === userTeam || r.target_shift_team === userTeam;
+        }
+        // Medewerker: eigen requests + takeover requests van eigen team
+        return r.requester_user_id === userId || r.target_user_id === userId ||
+               (r.request_type === 'takeover' && r.requester_shift_team === userTeam);
+    });
+
+    let requestsHtml = '';
+    if (pendingRequests.length === 0) {
+        requestsHtml = '<div class="home-card-empty">Geen openstaande verzoeken</div>';
+    } else {
+        requestsHtml = '<div class="home-card-body">';
+        pendingRequests.slice(0, 5).forEach(req => {
+            const isSwap = req.request_type === 'swap';
+            const typeLabel = isSwap ? 'Ruil' : 'Overname';
+            const requesterName = escapeHtml(req.requester_name || 'Onbekend');
+            const date = req.requester_shift_date ? req.requester_shift_date.split('T')[0] : '';
+            const dateDisplay = date ? parseDateOnly(date).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' }) : '';
+
+            const needsMyAction = req.target_user_id === userId && !req.target_approved;
+            const statusLabel = needsMyAction ? 'Actie vereist' : 'Wacht op reactie';
+            const statusClass = needsMyAction ? 'needs-action' : 'pending';
+
+            requestsHtml += `
+                <div class="home-request-item" data-action="view-swaps">
+                    <div class="home-request-info">
+                        <div class="home-request-type">${typeLabel}</div>
+                        <div class="home-request-detail">${requesterName} - ${escapeHtml(dateDisplay)}</div>
+                    </div>
+                    <span class="home-request-status ${statusClass}">${statusLabel}</span>
+                </div>
+            `;
+        });
+        if (pendingRequests.length > 5) {
+            requestsHtml += `<div class="home-card-empty" style="padding:8px 0">+ ${pendingRequests.length - 5} meer...</div>`;
+        }
+        requestsHtml += '</div>';
+    }
+
+    return `
+        <div class="home-card">
+            <div class="home-card-header">
+                Openstaande verzoeken
+                ${pendingRequests.length > 0 ? `<span class="card-count">${pendingRequests.length}</span>` : ''}
+            </div>
+            ${requestsHtml}
+        </div>
+    `;
+}
+
+function renderHomeTeamCoverage(role, user) {
+    const userTeam = user.team_id || user.mainTeam;
+    const teams = DataStore.settings?.teams || {};
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Get this week's dates (Mon-Sun)
+    const weekDates = getWeekDates(today);
+    const dayLabels = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+
+    // Filter teams based on role
+    const teamIds = Object.keys(teams).filter(id => {
+        if (['admin', 'hoofdverantwoordelijke'].includes(role)) return true;
+        return id === userTeam;
+    });
+
+    if (teamIds.length === 0) return '';
+
+    let coverageHtml = '<div class="home-card-body">';
+
+    teamIds.forEach(teamId => {
+        const team = teams[teamId];
+        if (!team) return;
+        const teamColor = team.color || '#64748b';
+
+        // Count employees in this team
+        const teamEmployees = (DataStore.users || []).filter(u =>
+            u.active !== false && (u.main_team === teamId || u.team_id === teamId) && u.role !== 'admin'
+        );
+        const totalEmployees = teamEmployees.length;
+        if (totalEmployees === 0) return;
+
+        coverageHtml += `<div class="home-team-section">`;
+        coverageHtml += `<div class="home-team-name"><span class="home-team-color-dot" style="background:${escapeHtml(teamColor)}"></span>${escapeHtml(team.name)}</div>`;
+
+        weekDates.forEach((dateStr, i) => {
+            // Count shifts for this team on this date
+            const shiftsOnDate = DataStore.shifts.filter(s =>
+                s.team === teamId && s.date.split('T')[0] === dateStr
+            ).length;
+
+            // Count absences for this team on this date
+            const absentOnDate = (DataStore.availability || []).filter(a => {
+                const emp = teamEmployees.find(e => Number(e.id) === Number(a.user_id || a.userId));
+                return emp && a.date.split('T')[0] === dateStr;
+            }).length;
+
+            const presentCount = Math.min(shiftsOnDate, totalEmployees);
+            const fillPercent = totalEmployees > 0 ? Math.round((presentCount / totalEmployees) * 100) : 0;
+            const barColor = fillPercent >= 70 ? 'var(--success-color)' : fillPercent >= 40 ? 'var(--warning-color)' : 'var(--danger-color)';
+
+            coverageHtml += `
+                <div class="home-coverage-bar">
+                    <span class="home-coverage-label">${dayLabels[i]}</span>
+                    <div class="home-coverage-track">
+                        <div class="home-coverage-fill" style="width:${fillPercent}%;background:${barColor}"></div>
+                    </div>
+                    <span class="home-coverage-count">${presentCount}/${totalEmployees}</span>
+                </div>
+            `;
+        });
+
+        coverageHtml += `</div>`;
+    });
+
+    coverageHtml += '</div>';
+
+    return `
+        <div class="home-card home-card-full">
+            <div class="home-card-header">Team bezetting deze week</div>
+            ${coverageHtml}
+        </div>
+    `;
+}
+
 function switchView(viewName) {
     // Cleanup drag handlers when switching views
     if (typeof DragHandler !== 'undefined') {
@@ -960,6 +1264,10 @@ function switchView(viewName) {
         view.classList.remove('active');
     });
     switch (viewName) {
+        case 'home':
+            DOM.homeView.classList.add('active');
+            renderHome();
+            break;
         case 'planning':
             DOM.planningView.classList.add('active');
             renderPlanning();
