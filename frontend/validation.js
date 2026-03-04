@@ -398,6 +398,109 @@ function validateShift(shiftData, excludeShiftId = null) {
     };
 }
 
+// ===== CONFLICT RESOLUTION: SUGGESTIES =====
+
+function generateSuggestions(error, shiftData) {
+    const suggestions = [];
+
+    switch (error.rule) {
+        case '11-uur regel': {
+            const minHours = DataStore.settings.rules?.minHoursBetweenShifts || 11;
+            if (error.shift1) {
+                // Suggest adjusting start time to meet rest requirement
+                const existingEnd = getShiftEndDateTime(error.shift1);
+                const suggestedStart = new Date(existingEnd.getTime() + minHours * 3600000);
+                const shiftDate = parseDateOnly(shiftData.date);
+
+                if (suggestedStart.toDateString() === shiftDate.toDateString()) {
+                    const timeStr = `${String(suggestedStart.getHours()).padStart(2, '0')}:${String(suggestedStart.getMinutes()).padStart(2, '0')}`;
+                    suggestions.push({
+                        label: `Starttijd naar ${timeStr} (${minHours}u rust)`,
+                        field: 'startTime',
+                        value: timeStr
+                    });
+                }
+
+                // Suggest the next day
+                const nextDay = new Date(shiftDate);
+                nextDay.setDate(nextDay.getDate() + 1);
+                const nextDayStr = nextDay.toISOString().split('T')[0];
+                suggestions.push({
+                    label: `Verplaats naar ${formatDate(nextDayStr)}`,
+                    field: 'date',
+                    value: nextDayStr
+                });
+            }
+            break;
+        }
+        case 'Overlappende diensten': {
+            if (error.shift1) {
+                suggestions.push({
+                    label: `Start na ${error.shift1.endTime}`,
+                    field: 'startTime',
+                    value: error.shift1.endTime
+                });
+                suggestions.push({
+                    label: 'Kies andere medewerker',
+                    field: 'employeeId',
+                    value: null,
+                    action: 'focus-employee'
+                });
+            }
+            break;
+        }
+        case 'Team mismatch': {
+            const employee = getEmployee(shiftData.employeeId);
+            if (employee) {
+                const mainTeam = employee.mainTeam || employee.main_team;
+                if (mainTeam) {
+                    const teamName = DataStore.settings.teams?.[mainTeam]?.name || mainTeam;
+                    suggestions.push({
+                        label: `Team naar ${teamName}`,
+                        field: 'team',
+                        value: mainTeam
+                    });
+                }
+            }
+            break;
+        }
+        case 'Weekend gesloten': {
+            const d = parseDateOnly(shiftData.date);
+            // Find next Monday
+            const daysUntilMonday = (8 - d.getDay()) % 7 || 7;
+            const nextMonday = new Date(d);
+            nextMonday.setDate(d.getDate() + daysUntilMonday);
+            const mondayStr = nextMonday.toISOString().split('T')[0];
+            suggestions.push({
+                label: `Verplaats naar ma ${formatDate(mondayStr)}`,
+                field: 'date',
+                value: mondayStr
+            });
+            break;
+        }
+        case 'Afwezigheid': {
+            // Suggest available employees for this slot
+            const allEmployees = getAllEmployees ? getAllEmployees(true) : DataStore.employees;
+            const available = allEmployees.filter(emp => {
+                if (emp.id === shiftData.employeeId) return false;
+                const absence = getAvailability(emp.id, shiftData.date);
+                return !absence || !absence.type;
+            }).slice(0, 3);
+
+            available.forEach(emp => {
+                suggestions.push({
+                    label: `Toewijzen aan ${emp.name}`,
+                    field: 'employeeId',
+                    value: String(emp.id)
+                });
+            });
+            break;
+        }
+    }
+
+    return suggestions;
+}
+
 function validateAllShifts() {
     const allIssues = [];
 

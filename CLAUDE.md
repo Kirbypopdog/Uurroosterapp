@@ -114,6 +114,23 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 
 Zie `DEPLOY.md` voor deployment instructies (Render platform).
 
+## Agent Aanbevelingen
+
+Bij elke niet-triviale taak, beveel de best passende agent aan uit `~/.claude/agents/`. De gebruiker kan deze starten via `/agents`. Kies op basis van het type werk:
+
+| Type werk | Aanbevolen agent |
+|-----------|-----------------|
+| Backend/API werk | `engineering-backend-architect` |
+| Frontend/UI werk | `engineering-frontend-developer` of `design-ui-designer` |
+| UX verbeteringen | `design-ux-architect` of `design-ux-researcher` |
+| Bug investigation | `testing-evidence-collector` |
+| Performance issues | `testing-performance-benchmarker` |
+| API testen | `testing-api-tester` |
+| Feature planning | `product-sprint-prioritizer` |
+| Code review/QA | `testing-reality-checker` |
+| DevOps/deploy | `engineering-devops-automator` |
+| Grote multi-stap projecten | `agents-orchestrator` (coördineert meerdere agents) |
+
 ## Environment Variables
 
 ```

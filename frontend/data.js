@@ -128,12 +128,13 @@ async function loadDataFromAPI() {
     try {
         // Load all data in parallel - users now includes employee/schedule data
         const loadErrors = [];
-        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData] = await Promise.all([
+        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData] = await Promise.all([
             dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
             dataApiFetch('/shifts').catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
             dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
             dataApiFetch('/shift-blocks').catch(err => { loadErrors.push('shift-blocks'); console.error('[LoadData] Failed to load shift-blocks:', err); return []; }),
-            dataApiFetch('/settings').catch(err => { loadErrors.push('settings'); console.error('[LoadData] Failed to load settings:', err); return { settings: {} }; })
+            dataApiFetch('/settings').catch(err => { loadErrors.push('settings'); console.error('[LoadData] Failed to load settings:', err); return { settings: {} }; }),
+            dataApiFetch('/schedule-drafts').catch(err => { console.log('[LoadData] Schedule drafts not available (using settings fallback)'); return { drafts: null }; })
         ]);
 
         if (loadErrors.length > 0) {
@@ -186,6 +187,12 @@ async function loadDataFromAPI() {
             schedule_drafts: apiSettings.schedule_drafts || DataStore.settings.schedule_drafts || [],
             schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern
         });
+
+        // Use schedule_drafts from dedicated table if available (overrides settings fallback)
+        if (draftsData.drafts) {
+            DataStore.settings.schedule_drafts = draftsData.drafts;
+            DataStore._draftsFromTable = true;
+        }
 
         DataStore._loaded = true;
         console.log('Data geladen van API:', {
@@ -1456,6 +1463,46 @@ async function resetData() {
     } catch (error) {
         showToast('Fout bij wissen: ' + error.message, 'error');
     }
+}
+
+// ===== AUDIT LOG =====
+
+async function fetchAuditLog(filters = {}) {
+    const params = new URLSearchParams();
+    if (filters.page) params.set('page', filters.page);
+    if (filters.limit) params.set('limit', filters.limit);
+    if (filters.actorId) params.set('actorId', filters.actorId);
+    if (filters.action) params.set('action', filters.action);
+    if (filters.resourceType) params.set('resourceType', filters.resourceType);
+    if (filters.startDate) params.set('startDate', filters.startDate);
+    if (filters.endDate) params.set('endDate', filters.endDate);
+    return dataApiFetch(`/audit-log?${params.toString()}`);
+}
+
+// ===== SCHEDULE DRAFTS =====
+
+async function fetchScheduleDrafts() {
+    return dataApiFetch('/schedule-drafts');
+}
+
+async function createScheduleDraft(draft) {
+    return dataApiFetch('/schedule-drafts', {
+        method: 'POST',
+        body: JSON.stringify(draft)
+    });
+}
+
+async function updateScheduleDraft(id, data) {
+    return dataApiFetch(`/schedule-drafts/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    });
+}
+
+async function deleteScheduleDraft(id) {
+    return dataApiFetch(`/schedule-drafts/${id}`, {
+        method: 'DELETE'
+    });
 }
 
 // ===== INITIALISATIE =====

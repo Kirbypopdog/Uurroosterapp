@@ -275,6 +275,100 @@ async function ensureSchema() {
         console.log(`  Error creating settings table: ${e.message}`);
       }
     }
+    // Check if audit_log table exists
+    const auditTableCheck = await client.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'audit_log'
+    `);
+
+    if (auditTableCheck.rows.length === 0) {
+      console.log('Creating audit_log table...');
+      try {
+        await client.query(`
+          CREATE TABLE audit_log (
+            id SERIAL PRIMARY KEY,
+            actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            actor_name TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'CANCEL', 'LOGIN')),
+            resource_type TEXT NOT NULL CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings')),
+            resource_id TEXT,
+            details JSONB DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT NOW()
+          );
+          CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_id);
+          CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log(resource_type);
+          CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
+        `);
+        console.log('  Created table: audit_log');
+      } catch (e) {
+        console.log(`  Error creating audit_log table: ${e.message}`);
+      }
+    }
+    // Check if schedule_drafts table exists
+    const draftsTableCheck = await client.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'schedule_drafts'
+    `);
+
+    if (draftsTableCheck.rows.length === 0) {
+      console.log('Creating schedule_drafts table...');
+      try {
+        await client.query(`
+          CREATE TABLE schedule_drafts (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            week_number INTEGER NOT NULL DEFAULT 1,
+            team_filter TEXT,
+            grid JSONB NOT NULL DEFAULT '{}',
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_by_name TEXT,
+            last_applied_at TIMESTAMP,
+            last_applied_by TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+          );
+          CREATE INDEX IF NOT EXISTS idx_schedule_drafts_created ON schedule_drafts(created_at DESC);
+        `);
+        console.log('  Created table: schedule_drafts');
+
+        // Migrate existing drafts from settings table
+        const settingsDrafts = await client.query(
+          `SELECT value FROM settings WHERE key = 'schedule_drafts'`
+        );
+        if (settingsDrafts.rows.length > 0) {
+          const drafts = settingsDrafts.rows[0].value;
+          if (Array.isArray(drafts) && drafts.length > 0) {
+            console.log(`  Migrating ${drafts.length} drafts from settings...`);
+            for (const draft of drafts) {
+              try {
+                await client.query(
+                  `INSERT INTO schedule_drafts (id, name, week_number, team_filter, grid, created_by_name, last_applied_at, last_applied_by, created_at, updated_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                   ON CONFLICT (id) DO NOTHING`,
+                  [
+                    draft.id || `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    draft.name || 'Naamloos',
+                    draft.weekNumber || 1,
+                    draft.teamFilter || null,
+                    JSON.stringify(draft.grid || {}),
+                    draft.createdByName || null,
+                    draft.lastAppliedAt || null,
+                    draft.lastAppliedBy || null,
+                    draft.createdAt || new Date().toISOString(),
+                    draft.updatedAt || draft.createdAt || new Date().toISOString()
+                  ]
+                );
+              } catch (migErr) {
+                console.log(`  Error migrating draft: ${migErr.message}`);
+              }
+            }
+            console.log('  Draft migration complete');
+          }
+        }
+      } catch (e) {
+        console.log(`  Error creating schedule_drafts table: ${e.message}`);
+      }
+    }
   } catch (err) {
     console.error('Schema check error:', err.message);
   } finally {
@@ -321,6 +415,21 @@ function requireRole(...roles) {
     }
     next();
   };
+}
+
+// ===== AUDIT LOG HELPER =====
+async function logAudit(req, action, resourceType, resourceId, details = {}) {
+  try {
+    const actorId = req.user?.id || null;
+    const actorName = req.user?.name || req.body?.email || 'System';
+    await pool.query(
+      `INSERT INTO audit_log (actor_id, actor_name, action, resource_type, resource_id, details)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [actorId, actorName, action, resourceType, String(resourceId || ''), JSON.stringify(details)]
+    );
+  } catch (err) {
+    console.error('Audit log error:', err.message);
+  }
 }
 
 app.get('/health', (req, res) => {
@@ -627,6 +736,7 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
         weekSchedulesJson
       ]
     );
+    await logAudit(req, 'CREATE', 'user', result.rows[0].id, { user: { name, email, role, mainTeam } });
     res.status(201).json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -691,6 +801,7 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
       ]
     );
 
+    await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -779,7 +890,9 @@ app.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
     if (userId === req.user.id) {
       return res.status(400).json({ error: 'Je kunt je eigen account niet verwijderen' });
     }
+    const deletedUser = await pool.query('SELECT name, email, role FROM users WHERE id = $1', [userId]);
     await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+    await logAudit(req, 'DELETE', 'user', userId, { user: deletedUser.rows[0] || {} });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -798,7 +911,8 @@ app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (re
       'UPDATE users SET password_hash = $1 WHERE id = $2',
       [passwordHash, userId]
     );
-    res.json({ ok: true, resetPassword: DEFAULT_RESET_PASSWORD });
+    await logAudit(req, 'UPDATE', 'user', userId, { action: 'password_reset' });
+    res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -859,6 +973,7 @@ app.post('/shifts', requireAuth, async (req, res) => {
       );
     }
 
+    await logAudit(req, 'CREATE', 'shift', newShift.id, { shift: newShift });
     res.status(201).json({ shift: newShift });
   } catch (err) {
     console.error(err);
@@ -877,6 +992,12 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
   const shiftSource = source === 'auto' ? 'auto' : 'manual';
 
   try {
+    const oldResult = await pool.query(
+      `SELECT id, user_id as "userId", team, date::text as date, start_time as "startTime", end_time as "endTime", notes, source FROM shifts WHERE id = $1`,
+      [id]
+    );
+    const oldShift = oldResult.rows[0] || null;
+
     const result = await pool.query(`
       UPDATE shifts
       SET user_id = COALESCE($1, user_id),
@@ -894,6 +1015,7 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Dienst niet gevonden' });
     }
+    await logAudit(req, 'UPDATE', 'shift', id, { before: oldShift, after: result.rows[0] });
     res.json({ shift: result.rows[0] });
   } catch (err) {
     console.error('PUT /shifts/:id error:', err);
@@ -951,6 +1073,7 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
 
     // Delete the shift
     await client.query('DELETE FROM shifts WHERE id = $1', [id]);
+    await logAudit(req, 'DELETE', 'shift', id, { shift: { id: shift.id, user_id: shift.user_id, team: shift.team, date: shift.date, source: shift.source } });
 
     // Create shift block to prevent auto-regeneration
     // Check if caller wants to skip block creation (for system cleanup operations)
@@ -1129,6 +1252,7 @@ app.post('/availability', requireAuth, async (req, res) => {
       RETURNING id, user_id as "userId", date::text as date, type, reason, updated_at as "updatedAt"
     `, [userId, date, type, reason || '']);
 
+    await logAudit(req, 'CREATE', 'availability', result.rows[0].id, { availability: result.rows[0] });
     res.status(201).json({ availability: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -1165,6 +1289,7 @@ app.delete('/availability', requireAuth, async (req, res) => {
       'DELETE FROM availability WHERE user_id = $1 AND date = $2',
       [userId, date]
     );
+    await logAudit(req, 'DELETE', 'availability', '', { userId, date });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -1478,6 +1603,7 @@ app.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     );
 
     await client.query('COMMIT');
+    await logAudit(req, 'APPROVE', 'swap_request', swapId, { swap: { requester: swap.requester_user_id, target: swap.target_user_id, type: 'swap' } });
 
     res.json({ ok: true, message: 'Swap geaccepteerd en uitgevoerd' });
   } catch (err) {
@@ -1542,6 +1668,7 @@ app.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
     );
 
     await client.query('COMMIT');
+    await logAudit(req, 'REJECT', 'swap_request', swapId, { swap: { requester: swap.requester_user_id, target: swap.target_user_id, reason: responseNotes } });
 
     res.json({ ok: true, message: 'Swap afgewezen' });
   } catch (err) {
@@ -1700,6 +1827,7 @@ app.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => 
     );
 
     await client.query('COMMIT');
+    await logAudit(req, 'APPROVE', 'swap_request', requestId, { type: 'takeover', requester: request.requester_user_id, acceptedBy: currentUserId });
 
     res.json({ ok: true, message: 'Shift overgenomen' });
   } catch (err) {
@@ -1956,9 +2084,137 @@ app.put('/settings/:key', requireAuth, async (req, res) => {
       ON CONFLICT (key)
       DO UPDATE SET value = $2, updated_at = NOW()
     `, [key, JSON.stringify(value)]);
+    await logAudit(req, 'UPDATE', 'settings', key, { key });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== SCHEDULE DRAFTS API =====
+
+app.get('/schedule-drafts', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, week_number as "weekNumber", team_filter as "teamFilter",
+             grid, created_by as "createdBy", created_by_name as "createdByName",
+             last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
+             created_at as "createdAt", updated_at as "updatedAt"
+      FROM schedule_drafts
+      ORDER BY updated_at DESC
+    `);
+    res.json({ drafts: result.rows });
+  } catch (err) {
+    console.error('Error fetching schedule drafts:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/schedule-drafts', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+  const { id, name, weekNumber, teamFilter, grid } = req.body;
+  const draftId = id || `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO schedule_drafts (id, name, week_number, team_filter, grid, created_by, created_by_name, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+       RETURNING id, name, week_number as "weekNumber", team_filter as "teamFilter",
+                 grid, created_by_name as "createdByName",
+                 last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
+                 created_at as "createdAt", updated_at as "updatedAt"`,
+      [draftId, name || 'Naamloos', weekNumber || 1, teamFilter || null, JSON.stringify(grid || {}), req.user.id, req.user.name]
+    );
+    await logAudit(req, 'CREATE', 'settings', draftId, { type: 'schedule_draft', name });
+    res.json({ draft: result.rows[0] });
+  } catch (err) {
+    console.error('Error creating schedule draft:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+  const { id } = req.params;
+  const { name, weekNumber, teamFilter, grid, lastAppliedAt, lastAppliedBy } = req.body;
+
+  try {
+    const setClauses = ['updated_at = NOW()'];
+    const params = [];
+    let paramIndex = 1;
+
+    if (name !== undefined) { setClauses.push(`name = $${paramIndex++}`); params.push(name); }
+    if (weekNumber !== undefined) { setClauses.push(`week_number = $${paramIndex++}`); params.push(weekNumber); }
+    if (teamFilter !== undefined) { setClauses.push(`team_filter = $${paramIndex++}`); params.push(teamFilter); }
+    if (grid !== undefined) { setClauses.push(`grid = $${paramIndex++}`); params.push(JSON.stringify(grid)); }
+    if (lastAppliedAt !== undefined) { setClauses.push(`last_applied_at = $${paramIndex++}`); params.push(lastAppliedAt); }
+    if (lastAppliedBy !== undefined) { setClauses.push(`last_applied_by = $${paramIndex++}`); params.push(lastAppliedBy); }
+
+    params.push(id);
+
+    const result = await pool.query(
+      `UPDATE schedule_drafts SET ${setClauses.join(', ')} WHERE id = $${paramIndex}
+       RETURNING id, name, week_number as "weekNumber", team_filter as "teamFilter",
+                 grid, created_by_name as "createdByName",
+                 last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
+                 created_at as "createdAt", updated_at as "updatedAt"`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Concept niet gevonden' });
+    }
+    await logAudit(req, 'UPDATE', 'settings', id, { type: 'schedule_draft', name: result.rows[0].name });
+    res.json({ draft: result.rows[0] });
+  } catch (err) {
+    console.error('Error updating schedule draft:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query('DELETE FROM schedule_drafts WHERE id = $1 RETURNING name', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Concept niet gevonden' });
+    }
+    await logAudit(req, 'DELETE', 'settings', id, { type: 'schedule_draft', name: result.rows[0].name });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error deleting schedule draft:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== AUDIT LOG API =====
+
+app.get('/audit-log', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'), async (req, res) => {
+  const { page = 1, limit = 50, actorId, action, resourceType, startDate, endDate } = req.query;
+  const offset = (Number(page) - 1) * Number(limit);
+
+  let whereClause = 'WHERE 1=1';
+  const params = [];
+  let paramIndex = 1;
+
+  if (actorId) { whereClause += ` AND actor_id = $${paramIndex++}`; params.push(Number(actorId)); }
+  if (action) { whereClause += ` AND action = $${paramIndex++}`; params.push(action); }
+  if (resourceType) { whereClause += ` AND resource_type = $${paramIndex++}`; params.push(resourceType); }
+  if (startDate) { whereClause += ` AND created_at >= $${paramIndex++}`; params.push(startDate); }
+  if (endDate) { whereClause += ` AND created_at <= $${paramIndex++}::date + interval '1 day'`; params.push(endDate); }
+
+  try {
+    const countResult = await pool.query(`SELECT COUNT(*) FROM audit_log ${whereClause}`, params);
+    const total = parseInt(countResult.rows[0].count);
+
+    params.push(Number(limit), offset);
+    const result = await pool.query(
+      `SELECT * FROM audit_log ${whereClause} ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+      params
+    );
+
+    res.json({ logs: result.rows, total, page: Number(page), limit: Number(limit) });
+  } catch (err) {
+    console.error('GET /audit-log error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });

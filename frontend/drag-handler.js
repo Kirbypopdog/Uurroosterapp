@@ -402,6 +402,16 @@ const DragHandler = {
                 // Continue anyway - shift was already transferred
             }
 
+            // Record undo action for drag transfer
+            if (typeof UndoManager !== 'undefined') {
+                UndoManager.push({
+                    type: 'update',
+                    shiftId: this.state.shiftId,
+                    shiftData: { employeeId: targetEmployee.id, date: targetDate, team: shift.team, startTime: shift.startTime, endTime: shift.endTime, notes: shift.notes || '' },
+                    previousData: { employeeId: originalEmployeeId, date: originalDate, team: shift.team, startTime: shift.startTime, endTime: shift.endTime, notes: shift.notes || '' }
+                });
+            }
+
             // Refresh view
             renderPlanning();
 

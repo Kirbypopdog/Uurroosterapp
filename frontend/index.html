@@ -84,6 +84,10 @@
             <div class="view-header">
                 <h2>Roosterplanning</h2>
                 <div class="header-actions">
+                    <div class="undo-redo-controls">
+                        <button id="undo-btn" class="btn btn-sm btn-secondary" disabled title="Ongedaan maken (Ctrl+Z)">&#8592; Undo</button>
+                        <button id="redo-btn" class="btn btn-sm btn-secondary" disabled title="Opnieuw (Ctrl+Y)">Redo &#8594;</button>
+                    </div>
                     <button id="add-shift-btn" class="btn btn-primary">+ Dienst toevoegen</button>
                 </div>
             </div>
@@ -108,8 +112,10 @@
                     <button class="team-toggle active" data-team="cargo">Cargo</button>
                     <button class="team-toggle active" data-team="overkoepelend">Overkoepelend</button>
                 </div>
+                <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
             </div>
 
+            <div id="coverage-heatmap-container"></div>
             <div id="validation-alerts" class="alerts-container"></div>
 
             <!-- Mobile day navigation (alleen zichtbaar op mobiel) -->
@@ -190,6 +196,7 @@
                 <button class="settings-tab" data-settings-tab="rooster">Rooster</button>
                 <button class="settings-tab" data-settings-tab="teams">Teams</button>
                 <button class="settings-tab" data-settings-tab="systeem">Systeem</button>
+                <button class="settings-tab" data-settings-tab="audit">Audit Log</button>
             </div>
             <div class="settings-content" id="settings-tab-content">
                 <!-- Dynamically rendered based on active tab -->
@@ -255,10 +262,14 @@
                     <textarea id="shift-notes" rows="2" placeholder="Bijzonderheden of opmerkingen..."></textarea>
                 </div>
                 <div id="shift-validation-errors" class="validation-errors"></div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-danger" id="shift-delete-btn" style="display: none; margin-right: auto;">Verwijderen</button>
-                    <button type="button" class="btn btn-secondary" id="shift-cancel-btn">Annuleren</button>
-                    <button type="submit" class="btn btn-primary" id="shift-submit-btn">Opslaan</button>
+                <div class="modal-actions modal-actions-split">
+                    <div class="modal-actions-left">
+                        <button type="button" class="btn btn-danger" id="shift-delete-btn" style="display: none;">Verwijderen</button>
+                    </div>
+                    <div class="modal-actions-right">
+                        <button type="button" class="btn btn-secondary" id="shift-cancel-btn">Annuleren</button>
+                        <button type="submit" class="btn btn-primary" id="shift-submit-btn">Opslaan</button>
+                    </div>
                 </div>
             </form>
         </div>
@@ -555,6 +566,25 @@
             <div class="modal-actions">
                 <button type="button" class="btn btn-secondary" id="confirm-modal-cancel">Annuleren</button>
                 <button type="button" class="btn btn-primary" id="confirm-modal-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Input Prompt Modal (replaces browser prompt()) -->
+    <div id="input-prompt-modal" class="modal hidden">
+        <div class="modal-content confirm-modal-content">
+            <div class="modal-header">
+                <h2 id="input-prompt-title">Invoer</h2>
+            </div>
+            <div class="modal-body">
+                <p id="input-prompt-message"></p>
+                <div class="form-group" style="margin-top: 12px;">
+                    <input type="text" id="input-prompt-value" class="form-input" placeholder="">
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="input-prompt-cancel">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="input-prompt-ok">OK</button>
             </div>
         </div>
     </div>

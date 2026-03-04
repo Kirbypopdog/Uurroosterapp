@@ -90,6 +90,33 @@ CREATE TABLE IF NOT EXISTS shift_swap_requests (
   responded_by INTEGER REFERENCES users(id)
 );
 
+-- Schedule drafts (roster builder concepts)
+CREATE TABLE IF NOT EXISTS schedule_drafts (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  week_number INTEGER NOT NULL DEFAULT 1,
+  team_filter TEXT,
+  grid JSONB NOT NULL DEFAULT '{}',
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_by_name TEXT,
+  last_applied_at TIMESTAMP,
+  last_applied_by TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Audit log (tracks all changes)
+CREATE TABLE IF NOT EXISTS audit_log (
+  id SERIAL PRIMARY KEY,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  actor_name TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'CANCEL', 'LOGIN')),
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings')),
+  resource_id TEXT,
+  details JSONB DEFAULT '{}',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(date);
 CREATE INDEX IF NOT EXISTS idx_shifts_user ON shifts(user_id);
@@ -102,3 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_shift_blocks_user_date ON shift_blocks(user_id, d
 CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON shift_swap_requests(status);
 CREATE INDEX IF NOT EXISTS idx_swap_requests_requester ON shift_swap_requests(requester_user_id);
 CREATE INDEX IF NOT EXISTS idx_swap_requests_target ON shift_swap_requests(target_user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log(resource_type);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_schedule_drafts_created ON schedule_drafts(created_at DESC);

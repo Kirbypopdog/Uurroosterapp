@@ -27,7 +27,111 @@ const AppState = {
     builderWeekNumber: 1,        // 1 or 2 (bi-weekly)
     builderTeamFilter: null,
     builderGrid: {},             // { [userId]: { [dayIndex0to6]: { startTime, endTime, team } } }
-    builderIsDirty: false
+    builderIsDirty: false,
+    showHeatmap: false,
+    settingsDirty: false
+};
+
+// ===== UNDO/REDO MANAGER =====
+const UndoManager = {
+    actions: [],
+    pointer: -1,
+    maxHistory: 50,
+    _executing: false, // Guard flag to prevent recording during undo/redo
+
+    canUndo() { return this.pointer >= 0; },
+    canRedo() { return this.pointer < this.actions.length - 1; },
+
+    push(action) {
+        if (this._executing) return; // Don't record actions triggered by undo/redo
+        this.actions = this.actions.slice(0, this.pointer + 1);
+        this.actions.push(action);
+        if (this.actions.length > this.maxHistory) {
+            this.actions.shift();
+        } else {
+            this.pointer++;
+        }
+        this.updateUI();
+    },
+
+    async undo() {
+        if (!this.canUndo() || this._executing) return;
+        const action = this.actions[this.pointer];
+        this.pointer--;
+        this._executing = true;
+        try {
+            await this._executeReverse(action);
+            renderPlanning();
+            showToast('Ongedaan gemaakt', 'info');
+        } catch (err) {
+            this.pointer++;
+            showToast('Undo mislukt: ' + err.message, 'error');
+        }
+        this._executing = false;
+        this.updateUI();
+    },
+
+    async redo() {
+        if (!this.canRedo() || this._executing) return;
+        this.pointer++;
+        const action = this.actions[this.pointer];
+        this._executing = true;
+        try {
+            await this._executeForward(action);
+            renderPlanning();
+            showToast('Opnieuw uitgevoerd', 'info');
+        } catch (err) {
+            this.pointer--;
+            showToast('Redo mislukt: ' + err.message, 'error');
+        }
+        this._executing = false;
+        this.updateUI();
+    },
+
+    async _executeReverse(action) {
+        switch (action.type) {
+            case 'create':
+                await deleteShift(action.resultId);
+                break;
+            case 'update':
+                await updateShift(action.shiftId, action.previousData);
+                break;
+            case 'delete': {
+                const recreated = await addShift(action.previousData);
+                action.resultId = recreated.id;
+                break;
+            }
+        }
+    },
+
+    async _executeForward(action) {
+        switch (action.type) {
+            case 'create': {
+                const created = await addShift(action.shiftData);
+                action.resultId = created.id;
+                break;
+            }
+            case 'update':
+                await updateShift(action.shiftId, action.shiftData);
+                break;
+            case 'delete':
+                await deleteShift(action.resultId);
+                break;
+        }
+    },
+
+    clear() {
+        this.actions = [];
+        this.pointer = -1;
+        this.updateUI();
+    },
+
+    updateUI() {
+        const undoBtn = document.getElementById('undo-btn');
+        const redoBtn = document.getElementById('redo-btn');
+        if (undoBtn) undoBtn.disabled = !this.canUndo();
+        if (redoBtn) redoBtn.disabled = !this.canRedo();
+    }
 };
 
 // Get the effective role (simulated if set, otherwise actual)
@@ -297,6 +401,42 @@ function showConfirm(message, title = 'Bevestig actie') {
         cancelBtn.addEventListener('click', handleCancel);
         modal.addEventListener('click', handleBackdropClick);
         document.addEventListener('keydown', handleEscape);
+    });
+}
+
+function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('input-prompt-modal');
+        const titleEl = document.getElementById('input-prompt-title');
+        const messageEl = document.getElementById('input-prompt-message');
+        const inputEl = document.getElementById('input-prompt-value');
+        const okBtn = document.getElementById('input-prompt-ok');
+        const cancelBtn = document.getElementById('input-prompt-cancel');
+
+        titleEl.textContent = title;
+        messageEl.textContent = message;
+        inputEl.value = defaultValue;
+        modal.classList.remove('hidden');
+        setTimeout(() => inputEl.focus(), 50);
+
+        const handleOk = () => { cleanup(); resolve(inputEl.value.trim()); };
+        const handleCancel = () => { cleanup(); resolve(null); };
+        const cleanup = () => {
+            modal.classList.add('hidden');
+            okBtn.removeEventListener('click', handleOk);
+            cancelBtn.removeEventListener('click', handleCancel);
+            modal.removeEventListener('click', handleBackdropClick);
+            document.removeEventListener('keydown', handleKeys);
+        };
+        const handleBackdropClick = (e) => { if (e.target === modal) handleCancel(); };
+        const handleKeys = (e) => {
+            if (e.key === 'Escape') handleCancel();
+            if (e.key === 'Enter') handleOk();
+        };
+        okBtn.addEventListener('click', handleOk);
+        cancelBtn.addEventListener('click', handleCancel);
+        modal.addEventListener('click', handleBackdropClick);
+        document.addEventListener('keydown', handleKeys);
     });
 }
 
@@ -741,6 +881,37 @@ function setupEventListeners() {
         const warningChip = event.target.closest('.validation-summary-item.validation-warning');
         if (warningChip) {
             openWarningDetailsModal();
+        }
+    });
+
+    // Heatmap toggle
+    const heatmapToggle = document.getElementById('heatmap-toggle-btn');
+    if (heatmapToggle) {
+        heatmapToggle.addEventListener('click', () => {
+            AppState.showHeatmap = !AppState.showHeatmap;
+            heatmapToggle.classList.toggle('active', AppState.showHeatmap);
+            const container = document.getElementById('coverage-heatmap-container');
+            if (container) {
+                container.innerHTML = AppState.showHeatmap ? renderCoverageHeatmap() : '';
+            }
+        });
+    }
+
+    // Undo/Redo buttons
+    document.getElementById('undo-btn')?.addEventListener('click', () => UndoManager.undo());
+    document.getElementById('redo-btn')?.addEventListener('click', () => UndoManager.redo());
+
+    // Undo/Redo keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+        if (document.querySelector('.modal:not(.hidden)')) return;
+
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            UndoManager.undo();
+        } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+            e.preventDefault();
+            UndoManager.redo();
         }
     });
 
@@ -1255,7 +1426,19 @@ function renderHomeTeamCoverage(role, user) {
     `;
 }
 
-function switchView(viewName) {
+async function switchView(viewName) {
+    // Warn about unsaved settings changes
+    if (AppState.settingsDirty && AppState.currentView === 'settings' && viewName !== 'settings') {
+        const proceed = await showConfirm(
+            'Je hebt onopgeslagen wijzigingen in instellingen. Wil je doorgaan zonder op te slaan?',
+            'Onopgeslagen wijzigingen'
+        );
+        if (!proceed) return;
+        AppState.settingsDirty = false;
+    }
+    // Clear undo history when switching views
+    UndoManager.clear();
+
     // Cleanup drag handlers when switching views
     if (typeof DragHandler !== 'undefined') {
         DragHandler.cleanup();
@@ -1551,10 +1734,94 @@ function renderPlanning() {
     // Set mobile day attribute after calendar is rendered
     updateTimelineMobileDayAttribute();
 
+    // Update heatmap if visible
+    const heatmapContainer = document.getElementById('coverage-heatmap-container');
+    if (heatmapContainer && AppState.showHeatmap) {
+        heatmapContainer.innerHTML = renderCoverageHeatmap();
+    }
+
     // Restore window scroll position after DOM updates
     requestAnimationFrame(() => {
         window.scrollTo(0, savedScrollY);
     });
+}
+
+function renderCoverageHeatmap() {
+    const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
+    const weekDates = getWeekDates(startDateStr);
+    const teams = DataStore.settings.teams || {};
+    const teamOrder = ['vlot1', 'vlot2', 'cargo', 'overkoepelend', 'jobstudent']
+        .filter(t => AppState.visibleTeams.includes(t) && teams[t]);
+    const minStaffingDay = DataStore.settings.rules?.minStaffingDay || 2;
+
+    let html = '<div class="coverage-heatmap">';
+    html += '<div class="heatmap-title">Team Bezetting</div>';
+    html += '<div class="heatmap-grid">';
+
+    // Header row
+    html += '<div class="heatmap-row heatmap-header">';
+    html += '<div class="heatmap-team-cell">Team</div>';
+    const dayNames = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
+    weekDates.forEach(date => {
+        const d = parseDateOnly(date);
+        html += `<div class="heatmap-day-cell">${dayNames[d.getDay()]} ${d.getDate()}</div>`;
+    });
+    html += '</div>';
+
+    // Team rows
+    teamOrder.forEach(teamId => {
+        const team = teams[teamId];
+        html += '<div class="heatmap-row">';
+        html += `<div class="heatmap-team-cell"><span class="heatmap-team-dot" style="background:${escapeHtml(team.color)}"></span>${escapeHtml(team.name)}</div>`;
+
+        weekDates.forEach(date => {
+            const count = DataStore.shifts.filter(s => s.team === teamId && s.date === date).length;
+            const d = parseDateOnly(date);
+            const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+            const closed = isWeekend && typeof isWeekendOpen === 'function' && !isWeekendOpen(date);
+
+            let colorClass = 'heatmap-red';
+            if (closed) colorClass = 'heatmap-closed';
+            else if (count >= minStaffingDay + 1) colorClass = 'heatmap-green';
+            else if (count >= minStaffingDay) colorClass = 'heatmap-yellow';
+            else if (count > 0) colorClass = 'heatmap-orange';
+
+            html += `<div class="heatmap-cell ${colorClass}" data-date="${date}" data-team="${teamId}"
+                onclick="showHeatmapDetail('${teamId}', '${date}')" title="${count} dienst${count !== 1 ? 'en' : ''}">
+                ${closed ? '-' : count}
+            </div>`;
+        });
+
+        html += '</div>';
+    });
+
+    html += '</div>';
+    html += `<div class="heatmap-legend">
+        <span class="heatmap-legend-item"><span class="heatmap-swatch heatmap-red"></span>Geen</span>
+        <span class="heatmap-legend-item"><span class="heatmap-swatch heatmap-orange"></span>Onder min.</span>
+        <span class="heatmap-legend-item"><span class="heatmap-swatch heatmap-yellow"></span>Minimum</span>
+        <span class="heatmap-legend-item"><span class="heatmap-swatch heatmap-green"></span>Boven min.</span>
+        <span class="heatmap-legend-item"><span class="heatmap-swatch heatmap-closed"></span>Gesloten</span>
+    </div>`;
+    html += '</div>';
+
+    return html;
+}
+
+function showHeatmapDetail(teamId, date) {
+    const team = (DataStore.settings.teams || {})[teamId];
+    const shifts = DataStore.shifts.filter(s => s.team === teamId && s.date === date);
+
+    let msg = `${team?.name || teamId} - ${formatDate(date)}\n`;
+    if (shifts.length === 0) {
+        msg += 'Geen diensten ingepland.';
+    } else {
+        shifts.forEach(s => {
+            const emp = getEmployee(s.employeeId);
+            msg += `${emp?.name || 'Onbekend'}: ${s.startTime} - ${s.endTime}\n`;
+        });
+    }
+    showToast(msg.trim(), 'info', 5000);
 }
 
 function renderValidationAlerts() {
@@ -3481,11 +3748,25 @@ async function handleShiftSubmit(e) {
         console.log('Validation result:', validation);
 
         if (!validation.isValid) {
-            let html = '<ul>';
+            let html = '<div class="conflict-resolution">';
             validation.errors.forEach(error => {
-                html += `<li>${error.message}</li>`;
+                const suggestions = generateSuggestions(error, shiftData);
+                html += `<div class="conflict-item">
+                    <div class="conflict-error">${escapeHtml(error.message)}</div>`;
+                if (suggestions.length > 0) {
+                    html += '<div class="conflict-suggestions"><span class="suggestions-label">Suggesties:</span>';
+                    suggestions.forEach(s => {
+                        html += `<button type="button" class="btn btn-sm suggestion-btn"
+                            data-field="${escapeHtml(s.field)}"
+                            data-value="${s.value !== null ? escapeHtml(String(s.value)) : ''}"
+                            ${s.action ? `data-action="${escapeHtml(s.action)}"` : ''}
+                            onclick="applySuggestion(this)">${escapeHtml(s.label)}</button>`;
+                    });
+                    html += '</div>';
+                }
+                html += '</div>';
             });
-            html += '</ul>';
+            html += '</div>';
             DOM.shiftValidationErrors.innerHTML = html;
             return;
         }
@@ -3501,9 +3782,13 @@ async function handleShiftSubmit(e) {
         }
 
         if (AppState.editingShiftId) {
+            const oldShift = getShift(AppState.editingShiftId);
+            const previousData = oldShift ? { employeeId: oldShift.employeeId, team: oldShift.team, date: oldShift.date, startTime: oldShift.startTime, endTime: oldShift.endTime, notes: oldShift.notes } : null;
             await updateShift(AppState.editingShiftId, shiftData);
+            UndoManager.push({ type: 'update', shiftId: AppState.editingShiftId, shiftData: { ...shiftData }, previousData });
         } else {
-            await addShift(shiftData);
+            const newShift = await addShift(shiftData);
+            UndoManager.push({ type: 'create', shiftData: { ...shiftData }, resultId: newShift.id });
         }
 
         closeShiftModal();
@@ -3514,13 +3799,44 @@ async function handleShiftSubmit(e) {
     }
 }
 
+function applySuggestion(btn) {
+    const field = btn.dataset.field;
+    const value = btn.dataset.value;
+    const action = btn.dataset.action;
+
+    if (action === 'focus-employee') {
+        DOM.shiftEmployee.focus();
+        return;
+    }
+
+    const fieldMap = {
+        startTime: DOM.shiftStart,
+        endTime: DOM.shiftEnd,
+        date: DOM.shiftDate,
+        team: DOM.shiftTeam,
+        employeeId: DOM.shiftEmployee
+    };
+
+    const el = fieldMap[field];
+    if (el && value) {
+        el.value = value;
+        el.classList.add('suggestion-applied');
+        setTimeout(() => el.classList.remove('suggestion-applied'), 1500);
+    }
+
+    DOM.shiftValidationErrors.innerHTML = '';
+    showToast('Suggestie toegepast - controleer en klik Opslaan', 'info');
+}
+
 async function deleteShiftConfirm(shiftId) {
     const shift = getShift(shiftId);
     if (!shift) return;
     const employee = getEmployee(shift.employeeId);
     const msg = `Dienst verwijderen?\n\n${employee?.name || 'Onbekend'}\n${formatDate(shift.date)}\n${shift.startTime} - ${shift.endTime}`;
     if (await showConfirm(msg, 'Dienst verwijderen?')) {
+        const shiftCopy = { employeeId: shift.employeeId, team: shift.team, date: shift.date, startTime: shift.startTime, endTime: shift.endTime, notes: shift.notes };
         await deleteShift(shiftId);
+        UndoManager.push({ type: 'delete', previousData: shiftCopy, resultId: shiftId });
         renderPlanning();
     }
 }
@@ -5119,9 +5435,8 @@ function attachSwapActionListeners() {
     document.querySelectorAll('.btn-target-approve-swap').forEach(btn => {
         btn.addEventListener('click', async () => {
             const swapId = parseInt(btn.dataset.swapId);
-            const notes = prompt('Wil je een bericht toevoegen? (optioneel)');
-            // Allow empty notes for approval (user might cancel the prompt)
-            if (notes !== null) { // User didn't cancel
+            const notes = await showInputPrompt('Wil je een bericht toevoegen?', 'Ruil accepteren');
+            if (notes !== null) {
                 try {
                     await targetApproveSwapRequest(swapId, notes);
                     showToast('Ruil geaccepteerd! De shifts zijn omgewisseld.', 'success');
@@ -5138,7 +5453,7 @@ function attachSwapActionListeners() {
     document.querySelectorAll('.btn-target-reject-swap').forEach(btn => {
         btn.addEventListener('click', async () => {
             const swapId = parseInt(btn.dataset.swapId);
-            const notes = prompt('Waarom wijs je dit ruilverzoek af? (verplicht)');
+            const notes = await showInputPrompt('Waarom wijs je dit ruilverzoek af? (verplicht)', 'Ruil afwijzen');
             if (notes && notes.trim() !== '') {
                 try {
                     await targetRejectSwapRequest(swapId, notes);
@@ -5183,9 +5498,9 @@ function attachSwapActionListeners() {
     document.querySelectorAll('.btn-accept-takeover').forEach(btn => {
         btn.addEventListener('click', async () => {
             const requestId = parseInt(btn.dataset.requestId);
-            const notes = prompt('Wil je een bericht toevoegen? (optioneel)');
+            const notes = await showInputPrompt('Wil je een bericht toevoegen?', 'Shift overnemen');
 
-            if (notes !== null) { // User didn't cancel
+            if (notes !== null) {
                 if (await showConfirm('Weet je zeker dat je deze shift wilt overnemen?')) {
                     try {
                         await acceptTakeoverRequest(requestId, notes);
@@ -5337,6 +5652,9 @@ function renderBuilderGrid(role, userTeam) {
     // Staffing summary
     html += renderBuilderStaffingSummary(employees);
 
+    // 11-hour rule warnings across consecutive days
+    html += renderBuilder11HourWarnings(employees);
+
     html += '</div>';
     return html;
 }
@@ -5421,37 +5739,129 @@ function renderBuilderEmployeeRow(employee) {
     return html;
 }
 
+function isNightShift(startTime) {
+    if (!startTime) return false;
+    const hour = parseInt(startTime.split(':')[0], 10);
+    return hour >= 20 || hour < 6;
+}
+
 function renderBuilderStaffingSummary(employees) {
     const builderClosedDays = getClosedDaysForWeek(AppState.builderWeekNumber);
-    let html = '<div class="builder-staffing-row">';
-    html += '<div class="builder-staffing-label">Bezetting</div>';
+    const minStaffDay = DataStore.settings.rules?.minStaffingDay || 1;
+    const minStaffNight = DataStore.settings.rules?.minStaffingNight || 1;
+
+    // Day row
+    let dayHtml = '<div class="builder-staffing-row">';
+    dayHtml += '<div class="builder-staffing-label">Dag</div>';
+
+    // Night row
+    let nightHtml = '<div class="builder-staffing-row">';
+    nightHtml += '<div class="builder-staffing-label">Nacht</div>';
 
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
         const jsDow = dayIndex === 6 ? 0 : dayIndex + 1;
 
         if (builderClosedDays.includes(jsDow)) {
-            html += '<div class="builder-staffing-cell closed"></div>';
+            dayHtml += '<div class="builder-staffing-cell closed"></div>';
+            nightHtml += '<div class="builder-staffing-cell closed"></div>';
             continue;
         }
 
-        let count = 0;
+        let dayCount = 0;
+        let nightCount = 0;
         employees.forEach(emp => {
             const empGrid = AppState.builderGrid[emp.id] || {};
-            if (empGrid[dayIndex]) count++;
+            const shift = empGrid[dayIndex];
+            if (shift) {
+                if (isNightShift(shift.startTime)) {
+                    nightCount++;
+                } else {
+                    dayCount++;
+                }
+            }
         });
 
-        const minStaffing = DataStore.settings.rules?.minStaffingDay || 1;
-        const staffClass = count >= minStaffing ? 'staffing-ok' : 'staffing-low';
+        const dayClass = dayCount >= minStaffDay ? 'staffing-ok' : 'staffing-low';
+        const nightClass = nightCount >= minStaffNight ? 'staffing-ok' : (nightCount === 0 ? '' : 'staffing-low');
 
-        html += `<div class="builder-staffing-cell ${staffClass}">
-            <span class="staffing-count">${count}</span>
-            <span class="staffing-min">min: ${minStaffing}</span>
+        dayHtml += `<div class="builder-staffing-cell ${dayClass}">
+            <span class="staffing-count">${dayCount}</span>
+            <span class="staffing-min">min: ${minStaffDay}</span>
+        </div>`;
+
+        nightHtml += `<div class="builder-staffing-cell ${nightClass}">
+            <span class="staffing-count">${nightCount}</span>
+            <span class="staffing-min">min: ${minStaffNight}</span>
         </div>`;
     }
 
-    html += '<div class="builder-staffing-cell"></div>';
-    html += '</div>';
-    return html;
+    dayHtml += '<div class="builder-staffing-cell"></div></div>';
+    nightHtml += '<div class="builder-staffing-cell"></div></div>';
+
+    return dayHtml + nightHtml;
+}
+
+function renderBuilder11HourWarnings(employees) {
+    const minHours = DataStore.settings.rules?.minHoursBetweenShifts || 11;
+    const warnings = [];
+    const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+
+    employees.forEach(emp => {
+        const empGrid = AppState.builderGrid[emp.id] || {};
+        const days = Object.keys(empGrid).map(Number).sort((a, b) => a - b);
+
+        for (let i = 0; i < days.length; i++) {
+            // Check next consecutive day
+            const nextDay = i < days.length - 1 ? days[i + 1] : null;
+            const currentShift = empGrid[days[i]];
+
+            // Also check wrap-around: Sunday (6) → Monday (0) for repeating patterns
+            const wrapTarget = days[i] === 6 ? empGrid[0] : null;
+
+            const checkPairs = [];
+            if (nextDay !== null && nextDay === days[i] + 1) {
+                checkPairs.push({ day1: days[i], day2: nextDay, shift2: empGrid[nextDay], isWrap: false });
+            }
+            if (wrapTarget) {
+                checkPairs.push({ day1: 6, day2: 0, shift2: wrapTarget, isWrap: true });
+            }
+
+            for (const pair of checkPairs) {
+                const endParts = currentShift.endTime.split(':').map(Number);
+                const startParts = pair.shift2.startTime.split(':').map(Number);
+
+                let endMinutes = endParts[0] * 60 + endParts[1];
+                let startMinutes = startParts[0] * 60 + startParts[1];
+
+                // Handle night shifts (end time < start time means next day)
+                const shift1StartParts = currentShift.startTime.split(':').map(Number);
+                const shift1Start = shift1StartParts[0] * 60 + shift1StartParts[1];
+                if (endMinutes <= shift1Start) {
+                    endMinutes += 24 * 60; // shift ends next day
+                }
+
+                // Rest = time from end of shift1 (on day N / day N+1 if night) to start of shift2 (on day N+1 / day 0)
+                const restMinutes = (24 * 60 - endMinutes) + startMinutes;
+                const restHours = restMinutes / 60;
+
+                if (restHours < minHours) {
+                    const label1 = dayNames[pair.day1];
+                    const label2 = dayNames[pair.day2];
+                    const wrapNote = pair.isWrap ? ' (weekovergang)' : '';
+                    warnings.push(
+                        `<strong>${escapeHtml(emp.name)}</strong>: ${restHours.toFixed(1)}u rust tussen ${label1} en ${label2}${wrapNote} (min. ${minHours}u)`
+                    );
+                }
+            }
+        }
+    });
+
+    if (warnings.length === 0) return '';
+
+    return `<div class="builder-11h-warnings">
+        <div class="builder-11h-warnings-title">11-uur regel waarschuwingen</div>
+        <ul>${warnings.map(w => `<li>${w}</li>`).join('')}</ul>
+    </div>`;
 }
 
 function renderBuilderActions() {
@@ -5491,10 +5901,12 @@ function renderBuilderDrafts() {
                         <div class="builder-draft-card" data-draft-id="${escapeHtml(draft.id)}">
                             <div class="builder-draft-info">
                                 <strong>${escapeHtml(draft.name)}</strong>
+                                ${draft.lastAppliedAt ? `<span class="builder-draft-applied-badge">Toegepast ${new Date(draft.lastAppliedAt).toLocaleDateString('nl-BE')}</span>` : ''}
                                 <span class="builder-draft-meta">Week ${draft.weekNumber} &middot; ${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers</span>
                                 <span class="builder-draft-meta">${escapeHtml(draft.createdByName || 'Onbekend')} &middot; ${dateStr}</span>
                             </div>
                             <div class="builder-draft-actions">
+                                <button class="btn btn-secondary btn-sm builder-draft-rename" data-draft-id="${escapeHtml(draft.id)}" title="Hernoemen">Hernoemen</button>
                                 <button class="btn btn-secondary btn-sm builder-draft-load" data-draft-id="${escapeHtml(draft.id)}">Laden</button>
                                 <button class="btn btn-primary btn-sm builder-draft-apply" data-draft-id="${escapeHtml(draft.id)}">Toepassen</button>
                                 <button class="btn btn-danger btn-sm builder-draft-delete" data-draft-id="${escapeHtml(draft.id)}">Verwijderen</button>
@@ -5690,26 +6102,36 @@ async function saveBuilderDraft() {
         Object.values(grid).some(d => Object.keys(d).length > 0);
     if (!hasData) return;
 
-    const name = prompt('Naam voor dit concept:');
-    if (!name || !name.trim()) return;
+    const name = await showInputPrompt('Geef een naam voor dit concept:', 'Concept opslaan');
+    if (!name) return;
 
-    const drafts = [...(DataStore.settings.schedule_drafts || [])];
-
-    const draft = {
+    const draftData = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         name: name.trim(),
-        createdBy: AppState.currentUser?.id,
-        createdByName: AppState.currentUser?.name || 'Onbekend',
         teamFilter: AppState.builderTeamFilter,
         weekNumber: AppState.builderWeekNumber,
-        grid: JSON.parse(JSON.stringify(grid)),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        grid: JSON.parse(JSON.stringify(grid))
     };
 
-    drafts.push(draft);
-    await saveSettings('schedule_drafts', drafts);
-    DataStore.settings.schedule_drafts = drafts;
+    try {
+        if (DataStore._draftsFromTable) {
+            const result = await createScheduleDraft(draftData);
+            DataStore.settings.schedule_drafts.push(result.draft);
+        } else {
+            const drafts = [...(DataStore.settings.schedule_drafts || [])];
+            draftData.createdBy = AppState.currentUser?.id;
+            draftData.createdByName = AppState.currentUser?.name || 'Onbekend';
+            draftData.createdAt = new Date().toISOString();
+            draftData.updatedAt = new Date().toISOString();
+            drafts.push(draftData);
+            await saveSettings('schedule_drafts', drafts);
+            DataStore.settings.schedule_drafts = drafts;
+        }
+    } catch (err) {
+        console.error('Error saving draft:', err);
+        showToast('Fout bij opslaan concept', 'error');
+        return;
+    }
 
     AppState.builderIsDirty = false;
     renderBuilder();
@@ -5744,13 +6166,49 @@ async function deleteBuilderDraft(draftId) {
     const confirmed = await showConfirm('Dit concept verwijderen?');
     if (!confirmed) return;
 
-    let drafts = [...(DataStore.settings.schedule_drafts || [])];
-    drafts = drafts.filter(d => d.id !== draftId);
-    await saveSettings('schedule_drafts', drafts);
-    DataStore.settings.schedule_drafts = drafts;
+    try {
+        if (DataStore._draftsFromTable) {
+            await deleteScheduleDraft(draftId);
+        } else {
+            const drafts = (DataStore.settings.schedule_drafts || []).filter(d => d.id !== draftId);
+            await saveSettings('schedule_drafts', drafts);
+        }
+        DataStore.settings.schedule_drafts = (DataStore.settings.schedule_drafts || []).filter(d => d.id !== draftId);
+    } catch (err) {
+        console.error('Error deleting draft:', err);
+        showToast('Fout bij verwijderen concept', 'error');
+        return;
+    }
 
     renderBuilder();
     showToast('Concept verwijderd', 'success');
+}
+
+async function renameBuilderDraft(draftId) {
+    const drafts = DataStore.settings.schedule_drafts || [];
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+
+    const newName = await showInputPrompt('Nieuwe naam voor dit concept:', 'Concept hernoemen', draft.name);
+    if (!newName) return;
+
+    try {
+        if (DataStore._draftsFromTable) {
+            await updateScheduleDraft(draftId, { name: newName });
+        } else {
+            draft.updatedAt = new Date().toISOString();
+            await saveSettings('schedule_drafts', drafts);
+        }
+        draft.name = newName;
+        draft.updatedAt = new Date().toISOString();
+    } catch (err) {
+        console.error('Error renaming draft:', err);
+        showToast('Fout bij hernoemen concept', 'error');
+        return;
+    }
+
+    renderBuilder();
+    showToast('Concept hernoemd', 'success');
 }
 
 async function applyBuilderDraft(draftId) {
@@ -5762,8 +6220,42 @@ async function applyBuilderDraft(draftId) {
     const weekNumber = draft.weekNumber || 1;
     const empCount = Object.keys(grid).length;
 
+    // Build preview of changes
+    let changesSummary = '';
+    let changesCount = 0;
+    for (const [empIdStr, empGrid] of Object.entries(grid)) {
+        const emp = getEmployee(Number(empIdStr));
+        if (!emp) continue;
+        const prevSchedule = getEmployeeWeekSchedule(emp, weekNumber) || [];
+        const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+        let empChanges = [];
+        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+            const newAssignment = empGrid[dayIndex];
+            const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
+            const oldEntry = prevSchedule.find(e => e.dayOfWeek === jsDayOfWeek && e.enabled);
+            const hasNew = !!newAssignment;
+            const hasOld = !!oldEntry;
+            if (hasNew && !hasOld) {
+                empChanges.push(`${dayNames[dayIndex]}: + ${newAssignment.startTime}-${newAssignment.endTime}`);
+            } else if (!hasNew && hasOld) {
+                empChanges.push(`${dayNames[dayIndex]}: verwijderd`);
+            } else if (hasNew && hasOld && (oldEntry.startTime !== newAssignment.startTime || oldEntry.endTime !== newAssignment.endTime)) {
+                empChanges.push(`${dayNames[dayIndex]}: ${oldEntry.startTime}-${oldEntry.endTime} → ${newAssignment.startTime}-${newAssignment.endTime}`);
+            }
+        }
+        if (empChanges.length > 0) {
+            changesCount++;
+            if (changesCount <= 8) {
+                changesSummary += `\n${emp.name}: ${empChanges.join(', ')}`;
+            }
+        }
+    }
+    if (changesCount > 8) changesSummary += `\n... en ${changesCount - 8} meer`;
+    if (changesCount === 0) changesSummary = '\nGeen wijzigingen gevonden.';
+
     const confirmed = await showConfirm(
-        `Concept "${draft.name}" toepassen?\n\nDit overschrijft het basisrooster week ${weekNumber} voor ${empCount} medewerkers.`
+        `Concept "${draft.name}" toepassen op basisrooster week ${weekNumber}?\n\nWijzigingen voor ${changesCount} van ${empCount} medewerkers:${changesSummary}`,
+        'Concept toepassen'
     );
     if (!confirmed) return;
 
@@ -5830,6 +6322,24 @@ async function applyBuilderDraft(draftId) {
         showToast(`${savedCount} opgeslagen, ${errorCount} fouten`, 'warning');
     } else {
         showToast(`Basisrooster week ${weekNumber} toegepast voor ${savedCount} medewerkers`, 'success');
+    }
+
+    // Mark draft as applied with timestamp
+    const appliedAt = new Date().toISOString();
+    const appliedBy = AppState.currentUser?.name || 'Onbekend';
+    const draftToMark = (DataStore.settings.schedule_drafts || []).find(d => d.id === draftId);
+    if (draftToMark) {
+        draftToMark.lastAppliedAt = appliedAt;
+        draftToMark.lastAppliedBy = appliedBy;
+        try {
+            if (DataStore._draftsFromTable) {
+                await updateScheduleDraft(draftId, { lastAppliedAt: appliedAt, lastAppliedBy: appliedBy });
+            } else {
+                await saveSettings('schedule_drafts', DataStore.settings.schedule_drafts);
+            }
+        } catch (err) {
+            console.error('Error marking draft as applied:', err);
+        }
     }
 
     await loadDataFromAPI();
@@ -5918,6 +6428,12 @@ function attachBuilderEventListeners(container) {
     if (saveDraftBtn) saveDraftBtn.addEventListener('click', saveBuilderDraft);
 
     // Draft action buttons (load, apply, delete)
+    container.querySelectorAll('.builder-draft-rename').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            renameBuilderDraft(btn.dataset.draftId);
+        });
+    });
     container.querySelectorAll('.builder-draft-load').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -5980,7 +6496,15 @@ function renderSettings() {
     renderSettingsTabContent(AppState.activeSettingsTab);
 }
 
-function switchSettingsTab(tabName) {
+async function switchSettingsTab(tabName) {
+    if (AppState.settingsDirty && tabName !== AppState.activeSettingsTab) {
+        const proceed = await showConfirm(
+            'Je hebt onopgeslagen wijzigingen in deze tab. Wil je doorgaan zonder op te slaan?',
+            'Onopgeslagen wijzigingen'
+        );
+        if (!proceed) return;
+        AppState.settingsDirty = false;
+    }
     AppState.activeSettingsTab = tabName;
     document.querySelectorAll('.settings-tab').forEach(tab => {
         const isActive = tab.dataset.settingsTab === tabName;
@@ -6013,9 +6537,40 @@ function renderSettingsTabContent(tabName) {
         case 'systeem':
             renderSettingsSystem(content);
             break;
+        case 'audit':
+            renderSettingsAudit(content);
+            break;
         default:
             content.innerHTML = '<p>Ongeldige tab</p>';
     }
+    // Track unsaved changes for all settings tabs with form inputs
+    if (['planning', 'rooster', 'teams'].includes(tabName)) {
+        trackSettingsDirty(content);
+    }
+}
+
+function getRoleDescription(role) {
+    const descriptions = {
+        'medewerker': 'Kan eigen rooster bekijken, diensten ruilen en verlof aanvragen.',
+        'teamverantwoordelijke': 'Kan diensten en medewerkers van het eigen team beheren.',
+        'hoofdverantwoordelijke': 'Kan alle diensten en medewerkers van alle teams beheren.',
+        'admin': 'Volledige toegang inclusief accountbeheer, instellingen en systeembeheer.'
+    };
+    return descriptions[role] || '';
+}
+
+function trackSettingsDirty(container) {
+    AppState.settingsDirty = false;
+    container.addEventListener('input', () => { AppState.settingsDirty = true; }, true);
+    container.addEventListener('change', (e) => {
+        if (e.target.tagName === 'SELECT' || e.target.type === 'checkbox') {
+            AppState.settingsDirty = true;
+        }
+    }, true);
+}
+
+function markSettingsSaved() {
+    AppState.settingsDirty = false;
 }
 
 // ===== SETTINGS TAB: ACCOUNTS =====
@@ -6208,6 +6763,7 @@ function showAddUserModal(teams) {
                             <option value="hoofdverantwoordelijke">Hoofdverantwoordelijke</option>
                             <option value="admin">Admin</option>
                         </select>
+                        <span class="form-hint role-hint" id="new-user-role-hint">${getRoleDescription('medewerker')}</span>
                     </div>
                     <div class="form-group">
                         <label for="new-user-team">Team</label>
@@ -6238,6 +6794,13 @@ function showAddUserModal(teams) {
                 form.querySelector('#new-user-team').value = selected.dataset.team;
             }
         }
+    });
+
+    // Update role description on change
+    const roleSelect = modal.querySelector('#new-user-role');
+    const roleHint = modal.querySelector('#new-user-role-hint');
+    roleSelect.addEventListener('change', () => {
+        roleHint.textContent = getRoleDescription(roleSelect.value);
     });
 
     const form = modal.querySelector('#add-user-form');
@@ -6317,6 +6880,7 @@ function showEditAccountModal(user, teams, onSave) {
                             <option value="hoofdverantwoordelijke" ${user.role === 'hoofdverantwoordelijke' ? 'selected' : ''}>Hoofdverantwoordelijke</option>
                             <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
                         </select>
+                        <span class="form-hint role-hint" id="edit-user-role-hint">${getRoleDescription(user.role)}</span>
                     </div>
                     <div class="form-group">
                         <label for="edit-user-team">Team</label>
@@ -6338,6 +6902,13 @@ function showEditAccountModal(user, teams, onSave) {
     `;
 
     document.body.appendChild(modal);
+
+    // Update role description on change
+    const editRoleSelect = modal.querySelector('#edit-user-role');
+    const editRoleHint = modal.querySelector('#edit-user-role-hint');
+    editRoleSelect.addEventListener('change', () => {
+        editRoleHint.textContent = getRoleDescription(editRoleSelect.value);
+    });
 
     const form = modal.querySelector('#edit-account-form');
 
@@ -6398,7 +6969,7 @@ function showEditAccountModal(user, teams, onSave) {
             const result = await apiFetch(`/admin/users/${user.id}/reset-password`, {
                 method: 'POST'
             });
-            showToast(`Wachtwoord gereset naar: ${result.resetPassword}`, 'success');
+            showToast('Wachtwoord is gereset naar het standaard wachtwoord', 'success');
         } catch (error) {
             showToast(`Reset mislukt: ${error.message}`, 'error');
         }
@@ -6432,7 +7003,38 @@ function renderSettingsPlanning(container) {
     const rules = DataStore.settings.rules;
     const planningHorizon = DataStore.settings.planningHorizon?.weeks || 4;
 
+    // Check if a holiday period is currently active or upcoming
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    const activeHoliday = getHolidayPeriod(todayStr);
+    const upcomingHoliday = !activeHoliday ? (DataStore.settings.holidayPeriods || []).find(p => {
+        const start = parseDateOnly(p.startDate);
+        const diff = (start - today) / (1000 * 60 * 60 * 24);
+        return diff > 0 && diff <= 14;
+    }) : null;
+
+    const holidayBanner = activeHoliday
+        ? `<div class="holiday-status-banner active">
+                <span class="holiday-status-icon">🏖️</span>
+                <div class="holiday-status-text">
+                    <strong>Vakantiewerking actief: ${escapeHtml(activeHoliday.name)}</strong>
+                    <span>${activeHoliday.startDate} t/m ${activeHoliday.endDate}</span>
+                </div>
+                <a href="#settings-holidays" class="btn btn-sm btn-secondary" onclick="document.getElementById('settings-holidays').scrollIntoView({behavior:'smooth'})">Instellingen</a>
+           </div>`
+        : upcomingHoliday
+        ? `<div class="holiday-status-banner upcoming">
+                <span class="holiday-status-icon">📅</span>
+                <div class="holiday-status-text">
+                    <strong>Komende vakantie: ${escapeHtml(upcomingHoliday.name)}</strong>
+                    <span>Start ${upcomingHoliday.startDate}</span>
+                </div>
+                <a href="#settings-holidays" class="btn btn-sm btn-secondary" onclick="document.getElementById('settings-holidays').scrollIntoView({behavior:'smooth'})">Instellingen</a>
+           </div>`
+        : '';
+
     container.innerHTML = `
+        ${holidayBanner}
         <!-- Planning horizon -->
         <div class="settings-card" id="settings-horizon">
             <div class="settings-card-header">
@@ -6717,6 +7319,7 @@ async function saveSchedulePattern() {
         saveToStorage();
         renderSettings();
         renderPlanning();
+        markSettingsSaved();
         showToast('Roosterpatroon opgeslagen', 'success');
     } catch (err) {
         console.error('Error saving schedule pattern:', err);
@@ -6838,6 +7441,191 @@ function renderSettingsSystem(container) {
     `;
 }
 
+// ===== SETTINGS TAB: AUDIT LOG =====
+function renderSettingsAudit(container) {
+    const role = getEffectiveRole();
+    if (!['admin', 'hoofdverantwoordelijke'].includes(role)) {
+        container.innerHTML = `<div class="settings-card"><div class="settings-card-body">
+            <div class="info-box neutral"><p>Je hebt geen toegang tot het audit log.</p></div>
+        </div></div>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="settings-card">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Audit Log</h3>
+                    <p class="settings-card-subtitle">Overzicht van alle wijzigingen in het systeem.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="audit-filters">
+                    <div class="audit-filter-row">
+                        <div class="form-group">
+                            <label>Van</label>
+                            <input type="date" id="audit-start-date" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label>Tot</label>
+                            <input type="date" id="audit-end-date" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label>Actie</label>
+                            <select id="audit-action-filter" class="form-input">
+                                <option value="">Alle</option>
+                                <option value="CREATE">Aangemaakt</option>
+                                <option value="UPDATE">Bijgewerkt</option>
+                                <option value="DELETE">Verwijderd</option>
+                                <option value="APPROVE">Goedgekeurd</option>
+                                <option value="REJECT">Afgewezen</option>
+                                <option value="LOGIN">Login</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Type</label>
+                            <select id="audit-resource-filter" class="form-input">
+                                <option value="">Alle</option>
+                                <option value="shift">Diensten</option>
+                                <option value="availability">Afwezigheid</option>
+                                <option value="swap_request">Ruilverzoek</option>
+                                <option value="user">Gebruiker</option>
+                                <option value="settings">Instellingen</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="align-self: flex-end;">
+                            <button class="btn btn-primary" onclick="loadAuditLog(1)">Zoeken</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="audit-log-results"></div>
+                <div id="audit-log-pagination" class="audit-pagination"></div>
+            </div>
+        </div>
+    `;
+
+    loadAuditLog(1);
+}
+
+const AUDIT_ACTION_LABELS = {
+    CREATE: 'Aangemaakt',
+    UPDATE: 'Bijgewerkt',
+    DELETE: 'Verwijderd',
+    APPROVE: 'Goedgekeurd',
+    REJECT: 'Afgewezen',
+    CANCEL: 'Geannuleerd',
+    LOGIN: 'Login'
+};
+
+const AUDIT_RESOURCE_LABELS = {
+    shift: 'Dienst',
+    availability: 'Afwezigheid',
+    swap_request: 'Ruilverzoek',
+    user: 'Gebruiker',
+    settings: 'Instelling'
+};
+
+async function loadAuditLog(page) {
+    const resultsEl = document.getElementById('audit-log-results');
+    const paginationEl = document.getElementById('audit-log-pagination');
+    if (!resultsEl) return;
+
+    resultsEl.innerHTML = '<p style="padding: 16px; color: var(--text-secondary);">Laden...</p>';
+
+    const filters = {
+        page,
+        limit: 30,
+        action: document.getElementById('audit-action-filter')?.value || '',
+        resourceType: document.getElementById('audit-resource-filter')?.value || '',
+        startDate: document.getElementById('audit-start-date')?.value || '',
+        endDate: document.getElementById('audit-end-date')?.value || ''
+    };
+
+    try {
+        const data = await fetchAuditLog(filters);
+        const logs = data.logs || [];
+
+        if (logs.length === 0) {
+            resultsEl.innerHTML = '<div class="info-box neutral"><p>Geen resultaten gevonden.</p></div>';
+            paginationEl.innerHTML = '';
+            return;
+        }
+
+        let html = '<table class="audit-log-table"><thead><tr>';
+        html += '<th>Tijdstip</th><th>Gebruiker</th><th>Actie</th><th>Type</th><th>Details</th>';
+        html += '</tr></thead><tbody>';
+
+        logs.forEach(log => {
+            const time = new Date(log.created_at);
+            const timeStr = time.toLocaleDateString('nl-BE', { day: '2-digit', month: '2-digit', year: '2-digit' })
+                + ' ' + time.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+
+            const actionLabel = AUDIT_ACTION_LABELS[log.action] || log.action;
+            const resourceLabel = AUDIT_RESOURCE_LABELS[log.resource_type] || log.resource_type;
+            const actionClass = log.action.toLowerCase();
+
+            let detailStr = '';
+            if (log.details && typeof log.details === 'object') {
+                if (log.details.before && log.details.after) {
+                    detailStr = formatAuditDiff(log.details.before, log.details.after);
+                } else if (log.details.shift) {
+                    const s = log.details.shift;
+                    detailStr = `${s.date || ''} ${s.startTime || s.start_time || ''}-${s.endTime || s.end_time || ''}`;
+                } else if (log.details.availability) {
+                    const a = log.details.availability;
+                    detailStr = `${a.date || ''} ${a.type || ''}`;
+                } else if (log.details.key) {
+                    detailStr = log.details.key;
+                } else if (log.details.user) {
+                    detailStr = log.details.user.name || log.details.user.email || '';
+                } else {
+                    const keys = Object.keys(log.details);
+                    if (keys.length > 0) detailStr = keys.join(', ');
+                }
+            }
+
+            html += `<tr>
+                <td class="audit-time">${escapeHtml(timeStr)}</td>
+                <td>${escapeHtml(log.actor_name)}</td>
+                <td><span class="audit-action-badge audit-${actionClass}">${escapeHtml(actionLabel)}</span></td>
+                <td>${escapeHtml(resourceLabel)}</td>
+                <td class="audit-details">${escapeHtml(detailStr)}</td>
+            </tr>`;
+        });
+
+        html += '</tbody></table>';
+        resultsEl.innerHTML = html;
+
+        // Pagination
+        const totalPages = Math.ceil(data.total / data.limit);
+        if (totalPages > 1) {
+            let pagHtml = '';
+            if (page > 1) pagHtml += `<button class="btn btn-sm btn-secondary" onclick="loadAuditLog(${page - 1})">Vorige</button>`;
+            pagHtml += `<span class="audit-page-info">Pagina ${page} van ${totalPages} (${data.total} resultaten)</span>`;
+            if (page < totalPages) pagHtml += `<button class="btn btn-sm btn-secondary" onclick="loadAuditLog(${page + 1})">Volgende</button>`;
+            paginationEl.innerHTML = pagHtml;
+        } else {
+            paginationEl.innerHTML = `<span class="audit-page-info">${data.total} resultaten</span>`;
+        }
+    } catch (err) {
+        resultsEl.innerHTML = `<div class="info-box neutral"><p>Fout bij laden: ${escapeHtml(err.message)}</p></div>`;
+    }
+}
+
+function formatAuditDiff(before, after) {
+    const changes = [];
+    const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+    for (const key of keys) {
+        if (key === 'createdAt' || key === 'id') continue;
+        const oldVal = before?.[key];
+        const newVal = after?.[key];
+        if (String(oldVal) !== String(newVal)) {
+            changes.push(`${key}: ${oldVal || '-'} → ${newVal || '-'}`);
+        }
+    }
+    return changes.slice(0, 3).join(', ');
+}
+
 async function ensureTeamsLoaded() {
     if (AppState.apiTeams && AppState.apiTeams.length > 0) {
         return AppState.apiTeams;
@@ -6948,6 +7736,7 @@ function saveRules() {
     DataStore.settings.rules.minStaffingNight = minStaffNight;
 
     saveToStorage();
+    markSettingsSaved();
     showToast('Planning regels zijn opgeslagen', 'success');
 }
 
@@ -6965,6 +7754,7 @@ async function savePlanningHorizon() {
             method: 'PUT',
             body: JSON.stringify({ value: { weeks } })
         });
+        markSettingsSaved();
         showToast('Planning horizon is opgeslagen', 'success');
 
         // Reset flag and re-apply schedules with new horizon
@@ -7010,8 +7800,8 @@ function openTemplateModal(templateId = null, template = null) {
     const safeTemplateName = escapeHtml(template?.name || '');
 
     const modalHtml = `
-    <div class="modal-overlay active" id="template-modal-overlay" onclick="closeTemplateModal()">
-        <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal" id="template-modal-overlay" onclick="closeTemplateModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <h2>${title}</h2>
                 <button class="modal-close" onclick="closeTemplateModal()">&times;</button>
@@ -7044,7 +7834,7 @@ function openTemplateModal(templateId = null, template = null) {
                     </div>
                 </div>
             </div>
-            <div class="modal-footer">
+            <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeTemplateModal()">Annuleren</button>
                 <button class="btn btn-primary" onclick="saveTemplate('${templateId || ''}')">Opslaan</button>
             </div>
@@ -7258,6 +8048,7 @@ function saveHolidayRules() {
         minStaffingNight: minStaffNight
     });
 
+    markSettingsSaved();
     showToast('Vakantie instellingen opgeslagen', 'success');
 }
 
