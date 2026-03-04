@@ -1345,6 +1345,31 @@ app.post('/shift-blocks', requireAuth, async (req, res) => {
   }
 });
 
+// Bulk delete shift blocks by date range (for schedule regeneration)
+app.delete('/shift-blocks/range', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+  try {
+    const { startDate, endDate, userId } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: 'startDate en endDate zijn verplicht' });
+    }
+
+    let query = 'DELETE FROM shift_blocks WHERE date >= $1::date AND date <= $2::date';
+    const params = [startDate, endDate];
+
+    if (userId) {
+      query += ' AND user_id = $3';
+      params.push(Number(userId));
+    }
+
+    const result = await pool.query(query, params);
+    await logAudit(req, 'DELETE', 'shift_block', '', { action: 'bulk_delete', startDate, endDate, userId: userId || 'all', count: result.rowCount });
+    res.json({ deleted: result.rowCount });
+  } catch (err) {
+    console.error('Error bulk deleting shift blocks:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.delete('/shift-blocks/:id', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'), async (req, res) => {
   try {
     const blockId = parseInt(req.params.id, 10);

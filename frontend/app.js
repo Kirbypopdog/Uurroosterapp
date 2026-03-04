@@ -4478,8 +4478,9 @@ async function saveProfileWeekSchedule() {
         }
 
         // Regenerate auto-shifts based on new base schedule
+        // clearBlocks: true ensures old shift_blocks don't prevent new schedule from being applied
         AppState.schedulesGenerated = false;
-        await autoApplyBaseSchedules();
+        await autoApplyBaseSchedules({ clearBlocks: true });
 
         // Refresh planning view if currently visible
         if (AppState.currentView === 'planning') {
@@ -4668,8 +4669,9 @@ async function handleEmployeeSubmit(e) {
     renderEmployees();
 
     // Regenerate auto-shifts based on new base schedule
+    // clearBlocks: true ensures old shift_blocks don't prevent new schedule from being applied
     AppState.schedulesGenerated = false;
-    await autoApplyBaseSchedules();
+    await autoApplyBaseSchedules({ clearBlocks: true });
 
     // Refresh planning view if currently visible
     if (AppState.currentView === 'planning') {
@@ -4695,7 +4697,7 @@ async function handleEmployeeDelete() {
 
 // ===== BASISROOSTER FUNCTIES =====
 
-async function autoApplyBaseSchedules() {
+async function autoApplyBaseSchedules({ clearBlocks = false } = {}) {
     // Skip if already generated in this session
     if (AppState.schedulesGenerated) {
         console.log('[Auto Schedule] Already generated this session, skipping');
@@ -4732,6 +4734,19 @@ async function autoApplyBaseSchedules() {
 
     // Remove auto-generated shifts in this range
     const removedShifts = await removeAutoShiftsInDateRange(startDate, endDate);
+
+    // Clear shift_blocks when explicitly regenerating (base schedule change)
+    // This ensures old blocks from manual deletions don't prevent new schedule from being applied
+    if (clearBlocks) {
+        try {
+            const result = await dataApiFetch(`/shift-blocks/range?startDate=${startDate}&endDate=${endDate}`, { method: 'DELETE' });
+            console.log(`[Auto Schedule] Cleared ${result.deleted || 0} shift blocks in range`);
+            // Refresh local cache
+            await fetchShiftBlocks();
+        } catch (err) {
+            console.warn('[Auto Schedule] Could not clear shift blocks:', err);
+        }
+    }
 
     // Apply base schedules for all employees
     const totalShifts = await applyWeekScheduleForAllEmployees(startDate, endDate);
