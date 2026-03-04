@@ -541,16 +541,36 @@ const DragHandler = {
 
         // Update shift via API
         try {
-            // Mark as manual so resized shifts persist across auto-schedule regeneration
-            await updateShift(this.state.shiftId, {
+            const previousData = {
+                employeeId: shift.employeeId,
+                date: shift.date,
+                team: shift.team,
+                startTime: shift.startTime,
+                endTime: shift.endTime,
+                notes: shift.notes || ''
+            };
+            const newData = {
                 employeeId: shift.employeeId,
                 date: shift.date,
                 team: shift.team,
                 startTime: newStartTime,
                 endTime: newEndTime,
                 notes: shift.notes || '',
-                source: 'manual' // Mark as manual so it persists
-            });
+                source: 'manual'
+            };
+
+            // Mark as manual so resized shifts persist across auto-schedule regeneration
+            await updateShift(this.state.shiftId, newData);
+
+            // Record undo action for drag resize
+            if (typeof UndoManager !== 'undefined') {
+                UndoManager.push({
+                    type: 'update',
+                    shiftId: this.state.shiftId,
+                    shiftData: newData,
+                    previousData: previousData
+                });
+            }
 
             // Refresh view
             renderPlanning();

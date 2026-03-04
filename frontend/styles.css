@@ -51,6 +51,20 @@
     vertical-align: middle;
 }
 
+/* Fallback when Lucide CDN is unavailable: show data-lucide attribute as text */
+.no-lucide [data-lucide] {
+    font-size: 0;
+    width: auto;
+    height: auto;
+}
+.no-lucide [data-lucide]::before {
+    font-size: 12px;
+    content: attr(data-lucide);
+    font-family: var(--font-family);
+    font-style: normal;
+    opacity: 0.6;
+}
+
 .lucide-xs { width: 12px; height: 12px; }
 .lucide-sm { width: 16px; height: 16px; }
 .lucide-md { width: 20px; height: 20px; }

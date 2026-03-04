@@ -461,6 +461,7 @@ app.post('/auth/register', async (req, res) => {
     );
     const user = insert.rows[0];
     const token = signToken(user);
+    await logAudit(req, 'CREATE', 'user', user.id, { name: user.name, email: user.email, source: 'register' });
     res.json({ token, user });
   } catch (err) {
     console.error(err);
@@ -587,6 +588,7 @@ app.put('/me', requireAuth, async (req, res) => {
                 week_schedules as "weekSchedules"`,
       [name, email.toLowerCase(), passwordHash, mainTeam, extraTeams, contractHours, week1Json, week2Json, weekSchedulesJson, req.user.id]
     );
+    await logAudit(req, 'UPDATE', 'user', req.user.id, { action: 'self_update', name, email });
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -872,6 +874,7 @@ app.put('/users/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Gebruiker niet gevonden' });
     }
 
+    await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -1113,6 +1116,7 @@ app.delete('/shifts', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'
       'DELETE FROM shifts WHERE date >= $1 AND date <= $2',
       [startDate, endDate]
     );
+    await logAudit(req, 'DELETE', 'shift', '', { action: 'bulk_delete', startDate, endDate, deletedCount: result.rowCount });
     res.json({ deleted: result.rowCount });
   } catch (err) {
     console.error(err);
@@ -1174,6 +1178,7 @@ app.post('/shifts/bulk', requireAuth, requireRole('admin', 'hoofdverantwoordelij
     }
 
     await client.query('COMMIT');
+    await logAudit(req, 'CREATE', 'shift', '', { action: 'bulk_create', count: createdShifts.length, overwriteExisting: !!overwriteExisting });
     res.status(201).json({ shifts: createdShifts, count: createdShifts.length });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -1330,6 +1335,9 @@ app.post('/shift-blocks', requireAuth, async (req, res) => {
       RETURNING *
     `, [user_id, date, req.user.id, reason || 'Created via drag & drop']);
 
+    if (result.rows[0]) {
+      await logAudit(req, 'CREATE', 'shift_block', result.rows[0].id, { user_id, date, reason });
+    }
     res.json(result.rows[0] || { message: 'Block already exists' });
   } catch (err) {
     console.error('Error creating shift block:', err);
@@ -1345,6 +1353,7 @@ app.delete('/shift-blocks/:id', requireAuth, requireRole('admin', 'hoofdverantwo
     }
 
     await pool.query('DELETE FROM shift_blocks WHERE id = $1', [blockId]);
+    await logAudit(req, 'DELETE', 'shift_block', blockId, {});
     res.json({ message: 'Shift block removed successfully' });
   } catch (err) {
     console.error('Error deleting shift block:', err);
@@ -1512,6 +1521,7 @@ app.post('/swap-requests', requireAuth, async (req, res) => {
       [currentUserId, requesterShiftId, targetShift.user_id, targetShiftId, message || null]
     );
 
+    await logAudit(req, 'CREATE', 'swap_request', insertResult.rows[0].id, { requester: currentUserId, target: targetShift.user_id, type: 'swap' });
     res.status(201).json({ swapRequest: insertResult.rows[0] });
   } catch (err) {
     console.error('POST /swap-requests error:', err);
@@ -1740,6 +1750,7 @@ app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     );
 
     await client.query('COMMIT');
+    await logAudit(req, 'CREATE', 'swap_request', '', { type: 'takeover', shiftId, shiftOwner: shift.user_id, createdBy: currentUserId });
 
     res.json({ ok: true, message: 'Open verzoek aangemaakt' });
   } catch (err) {
@@ -1921,6 +1932,7 @@ app.put('/swap-requests/:id/approve', requireAuth, async (req, res) => {
     );
 
     await client.query('COMMIT');
+    await logAudit(req, 'APPROVE', 'swap_request', swapId, { type: 'lead_approval', requester: swap.requester_user_id, target: swap.target_user_id, approvedBy: currentUserId });
 
     res.json({ ok: true, message: 'Swap goedgekeurd en uitgevoerd' });
   } catch (err) {
@@ -1984,6 +1996,7 @@ app.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
       [responseNotes, currentUserId, swapId]
     );
 
+    await logAudit(req, 'REJECT', 'swap_request', swapId, { type: 'lead_rejection', requester: swap.requester_user_id, target: swap.target_user_id, reason: responseNotes, rejectedBy: currentUserId });
     res.json({ ok: true, message: 'Swap afgewezen' });
   } catch (err) {
     console.error('PUT /swap-requests/:id/reject error:', err);
@@ -2037,6 +2050,7 @@ app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
       [swapId]
     );
 
+    await logAudit(req, 'CANCEL', 'swap_request', swapId, { type: swap.request_type, requester: swap.requester_user_id, cancelledBy: currentUserId });
     res.json({ ok: true, message: 'Swap request geannuleerd' });
   } catch (err) {
     console.error('DELETE /swap-requests/:id error:', err);
@@ -2342,6 +2356,7 @@ app.post('/import', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'),
     }
   }
 
+  await logAudit(req, 'IMPORT', 'system', '', { imported: results.imported, skipped: results.skipped, errorCount: results.errors.length });
   res.json({ ok: true, results });
 });
 
@@ -2358,6 +2373,7 @@ app.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
     await client.query('DELETE FROM settings');
     // Note: We don't delete users as that would log everyone out
     await client.query('COMMIT');
+    await logAudit(req, 'DELETE', 'system', '', { action: 'reset_all_data', tables: ['shift_swap_requests', 'shift_blocks', 'availability', 'shifts', 'settings'] });
 
     res.json({ ok: true, message: 'Planning data gewist (gebruikers behouden)' });
   } catch (err) {
@@ -2540,6 +2556,7 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
 
     await client.query('COMMIT');
     results.migrations.push('✅ Migration completed successfully!');
+    await logAudit(req, 'MIGRATE', 'system', '', { migrations: results.migrations, fixes: results.fixes });
 
     res.json({ ok: true, results });
   } catch (err) {
@@ -2575,6 +2592,7 @@ app.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
       if (result.rows[0].inserted) created++;
       else updated++;
     }
+    await logAudit(req, 'CREATE', 'system', '', { action: 'seed_teams', created, updated, total: teams.length });
     res.json({ ok: true, created, updated, total: teams.length });
   } catch (err) {
     console.error(err);

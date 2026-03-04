@@ -61,10 +61,12 @@ const UndoManager = {
         this._executing = true;
         try {
             await this._executeReverse(action);
-            renderPlanning();
+            renderPlanning(); // Only render after successful API call
             showToast('Ongedaan gemaakt', 'info');
         } catch (err) {
-            this.pointer++;
+            this.pointer++; // Restore pointer
+            // Re-sync UI from server data to ensure consistency
+            try { await loadDataFromAPI(); renderPlanning(); } catch (_) {}
             showToast('Undo mislukt: ' + err.message, 'error');
         }
         this._executing = false;
@@ -78,10 +80,12 @@ const UndoManager = {
         this._executing = true;
         try {
             await this._executeForward(action);
-            renderPlanning();
+            renderPlanning(); // Only render after successful API call
             showToast('Opnieuw uitgevoerd', 'info');
         } catch (err) {
-            this.pointer--;
+            this.pointer--; // Restore pointer
+            // Re-sync UI from server data to ensure consistency
+            try { await loadDataFromAPI(); renderPlanning(); } catch (_) {}
             showToast('Redo mislukt: ' + err.message, 'error');
         }
         this._executing = false;
@@ -98,7 +102,7 @@ const UndoManager = {
                 break;
             case 'delete': {
                 const recreated = await addShift(action.previousData);
-                action.resultId = recreated.id;
+                action.resultId = recreated.id; // Track new ID for future redo
                 break;
             }
         }
@@ -108,14 +112,14 @@ const UndoManager = {
         switch (action.type) {
             case 'create': {
                 const created = await addShift(action.shiftData);
-                action.resultId = created.id;
+                action.resultId = created.id; // Track new ID for future undo
                 break;
             }
             case 'update':
                 await updateShift(action.shiftId, action.shiftData);
                 break;
             case 'delete':
-                await deleteShift(action.resultId);
+                await deleteShift(action.resultId); // Uses latest ID from _executeReverse
                 break;
         }
     },
@@ -209,6 +213,8 @@ const ICONS = {
 };
 
 const IconHelper = {
+    _pendingRoots: new Set(),
+    _debounceTimer: null,
     html(name, size = 'sm', extraClass = '') {
         const cls = `lucide-${size}${extraClass ? ' ' + extraClass : ''}`;
         return `<i data-lucide="${name}" class="${cls}"></i>`;
@@ -217,9 +223,27 @@ const IconHelper = {
         const el = typeof container === 'string'
             ? document.querySelector(container)
             : (container || document.body);
-        if (el && typeof lucide !== 'undefined') {
-            lucide.createIcons({ root: el });
-        }
+        if (!el) return;
+        if (typeof lucide === 'undefined') return;
+        // Debounce: batch rapid init calls into a single createIcons pass
+        this._pendingRoots.add(el);
+        if (this._debounceTimer) cancelAnimationFrame(this._debounceTimer);
+        this._debounceTimer = requestAnimationFrame(() => {
+            // Find the broadest common root to avoid redundant passes
+            const roots = [...this._pendingRoots];
+            this._pendingRoots.clear();
+            this._debounceTimer = null;
+            // If document.body is in the set, just do one pass
+            if (roots.includes(document.body)) {
+                lucide.createIcons();
+                return;
+            }
+            // Filter out elements contained by other elements in the set
+            const unique = roots.filter(r => !roots.some(other => other !== r && other.contains(r)));
+            for (const root of unique) {
+                lucide.createIcons({ root });
+            }
+        });
     }
 };
 
