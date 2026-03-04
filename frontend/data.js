@@ -65,6 +65,18 @@ function normalizeSettings(settings) {
         };
     }
 
+    // Schedule pattern normalisatie
+    if (!merged.schedulePattern || typeof merged.schedulePattern !== 'object') {
+        merged.schedulePattern = defaults.schedulePattern || {
+            cycleLength: 2,
+            referenceDate: merged.biWeeklyReferenceDate || '2025-01-06',
+            weeks: {
+                "1": { closedDays: [6, 0], label: "Weekend gesloten" },
+                "2": { closedDays: [], label: "Weekend open" }
+            }
+        };
+    }
+
     return merged;
 }
 
@@ -169,7 +181,10 @@ async function loadDataFromAPI() {
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
-            planningHorizon: apiSettings.planning_horizon || DataStore.settings.planningHorizon
+            planningHorizon: apiSettings.planning_horizon || DataStore.settings.planningHorizon,
+            schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
+            schedule_drafts: apiSettings.schedule_drafts || DataStore.settings.schedule_drafts || [],
+            schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern
         });
 
         DataStore._loaded = true;
@@ -303,6 +318,44 @@ async function addShift(shiftData) {
         return shift;
     } catch (error) {
         console.error('Fout bij toevoegen dienst:', error);
+        throw error;
+    }
+}
+
+async function addShiftsBulk(shiftsArray, overwriteExisting = false) {
+    try {
+        const data = await dataApiFetch('/shifts/bulk', {
+            method: 'POST',
+            body: JSON.stringify({
+                shifts: shiftsArray.map(s => ({
+                    userId: s.userId || s.employeeId,
+                    team: s.team,
+                    date: s.date,
+                    startTime: s.startTime,
+                    endTime: s.endTime,
+                    notes: s.notes || ''
+                })),
+                overwriteExisting
+            })
+        });
+
+        const newShifts = (data.shifts || []).map(s => ({
+            ...s,
+            date: typeof s.date === 'string' ? s.date.split('T')[0] : s.date,
+            employeeId: s.userId,
+            source: s.source || 'manual'
+        }));
+
+        if (overwriteExisting) {
+            // Remove old shifts for these user/date pairs from cache
+            const pairSet = new Set(newShifts.map(s => `${s.userId}|${s.date}`));
+            DataStore.shifts = DataStore.shifts.filter(s => !pairSet.has(`${s.userId || s.employeeId}|${s.date}`));
+        }
+
+        DataStore.shifts.push(...newShifts);
+        return newShifts;
+    } catch (error) {
+        console.error('Fout bij bulk toevoegen diensten:', error);
         throw error;
     }
 }
@@ -464,7 +517,9 @@ function getShiftsByTeam(teamId, startDate = null, endDate = null) {
 // ===== WEEKROOSTER FUNCTIES =====
 
 function getWeekNumber(date) {
-    const referenceDate = parseDateOnly(DataStore.settings.biWeeklyReferenceDate);
+    const pattern = getSchedulePattern();
+    const cycleLength = pattern.cycleLength || 2;
+    const referenceDate = parseDateOnly(pattern.referenceDate || DataStore.settings.biWeeklyReferenceDate);
     referenceDate.setHours(0, 0, 0, 0);
     const currentDate = parseDateOnly(date);
     currentDate.setHours(0, 0, 0, 0);
@@ -477,7 +532,9 @@ function getWeekNumber(date) {
     const diffTime = currMonday.getTime() - refMonday.getTime();
     const diffWeeks = Math.round(diffTime / (1000 * 60 * 60 * 24 * 7));
 
-    return (diffWeeks % 2 === 0) ? 1 : 2;
+    // Modulo N for flexible cycle length (1-based: returns 1..cycleLength)
+    const mod = diffWeeks % cycleLength;
+    return (mod < 0 ? mod + cycleLength : mod) + 1;
 }
 
 function getISOWeekNumber(date) {
@@ -494,10 +551,7 @@ async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
         return [];
     }
 
-    const hasWeek1 = employee.weekScheduleWeek1 && employee.weekScheduleWeek1.length > 0;
-    const hasWeek2 = employee.weekScheduleWeek2 && employee.weekScheduleWeek2.length > 0;
-
-    if (!hasWeek1 && !hasWeek2) {
+    if (!hasAnyWeekSchedule(employee)) {
         return [];
     }
 
@@ -529,7 +583,7 @@ async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
         }
 
         const weekNumber = getWeekNumber(dateStr);
-        const weekSchedule = weekNumber === 1 ? employee.weekScheduleWeek1 : employee.weekScheduleWeek2;
+        const weekSchedule = getEmployeeWeekSchedule(employee, weekNumber);
 
         const scheduleForDay = weekSchedule.find(s => s.dayOfWeek === dayOfWeek);
         if (scheduleForDay && scheduleForDay.enabled) {
@@ -1014,13 +1068,17 @@ function checkStaffingWarnings(date, timeSlot) {
 // ===== HELPER FUNCTIES =====
 
 function isWeekendOpen(date) {
+    // Backward compat wrapper: checks if this date (or its weekend) is open
+    // For adjacent days (Friday, Monday), checks the Saturday of that weekend
     const d = parseDateOnly(date);
     const dayOfWeek = d.getDay();
 
+    // Weekdays (Tue-Thu) are never closed as "weekend"
     if (dayOfWeek >= 2 && dayOfWeek <= 4) {
         return true;
     }
 
+    // For Friday/Monday, check their adjacent Saturday
     let checkDate = date;
     if (dayOfWeek === 5) {
         const saturday = new Date(d);
@@ -1032,8 +1090,85 @@ function isWeekendOpen(date) {
         checkDate = formatDateYYYYMMDD(saturday);
     }
 
-    const weekNumber = getWeekNumber(checkDate);
-    return weekNumber === 2;
+    return !isDayClosed(checkDate);
+}
+
+// ===== FLEXIBEL ROOSTERPATROON FUNCTIES =====
+
+function getSchedulePattern() {
+    if (DataStore.settings.schedulePattern && DataStore.settings.schedulePattern.cycleLength) {
+        return DataStore.settings.schedulePattern;
+    }
+    // Backward compat: construct from biWeeklyReferenceDate
+    return {
+        cycleLength: 2,
+        referenceDate: DataStore.settings.biWeeklyReferenceDate || '2025-01-06',
+        weeks: {
+            "1": { closedDays: [6, 0], label: "Weekend gesloten" },
+            "2": { closedDays: [], label: "Weekend open" }
+        }
+    };
+}
+
+function getCycleLength() {
+    return getSchedulePattern().cycleLength || 2;
+}
+
+function getClosedDaysForWeek(weekNumber) {
+    const pattern = getSchedulePattern();
+    const weekConfig = pattern.weeks?.[String(weekNumber)];
+    return weekConfig?.closedDays || [];
+}
+
+function getWeekLabel(weekNumber) {
+    const pattern = getSchedulePattern();
+    const weekConfig = pattern.weeks?.[String(weekNumber)];
+    if (weekConfig?.label) return weekConfig.label;
+    const closedDays = getClosedDaysForWeek(weekNumber);
+    return closedDays.length > 0 ? `${formatClosedDays(closedDays)}` : 'Alle dagen open';
+}
+
+function isDayClosed(date) {
+    const d = parseDateOnly(date);
+    const dayOfWeek = d.getDay();
+    const weekNumber = getWeekNumber(date);
+    const closedDays = getClosedDaysForWeek(weekNumber);
+    return closedDays.includes(dayOfWeek);
+}
+
+function isDayClosedForWeek(dayOfWeek, weekNumber) {
+    const closedDays = getClosedDaysForWeek(weekNumber);
+    return closedDays.includes(dayOfWeek);
+}
+
+function getEmployeeWeekSchedule(employee, weekNumber) {
+    // Try new format first (array of N week schedules)
+    if (Array.isArray(employee.weekSchedules) && employee.weekSchedules.length > 0) {
+        return employee.weekSchedules[weekNumber - 1] || [];
+    }
+    // Fall back to old format (2 fixed columns)
+    if (weekNumber === 1) return employee.weekScheduleWeek1 || [];
+    if (weekNumber === 2) return employee.weekScheduleWeek2 || [];
+    return [];
+}
+
+function hasAnyWeekSchedule(employee) {
+    if (Array.isArray(employee.weekSchedules)) {
+        return employee.weekSchedules.some(ws => Array.isArray(ws) && ws.length > 0);
+    }
+    return (employee.weekScheduleWeek1?.length > 0) || (employee.weekScheduleWeek2?.length > 0);
+}
+
+function formatClosedDays(closedDays) {
+    if (!closedDays || closedDays.length === 0) return 'alle dagen open';
+    const dayMap = { 0: 'zo', 1: 'ma', 2: 'di', 3: 'wo', 4: 'do', 5: 'vr', 6: 'za' };
+    return closedDays.map(d => dayMap[d]).join(', ') + ' gesloten';
+}
+
+function getOpenDaysForWeek(weekNumber) {
+    const closedDays = getClosedDaysForWeek(weekNumber);
+    // Return JS dayOfWeek numbers for open days (0=zo, 1=ma, ..., 6=za)
+    return [1, 2, 3, 4, 5, 6, 0].filter(d => !closedDays.includes(d));
 }
 
 // ===== VAKANTIE FUNCTIES =====
@@ -1188,8 +1323,10 @@ function isWeekendOrHolidayWeek(weekStartDate) {
     const monday = parseDateOnly(weekStartDate);
     monday.setHours(0, 0, 0, 0);
 
-    const biWeeklyNumber = getWeekNumber(monday);
-    const isOpenWeekend = biWeeklyNumber === 2;
+    // Check if weekend is open (i.e. Saturday is NOT a closed day)
+    const weekNumber = getWeekNumber(monday);
+    const closedDays = getClosedDaysForWeek(weekNumber);
+    const isOpenWeekend = !closedDays.includes(6) && !closedDays.includes(0);
 
     let hasHoliday = false;
     for (let i = 0; i < 7; i++) {

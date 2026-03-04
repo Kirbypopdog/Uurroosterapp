@@ -56,6 +56,7 @@
                 <button class="nav-btn" data-view="employees">Medewerkers</button>
                 <button class="nav-btn" data-view="profile">Profiel</button>
                 <button class="nav-btn" data-view="availability">Verlof en ziekte</button>
+                <button class="nav-btn" data-view="builder">Rooster Bouwen</button>
                 <button class="nav-btn" data-view="swaps">Ruilen</button>
                 <button class="nav-btn" data-view="settings">Instellingen</button>
             </div>
@@ -158,6 +159,15 @@
                 <p class="view-description">Registreer wanneer medewerkers afwezig zijn (verlof, ziek, etc.)</p>
             </div>
             <div id="availability-content"></div>
+        </div>
+
+        <!-- Roosterbouwer View -->
+        <div id="builder-view" class="view">
+            <div class="view-header">
+                <h2>Rooster Bouwen</h2>
+                <p class="view-description">Bouw het basisrooster (week 1 &amp; 2) voor je team</p>
+            </div>
+            <div id="builder-content"></div>
         </div>
 
         <!-- Dienstenruil View -->
@@ -295,10 +305,8 @@
                 <input type="hidden" id="employee-contract">
                 <input type="hidden" id="employee-active" value="true">
 
-                <!-- Week tabs -->
-                <div class="week-tabs">
-                    <button type="button" class="week-tab active" data-week="1">Week 1 (weekend gesloten)</button>
-                    <button type="button" class="week-tab" data-week="2">Week 2 (weekend open)</button>
+                <!-- Week tabs - dynamisch gevuld door generateWeekScheduleHTML() -->
+                <div class="week-tabs" id="employee-week-tabs">
                 </div>
 
                 <div id="week-schedule-container" class="week-schedule-tabs-content">
@@ -547,6 +555,39 @@
             <div class="modal-actions">
                 <button type="button" class="btn btn-secondary" id="confirm-modal-cancel">Annuleren</button>
                 <button type="button" class="btn btn-primary" id="confirm-modal-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Roosterbouwer Dienst Kiezen -->
+    <div id="builder-shift-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header">
+                <h2 id="builder-shift-modal-title">Dienst toewijzen</h2>
+                <span class="modal-close" id="builder-shift-modal-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="builder-shift-employee-info" class="form-group" style="margin-bottom: 16px;"></div>
+                <div class="form-group">
+                    <label>Dienst type</label>
+                    <div id="builder-shift-templates" class="builder-template-buttons"></div>
+                </div>
+                <div id="builder-custom-times" class="form-row" style="display: none;">
+                    <div class="form-group">
+                        <label for="builder-shift-start">Starttijd</label>
+                        <input type="time" id="builder-shift-start" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="builder-shift-end">Eindtijd</label>
+                        <input type="time" id="builder-shift-end" class="form-input">
+                    </div>
+                </div>
+                <div id="builder-shift-validation" class="validation-errors"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger" id="builder-shift-clear" style="margin-right: auto;">Leegmaken</button>
+                <button type="button" class="btn btn-secondary" id="builder-shift-cancel">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="builder-shift-save">Toewijzen</button>
             </div>
         </div>
     </div>

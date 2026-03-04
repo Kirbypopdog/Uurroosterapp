@@ -590,7 +590,7 @@ const DragHandler = {
         // Get default times from employee's week schedule for this day
         const dayOfWeek = new Date(date).getDay();
         const weekNumber = getWeekNumber(new Date(date));
-        const schedule = employee[`weekScheduleWeek${weekNumber}`] || [];
+        const schedule = getEmployeeWeekSchedule(employee, weekNumber);
         const daySchedule = schedule.find(s => s.dayOfWeek === dayOfWeek && s.enabled);
 
         const defaultStartTime = daySchedule?.startTime || '09:00';

@@ -12,11 +12,20 @@ if (window.location.hostname === 'localhost' ||
 }
 
 window.DEFAULT_SETTINGS = {
-    // Referentie datum voor bi-weekly rooster (Week 1 begint op deze maandag)
-    // Dit is de referentie: maandag 6 januari 2025 = Week 1
-    // Week 1 = weekend GESLOTEN (vrijdag 18:00 tot maandag 7:30)
-    // Week 2 = weekend OPEN
+    // Referentie datum voor bi-weekly rooster (backward compat)
     biWeeklyReferenceDate: '2025-01-06',
+
+    // Flexibel roosterpatroon - vervangt de hardcoded bi-weekly logica
+    // cycleLength: aantal weken in de cyclus (1 = wekelijks, 2 = bi-weekly, 3 = tri-weekly, ...)
+    // weeks: per weeknummer de gesloten dagen (JS dayOfWeek: 0=zo, 1=ma, ..., 6=za)
+    schedulePattern: {
+        cycleLength: 2,
+        referenceDate: '2025-01-06',
+        weeks: {
+            "1": { closedDays: [6, 0], label: "Weekend gesloten" },
+            "2": { closedDays: [], label: "Weekend open" }
+        }
+    },
 
     // Planning horizon - hoe ver vooruit worden automatische diensten gegenereerd
     planningHorizon: {

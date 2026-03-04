@@ -22,7 +22,12 @@ const AppState = {
     activeSettingsTab: 'accounts',
     mobileDayIndex: 0, // 0=Monday, 1=Tuesday, ..., 6=Sunday (for mobile day view)
     availabilityMobileDayIndex: 0, // Same for availability view
-    simulatedRole: null // For admin testing: simulates different user roles
+    simulatedRole: null, // For admin testing: simulates different user roles
+    // Builder state
+    builderWeekNumber: 1,        // 1 or 2 (bi-weekly)
+    builderTeamFilter: null,
+    builderGrid: {},             // { [userId]: { [dayIndex0to6]: { startTime, endTime, team } } }
+    builderIsDirty: false
 };
 
 // Get the effective role (simulated if set, otherwise actual)
@@ -379,6 +384,7 @@ function initDOM() {
     DOM.profileView = document.getElementById('profile-view');
     DOM.profileContent = document.getElementById('profile-content');
     DOM.availabilityView = document.getElementById('availability-view');
+    DOM.builderView = document.getElementById('builder-view');
     DOM.swapsView = document.getElementById('swaps-view');
     DOM.settingsView = document.getElementById('settings-view');
     DOM.addShiftBtn = document.getElementById('add-shift-btn');
@@ -869,7 +875,7 @@ function showApp() {
     applyRoleVisibility();
     // Restore saved view from localStorage, or use default
     const savedView = localStorage.getItem('hetvlot_activeView');
-    if (savedView && ['home', 'planning', 'employees', 'profile', 'availability', 'swaps', 'settings'].includes(savedView)) {
+    if (savedView && ['home', 'planning', 'employees', 'profile', 'availability', 'builder', 'swaps', 'settings'].includes(savedView)) {
         AppState.currentView = savedView;
     }
     switchView(AppState.currentView);
@@ -901,6 +907,11 @@ function applyRoleVisibility() {
     // Employees tab: NOT for medewerker role (they manage their schedule via profile)
     if (role !== 'medewerker') {
         allowedViews.add('employees');
+    }
+
+    // Builder tab: teamverantwoordelijke, hoofdverantwoordelijke, admin
+    if (['teamverantwoordelijke', 'hoofdverantwoordelijke', 'admin'].includes(role)) {
+        allowedViews.add('builder');
     }
 
     // Settings only for hoofdverantwoordelijke and admin
@@ -1287,6 +1298,10 @@ function switchView(viewName) {
         case 'swaps':
             DOM.swapsView.classList.add('active');
             renderSwaps();
+            break;
+        case 'builder':
+            DOM.builderView.classList.add('active');
+            renderBuilder();
             break;
         case 'settings':
             DOM.settingsView.classList.add('active');
@@ -1842,7 +1857,7 @@ function renderTimelineView() {
         const dayName = dayNames[dayOfWeek];
         const dateNum = d.getDate();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-        const isClosed = isWeekend && !isWeekendOpen(date);
+        const isClosed = isDayClosed(date);
         const isHoliday = isHolidayPeriod(date);
         const holidayInfo = isHoliday ? getHolidayPeriod(date) : null;
 
@@ -1917,7 +1932,7 @@ function renderTimelineView() {
                     const d = parseDateOnly(date);
                     const dayOfWeek = d.getDay();
                     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                    const isClosed = isWeekend && !isWeekendOpen(date);
+                    const isClosed = isDayClosed(date);
 
                     let cellClass = 'timeline-day-cell';
                     if (isWeekend) cellClass += ' weekend';
@@ -2090,7 +2105,7 @@ function renderTimelineView() {
                     const d = parseDateOnly(date);
                     const dayOfWeek = d.getDay();
                     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                    const isClosed = isWeekend && !isWeekendOpen(date);
+                    const isClosed = isDayClosed(date);
 
                     let cellClass = 'timeline-day-cell';
                     if (isWeekend) cellClass += ' weekend';
@@ -2279,7 +2294,7 @@ function renderMonthView() {
             const dayName = dayNames[dayOfWeek];
             const dayNum = d.getDate();
             const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-            const isClosed = isWeekend && !isWeekendOpen(date);
+            const isClosed = isDayClosed(date);
             const isHoliday = isHolidayPeriod(date);
 
             // Highlight dates outside current month
@@ -2340,7 +2355,7 @@ function renderMonthView() {
                         const d = parseDateOnly(date);
                         const dayOfWeek = d.getDay();
                         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                        const isClosed = isWeekend && !isWeekendOpen(date);
+                        const isClosed = isDayClosed(date);
                         const isCurrentMonth = d.getMonth() === monthStart.getMonth();
 
                         let cellClass = 'month-day-cell';
@@ -2418,7 +2433,7 @@ function renderMonthView() {
                         const d = parseDateOnly(date);
                         const dayOfWeek = d.getDay();
                         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                        const isClosed = isWeekend && !isWeekendOpen(date);
+                        const isClosed = isDayClosed(date);
                         const isCurrentMonth = d.getMonth() === monthStart.getMonth();
 
                         let cellClass = 'month-day-cell';
@@ -3689,12 +3704,19 @@ function renderProfile() {
             <div class="settings-card" style="grid-column: 1 / -1;">
                 <div class="settings-card-header">
                     <h3><span class="settings-icon">📅</span> Mijn Vast Werkrooster</h3>
-                    <p class="settings-description">Je vaste werktijden per week (bi-weekly patroon)</p>
+                    <p class="settings-description">Je vaste werktijden per week</p>
                 </div>
                 <div class="settings-card-body">
                     <div class="week-schedule-tabs" id="profile-week-tabs">
-                        <button type="button" class="week-tab active" data-week="1">Week 1 (weekend gesloten)</button>
-                        <button type="button" class="week-tab" data-week="2">Week 2 (weekend open)</button>
+                        ${(() => {
+                            const cl = getCycleLength();
+                            let tabs = '';
+                            for (let w = 1; w <= cl; w++) {
+                                const label = getWeekLabel(w);
+                                tabs += `<button type="button" class="week-tab ${w === 1 ? 'active' : ''}" data-week="${w}">Week ${w} (${escapeHtml(label)})</button>`;
+                            }
+                            return tabs;
+                        })()}
                     </div>
                     <div id="profile-week-schedule-container" class="week-schedule-container"></div>
                     <div id="profile-schedule-message" class="form-message info" aria-live="polite">
@@ -3822,24 +3844,26 @@ function generateProfileWeekScheduleHTML() {
         return html;
     }
 
-    // Week 1: ma-vr (geen weekend want gesloten)
-    // Week 2: ma-zo (weekend open)
-    container.innerHTML =
-        generateWeekHTML(1, [1, 2, 3, 4, 5]) +
-        generateWeekHTML(2, [1, 2, 3, 4, 5, 6, 0]);
+    // Dynamisch: genereer HTML voor elke week in de cyclus
+    const cycleLen = getCycleLength();
+    let weeksHtml = '';
+    for (let w = 1; w <= cycleLen; w++) {
+        const openDays = getOpenDaysForWeek(w);
+        weeksHtml += generateWeekHTML(w, openDays);
+    }
+    container.innerHTML = weeksHtml;
 }
 
 function loadProfileWeekSchedule() {
     const user = AppState.currentUser;
     if (!user) return;
 
-    // Load week 1
-    if (user.weekScheduleWeek1) {
-        loadProfileWeekScheduleData(1, user.weekScheduleWeek1);
-    }
-    // Load week 2
-    if (user.weekScheduleWeek2) {
-        loadProfileWeekScheduleData(2, user.weekScheduleWeek2);
+    const cycleLen = getCycleLength();
+    for (let w = 1; w <= cycleLen; w++) {
+        const schedule = getEmployeeWeekSchedule(user, w);
+        if (schedule && schedule.length > 0) {
+            loadProfileWeekScheduleData(w, schedule);
+        }
     }
 }
 
@@ -3965,36 +3989,43 @@ async function saveProfileWeekSchedule() {
         saveBtn.disabled = true;
         saveBtn.textContent = 'Opslaan...';
 
-        // Collect week schedule data
-        const weekScheduleWeek1 = getProfileWeekScheduleFromForm(1);
-        const weekScheduleWeek2 = getProfileWeekScheduleFromForm(2);
+        // Collect week schedule data for all weeks in cycle
+        const cycleLen = getCycleLength();
+        const weekSchedules = [];
+        for (let w = 1; w <= cycleLen; w++) {
+            weekSchedules.push(getProfileWeekScheduleFromForm(w));
+        }
 
-        // Save via PUT /users/:id (own profile)
-        // Include all required fields (name) plus the schedule data we're updating
+        // Build payload with backward compat (weekScheduleWeek1/2 for old columns)
+        const payload = {
+            name: AppState.currentUser.name,
+            email: AppState.currentUser.email,
+            mainTeam: AppState.currentUser.mainTeam,
+            extraTeams: AppState.currentUser.extraTeams,
+            contractHours: AppState.currentUser.contractHours,
+            active: AppState.currentUser.active,
+            weekScheduleWeek1: weekSchedules[0] || [],
+            weekScheduleWeek2: weekSchedules[1] || [],
+            weekSchedules: weekSchedules
+        };
+
         const data = await apiFetch(`/users/${AppState.currentUser.id}`, {
             method: 'PUT',
-            body: JSON.stringify({
-                name: AppState.currentUser.name,
-                email: AppState.currentUser.email,
-                mainTeam: AppState.currentUser.mainTeam,
-                extraTeams: AppState.currentUser.extraTeams,
-                contractHours: AppState.currentUser.contractHours,
-                active: AppState.currentUser.active,
-                weekScheduleWeek1,
-                weekScheduleWeek2
-            })
+            body: JSON.stringify(payload)
         });
 
         // Update local state
-        AppState.currentUser.weekScheduleWeek1 = weekScheduleWeek1;
-        AppState.currentUser.weekScheduleWeek2 = weekScheduleWeek2;
+        AppState.currentUser.weekScheduleWeek1 = weekSchedules[0] || [];
+        AppState.currentUser.weekScheduleWeek2 = weekSchedules[1] || [];
+        AppState.currentUser.weekSchedules = weekSchedules;
         sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
 
         // Also update in DataStore.users
         const userIndex = DataStore.users.findIndex(u => u.id === AppState.currentUser.id);
         if (userIndex !== -1) {
-            DataStore.users[userIndex].weekScheduleWeek1 = weekScheduleWeek1;
-            DataStore.users[userIndex].weekScheduleWeek2 = weekScheduleWeek2;
+            DataStore.users[userIndex].weekScheduleWeek1 = weekSchedules[0] || [];
+            DataStore.users[userIndex].weekScheduleWeek2 = weekSchedules[1] || [];
+            DataStore.users[userIndex].weekSchedules = weekSchedules;
         }
 
         // Regenerate auto-shifts based on new base schedule
@@ -4017,7 +4048,7 @@ async function saveProfileWeekSchedule() {
 
 function getProfileWeekScheduleFromForm(weekNumber) {
     const schedule = [];
-    const days = weekNumber === 1 ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6, 0];
+    const days = getOpenDaysForWeek(weekNumber);
 
     days.forEach(dayNum => {
         const checkbox = document.querySelector(`.profile-week-schedule-enabled[data-week="${weekNumber}"][data-day="${dayNum}"]`);
@@ -4144,8 +4175,10 @@ function openEditEmployeeModal(employeeId) {
     DOM.employeeActive.value = employee.active !== false ? 'true' : 'false';
 
     generateWeekScheduleHTML();
-    loadWeekScheduleForm(1, employee.weekScheduleWeek1 || []);
-    loadWeekScheduleForm(2, employee.weekScheduleWeek2 || []);
+    const cycleLen = getCycleLength();
+    for (let w = 1; w <= cycleLen; w++) {
+        loadWeekScheduleForm(w, getEmployeeWeekSchedule(employee, w));
+    }
     // Delete button hidden - accounts are managed via Settings > Accounts
     DOM.employeeDeleteBtn.style.display = 'none';
     DOM.employeeModal.classList.remove('hidden');
@@ -4160,8 +4193,11 @@ function closeEmployeeModal() {
 
 async function handleEmployeeSubmit(e) {
     e.preventDefault();
-    const weekScheduleWeek1 = getWeekScheduleFromForm(1);
-    const weekScheduleWeek2 = getWeekScheduleFromForm(2);
+    const cycleLen = getCycleLength();
+    const weekSchedules = [];
+    for (let w = 1; w <= cycleLen; w++) {
+        weekSchedules.push(getWeekScheduleFromForm(w));
+    }
 
     const employeeData = {
         name: DOM.employeeName.value.trim(),
@@ -4169,9 +4205,10 @@ async function handleEmployeeSubmit(e) {
         mainTeam: DOM.employeeMainTeam.value,
         extraTeams: [],
         contractHours: parseFloat(DOM.employeeContract.value) || 0,
-        active: DOM.employeeActive.value === 'true', // Hidden input stores string
-        weekScheduleWeek1: weekScheduleWeek1,
-        weekScheduleWeek2: weekScheduleWeek2
+        active: DOM.employeeActive.value === 'true',
+        weekScheduleWeek1: weekSchedules[0] || [],
+        weekScheduleWeek2: weekSchedules[1] || [],
+        weekSchedules: weekSchedules
     };
     if (AppState.editingEmployeeId) {
         await updateEmployee(AppState.editingEmployeeId, employeeData);
@@ -4241,10 +4278,7 @@ async function autoApplyBaseSchedules() {
 
     // Count employees with base schedules
     const employees = getAllEmployees(true);
-    const employeesWithSchedule = employees.filter(emp =>
-        (emp.weekScheduleWeek1 && emp.weekScheduleWeek1.length > 0) ||
-        (emp.weekScheduleWeek2 && emp.weekScheduleWeek2.length > 0)
-    );
+    const employeesWithSchedule = employees.filter(emp => hasAnyWeekSchedule(emp));
     console.log(`[Auto Schedule] Found ${employees.length} active employees, ${employeesWithSchedule.length} with base schedules configured`);
 
     // Remove auto-generated shifts in this range
@@ -4262,6 +4296,29 @@ async function autoApplyBaseSchedules() {
 }
 
 function generateWeekScheduleHTML() {
+    // Generate dynamic week tabs
+    const tabsContainer = document.getElementById('employee-week-tabs');
+    if (tabsContainer) {
+        const cl = getCycleLength();
+        let tabsHtml = '';
+        for (let w = 1; w <= cl; w++) {
+            const label = getWeekLabel(w);
+            tabsHtml += `<button type="button" class="week-tab ${w === 1 ? 'active' : ''}" data-week="${w}">Week ${w} (${escapeHtml(label)})</button>`;
+        }
+        tabsContainer.innerHTML = tabsHtml;
+
+        // Add tab click listeners
+        tabsContainer.querySelectorAll('.week-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabsContainer.querySelectorAll('.week-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                document.querySelectorAll('#week-schedule-container .week-content').forEach(content => {
+                    content.classList.toggle('active', content.dataset.week === tab.dataset.week);
+                });
+            });
+        });
+    }
+
     const container = document.getElementById('week-schedule-container');
     if (!container) return;
 
@@ -4303,11 +4360,14 @@ function generateWeekScheduleHTML() {
         return html;
     }
 
-    // Week 1: ma-vr (geen weekend want gesloten)
-    // Week 2: ma-zo (weekend open)
-    container.innerHTML =
-        generateWeekHTML(1, [1, 2, 3, 4, 5]) +
-        generateWeekHTML(2, [1, 2, 3, 4, 5, 6, 0]);
+    // Dynamisch: genereer HTML voor elke week in de cyclus
+    const cycleLen = getCycleLength();
+    let weeksHtml = '';
+    for (let w = 1; w <= cycleLen; w++) {
+        const openDays = getOpenDaysForWeek(w);
+        weeksHtml += generateWeekHTML(w, openDays);
+    }
+    container.innerHTML = weeksHtml;
 
     // Add event listeners
     setupWeekScheduleListeners();
@@ -4522,7 +4582,7 @@ function renderAvailability() {
         const d = parseDateOnly(date);
         const dayOfWeek = d.getDay();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-        const isClosed = isWeekend && !isWeekendOpen(date);
+        const isClosed = isDayClosed(date);
         let dayClass = 'availability-day-col';
         if (isClosed) dayClass += ' closed';
         else if (isWeekend) dayClass += ' weekend';
@@ -4561,17 +4621,16 @@ function renderAvailability() {
                 const d = parseDateOnly(date);
                 const dayOfWeek = d.getDay();
                 const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                const isClosed = isWeekend && !isWeekendOpen(date);
+                const isClosed = isDayClosed(date);
 
                 const absence = getAvailability(emp.id, date);
                 const hasShift = getShiftsByEmployee(emp.id, date, date).length > 0;
 
                 // Check of medewerker normaal werkt op deze dag volgens basisrooster
                 const weekNumber = getWeekNumber(date);
-                const weekSchedule = weekNumber === 1 ? emp.weekScheduleWeek1 : emp.weekScheduleWeek2;
+                const weekSchedule = getEmployeeWeekSchedule(emp, weekNumber);
                 const scheduledForDay = weekSchedule && weekSchedule.find(s => s.dayOfWeek === dayOfWeek && s.enabled);
-                const hasWeekSchedule = (emp.weekScheduleWeek1 && emp.weekScheduleWeek1.length > 0) ||
-                                        (emp.weekScheduleWeek2 && emp.weekScheduleWeek2.length > 0);
+                const hasWeekSchedule = hasAnyWeekSchedule(emp);
 
                 let cellClass = 'availability-day-col';
                 if (isClosed) cellClass += ' closed';
@@ -5143,6 +5202,761 @@ function attachSwapActionListeners() {
         });
     });
 }
+
+// ===== ROOSTERBOUWER (Schedule Builder) =====
+// Simpele week 1 / week 2 bouwer - bouwt basisroosters voor het team
+
+function renderBuilder() {
+    const container = document.getElementById('builder-content');
+    if (!container) return;
+
+    const role = getEffectiveRole();
+    const userTeam = AppState.currentUser?.team_id || AppState.currentUser?.mainTeam;
+
+    // Don't auto-lock team filter - teamverantwoordelijke can build for all teams
+
+    let html = '';
+    html += renderBuilderControls(role, userTeam);
+    html += renderBuilderGrid(role, userTeam);
+    html += renderBuilderActions();
+
+    container.innerHTML = html;
+    attachBuilderEventListeners(container);
+}
+
+function renderBuilderControls(role, userTeam) {
+    const wn = AppState.builderWeekNumber;
+
+    // Team filter - dropdown for all roles that can access builder
+    const teams = DataStore.settings.teams || {};
+    const teamFilterHtml = `<select id="builder-team-select" class="form-input" style="width: auto;">
+        <option value="">Alle teams</option>
+        ${Object.entries(teams).map(([key, t]) =>
+            `<option value="${key}" ${AppState.builderTeamFilter === key ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
+        ).join('')}
+    </select>`;
+
+    return `
+        <div class="builder-controls">
+            <div class="builder-controls-row">
+                <div class="builder-week-nav">
+                    ${(() => {
+                        const cl = getCycleLength();
+                        let btns = '';
+                        for (let w = 1; w <= cl; w++) {
+                            const label = getWeekLabel(w);
+                            btns += `<button class="btn ${wn === w ? 'btn-primary' : 'btn-secondary'} btn-sm" id="builder-week-${w}">Week ${w} (${escapeHtml(label)})</button>`;
+                        }
+                        return btns;
+                    })()}
+                </div>
+                <div class="builder-team-filter">
+                    ${teamFilterHtml}
+                </div>
+            </div>
+            <div class="builder-controls-row">
+                <div class="builder-load-options">
+                    <button class="btn btn-secondary btn-sm" id="builder-load-base">Huidig basisrooster laden</button>
+                    <button class="btn btn-secondary btn-sm" id="builder-load-blank">Leeg beginnen</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderBuilderGrid(role, userTeam) {
+    const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+
+    let employees;
+    if (AppState.builderTeamFilter) {
+        employees = getEmployeesByTeam(AppState.builderTeamFilter, true);
+    } else {
+        employees = getAllEmployees(true);
+    }
+    employees = employees.sort((a, b) => a.name.localeCompare(b.name));
+
+    if (employees.length === 0) {
+        return '<div class="builder-empty">Geen medewerkers gevonden voor het geselecteerde team</div>';
+    }
+
+    const teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'];
+    const teams = DataStore.settings.teams || {};
+
+    let html = '<div class="builder-grid-wrapper">';
+    html += '<div class="builder-grid">';
+
+    // Bepaal gesloten dagen voor huidige builder week
+    const builderClosedDays = getClosedDaysForWeek(AppState.builderWeekNumber);
+    // Map dayIndex (0=Ma..6=Zo) naar JS dayOfWeek (0=Zo, 1=Ma..6=Za)
+    function dayIndexToJsDow(dayIndex) {
+        return dayIndex === 6 ? 0 : dayIndex + 1;
+    }
+
+    // Header
+    html += '<div class="builder-grid-header">';
+    html += '<div class="builder-name-header">Medewerker</div>';
+    dayNames.forEach((name, i) => {
+        let headerClass = 'builder-day-header';
+        const jsDow = dayIndexToJsDow(i);
+        const isWeekend = i >= 5;
+        const isClosed = builderClosedDays.includes(jsDow);
+        if (isWeekend) headerClass += ' weekend';
+        if (isClosed) headerClass += ' closed';
+        const label = isClosed ? `${name} (Gesloten)` : name;
+        html += `<div class="${headerClass}"><span class="day-name">${label}</span></div>`;
+    });
+    html += '<div class="builder-hours-header">Uren</div>';
+    html += '</div>';
+
+    // Employee rows grouped by team
+    const renderedTeams = AppState.builderTeamFilter ? [AppState.builderTeamFilter] : teamOrder;
+
+    renderedTeams.forEach(teamKey => {
+        const teamEmployees = employees.filter(e => e.mainTeam === teamKey);
+        if (teamEmployees.length === 0) return;
+
+        const teamName = teams[teamKey]?.name || teamKey;
+        html += `<div class="builder-team-section team-${teamKey}">
+            <span>${escapeHtml(teamName)} (${teamEmployees.length})</span>
+        </div>`;
+
+        teamEmployees.forEach(emp => {
+            html += renderBuilderEmployeeRow(emp);
+        });
+    });
+
+    const knownTeams = new Set(teamOrder);
+    const otherEmployees = employees.filter(e => !knownTeams.has(e.mainTeam));
+    if (otherEmployees.length > 0) {
+        html += `<div class="builder-team-section"><span>Overig (${otherEmployees.length})</span></div>`;
+        otherEmployees.forEach(emp => { html += renderBuilderEmployeeRow(emp); });
+    }
+
+    html += '</div>';
+
+    // Staffing summary
+    html += renderBuilderStaffingSummary(employees);
+
+    html += '</div>';
+    return html;
+}
+
+function renderBuilderEmployeeRow(employee) {
+    const empGrid = AppState.builderGrid[employee.id] || {};
+    let totalHours = 0;
+    const contractHours = employee.contractHours || employee.contract_hours || 0;
+
+    let html = `<div class="builder-row" data-employee-id="${employee.id}">`;
+
+    html += `<div class="builder-name-cell">
+        <span class="emp-name">${escapeHtml(employee.name)}</span>
+        <span class="emp-contract">${contractHours}u/week</span>
+    </div>`;
+
+    // Gesloten dagen voor huidige builder week
+    const builderClosedDays = getClosedDaysForWeek(AppState.builderWeekNumber);
+
+    // 7 day cells (Mon=0 .. Sun=6)
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const jsDow = dayIndex === 6 ? 0 : dayIndex + 1;
+
+        // Gesloten dag
+        if (builderClosedDays.includes(jsDow)) {
+            html += `<div class="builder-cell closed" data-employee-id="${employee.id}" data-day="${dayIndex}">
+                <span class="cell-closed">Gesloten</span>
+            </div>`;
+            continue;
+        }
+
+        const assignment = empGrid[dayIndex];
+
+        let cellClass = 'builder-cell';
+
+        // Check 11-hour rule against adjacent days
+        let hasError = false;
+        if (assignment) {
+            const minHours = DataStore.settings.rules?.minHoursBetweenShifts || 11;
+            // Check previous day
+            if (dayIndex > 0 && empGrid[dayIndex - 1]) {
+                const prev = empGrid[dayIndex - 1];
+                const hours = calcHoursBetweenTwoAssignments(prev, assignment);
+                if (hours >= 0 && hours < minHours) hasError = true;
+            }
+            // Check next day
+            if (dayIndex < 6 && empGrid[dayIndex + 1]) {
+                const next = empGrid[dayIndex + 1];
+                const hours = calcHoursBetweenTwoAssignments(assignment, next);
+                if (hours >= 0 && hours < minHours) hasError = true;
+            }
+        }
+        if (hasError) cellClass += ' has-error';
+
+        html += `<div class="${cellClass}" data-employee-id="${employee.id}" data-day="${dayIndex}">`;
+
+        if (assignment) {
+            const shiftHours = calculateBuilderShiftHours(assignment);
+            totalHours += shiftHours;
+            const templateName = getTemplateNameForTimes(assignment.startTime, assignment.endTime);
+            const teamColor = assignment.team ? `team-${assignment.team}` : '';
+
+            html += `<div class="builder-shift ${teamColor}">
+                <span class="builder-shift-label">${escapeHtml(templateName)}</span>
+                <span class="builder-shift-time">${assignment.startTime}-${assignment.endTime}</span>
+            </div>`;
+        } else {
+            html += '<span class="cell-empty">+</span>';
+        }
+
+        html += '</div>';
+    }
+
+    // Hours
+    const hoursClass = totalHours > contractHours ? 'over-hours' : (totalHours < contractHours ? 'under-hours' : 'exact-hours');
+    html += `<div class="builder-hours-cell ${hoursClass}">
+        <span class="planned-hours">${totalHours.toFixed(1)}</span>
+        <span class="contract-hours">/ ${contractHours}u</span>
+    </div>`;
+
+    html += '</div>';
+    return html;
+}
+
+function renderBuilderStaffingSummary(employees) {
+    const builderClosedDays = getClosedDaysForWeek(AppState.builderWeekNumber);
+    let html = '<div class="builder-staffing-row">';
+    html += '<div class="builder-staffing-label">Bezetting</div>';
+
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const jsDow = dayIndex === 6 ? 0 : dayIndex + 1;
+
+        if (builderClosedDays.includes(jsDow)) {
+            html += '<div class="builder-staffing-cell closed"></div>';
+            continue;
+        }
+
+        let count = 0;
+        employees.forEach(emp => {
+            const empGrid = AppState.builderGrid[emp.id] || {};
+            if (empGrid[dayIndex]) count++;
+        });
+
+        const minStaffing = DataStore.settings.rules?.minStaffingDay || 1;
+        const staffClass = count >= minStaffing ? 'staffing-ok' : 'staffing-low';
+
+        html += `<div class="builder-staffing-cell ${staffClass}">
+            <span class="staffing-count">${count}</span>
+            <span class="staffing-min">min: ${minStaffing}</span>
+        </div>`;
+    }
+
+    html += '<div class="builder-staffing-cell"></div>';
+    html += '</div>';
+    return html;
+}
+
+function renderBuilderActions() {
+    const hasData = Object.keys(AppState.builderGrid).length > 0 &&
+        Object.values(AppState.builderGrid).some(d => Object.keys(d).length > 0);
+
+    return `
+        <div class="builder-actions">
+            <button class="btn btn-primary" id="builder-save-draft" ${!hasData ? 'disabled' : ''}>
+                Concept opslaan
+            </button>
+        </div>
+        ${renderBuilderDrafts()}
+    `;
+}
+
+function renderBuilderDrafts() {
+    const drafts = DataStore.settings.schedule_drafts || [];
+    if (drafts.length === 0) {
+        return '<div class="builder-drafts"><p class="builder-drafts-empty">Nog geen opgeslagen concepten</p></div>';
+    }
+
+    const sorted = [...drafts].sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+
+    return `
+        <div class="builder-drafts">
+            <h3>Opgeslagen concepten</h3>
+            <div class="builder-drafts-list">
+                ${sorted.map(draft => {
+                    const date = new Date(draft.updatedAt || draft.createdAt);
+                    const dateStr = date.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    const teamLabel = draft.teamFilter
+                        ? (DataStore.settings.teams?.[draft.teamFilter]?.name || draft.teamFilter)
+                        : 'Alle teams';
+                    const empCount = Object.keys(draft.grid || {}).length;
+                    return `
+                        <div class="builder-draft-card" data-draft-id="${escapeHtml(draft.id)}">
+                            <div class="builder-draft-info">
+                                <strong>${escapeHtml(draft.name)}</strong>
+                                <span class="builder-draft-meta">Week ${draft.weekNumber} &middot; ${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers</span>
+                                <span class="builder-draft-meta">${escapeHtml(draft.createdByName || 'Onbekend')} &middot; ${dateStr}</span>
+                            </div>
+                            <div class="builder-draft-actions">
+                                <button class="btn btn-secondary btn-sm builder-draft-load" data-draft-id="${escapeHtml(draft.id)}">Laden</button>
+                                <button class="btn btn-primary btn-sm builder-draft-apply" data-draft-id="${escapeHtml(draft.id)}">Toepassen</button>
+                                <button class="btn btn-danger btn-sm builder-draft-delete" data-draft-id="${escapeHtml(draft.id)}">Verwijderen</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// --- Builder: Cell Editing ---
+
+function openBuilderShiftModal(employeeId, dayIndex) {
+    const employee = getEmployee(employeeId);
+    if (!employee) return;
+
+    const modal = document.getElementById('builder-shift-modal');
+    const titleEl = document.getElementById('builder-shift-modal-title');
+    const infoEl = document.getElementById('builder-shift-employee-info');
+    const templatesEl = document.getElementById('builder-shift-templates');
+    const customTimes = document.getElementById('builder-custom-times');
+    const validationEl = document.getElementById('builder-shift-validation');
+    const startInput = document.getElementById('builder-shift-start');
+    const endInput = document.getElementById('builder-shift-end');
+
+    const dayNames = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
+    titleEl.textContent = 'Dienst toewijzen';
+    infoEl.innerHTML = `<strong>${escapeHtml(employee.name)}</strong> &mdash; ${dayNames[dayIndex]} (Week ${AppState.builderWeekNumber})`;
+
+    // Template buttons
+    const shiftTemplates = DataStore.settings.shiftTemplates || {};
+    let buttonsHtml = '';
+    Object.entries(shiftTemplates).forEach(([key, template]) => {
+        buttonsHtml += `<button class="btn builder-template-btn" data-template="${key}">
+            <span class="template-name">${escapeHtml(template.name)}</span>
+            <span class="template-time">${template.start} - ${template.end}</span>
+        </button>`;
+    });
+    buttonsHtml += `<button class="btn builder-template-btn" data-template="custom">
+        <span class="template-name">Aangepast</span>
+        <span class="template-time">Kies zelf</span>
+    </button>`;
+    templatesEl.innerHTML = buttonsHtml;
+
+    customTimes.style.display = 'none';
+    startInput.value = '';
+    endInput.value = '';
+    validationEl.innerHTML = '';
+
+    // Pre-select current assignment
+    const empGrid = AppState.builderGrid[employeeId] || {};
+    const current = empGrid[dayIndex];
+    if (current) {
+        startInput.value = current.startTime;
+        endInput.value = current.endTime;
+        const matchingKey = Object.entries(shiftTemplates).find(([k, t]) =>
+            t.start === current.startTime && t.end === current.endTime
+        );
+        if (matchingKey) {
+            const btn = templatesEl.querySelector(`[data-template="${matchingKey[0]}"]`);
+            if (btn) btn.classList.add('active');
+        } else {
+            customTimes.style.display = 'flex';
+            const customBtn = templatesEl.querySelector('[data-template="custom"]');
+            if (customBtn) customBtn.classList.add('active');
+        }
+    }
+
+    // Template button clicks
+    templatesEl.querySelectorAll('.builder-template-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            templatesEl.querySelectorAll('.builder-template-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const templateKey = btn.dataset.template;
+            if (templateKey === 'custom') {
+                customTimes.style.display = 'flex';
+            } else {
+                customTimes.style.display = 'none';
+                const template = shiftTemplates[templateKey];
+                startInput.value = template.start;
+                endInput.value = template.end;
+            }
+        });
+    });
+
+    // Save button
+    const saveBtn = document.getElementById('builder-shift-save');
+    const newSaveBtn = saveBtn.cloneNode(true);
+    saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+    newSaveBtn.addEventListener('click', () => {
+        const start = startInput.value;
+        const end = endInput.value;
+        if (!start || !end) {
+            showToast('Vul start- en eindtijd in', 'warning');
+            return;
+        }
+        if (!AppState.builderGrid[employeeId]) {
+            AppState.builderGrid[employeeId] = {};
+        }
+        AppState.builderGrid[employeeId][dayIndex] = {
+            startTime: start,
+            endTime: end,
+            team: employee.mainTeam || AppState.builderTeamFilter || null
+        };
+        AppState.builderIsDirty = true;
+        modal.classList.add('hidden');
+        renderBuilder();
+    });
+
+    // Clear button
+    const clearBtn = document.getElementById('builder-shift-clear');
+    const newClearBtn = clearBtn.cloneNode(true);
+    clearBtn.parentNode.replaceChild(newClearBtn, clearBtn);
+    newClearBtn.addEventListener('click', () => {
+        if (AppState.builderGrid[employeeId]) {
+            delete AppState.builderGrid[employeeId][dayIndex];
+            if (Object.keys(AppState.builderGrid[employeeId]).length === 0) {
+                delete AppState.builderGrid[employeeId];
+            }
+        }
+        AppState.builderIsDirty = true;
+        modal.classList.add('hidden');
+        renderBuilder();
+    });
+
+    // Cancel/Close
+    const cancelBtn = document.getElementById('builder-shift-cancel');
+    const newCancelBtn = cancelBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+    newCancelBtn.addEventListener('click', () => modal.classList.add('hidden'));
+
+    const closeBtn = document.getElementById('builder-shift-modal-close');
+    const newCloseBtn = closeBtn.cloneNode(true);
+    closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+    newCloseBtn.addEventListener('click', () => modal.classList.add('hidden'));
+
+    modal.classList.remove('hidden');
+}
+
+// --- Builder: Loading ---
+
+function loadBuilderFromBaseSchedules() {
+    const weekNumber = AppState.builderWeekNumber;
+
+    let employees;
+    if (AppState.builderTeamFilter) {
+        employees = getEmployeesByTeam(AppState.builderTeamFilter, true);
+    } else {
+        employees = getAllEmployees(true);
+    }
+
+    AppState.builderGrid = {};
+
+    employees.forEach(emp => {
+        const weekSchedule = getEmployeeWeekSchedule(emp, weekNumber);
+
+        if (!weekSchedule || weekSchedule.length === 0) return;
+
+        weekSchedule.forEach(entry => {
+            if (!entry.enabled) return;
+
+            // entry.dayOfWeek: 0=Sun, 1=Mon, ..., 6=Sat (JS convention in profile)
+            // Our dayIndex: 0=Mon, 1=Tue, ..., 6=Sun
+            let dayIndex;
+            if (entry.dayOfWeek === 0) dayIndex = 6; // Sun
+            else dayIndex = entry.dayOfWeek - 1; // Mon=0, Tue=1, ...
+
+            if (dayIndex < 0 || dayIndex > 6) return;
+
+            if (!AppState.builderGrid[emp.id]) {
+                AppState.builderGrid[emp.id] = {};
+            }
+            AppState.builderGrid[emp.id][dayIndex] = {
+                startTime: entry.startTime,
+                endTime: entry.endTime,
+                team: entry.team || emp.mainTeam
+            };
+        });
+    });
+
+    AppState.builderIsDirty = true;
+    renderBuilder();
+    showToast(`Basisrooster week ${weekNumber} geladen`, 'success');
+}
+
+// --- Builder: Draft management ---
+
+async function saveBuilderDraft() {
+    const grid = AppState.builderGrid;
+    const hasData = Object.keys(grid).length > 0 &&
+        Object.values(grid).some(d => Object.keys(d).length > 0);
+    if (!hasData) return;
+
+    const name = prompt('Naam voor dit concept:');
+    if (!name || !name.trim()) return;
+
+    const drafts = [...(DataStore.settings.schedule_drafts || [])];
+
+    const draft = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        name: name.trim(),
+        createdBy: AppState.currentUser?.id,
+        createdByName: AppState.currentUser?.name || 'Onbekend',
+        teamFilter: AppState.builderTeamFilter,
+        weekNumber: AppState.builderWeekNumber,
+        grid: JSON.parse(JSON.stringify(grid)),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+
+    drafts.push(draft);
+    await saveSettings('schedule_drafts', drafts);
+    DataStore.settings.schedule_drafts = drafts;
+
+    AppState.builderIsDirty = false;
+    renderBuilder();
+    showToast('Concept opgeslagen', 'success');
+}
+
+function loadBuilderDraft(draftId) {
+    const drafts = DataStore.settings.schedule_drafts || [];
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+
+    if (AppState.builderIsDirty) {
+        showConfirm('Je hebt onopgeslagen wijzigingen. Wil je doorgaan?').then(confirmed => {
+            if (!confirmed) return;
+            doLoadDraft(draft);
+        });
+    } else {
+        doLoadDraft(draft);
+    }
+}
+
+function doLoadDraft(draft) {
+    AppState.builderWeekNumber = draft.weekNumber || 1;
+    AppState.builderTeamFilter = draft.teamFilter || null;
+    AppState.builderGrid = JSON.parse(JSON.stringify(draft.grid || {}));
+    AppState.builderIsDirty = false;
+    renderBuilder();
+    showToast(`Concept "${draft.name}" geladen`, 'info');
+}
+
+async function deleteBuilderDraft(draftId) {
+    const confirmed = await showConfirm('Dit concept verwijderen?');
+    if (!confirmed) return;
+
+    let drafts = [...(DataStore.settings.schedule_drafts || [])];
+    drafts = drafts.filter(d => d.id !== draftId);
+    await saveSettings('schedule_drafts', drafts);
+    DataStore.settings.schedule_drafts = drafts;
+
+    renderBuilder();
+    showToast('Concept verwijderd', 'success');
+}
+
+async function applyBuilderDraft(draftId) {
+    const drafts = DataStore.settings.schedule_drafts || [];
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+
+    const grid = draft.grid || {};
+    const weekNumber = draft.weekNumber || 1;
+    const empCount = Object.keys(grid).length;
+
+    const confirmed = await showConfirm(
+        `Concept "${draft.name}" toepassen?\n\nDit overschrijft het basisrooster week ${weekNumber} voor ${empCount} medewerkers.`
+    );
+    if (!confirmed) return;
+
+    let savedCount = 0;
+    let errorCount = 0;
+
+    for (const [empIdStr, empGrid] of Object.entries(grid)) {
+        const empId = Number(empIdStr);
+        const emp = getEmployee(empId);
+        if (!emp) continue;
+
+        const entries = [];
+        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+            const assignment = empGrid[dayIndex];
+            if (assignment) {
+                const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
+                entries.push({
+                    dayOfWeek: jsDayOfWeek,
+                    enabled: true,
+                    startTime: assignment.startTime,
+                    endTime: assignment.endTime,
+                    team: assignment.team || emp.mainTeam
+                });
+            }
+        }
+
+        const prevSchedule = getEmployeeWeekSchedule(emp, weekNumber);
+        const hadPrevious = prevSchedule && prevSchedule.length > 0;
+        if (entries.length === 0 && !hadPrevious) continue;
+
+        try {
+            // Build week1/week2 payload: update the target week, keep others intact
+            const body = {
+                name: emp.name,
+                email: emp.email,
+                mainTeam: emp.mainTeam,
+                extraTeams: emp.extraTeams || [],
+                contractHours: emp.contractHours || emp.contract_hours || 0,
+                active: emp.active !== false
+            };
+            // Build all weeks: update the target week, keep others intact
+            const cl = getCycleLength();
+            const allWeeks = [];
+            for (let w = 1; w <= cl; w++) {
+                allWeeks.push(w === weekNumber ? entries : getEmployeeWeekSchedule(emp, w));
+            }
+            // Backward compat: always send weekScheduleWeek1/2 for dual-write
+            body.weekScheduleWeek1 = allWeeks[0] || [];
+            body.weekScheduleWeek2 = allWeeks[1] || [];
+            body.weekSchedules = allWeeks;
+
+            await dataApiFetch(`/users/${emp.id}`, {
+                method: 'PUT',
+                body: JSON.stringify(body)
+            });
+            savedCount++;
+        } catch (error) {
+            console.error(`Fout bij opslaan rooster voor ${emp.name}:`, error);
+            errorCount++;
+        }
+    }
+
+    if (errorCount > 0) {
+        showToast(`${savedCount} opgeslagen, ${errorCount} fouten`, 'warning');
+    } else {
+        showToast(`Basisrooster week ${weekNumber} toegepast voor ${savedCount} medewerkers`, 'success');
+    }
+
+    await loadDataFromAPI();
+    renderBuilder();
+}
+
+// --- Builder: Helpers ---
+
+function calculateBuilderShiftHours(assignment) {
+    return calculateShiftHours({
+        date: '2026-01-01',
+        startTime: assignment.startTime,
+        endTime: assignment.endTime
+    });
+}
+
+function getTemplateNameForTimes(startTime, endTime) {
+    const templates = DataStore.settings.shiftTemplates || {};
+    const match = Object.entries(templates).find(([key, t]) =>
+        t.start === startTime && t.end === endTime
+    );
+    if (match) return match[1].name;
+    return `${startTime}-${endTime}`;
+}
+
+function calcHoursBetweenTwoAssignments(shift1, shift2) {
+    // Assumes consecutive days
+    const [eh, em] = shift1.endTime.split(':').map(Number);
+    const [sh, sm] = shift1.startTime.split(':').map(Number);
+
+    let endHour = eh + em / 60;
+    const startHour = sh + sm / 60;
+    // Overnight shift
+    if (endHour <= startHour) endHour += 24;
+
+    const [s2h, s2m] = shift2.startTime.split(':').map(Number);
+    const nextStartHour = 24 + s2h + s2m / 60; // next day
+
+    return nextStartHour - endHour;
+}
+
+// --- Builder: Event Listeners ---
+
+function attachBuilderEventListeners(container) {
+    // Week toggle buttons (dynamic based on cycle length)
+    const cycleLen = getCycleLength();
+    for (let w = 1; w <= cycleLen; w++) {
+        const btn = document.getElementById(`builder-week-${w}`);
+        if (btn) btn.addEventListener('click', () => switchBuilderWeek(w));
+    }
+
+    // Team filter
+    const teamSelect = document.getElementById('builder-team-select');
+    if (teamSelect) {
+        teamSelect.addEventListener('change', (e) => {
+            AppState.builderTeamFilter = e.target.value || null;
+            AppState.builderGrid = {};
+            AppState.builderIsDirty = false;
+            renderBuilder();
+        });
+    }
+
+    // Load buttons
+    const loadBase = document.getElementById('builder-load-base');
+    if (loadBase) loadBase.addEventListener('click', loadBuilderFromBaseSchedules);
+
+    const loadBlank = document.getElementById('builder-load-blank');
+    if (loadBlank) loadBlank.addEventListener('click', () => {
+        AppState.builderGrid = {};
+        AppState.builderIsDirty = false;
+        renderBuilder();
+        showToast('Grid leeggemaakt', 'info');
+    });
+
+    // Cell clicks (skip closed cells)
+    container.querySelectorAll('.builder-cell:not(.closed)').forEach(cell => {
+        cell.addEventListener('click', () => {
+            const empId = Number(cell.dataset.employeeId);
+            const dayIndex = Number(cell.dataset.day);
+            openBuilderShiftModal(empId, dayIndex);
+        });
+    });
+
+    // Save draft button
+    const saveDraftBtn = document.getElementById('builder-save-draft');
+    if (saveDraftBtn) saveDraftBtn.addEventListener('click', saveBuilderDraft);
+
+    // Draft action buttons (load, apply, delete)
+    container.querySelectorAll('.builder-draft-load').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            loadBuilderDraft(btn.dataset.draftId);
+        });
+    });
+    container.querySelectorAll('.builder-draft-apply').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            applyBuilderDraft(btn.dataset.draftId);
+        });
+    });
+    container.querySelectorAll('.builder-draft-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteBuilderDraft(btn.dataset.draftId);
+        });
+    });
+}
+
+function switchBuilderWeek(weekNumber) {
+    if (AppState.builderIsDirty) {
+        showConfirm('Je hebt onopgeslagen wijzigingen. Wil je doorgaan?').then(confirmed => {
+            if (confirmed) {
+                AppState.builderWeekNumber = weekNumber;
+                AppState.builderGrid = {};
+                AppState.builderIsDirty = false;
+                renderBuilder();
+            }
+        });
+    } else {
+        AppState.builderWeekNumber = weekNumber;
+        AppState.builderGrid = {};
+        AppState.builderIsDirty = false;
+        renderBuilder();
+    }
+}
+
+// ===== END ROOSTERBOUWER =====
 
 function renderSettings() {
     // Update tab active states and scroll active into view
@@ -5724,28 +6538,60 @@ function renderSettingsPlanning(container) {
 // ===== SETTINGS TAB: ROOSTER =====
 function renderSettingsRooster(container) {
     container.innerHTML = `
-        <!-- Bi-weekly rooster -->
-        <div class="settings-card" id="settings-biweekly">
+        <!-- Roosterpatroon -->
+        <div class="settings-card" id="settings-schedule-pattern">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Bi-weekly Patroon</h3>
-                    <p class="settings-card-subtitle">Week 1 en Week 2 wisselen elkaar af.</p>
+                    <h3>Roosterpatroon</h3>
+                    <p class="settings-card-subtitle">Configureer de cyclus en gesloten dagen.</p>
                 </div>
             </div>
             <div class="settings-card-body">
-                <div class="info-box info">
-                    <p><strong>Week 1</strong> = weekend GESLOTEN (vrij 18:00 - ma 7:30)</p>
-                    <p><strong>Week 2</strong> = weekend OPEN</p>
-                    <p class="current-setting">Huidige Week 1 start: <strong>${formatDate(DataStore.settings.biWeeklyReferenceDate)}</strong></p>
+                ${(() => {
+                    const pattern = getSchedulePattern();
+                    const cl = pattern.cycleLength || 2;
+                    let weeksInfo = '';
+                    for (let w = 1; w <= cl; w++) {
+                        const closed = getClosedDaysForWeek(w);
+                        const label = closed.length > 0 ? formatClosedDays(closed) : 'alle dagen open';
+                        weeksInfo += `<p><strong>Week ${w}</strong> = ${escapeHtml(label)}</p>`;
+                    }
+                    return `<div class="info-box info">
+                        ${weeksInfo}
+                        <p class="current-setting">Referentie Week 1: <strong>${formatDate(pattern.referenceDate || DataStore.settings.biWeeklyReferenceDate)}</strong></p>
+                    </div>`;
+                })()}
+                <div class="form-group">
+                    <label for="schedule-cycle-length">Cycluslengte (aantal weken):</label>
+                    <input type="number" id="schedule-cycle-length" class="form-input" min="1" max="8" value="${getSchedulePattern().cycleLength || 2}" style="width: 80px;" />
+                </div>
+                <div id="schedule-pattern-weeks">
+                    ${(() => {
+                        const pattern = getSchedulePattern();
+                        const cl = pattern.cycleLength || 2;
+                        const dayLabels = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
+                        let html = '';
+                        for (let w = 1; w <= cl; w++) {
+                            const closed = getClosedDaysForWeek(w);
+                            html += `<div class="form-group schedule-pattern-week">
+                                <label>Week ${w} - Gesloten dagen:</label>
+                                <div class="schedule-pattern-days">
+                                    ${[1,2,3,4,5,6,0].map(d => `<label class="schedule-day-checkbox">
+                                        <input type="checkbox" class="pattern-closed-day" data-week="${w}" data-day="${d}" ${closed.includes(d) ? 'checked' : ''}>
+                                        <span>${dayLabels[d]}</span>
+                                    </label>`).join('')}
+                                </div>
+                            </div>`;
+                        }
+                        return html;
+                    })()}
                 </div>
                 <div class="form-group">
-                    <label for="biweekly-reference-date">Referentie maandag voor Week 1:</label>
-                    <div class="input-with-button">
-                        <input type="date" id="biweekly-reference-date" class="form-input" value="${DataStore.settings.biWeeklyReferenceDate}" />
-                        <button class="btn btn-primary" onclick="updateBiWeeklyReference()">Opslaan</button>
-                    </div>
+                    <label for="schedule-reference-date">Referentie maandag (Week 1 start):</label>
+                    <input type="date" id="schedule-reference-date" class="form-input" value="${getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate}" />
                     <span class="form-hint">Selecteer altijd een maandag</span>
                 </div>
+                <button class="btn btn-primary" id="save-schedule-pattern-btn">Patroon Opslaan</button>
             </div>
         </div>
 
@@ -5758,7 +6604,7 @@ function renderSettingsRooster(container) {
                 </div>
             </div>
             <div class="settings-card-body">
-                <p class="form-help-text">Tijdens open weekenden (Week 2) wordt automatisch een verantwoordelijke aangeduid. De rotatie gaat om de beurt door medewerkers van de geselecteerde teams.</p>
+                <p class="form-help-text">Tijdens open weekenden wordt automatisch een verantwoordelijke aangeduid. De rotatie gaat om de beurt door medewerkers van de geselecteerde teams.</p>
 
                 <div class="eligible-teams-compact" style="margin-top: 16px;">
                     ${renderEligibleTeamsCheckboxes()}
@@ -5777,6 +6623,105 @@ function renderSettingsRooster(container) {
             </div>
         </div>
     `;
+
+    // Event listener: Save schedule pattern
+    const saveBtn = document.getElementById('save-schedule-pattern-btn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveSchedulePattern);
+    }
+
+    // Event listener: Cycle length change → rebuild week rows
+    const cycleLengthInput = document.getElementById('schedule-cycle-length');
+    if (cycleLengthInput) {
+        cycleLengthInput.addEventListener('change', function() {
+            const newLength = Math.max(1, Math.min(8, parseInt(this.value) || 2));
+            this.value = newLength;
+            rebuildSchedulePatternWeeks(newLength);
+        });
+    }
+}
+
+function rebuildSchedulePatternWeeks(cycleLength) {
+    const container = document.getElementById('schedule-pattern-weeks');
+    if (!container) return;
+
+    const pattern = getSchedulePattern();
+    const dayLabels = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
+    let html = '';
+
+    for (let w = 1; w <= cycleLength; w++) {
+        const closed = (w <= (pattern.cycleLength || 2)) ? getClosedDaysForWeek(w) : [];
+        html += `<div class="form-group schedule-pattern-week">
+            <label>Week ${w} - Gesloten dagen:</label>
+            <div class="schedule-pattern-days">
+                ${[1,2,3,4,5,6,0].map(d => `<label class="schedule-day-checkbox">
+                    <input type="checkbox" class="pattern-closed-day" data-week="${w}" data-day="${d}" ${closed.includes(d) ? 'checked' : ''}>
+                    <span>${dayLabels[d]}</span>
+                </label>`).join('')}
+            </div>
+        </div>`;
+    }
+
+    container.innerHTML = html;
+}
+
+async function saveSchedulePattern() {
+    const cycleLengthInput = document.getElementById('schedule-cycle-length');
+    const refDateInput = document.getElementById('schedule-reference-date');
+
+    const cycleLength = Math.max(1, Math.min(8, parseInt(cycleLengthInput?.value) || 2));
+    const referenceDate = refDateInput?.value;
+
+    if (!referenceDate) {
+        showToast('Selecteer een referentie datum', 'warning');
+        return;
+    }
+
+    // Check if it's a Monday
+    const date = parseDateOnly(referenceDate);
+    if (date.getDay() !== 1) {
+        showToast('De referentie datum moet een maandag zijn', 'warning');
+        return;
+    }
+
+    // Collect closed days per week
+    const weeks = {};
+    for (let w = 1; w <= cycleLength; w++) {
+        const closedDays = [];
+        document.querySelectorAll(`.pattern-closed-day[data-week="${w}"]`).forEach(cb => {
+            if (cb.checked) {
+                closedDays.push(parseInt(cb.dataset.day));
+            }
+        });
+        const label = closedDays.length > 0 ? formatClosedDays(closedDays) : 'alle dagen open';
+        weeks[String(w)] = { closedDays, label };
+    }
+
+    const newPattern = { cycleLength, referenceDate, weeks };
+
+    // Save to backend
+    try {
+        await saveSettings('schedule_pattern', newPattern);
+
+        // Update local state
+        DataStore.settings.schedulePattern = newPattern;
+        // Backward compat: sync biWeeklyReferenceDate
+        DataStore.settings.biWeeklyReferenceDate = referenceDate;
+
+        // Also sync rotation start date
+        if (!DataStore.settings.responsibleRotation) {
+            DataStore.settings.responsibleRotation = { eligibleTeams: [], assignments: {} };
+        }
+        DataStore.settings.responsibleRotation.rotationStart = referenceDate;
+
+        saveToStorage();
+        renderSettings();
+        renderPlanning();
+        showToast('Roosterpatroon opgeslagen', 'success');
+    } catch (err) {
+        console.error('Error saving schedule pattern:', err);
+        showToast('Fout bij opslaan van roosterpatroon', 'error');
+    }
 }
 
 // ===== SETTINGS TAB: TEAMS =====
@@ -6383,7 +7328,7 @@ function renderRotationSettingsCompact() {
     const rotation = DataStore.settings.responsibleRotation || {};
     const eligible = getEligibleEmployeesForResponsible();
 
-    const referenceDate = DataStore.settings.biWeeklyReferenceDate || '';
+    const referenceDate = getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '';
     const currentStart = rotation.rotationStart || referenceDate;
     const currentEmployee = String(rotation.rotationStartEmployee || '');
 
@@ -6420,7 +7365,7 @@ function renderRotationSettingsCompact() {
 function saveRotationSettings() {
     const employeeSelect = document.getElementById('rotation-start-employee');
 
-    const startDate = DataStore.settings.biWeeklyReferenceDate;
+    const startDate = getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate;
     const employeeId = employeeSelect.value;
 
     if (!startDate) {
@@ -6493,35 +7438,6 @@ function renderUpcomingResponsibles() {
 
     html += '</div>';
     return html;
-}
-
-function updateBiWeeklyReference() {
-    const dateInput = document.getElementById('biweekly-reference-date');
-    const selectedDate = dateInput.value;
-
-    if (!selectedDate) {
-        showToast('Selecteer eerst een datum', 'warning');
-        return;
-    }
-
-    // Check if it's a Monday
-    const date = parseDateOnly(selectedDate);
-    const dayOfWeek = date.getDay();
-
-    if (dayOfWeek !== 1) {
-        showToast('De geselecteerde datum is geen maandag. Kies een maandag als referentie datum.', 'warning');
-        return;
-    }
-
-    DataStore.settings.biWeeklyReferenceDate = selectedDate;
-    if (!DataStore.settings.responsibleRotation) {
-        DataStore.settings.responsibleRotation = { eligibleTeams: [], assignments: {} };
-    }
-    DataStore.settings.responsibleRotation.rotationStart = selectedDate;
-    saveToStorage();
-    renderSettings();
-    renderPlanning(); // Update the current week display
-    showToast('Referentie datum voor Week 1 is bijgewerkt', 'success');
 }
 
 function setupSettingsCollapsibles(scope = document) {
@@ -7051,12 +7967,14 @@ async function showDebugInfo() {
 
         message += `\nMEDEWERKERS (${result.employeeCount}):\n`;
         result.employees.forEach(emp => {
+            const ws = emp.weekSchedules;
             const w1 = emp.weekScheduleWeek1;
             const w2 = emp.weekScheduleWeek2;
             message += `\n${emp.name} (ID: ${emp.id}):\n`;
             message += `  mainTeam: ${emp.mainTeam || 'GEEN'}\n`;
-            message += `  weekScheduleWeek1: type=${w1.type}, isArray=${w1.isArray}, length=${w1.length}\n`;
-            message += `  weekScheduleWeek2: type=${w2.type}, isArray=${w2.isArray}, length=${w2.length}\n`;
+            message += `  weekSchedules: type=${ws?.type || typeof ws}, isArray=${Array.isArray(ws)}, length=${ws?.length || 0}\n`;
+            message += `  weekScheduleWeek1: type=${w1?.type || typeof w1}, isArray=${w1?.isArray || Array.isArray(w1)}, length=${w1?.length || 0}\n`;
+            message += `  weekScheduleWeek2: type=${w2?.type || typeof w2}, isArray=${w2?.isArray || Array.isArray(w2)}, length=${w2?.length || 0}\n`;
         });
 
         console.log(message);
@@ -7177,8 +8095,17 @@ function sanitizeImportedData(rawData) {
             if (!Number.isFinite(id)) return null;
             const mainTeam = settings.teams[emp?.mainTeam] ? emp.mainTeam : Object.keys(settings.teams)[0];
             const extraTeams = Array.isArray(emp?.extraTeams) ? emp.extraTeams.filter(teamId => settings.teams[teamId]) : [];
-            const weekScheduleWeek1 = Array.isArray(emp?.weekScheduleWeek1) ? emp.weekScheduleWeek1 : [];
-            const weekScheduleWeek2 = Array.isArray(emp?.weekScheduleWeek2) ? emp.weekScheduleWeek2 : [];
+            // Support both new weekSchedules array and old weekScheduleWeek1/2 format
+            let weekScheduleWeek1, weekScheduleWeek2, weekSchedules;
+            if (Array.isArray(emp?.weekSchedules) && emp.weekSchedules.length >= 2) {
+                weekSchedules = emp.weekSchedules;
+                weekScheduleWeek1 = Array.isArray(weekSchedules[0]) ? weekSchedules[0] : [];
+                weekScheduleWeek2 = Array.isArray(weekSchedules[1]) ? weekSchedules[1] : [];
+            } else {
+                weekScheduleWeek1 = Array.isArray(emp?.weekScheduleWeek1) ? emp.weekScheduleWeek1 : [];
+                weekScheduleWeek2 = Array.isArray(emp?.weekScheduleWeek2) ? emp.weekScheduleWeek2 : [];
+                weekSchedules = [weekScheduleWeek1, weekScheduleWeek2];
+            }
 
             function sanitizeScheduleItem(item) {
                 const dayOfWeek = Number(item?.dayOfWeek);
@@ -7204,6 +8131,7 @@ function sanitizeImportedData(rawData) {
                 active: emp?.active !== false,
                 weekScheduleWeek1: weekScheduleWeek1.map(sanitizeScheduleItem).filter(Boolean),
                 weekScheduleWeek2: weekScheduleWeek2.map(sanitizeScheduleItem).filter(Boolean),
+                weekSchedules: weekSchedules.map(ws => (Array.isArray(ws) ? ws : []).map(sanitizeScheduleItem).filter(Boolean)),
                 createdAt: emp?.createdAt || new Date().toISOString()
             };
         })
@@ -7292,7 +8220,11 @@ async function importData(event) {
                     contractHours: Number(emp.contractHours) || 0,
                     active: emp.active !== false,
                     weekScheduleWeek1: Array.isArray(emp.weekScheduleWeek1) ? emp.weekScheduleWeek1 : [],
-                    weekScheduleWeek2: Array.isArray(emp.weekScheduleWeek2) ? emp.weekScheduleWeek2 : []
+                    weekScheduleWeek2: Array.isArray(emp.weekScheduleWeek2) ? emp.weekScheduleWeek2 : [],
+                    weekSchedules: Array.isArray(emp.weekSchedules) ? emp.weekSchedules : [
+                        Array.isArray(emp.weekScheduleWeek1) ? emp.weekScheduleWeek1 : [],
+                        Array.isArray(emp.weekScheduleWeek2) ? emp.weekScheduleWeek2 : []
+                    ]
                 }))
             };
 
