@@ -160,6 +160,69 @@ const PERMISSIONS = {
     EXPORT_DATA: ['admin', 'hoofdverantwoordelijke']
 };
 
+// ===== LUCIDE ICON HELPERS =====
+const ICONS = {
+    // Status & Validation
+    warning: 'triangle-alert',
+    error: 'circle-x',
+    success: 'circle-check',
+    check: 'check',
+    info: 'info',
+    zap: 'zap',
+    // Navigation
+    home: 'house',
+    planning: 'calendar-days',
+    employees: 'users',
+    profile: 'user',
+    availability: 'calendar-off',
+    swaps: 'arrow-left-right',
+    settings: 'settings',
+    logout: 'log-out',
+    // Actions
+    close: 'x',
+    delete: 'trash-2',
+    edit: 'pencil',
+    search: 'search',
+    // Arrows
+    left: 'chevron-left',
+    right: 'chevron-right',
+    swap: 'arrow-left-right',
+    // Feature Icons
+    star: 'star',
+    holiday: 'umbrella',
+    calendar: 'calendar',
+    calendarRange: 'calendar-range',
+    tip: 'lightbulb',
+    email: 'mail',
+    clock: 'clock',
+    // Shift Types
+    early: 'sunrise',
+    late: 'sunset',
+    night: 'moon',
+    long: 'ruler',
+    // Misc
+    testMode: 'flask-conical',
+    takeover: 'hand',
+    repeat: 'repeat-2',
+    undo: 'undo-2',
+    redo: 'redo-2'
+};
+
+const IconHelper = {
+    html(name, size = 'sm', extraClass = '') {
+        const cls = `lucide-${size}${extraClass ? ' ' + extraClass : ''}`;
+        return `<i data-lucide="${name}" class="${cls}"></i>`;
+    },
+    init(container) {
+        const el = typeof container === 'string'
+            ? document.querySelector(container)
+            : (container || document.body);
+        if (el && typeof lucide !== 'undefined') {
+            lucide.createIcons({ root: el });
+        }
+    }
+};
+
 function hasPermission(permission) {
     const role = getEffectiveRole();
     return PERMISSIONS[permission]?.includes(role) || false;
@@ -305,23 +368,24 @@ const ToastManager = {
     },
 
     render(toast) {
-        const icons = {
-            success: '✓',
-            error: '✕',
-            warning: '⚠',
-            info: 'ℹ'
+        const iconMap = {
+            success: ICONS.success,
+            error: ICONS.error,
+            warning: ICONS.warning,
+            info: ICONS.info
         };
 
         const el = document.createElement('div');
         el.className = `toast toast-${toast.type}`;
         el.dataset.toastId = toast.id;
         el.innerHTML = `
-            <span class="toast-icon">${icons[toast.type]}</span>
+            <span class="toast-icon">${IconHelper.html(iconMap[toast.type], 'sm')}</span>
             <span class="toast-message">${escapeHtml(toast.message)}</span>
-            <button class="toast-close" onclick="ToastManager.remove(${toast.id})">×</button>
+            <button class="toast-close" onclick="ToastManager.remove(${toast.id})">${IconHelper.html(ICONS.close, 'xs')}</button>
         `;
 
         this.container.appendChild(el);
+        IconHelper.init(el);
 
         // Trigger animation
         setTimeout(() => el.classList.add('toast-show'), 10);
@@ -893,6 +957,7 @@ function setupEventListeners() {
             const container = document.getElementById('coverage-heatmap-container');
             if (container) {
                 container.innerHTML = AppState.showHeatmap ? renderCoverageHeatmap() : '';
+                if (AppState.showHeatmap) IconHelper.init(container);
             }
         });
     }
@@ -1148,6 +1213,7 @@ function renderHome() {
     html += '</div>';
 
     container.innerHTML = html;
+    IconHelper.init(container);
 
     // Attach quick action click handlers
     container.querySelectorAll('.home-action-btn').forEach(btn => {
@@ -1269,15 +1335,15 @@ function renderHomeQuickActions(role) {
     let actions = '';
 
     if (['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(role)) {
-        actions += `<button class="home-action-btn" data-action="add-shift"><span class="home-action-icon">+</span>Dienst toevoegen</button>`;
+        actions += `<button class="home-action-btn" data-action="add-shift"><span class="home-action-icon">${IconHelper.html('plus', 'md')}</span>Dienst toevoegen</button>`;
     }
 
-    actions += `<button class="home-action-btn" data-action="view-planning"><span class="home-action-icon">&#128197;</span>Planning bekijken</button>`;
-    actions += `<button class="home-action-btn" data-action="request-absence"><span class="home-action-icon">&#128196;</span>Verlof aanvragen</button>`;
-    actions += `<button class="home-action-btn" data-action="request-swap"><span class="home-action-icon">&#128260;</span>Dienst ruilen</button>`;
+    actions += `<button class="home-action-btn" data-action="view-planning"><span class="home-action-icon">${IconHelper.html(ICONS.planning, 'md')}</span>Planning bekijken</button>`;
+    actions += `<button class="home-action-btn" data-action="request-absence"><span class="home-action-icon">${IconHelper.html(ICONS.availability, 'md')}</span>Verlof aanvragen</button>`;
+    actions += `<button class="home-action-btn" data-action="request-swap"><span class="home-action-icon">${IconHelper.html(ICONS.swap, 'md')}</span>Dienst ruilen</button>`;
 
     if (['admin', 'hoofdverantwoordelijke'].includes(role)) {
-        actions += `<button class="home-action-btn" data-action="add-employee"><span class="home-action-icon">&#128100;</span>Accounts beheren</button>`;
+        actions += `<button class="home-action-btn" data-action="add-employee"><span class="home-action-icon">${IconHelper.html(ICONS.profile, 'md')}</span>Accounts beheren</button>`;
     }
 
     return `
@@ -1738,6 +1804,7 @@ function renderPlanning() {
     const heatmapContainer = document.getElementById('coverage-heatmap-container');
     if (heatmapContainer && AppState.showHeatmap) {
         heatmapContainer.innerHTML = renderCoverageHeatmap();
+        IconHelper.init(heatmapContainer);
     }
 
     // Restore window scroll position after DOM updates
@@ -1853,7 +1920,7 @@ function renderValidationAlerts() {
         if (totalErrors > 0) {
             AppState.errorBreakdown = buildIssueBreakdown(summary, 'errors');
             html += `<div class="validation-summary-item validation-error">
-                <span class="validation-icon">⚠️</span>
+                <span class="validation-icon">${IconHelper.html(ICONS.warning, 'sm')}</span>
                 <span class="validation-text">${totalErrors} fout${totalErrors > 1 ? 'en' : ''} (klik voor details)</span>
             </div>`;
         } else {
@@ -1863,7 +1930,7 @@ function renderValidationAlerts() {
         if (totalWarnings > 0) {
             AppState.warningBreakdown = buildIssueBreakdown(summary, 'warnings');
             html += `<div class="validation-summary-item validation-warning">
-                <span class="validation-icon">⚡</span>
+                <span class="validation-icon">${IconHelper.html(ICONS.zap, 'sm')}</span>
                 <span class="validation-text">${totalWarnings} waarschuwing${totalWarnings > 1 ? 'en' : ''} (klik voor details)</span>
             </div>`;
         } else {
@@ -1876,6 +1943,7 @@ function renderValidationAlerts() {
     }
 
     DOM.validationAlerts.innerHTML = html;
+    IconHelper.init(DOM.validationAlerts);
 }
 
 function buildIssueBreakdown(summary, issueType) {
@@ -2134,7 +2202,7 @@ function renderTimelineView() {
         if (isHoliday) headerClass += ' holiday';
 
         const holidayLabel = escapeHtml(holidayInfo?.name || 'Vakantie');
-        const holidayBadge = isHoliday ? `<span class="holiday-badge" data-tooltip="${holidayLabel}">🏖️</span>` : '';
+        const holidayBadge = isHoliday ? `<span class="holiday-badge" data-tooltip="${holidayLabel}">${IconHelper.html(ICONS.holiday, 'xs')}</span>` : '';
 
         html += `<div class="${headerClass}">
             <span class="day-name">${dayName}</span>
@@ -2185,7 +2253,7 @@ function renderTimelineView() {
 
                 // Employee name - check if this is the weekend responsible
                 const isResponsible = responsible && String(responsible.id) === String(emp.id);
-                const responsibleBadge = isResponsible ? '<span class="responsible-badge">⭐</span>' : '';
+                const responsibleBadge = isResponsible ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
                 const responsibleClass = isResponsible ? ' is-responsible' : '';
                 const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
 
@@ -2222,7 +2290,7 @@ function renderTimelineView() {
 
                         // Show shift block indicator if present
                         if (hasShiftBlock) {
-                            html += `<div class="shift-block-indicator" data-tooltip="Shift geblokkeerd (auto-schedule overgeslagen)" data-tooltip-pos="top">🚫</div>`;
+                            html += `<div class="shift-block-indicator" data-tooltip="Shift geblokkeerd (auto-schedule overgeslagen)" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
                         }
 
                         // Get shifts for this employee on this date
@@ -2304,13 +2372,13 @@ function renderTimelineView() {
                             }
                             if (isAbsent) {
                                 const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
-                                titleText = `⚠️ CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
+                                titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
-                                titleText += `\n❌ ${validation.errors.map(e => e.message).join('\n❌ ')}`;
+                                titleText += `\n${validation.errors.map(e => e.message).join('\n')}`;
                             }
                             if (validation.hasWarnings && validation.warnings.length > 0) {
-                                titleText += `\n⚠️ ${validation.warnings.map(w => w.message).join('\n⚠️ ')}`;
+                                titleText += `\n${validation.warnings.map(w => w.message).join('\n')}`;
                             }
 
                             // Width kan een getal of een calc() string zijn
@@ -2359,7 +2427,7 @@ function renderTimelineView() {
                 html += `<div class="timeline-row ${isAlt ? 'alt' : ''}">`;
 
                 const isResponsible = responsible && String(responsible.id) === String(emp.id);
-                const responsibleBadge = isResponsible ? '<span class="responsible-badge">⭐</span>' : '';
+                const responsibleBadge = isResponsible ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
                 const responsibleClass = isResponsible ? ' is-responsible' : '';
                 const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
 
@@ -2457,13 +2525,13 @@ function renderTimelineView() {
                             }
                             if (isAbsent) {
                                 const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
-                                titleText = `⚠️ CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
+                                titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
-                                titleText += `\n❌ ${validation.errors.map(e => e.message).join('\n❌ ')}`;
+                                titleText += `\n${validation.errors.map(e => e.message).join('\n')}`;
                             }
                             if (validation.hasWarnings && validation.warnings.length > 0) {
-                                titleText += `\n⚠️ ${validation.warnings.map(w => w.message).join('\n⚠️ ')}`;
+                                titleText += `\n${validation.warnings.map(w => w.message).join('\n')}`;
                             }
 
                             // Width kan een getal of een calc() string zijn
@@ -2501,6 +2569,7 @@ function renderTimelineView() {
     html += '</div>'; // Close wrapper
 
     DOM.rosterCalendar.innerHTML = html;
+    IconHelper.init(DOM.rosterCalendar);
 
     // Initialize drag & drop handlers
     if (typeof DragHandler !== 'undefined') {
@@ -2758,6 +2827,7 @@ function renderMonthView() {
     html += '</div>'; // month-view-wrapper
 
     DOM.rosterCalendar.innerHTML = html;
+    IconHelper.init(DOM.rosterCalendar);
 }
 
 function getShiftsForDateAndTimeSlot(date, slotStart, slotEnd) {
@@ -2895,7 +2965,7 @@ function renderShiftBlock(shift, stackInfo = { offset: 0, total: 1, groupShifts:
     if (isAbsent) {
         const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
         const label = absenceLabels[availability.type] || 'Afwezig';
-        availabilityIcon = `<span class="shift-availability-indicator unavailable" title="⚠️ CONFLICT: ${label}">⚠️ ${label}</span>`;
+        availabilityIcon = `<span class="shift-availability-indicator unavailable" title="CONFLICT: ${label}">${IconHelper.html(ICONS.warning, 'xs')} ${label}</span>`;
     }
 
     // Add count badge for stacked shifts (only on the top shift)
@@ -2912,7 +2982,7 @@ function renderShiftBlock(shift, stackInfo = { offset: 0, total: 1, groupShifts:
             <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
             <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
             ${countBadge}
-            ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">×</button>` : ''}
+            ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">${IconHelper.html(ICONS.close, 'xs')}</button>` : ''}
         </div>
     </div>`;
 }
@@ -2941,7 +3011,7 @@ function renderShiftCard(shift) {
     let availabilityIcon = '';
     if (availability && !availability.available) {
         const reason = escapeHtml(availability.reason || 'Geen reden opgegeven');
-        availabilityIcon = `<span class="shift-availability-indicator unavailable" title="Medewerker niet beschikbaar: ${reason}">⚠️</span>`;
+        availabilityIcon = `<span class="shift-availability-indicator unavailable" title="Medewerker niet beschikbaar: ${reason}">${IconHelper.html(ICONS.warning, 'xs')}</span>`;
     } else if (availability && availability.shiftTypes && availability.shiftTypes.length > 0) {
         // Check if shift matches availability
         let shiftType = null;
@@ -2951,7 +3021,7 @@ function renderShiftCard(shift) {
 
         if (shiftType && !availability.shiftTypes.includes(shiftType)) {
             const shiftTypes = escapeHtml(availability.shiftTypes.join(', '));
-            availabilityIcon = `<span class="shift-availability-indicator partial" title="Alleen beschikbaar voor: ${shiftTypes}">⚡</span>`;
+            availabilityIcon = `<span class="shift-availability-indicator partial" title="Alleen beschikbaar voor: ${shiftTypes}">${IconHelper.html(ICONS.zap, 'xs')}</span>`;
         }
     }
 
@@ -2961,7 +3031,7 @@ function renderShiftCard(shift) {
         <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
         <div class="shift-card-footer">
             <span class="shift-team-badge team-${shift.team}">${escapeHtml(DataStore.settings.teams[shift.team].name)}</span>
-            ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">×</button>` : ''}
+            ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">${IconHelper.html(ICONS.close, 'xs')}</button>` : ''}
         </div>
     </div>`;
 }
@@ -3127,12 +3197,12 @@ function openShiftModal(shift, canEdit) {
     let sourceHtml = '';
     if (isAutoShift) {
         sourceHtml = `<div class="shift-source-info shift-source-auto">
-            <span class="source-icon">⚡</span>
+            <span class="source-icon">${IconHelper.html(ICONS.zap, 'sm')}</span>
             <span class="source-text">Automatisch ingepland via basisrooster</span>
         </div>`;
     } else {
         sourceHtml = `<div class="shift-source-info shift-source-manual">
-            <span class="source-icon">✏️</span>
+            <span class="source-icon">${IconHelper.html(ICONS.edit, 'sm')}</span>
             <span class="source-text">Handmatig aangepast (beschermd bij regeneratie)</span>
         </div>`;
     }
@@ -3147,22 +3217,23 @@ function openShiftModal(shift, canEdit) {
         const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren opnemen', 'vorming': 'Vorming', 'andere': 'Afwezig' };
         const employeeName = escapeHtml(getEmployee(shift.employeeId)?.name || '');
         issuesHtml += `<div class="validation-warning absence">
-            <strong>⚠️ Afwezigheid:</strong> ${employeeName} is afwezig (${absenceLabels[availability.type] || 'Afwezig'})
+            <strong>${IconHelper.html(ICONS.warning, 'sm')} Afwezigheid:</strong> ${employeeName} is afwezig (${absenceLabels[availability.type] || 'Afwezig'})
         </div>`;
     }
     if (!validation.isValid && validation.errors.length > 0) {
         issuesHtml += `<div class="validation-error">
-            <strong>❌ Fouten:</strong>
+            <strong>${IconHelper.html(ICONS.error, 'sm')} Fouten:</strong>
             <ul>${validation.errors.map(e => `<li>${escapeHtml(e.message)}</li>`).join('')}</ul>
         </div>`;
     }
     if (validation.hasWarnings && validation.warnings.length > 0) {
         issuesHtml += `<div class="validation-warning">
-            <strong>⚠️ Waarschuwingen:</strong>
+            <strong>${IconHelper.html(ICONS.warning, 'sm')} Waarschuwingen:</strong>
             <ul>${validation.warnings.map(w => `<li>${escapeHtml(w.message)}</li>`).join('')}</ul>
         </div>`;
     }
     DOM.shiftValidationErrors.innerHTML = issuesHtml;
+    IconHelper.init(DOM.shiftValidationErrors);
 
     DOM.shiftModal.classList.remove('hidden');
 }
@@ -3351,7 +3422,7 @@ function runSwapValidation() {
         validationDisplay.classList.add('has-errors');
         validationDisplay.innerHTML = `
             <div class="validation-errors">
-                <strong>❌ Fouten:</strong>
+                <strong>${IconHelper.html(ICONS.error, 'sm')} Fouten:</strong>
                 <ul>${validation.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
             </div>
         `;
@@ -3359,7 +3430,7 @@ function runSwapValidation() {
         validationDisplay.classList.add('has-warnings');
         validationDisplay.innerHTML = `
             <div class="validation-warnings">
-                <strong>⚠️ Waarschuwingen:</strong>
+                <strong>${IconHelper.html(ICONS.warning, 'sm')} Waarschuwingen:</strong>
                 <ul>${validation.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
             </div>
             <p style="margin-top: 0.5rem; color: #92400e;">Je kunt dit verzoek indienen, maar een verantwoordelijke moet het goedkeuren.</p>
@@ -3368,11 +3439,12 @@ function runSwapValidation() {
         validationDisplay.classList.add('is-valid');
         validationDisplay.innerHTML = `
             <div class="validation-success">
-                <strong>✅ Geen problemen gevonden</strong>
+                <strong>${IconHelper.html(ICONS.success, 'sm')} Geen problemen gevonden</strong>
                 <p style="margin-top: 0.5rem;">Deze ruil kan worden ingediend voor goedkeuring.</p>
             </div>
         `;
     }
+    IconHelper.init(validationDisplay);
 }
 
 async function handleSwapRequestSubmit() {
@@ -3497,7 +3569,7 @@ function openSwapReviewModal(swapId) {
             validationDisplay.className = 'has-errors';
             validationDisplay.innerHTML = `
                 <div class="validation-errors">
-                    <strong>❌ Fouten:</strong>
+                    <strong>${IconHelper.html(ICONS.error, 'sm')} Fouten:</strong>
                     <ul>${validation.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
                 </div>
                 <p style="margin-top: 0.5rem; color: #991b1b; font-weight: 500;">
@@ -3508,7 +3580,7 @@ function openSwapReviewModal(swapId) {
             validationDisplay.className = 'has-warnings';
             validationDisplay.innerHTML = `
                 <div class="validation-warnings">
-                    <strong>⚠️ Waarschuwingen:</strong>
+                    <strong>${IconHelper.html(ICONS.warning, 'sm')} Waarschuwingen:</strong>
                     <ul>${validation.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
                 </div>
                 <p style="margin-top: 0.5rem; color: #92400e;">
@@ -3519,11 +3591,12 @@ function openSwapReviewModal(swapId) {
             validationDisplay.className = 'is-valid';
             validationDisplay.innerHTML = `
                 <div class="validation-success">
-                    <strong>✅ Geen problemen gevonden</strong>
+                    <strong>${IconHelper.html(ICONS.success, 'sm')} Geen problemen gevonden</strong>
                     <p style="margin-top: 0.5rem;">Deze ruil kan veilig worden goedgekeurd.</p>
                 </div>
             `;
         }
+        IconHelper.init(validationDisplay);
     }
 
     // Clear response notes
@@ -3768,6 +3841,7 @@ async function handleShiftSubmit(e) {
             });
             html += '</div>';
             DOM.shiftValidationErrors.innerHTML = html;
+            IconHelper.init(DOM.shiftValidationErrors);
             return;
         }
         if (validation.hasWarnings) {
@@ -3894,6 +3968,7 @@ function renderEmployees() {
     }
 
     DOM.employeesList.innerHTML = html;
+    IconHelper.init(DOM.employeesList);
     // Add click handler for employee cards based on permissions
     document.querySelectorAll('.employee-card').forEach(card => {
         const employeeId = parseFloat(card.dataset.employeeId);
@@ -3963,7 +4038,7 @@ function renderProfile() {
         <div class="profile-grid">
             <div class="settings-card">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">👤</span> Mijn profiel</h3>
+                    <h3><span class="settings-icon">${IconHelper.html(ICONS.profile, 'md')}</span> Mijn profiel</h3>
                 </div>
                 <div class="settings-card-body">
                     <form id="profile-form">
@@ -3997,7 +4072,7 @@ function renderProfile() {
 
             <div class="settings-card">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">🔎</span> Account overzicht</h3>
+                    <h3><span class="settings-icon">${IconHelper.html(ICONS.search, 'md')}</span> Account overzicht</h3>
                 </div>
                 <div class="settings-card-body">
                     <div class="profile-meta">
@@ -4019,7 +4094,7 @@ function renderProfile() {
 
             <div class="settings-card" style="grid-column: 1 / -1;">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">📅</span> Mijn Vast Werkrooster</h3>
+                    <h3><span class="settings-icon">${IconHelper.html(ICONS.calendar, 'md')}</span> Mijn Vast Werkrooster</h3>
                     <p class="settings-description">Je vaste werktijden per week</p>
                 </div>
                 <div class="settings-card-body">
@@ -4045,6 +4120,7 @@ function renderProfile() {
             </div>
         </div>
     `;
+    IconHelper.init(DOM.profileContent);
 
     // Setup week schedule for profile
     generateProfileWeekScheduleHTML();
@@ -4353,7 +4429,7 @@ async function saveProfileWeekSchedule() {
             renderPlanning();
         }
 
-        setMessage('✅ Basisrooster opgeslagen en diensten geregenereerd!\n\nℹ️ Handmatige diensten blijven behouden.', 'success');
+        setMessage('Basisrooster opgeslagen en diensten geregenereerd!\n\nHandmatige diensten blijven behouden.', 'success');
     } catch (error) {
         setMessage(`Opslaan mislukt: ${error.message}`, 'error');
     } finally {
@@ -4420,8 +4496,8 @@ function renderEmployeeCard(emp) {
                 <span class="employee-status ${statusClass}">${statusText}</span>
             </div>
             <div class="employee-info">
-                ${emp.email ? `<div class="employee-info-item">📧 ${employeeEmail}</div>` : ''}
-                ${emp.contractHours ? `<div class="employee-info-item">⏰ ${emp.contractHours}u/week contract</div>` : ''}
+                ${emp.email ? `<div class="employee-info-item">${IconHelper.html(ICONS.email, 'xs')} ${employeeEmail}</div>` : ''}
+                ${emp.contractHours ? `<div class="employee-info-item">${IconHelper.html(ICONS.clock, 'xs')} ${emp.contractHours}u/week contract</div>` : ''}
             </div>
             <div class="employee-teams">
                 <span class="team-badge ${emp.mainTeam}">${mainTeamName}</span>
@@ -4454,9 +4530,9 @@ function renderEmployeeCard(emp) {
                     ` : ''}
                     <div class="hours-controls">
                         <div class="hours-week-nav">
-                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="prev" title="Vorige week">&larr;</button>
-                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="today" title="Huidige week">•</button>
-                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="next" title="Volgende week">&rarr;</button>
+                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="prev" title="Vorige week">${IconHelper.html(ICONS.left, 'xs')}</button>
+                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="today" title="Huidige week">${IconHelper.html('circle-dot', 'xs')}</button>
+                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="next" title="Volgende week">${IconHelper.html(ICONS.right, 'xs')}</button>
                         </div>
                         <button class="hours-toggle-btn" type="button" data-employee-id="${emp.id}">Toon maand</button>
                     </div>
@@ -4863,9 +4939,9 @@ function renderAvailability() {
     let html = `
         <div class="availability-controls">
             <div class="date-navigation">
-                <button id="availability-prev-week" class="btn btn-nav">&larr;</button>
+                <button id="availability-prev-week" class="btn btn-nav">${IconHelper.html(ICONS.left, 'sm')}</button>
                 <button id="availability-today" class="btn">Vandaag</button>
-                <button id="availability-next-week" class="btn btn-nav">&rarr;</button>
+                <button id="availability-next-week" class="btn btn-nav">${IconHelper.html(ICONS.right, 'sm')}</button>
             </div>
             <div class="period-display">${formatDate(weekDates[0])} - ${formatDate(weekDates[6])}</div>
             <div class="availability-actions">
@@ -4880,11 +4956,11 @@ function renderAvailability() {
 
         <!-- Mobile day navigation for availability -->
         <div id="availability-mobile-day-nav" class="mobile-day-nav availability-mobile-nav">
-            <button id="availability-mobile-prev-day" class="btn btn-sm">&larr;</button>
+            <button id="availability-mobile-prev-day" class="btn btn-sm">${IconHelper.html(ICONS.left, 'sm')}</button>
             <div id="availability-mobile-day-display" class="mobile-day-display">
                 ${getAvailabilityMobileDayDisplayHTML()}
             </div>
-            <button id="availability-mobile-next-day" class="btn btn-sm">&rarr;</button>
+            <button id="availability-mobile-next-day" class="btn btn-sm">${IconHelper.html(ICONS.right, 'sm')}</button>
         </div>
 
         <div class="availability-container" data-mobile-day="${AppState.availabilityMobileDayIndex}">
@@ -4968,7 +5044,7 @@ function renderAvailability() {
                         if (hasShift) {
                             hasConflict = true;
                             statusClass = 'absent conflict';
-                            tooltipText = `⚠️ CONFLICT: ${statusText} maar heeft nog dienst ingepland!`;
+                            tooltipText = `CONFLICT: ${statusText} maar heeft nog dienst ingepland!`;
                         }
                     } else if (hasShift) {
                         statusClass = 'has-shift';
@@ -4986,13 +5062,13 @@ function renderAvailability() {
                     }
                 }
 
-                const conflictIcon = hasConflict ? '<span class="conflict-icon">⚠️</span>' : '';
+                const conflictIcon = hasConflict ? `<span class="conflict-icon">${IconHelper.html(ICONS.warning, 'xs')}</span>` : '';
                 const cellContent = !isClosed ? `
                     <div class="availability-cell-content ${statusClass}"
                          data-employee-id="${emp.id}"
                          data-date="${date}"
                          title="${escapeHtml(tooltipText)}">
-                        ${conflictIcon}${statusText ? `<span class="status-label">${escapeHtml(statusText)}</span>` : '<span class="status-check">✓</span>'}
+                        ${conflictIcon}${statusText ? `<span class="status-label">${escapeHtml(statusText)}</span>` : `<span class="status-check">${IconHelper.html(ICONS.check, 'xs')}</span>`}
                     </div>
                 ` : '';
 
@@ -5006,6 +5082,7 @@ function renderAvailability() {
     html += `</div></div>`; // End table and container
 
     DOM.availabilityView.querySelector('#availability-content').innerHTML = html;
+    IconHelper.init(DOM.availabilityView.querySelector('#availability-content'));
 
     // Add event listeners for navigation
     document.getElementById('availability-prev-week').addEventListener('click', () => {
@@ -5099,6 +5176,7 @@ async function renderSwaps() {
             swapsList.innerHTML = `<div style="padding: 40px; text-align: center;">
                 <p>Je moet ingelogd zijn om ruilverzoeken te zien.</p>
             </div>`;
+            IconHelper.init(swapsList);
             return;
         }
 
@@ -5221,6 +5299,7 @@ async function renderSwaps() {
         html += '</div>';
 
         swapsList.innerHTML = html;
+        IconHelper.init(swapsList);
 
         // Attach event listeners to action buttons
         attachSwapActionListeners();
@@ -5228,9 +5307,10 @@ async function renderSwaps() {
     } catch (error) {
         console.error('Error rendering swaps:', error);
         swapsList.innerHTML = `<div style="padding: 40px; text-align: center; color: #e11d48;">
-            <h3>❌ Fout bij laden ruilverzoeken</h3>
+            <h3>${IconHelper.html(ICONS.error, 'md')} Fout bij laden ruilverzoeken</h3>
             <p>${escapeHtml(error.message || 'Onbekende fout')}</p>
         </div>`;
+        IconHelper.init(swapsList);
     }
 }
 
@@ -5256,10 +5336,10 @@ function renderSwapRequestCard(swapRequest, mode) {
         actionsHtml = `
             <div class="swap-request-actions" style="display: flex; gap: 0.5rem;">
                 <button class="btn btn-primary btn-target-approve-swap" data-swap-id="${swapRequest.id}">
-                    ✓ Accepteren
+                    ${IconHelper.html(ICONS.check, 'xs')} Accepteren
                 </button>
                 <button class="btn btn-danger btn-target-reject-swap" data-swap-id="${swapRequest.id}">
-                    ✗ Afwijzen
+                    ${IconHelper.html(ICONS.close, 'xs')} Afwijzen
                 </button>
             </div>
         `;
@@ -5303,7 +5383,7 @@ function renderSwapRequestCard(swapRequest, mode) {
     return `
         <div class="swap-request-card">
             <div class="swap-request-header">
-                <h4>${escapeHtml(swapRequest.requester_name)} ⇄ ${escapeHtml(swapRequest.target_name)}</h4>
+                <h4>${escapeHtml(swapRequest.requester_name)} ${IconHelper.html(ICONS.swap, 'sm')} ${escapeHtml(swapRequest.target_name)}</h4>
                 <span class="swap-status-badge status-${swapRequest.status}">
                     ${statusLabels[swapRequest.status] || swapRequest.status}
                 </span>
@@ -5315,7 +5395,7 @@ function renderSwapRequestCard(swapRequest, mode) {
                     ${swapRequest.requester_shift_start} - ${swapRequest.requester_shift_end} |
                     ${escapeHtml(swapRequest.requester_shift_team || '')}
                 </div>
-                <div class="swap-request-arrow">⇄</div>
+                <div class="swap-request-arrow">${IconHelper.html(ICONS.swap, 'sm')}</div>
                 <div class="swap-request-shift">
                     <strong>${escapeHtml(swapRequest.target_name)}</strong>
                     ${formatDate(swapRequest.target_shift_date)} |
@@ -5382,7 +5462,7 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
         actionsHtml = `
             <div class="swap-request-actions">
                 <button class="btn btn-success btn-accept-takeover" data-request-id="${takeoverRequest.id}">
-                    ✓ Overnemen
+                    ${IconHelper.html(ICONS.check, 'xs')} Overnemen
                 </button>
             </div>
         `;
@@ -5536,6 +5616,7 @@ function renderBuilder() {
     html += renderBuilderActions();
 
     container.innerHTML = html;
+    IconHelper.init(container);
     attachBuilderEventListeners(container);
 }
 
@@ -6240,7 +6321,7 @@ async function applyBuilderDraft(draftId) {
             } else if (!hasNew && hasOld) {
                 empChanges.push(`${dayNames[dayIndex]}: verwijderd`);
             } else if (hasNew && hasOld && (oldEntry.startTime !== newAssignment.startTime || oldEntry.endTime !== newAssignment.endTime)) {
-                empChanges.push(`${dayNames[dayIndex]}: ${oldEntry.startTime}-${oldEntry.endTime} → ${newAssignment.startTime}-${newAssignment.endTime}`);
+                empChanges.push(`${dayNames[dayIndex]}: ${oldEntry.startTime}-${oldEntry.endTime} -> ${newAssignment.startTime}-${newAssignment.endTime}`);
             }
         }
         if (empChanges.length > 0) {
@@ -6543,6 +6624,7 @@ function renderSettingsTabContent(tabName) {
         default:
             content.innerHTML = '<p>Ongeldige tab</p>';
     }
+    IconHelper.init(content);
     // Track unsaved changes for all settings tabs with form inputs
     if (['planning', 'rooster', 'teams'].includes(tabName)) {
         trackSettingsDirty(content);
@@ -6653,6 +6735,7 @@ async function loadAdminUsers(container) {
 
         const list = container.querySelector('#admin-users-list');
         list.innerHTML = rows || '<p>Geen accounts gevonden.</p>';
+        IconHelper.init(list);
 
         const teamFilter = container.querySelector('#admin-team-filter');
         if (teamFilter) {
@@ -6727,7 +6810,7 @@ function showAddUserModal(teams) {
         <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
                 <h2>Nieuwe gebruiker</h2>
-                <button class="modal-close" onclick="document.getElementById('add-user-modal').remove()">&times;</button>
+                <button class="modal-close" onclick="document.getElementById('add-user-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <form id="add-user-form">
@@ -6782,6 +6865,7 @@ function showAddUserModal(teams) {
     `;
 
     document.body.appendChild(modal);
+    IconHelper.init(modal);
 
     // Auto-fill when selecting an employee
     const employeeSelect = modal.querySelector('#new-user-employee');
@@ -6860,7 +6944,7 @@ function showEditAccountModal(user, teams, onSave) {
         <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
                 <h2>Account bewerken</h2>
-                <button class="modal-close" onclick="document.getElementById('edit-account-modal').remove()">&times;</button>
+                <button class="modal-close" onclick="document.getElementById('edit-account-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <form id="edit-account-form">
@@ -6902,6 +6986,7 @@ function showEditAccountModal(user, teams, onSave) {
     `;
 
     document.body.appendChild(modal);
+    IconHelper.init(modal);
 
     // Update role description on change
     const editRoleSelect = modal.querySelector('#edit-user-role');
@@ -7015,7 +7100,7 @@ function renderSettingsPlanning(container) {
 
     const holidayBanner = activeHoliday
         ? `<div class="holiday-status-banner active">
-                <span class="holiday-status-icon">🏖️</span>
+                <span class="holiday-status-icon">${IconHelper.html(ICONS.holiday, 'md')}</span>
                 <div class="holiday-status-text">
                     <strong>Vakantiewerking actief: ${escapeHtml(activeHoliday.name)}</strong>
                     <span>${activeHoliday.startDate} t/m ${activeHoliday.endDate}</span>
@@ -7024,7 +7109,7 @@ function renderSettingsPlanning(container) {
            </div>`
         : upcomingHoliday
         ? `<div class="holiday-status-banner upcoming">
-                <span class="holiday-status-icon">📅</span>
+                <span class="holiday-status-icon">${IconHelper.html(ICONS.calendar, 'md')}</span>
                 <div class="holiday-status-text">
                     <strong>Komende vakantie: ${escapeHtml(upcomingHoliday.name)}</strong>
                     <span>Start ${upcomingHoliday.startDate}</span>
@@ -7265,6 +7350,7 @@ function rebuildSchedulePatternWeeks(cycleLength) {
     }
 
     container.innerHTML = html;
+    IconHelper.init(container);
 }
 
 async function saveSchedulePattern() {
@@ -7595,6 +7681,7 @@ async function loadAuditLog(page) {
 
         html += '</tbody></table>';
         resultsEl.innerHTML = html;
+        IconHelper.init(resultsEl);
 
         // Pagination
         const totalPages = Math.ceil(data.total / data.limit);
@@ -7620,7 +7707,7 @@ function formatAuditDiff(before, after) {
         const oldVal = before?.[key];
         const newVal = after?.[key];
         if (String(oldVal) !== String(newVal)) {
-            changes.push(`${key}: ${oldVal || '-'} → ${newVal || '-'}`);
+            changes.push(`${key}: ${oldVal || '-'} -> ${newVal || '-'}`);
         }
     }
     return changes.slice(0, 3).join(', ');
@@ -7671,8 +7758,8 @@ function renderTemplatesConfig() {
                 <span class="template-times">${template.start} - ${template.end} (${duration})</span>
             </div>
             <div class="template-actions">
-                <button class="btn-icon-only" onclick="editTemplate('${templateId}')" title="Bewerken">✏️</button>
-                <button class="btn-icon-only danger" onclick="deleteTemplate('${templateId}')" title="Verwijderen">🗑️</button>
+                <button class="btn-icon-only" onclick="editTemplate('${templateId}')" title="Bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
+                <button class="btn-icon-only danger" onclick="deleteTemplate('${templateId}')" title="Verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
             </div>
         </div>`;
     });
@@ -7680,13 +7767,13 @@ function renderTemplatesConfig() {
 }
 
 function getTemplateIcon(templateId) {
-    const icons = {
-        'vroeg': '🌅',
-        'laat': '🌆',
-        'nacht': '🌙',
-        'lang': '📏'
+    const iconMap = {
+        'vroeg': ICONS.early,
+        'laat': ICONS.late,
+        'nacht': ICONS.night,
+        'lang': ICONS.long
     };
-    return icons[templateId] || '🕐';
+    return IconHelper.html(iconMap[templateId] || ICONS.clock, 'sm');
 }
 
 function calculateTemplateDuration(start, end) {
@@ -7804,7 +7891,7 @@ function openTemplateModal(templateId = null, template = null) {
         <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <h2>${title}</h2>
-                <button class="modal-close" onclick="closeTemplateModal()">&times;</button>
+                <button class="modal-close" onclick="closeTemplateModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
@@ -7842,6 +7929,7 @@ function openTemplateModal(templateId = null, template = null) {
     </div>`;
 
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    IconHelper.init(document.getElementById('template-modal-overlay'));
 }
 
 function closeTemplateModal() {
@@ -7919,7 +8007,7 @@ function renderHolidayPeriods() {
                     <span class="holiday-period-days">(${days} dagen)</span>
                 </span>
             </div>
-            <button class="btn-icon-only danger" onclick="deleteHolidayPeriod(${period.id})" title="Verwijderen">🗑️</button>
+            <button class="btn-icon-only danger" onclick="deleteHolidayPeriod(${period.id})" title="Verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
         </div>`;
     }).join('');
 }
@@ -7935,7 +8023,7 @@ function openAddHolidayModal() {
         <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 450px;">
             <div class="modal-header">
                 <h2>Vakantieperiode toevoegen</h2>
-                <button class="modal-close" onclick="closeHolidayModal()">&times;</button>
+                <button class="modal-close" onclick="closeHolidayModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
@@ -7974,6 +8062,7 @@ function openAddHolidayModal() {
     </div>`;
 
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    IconHelper.init(document.getElementById('holiday-modal'));
 
     // Update info bij datum wijziging
     document.getElementById('holiday-start').addEventListener('change', updateHolidayDateInfo);
@@ -8108,6 +8197,7 @@ function saveEligibleTeamsQuiet() {
     const upcomingContainer = document.querySelector('.upcoming-responsibles');
     if (upcomingContainer) {
         upcomingContainer.innerHTML = renderUpcomingResponsibles();
+        IconHelper.init(upcomingContainer);
     }
 }
 
@@ -8369,7 +8459,8 @@ function openAvailabilityModal(employeeId = null, date = null) {
 
         // Show warning if employee has shift
         if (hasShift) {
-            warningDiv.innerHTML = '<div class="alert alert-warning">⚠️ Deze medewerker heeft al een dienst op deze dag</div>';
+            warningDiv.innerHTML = `<div class="alert alert-warning">${IconHelper.html(ICONS.warning, 'sm')} Deze medewerker heeft al een dienst op deze dag</div>`;
+            IconHelper.init(warningDiv);
         } else {
             warningDiv.innerHTML = '';
         }
@@ -8451,7 +8542,7 @@ async function handleAvailabilitySave() {
         if (conflictDates.length > 0) {
             const employee = getEmployee(employeeId);
             const employeeName = employee?.name || 'Deze medewerker';
-            const confirmMsg = `⚠️ Let op: ${employeeName} heeft nog ${conflictDates.length} dienst(en) ingepland op deze dagen!\n\nDiensten op: ${conflictDates.map(d => formatDate(d)).join(', ')}\n\nDe afwezigheid wordt geregistreerd, maar de diensten blijven staan. Vergeet niet deze diensten te verwijderen of opnieuw toe te wijzen!\n\nDoorgaan?`;
+            const confirmMsg = `Let op: ${employeeName} heeft nog ${conflictDates.length} dienst(en) ingepland op deze dagen!\n\nDiensten op: ${conflictDates.map(d => formatDate(d)).join(', ')}\n\nDe afwezigheid wordt geregistreerd, maar de diensten blijven staan. Vergeet niet deze diensten te verwijderen of opnieuw toe te wijzen!\n\nDoorgaan?`;
             if (!await showConfirm(confirmMsg, 'Waarschuwing: conflicterende diensten')) {
                 return;
             }
@@ -8702,7 +8793,7 @@ function exportData() {
 }
 
 async function runMigration() {
-    if (!await showConfirm('🚀 VOLLEDIGE DATABASE MIGRATIE\n\nDit zal:\n✅ Employees tabel samenvoegen met users\n✅ Shifts migreren (employee_id → user_id)\n✅ Availability migreren (employee_id → user_id)\n✅ Employees tabel verwijderen\n✅ Weekroosters repareren\n\n⚠️ Dit is een grote wijziging, maar 100% veilig:\n- Gebruikt transactions (bij error: automatisch ROLLBACK)\n- Alle data blijft behouden\n- Foreign key mappings correct uitgevoerd\n\nDoorgaan?', 'Database Migratie')) {
+    if (!await showConfirm('VOLLEDIGE DATABASE MIGRATIE\n\nDit zal:\n- Employees tabel samenvoegen met users\n- Shifts migreren (employee_id -> user_id)\n- Availability migreren (employee_id -> user_id)\n- Employees tabel verwijderen\n- Weekroosters repareren\n\nDit is een grote wijziging, maar 100% veilig:\n- Gebruikt transactions (bij error: automatisch ROLLBACK)\n- Alle data blijft behouden\n- Foreign key mappings correct uitgevoerd\n\nDoorgaan?', 'Database Migratie')) {
         return;
     }
 

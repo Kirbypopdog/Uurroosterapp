@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
     <!-- Login Scherm -->
@@ -51,17 +52,18 @@
                 <h1 class="app-title">Het Vlot</h1>
             </div>
             <div class="nav-center" id="nav-menu">
-                <button class="nav-btn active" data-view="home">Home</button>
-                <button class="nav-btn" data-view="planning">Planning</button>
-                <button class="nav-btn" data-view="employees">Medewerkers</button>
-                <button class="nav-btn" data-view="profile">Profiel</button>
-                <button class="nav-btn" data-view="availability">Verlof en ziekte</button>
-                <button class="nav-btn" data-view="builder">Rooster Bouwen</button>
-                <button class="nav-btn" data-view="swaps">Ruilen</button>
-                <button class="nav-btn" data-view="settings">Instellingen</button>
+                <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i> Home</button>
+                <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i> Planning</button>
+                <button class="nav-btn" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
+                <button class="nav-btn" data-view="profile"><i data-lucide="user" class="nav-icon"></i> Profiel</button>
+                <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i> Verlof en ziekte</button>
+                <button class="nav-btn" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster Bouwen</button>
+                <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i> Ruilen</button>
+                <button class="nav-btn" data-view="settings"><i data-lucide="settings" class="nav-icon"></i> Instellingen</button>
             </div>
             <div class="nav-right">
                 <div id="role-switcher" class="role-switcher hidden">
+                    <i data-lucide="flask-conical" class="lucide-sm role-switcher-icon"></i>
                     <select id="role-switch-select">
                         <option value="admin">Admin</option>
                         <option value="hoofdverantwoordelijke">Hoofdverantwoordelijke</option>
@@ -70,7 +72,7 @@
                     </select>
                 </div>
                 <span id="current-user" class="user-badge"></span>
-                <button id="logout-btn" class="btn btn-secondary btn-sm">Uitloggen</button>
+                <button id="logout-btn" class="btn btn-secondary btn-sm"><i data-lucide="log-out" class="lucide-sm logout-icon"></i> Uitloggen</button>
             </div>
         </nav>
 
@@ -85,8 +87,8 @@
                 <h2>Roosterplanning</h2>
                 <div class="header-actions">
                     <div class="undo-redo-controls">
-                        <button id="undo-btn" class="btn btn-sm btn-secondary" disabled title="Ongedaan maken (Ctrl+Z)">&#8592; Undo</button>
-                        <button id="redo-btn" class="btn btn-sm btn-secondary" disabled title="Opnieuw (Ctrl+Y)">Redo &#8594;</button>
+                        <button id="undo-btn" class="btn btn-sm btn-secondary" disabled title="Ongedaan maken (Ctrl+Z)"><i data-lucide="undo-2" class="lucide-sm"></i> Undo</button>
+                        <button id="redo-btn" class="btn btn-sm btn-secondary" disabled title="Opnieuw (Ctrl+Y)">Redo <i data-lucide="redo-2" class="lucide-sm"></i></button>
                     </div>
                     <button id="add-shift-btn" class="btn btn-primary">+ Dienst toevoegen</button>
                 </div>
@@ -94,9 +96,9 @@
 
             <div class="planning-controls">
                 <div class="date-navigation">
-                    <button id="prev-week" class="btn">&larr;</button>
+                    <button id="prev-week" class="btn"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
                     <button id="today-btn" class="btn">Vandaag</button>
-                    <button id="next-week" class="btn">&rarr;</button>
+                    <button id="next-week" class="btn"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
                 </div>
                 <div id="current-period" class="period-display"></div>
                 <!-- Month view toggle hidden for now
@@ -120,13 +122,13 @@
 
             <!-- Mobile day navigation (alleen zichtbaar op mobiel) -->
             <div id="mobile-day-nav" class="mobile-day-nav">
-                <button id="mobile-prev-day" class="btn btn-sm">&larr;</button>
+                <button id="mobile-prev-day" class="btn btn-sm"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
                 <div id="mobile-day-display" class="mobile-day-display">
                     <span class="mobile-day-name">Ma</span>
                     <span class="mobile-day-date">1 jan</span>
                     <input type="date" id="mobile-date-picker" class="mobile-date-picker">
                 </div>
-                <button id="mobile-next-day" class="btn btn-sm">&rarr;</button>
+                <button id="mobile-next-day" class="btn btn-sm"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
             </div>
 
             <div id="roster-calendar" class="calendar-container"></div>
@@ -211,7 +213,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="shift-modal-title">Dienst toevoegen</h2>
-                <span class="modal-close">&times;</span>
+                <span class="modal-close"><i data-lucide="x"></i></span>
             </div>
             <form id="shift-form">
                 <div class="form-row">
@@ -280,7 +282,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Waarschuwingen</h2>
-                <span class="modal-close" id="warning-details-close">&times;</span>
+                <span class="modal-close" id="warning-details-close"><i data-lucide="x"></i></span>
             </div>
             <div class="modal-body">
                 <div id="warning-details-list"></div>
@@ -293,7 +295,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Fouten</h2>
-                <span class="modal-close" id="error-details-close">&times;</span>
+                <span class="modal-close" id="error-details-close"><i data-lucide="x"></i></span>
             </div>
             <div class="modal-body">
                 <div id="error-details-list"></div>
@@ -306,7 +308,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="employee-modal-title">Medewerker toevoegen</h2>
-                <span class="modal-close">&times;</span>
+                <span class="modal-close"><i data-lucide="x"></i></span>
             </div>
             <form id="employee-form">
                 <!-- Hidden fields to preserve existing values -->
@@ -338,7 +340,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="availability-modal-title">Afwezigheid registreren</h2>
-                <span class="modal-close" id="availability-modal-close">&times;</span>
+                <span class="modal-close" id="availability-modal-close"><i data-lucide="x"></i></span>
             </div>
             <div id="availability-warning"></div>
             <div class="modal-body">
@@ -392,7 +394,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Dienst Ruilen</h2>
-                <span class="modal-close" id="swap-request-modal-close">&times;</span>
+                <span class="modal-close" id="swap-request-modal-close"><i data-lucide="x"></i></span>
             </div>
             <div class="modal-body">
                 <!-- Shift Preview -->
@@ -401,7 +403,7 @@
                         <h3>Jouw shift</h3>
                         <div id="swap-requester-shift-preview"></div>
                     </div>
-                    <div class="swap-arrow">⇄</div>
+                    <div class="swap-arrow"><i data-lucide="arrow-left-right"></i></div>
                     <div class="swap-shift-card">
                         <h3>Gewenste shift</h3>
                         <div id="swap-target-shift-preview"></div>
@@ -444,7 +446,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Ruilverzoek Beoordelen</h2>
-                <span class="modal-close" id="swap-review-modal-close">&times;</span>
+                <span class="modal-close" id="swap-review-modal-close"><i data-lucide="x"></i></span>
             </div>
             <div class="modal-body">
                 <!-- Request Info -->
@@ -459,7 +461,7 @@
                         <h3><span id="swap-review-requester-name"></span></h3>
                         <div id="swap-review-requester-shift"></div>
                     </div>
-                    <div class="swap-arrow">⇄</div>
+                    <div class="swap-arrow"><i data-lucide="arrow-left-right"></i></div>
                     <div class="swap-shift-card">
                         <h3><span id="swap-review-target-name"></span></h3>
                         <div id="swap-review-target-shift"></div>
@@ -494,7 +496,7 @@
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
                 <h2>Shift afstaan</h2>
-                <span class="modal-close" id="shift-afstaan-choice-close">&times;</span>
+                <span class="modal-close" id="shift-afstaan-choice-close"><i data-lucide="x"></i></span>
             </div>
             <div class="modal-body">
                 <p style="margin-bottom: 1.5rem; color: #666;">
@@ -503,12 +505,12 @@
 
                 <div style="display: flex; flex-direction: column; gap: 12px;">
                     <button type="button" class="btn btn-primary" id="choice-swap-btn" style="padding: 16px; text-align: left; display: flex; flex-direction: column; gap: 4px;">
-                        <div style="font-weight: 600; font-size: 16px;">🔄 Ruilen met collega</div>
+                        <div style="font-weight: 600; font-size: 16px;"><i data-lucide="repeat-2" class="lucide-sm" style="display:inline-block;vertical-align:middle;margin-right:4px;"></i> Ruilen met collega</div>
                         <div style="font-size: 13px; opacity: 0.9;">Zoek een collega om shifts te ruilen (jij neemt hun shift over)</div>
                     </button>
 
                     <button type="button" class="btn btn-secondary" id="choice-takeover-btn" style="padding: 16px; text-align: left; display: flex; flex-direction: column; gap: 4px;">
-                        <div style="font-weight: 600; font-size: 16px;">👋 Iemand zoeken</div>
+                        <div style="font-weight: 600; font-size: 16px;"><i data-lucide="hand" class="lucide-sm" style="display:inline-block;vertical-align:middle;margin-right:4px;"></i> Iemand zoeken</div>
                         <div style="font-size: 13px; opacity: 0.9;">Stel je shift beschikbaar voor iedereen (zonder ruilen)</div>
                     </button>
                 </div>
@@ -524,7 +526,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Iemand Zoeken voor Shift</h2>
-                <span class="modal-close" id="takeover-request-modal-close">&times;</span>
+                <span class="modal-close" id="takeover-request-modal-close"><i data-lucide="x"></i></span>
             </div>
             <div class="modal-body">
                 <p style="margin-bottom: 1rem; color: #666;">
@@ -544,7 +546,7 @@
                 </div>
 
                 <p style="margin-top: 1rem; padding: 0.75rem; background: #fef3c7; border-radius: 4px; font-size: 0.9rem;">
-                    💡 Zodra iemand je shift accepteert, krijgt die persoon de shift toegewezen.
+                    <i data-lucide="lightbulb" class="lucide-sm" style="display:inline-block;vertical-align:middle;margin-right:4px;"></i> Zodra iemand je shift accepteert, krijgt die persoon de shift toegewezen.
                 </p>
             </div>
             <div class="modal-actions">
@@ -594,7 +596,7 @@
         <div class="modal-content" style="max-width: 420px;">
             <div class="modal-header">
                 <h2 id="builder-shift-modal-title">Dienst toewijzen</h2>
-                <span class="modal-close" id="builder-shift-modal-close">&times;</span>
+                <span class="modal-close" id="builder-shift-modal-close"><i data-lucide="x"></i></span>
             </div>
             <div class="modal-body">
                 <div id="builder-shift-employee-info" class="form-group" style="margin-bottom: 16px;"></div>
@@ -627,5 +629,10 @@
     <script src="validation.js"></script>
     <script src="drag-handler.js"></script>
     <script src="app.js"></script>
+    <script>
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+    </script>
 </body>
 </html>

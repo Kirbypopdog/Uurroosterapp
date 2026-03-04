@@ -45,6 +45,33 @@
     --sidebar-collapsed-width: 64px;
 }
 
+/* ===== LUCIDE ICON SIZING ===== */
+[data-lucide] {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.lucide-xs { width: 12px; height: 12px; }
+.lucide-sm { width: 16px; height: 16px; }
+.lucide-md { width: 20px; height: 20px; }
+.lucide-lg { width: 24px; height: 24px; }
+
+.lucide-inline {
+    width: 1em;
+    height: 1em;
+    vertical-align: -0.125em;
+}
+
+.modal-close [data-lucide] {
+    width: 20px;
+    height: 20px;
+}
+
+.swap-arrow [data-lucide] {
+    width: 24px;
+    height: 24px;
+}
+
 /* ===== CUSTOM TOOLTIPS (JavaScript-based) ===== */
 .custom-tooltip {
     position: fixed;
@@ -343,9 +370,10 @@ textarea {
     border-radius: var(--radius-md);
 }
 
-.role-switcher::before {
-    content: "🧪";
-    font-size: 14px;
+.role-switcher-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
 }
 
 .role-switcher select {
@@ -2407,7 +2435,7 @@ textarea {
 }
 
 .timeline-team-header.team-no-team .team-header-name::after {
-    content: " ⚠️";
+    content: " \26A0";
     font-size: 12px;
 }
 
@@ -5614,22 +5642,14 @@ textarea {
         transition: all 0.2s, font-size 0s;
     }
 
-    /* Nav button icons via ::before */
-    .nav-btn::before {
-        font-size: 16px;
+    /* Nav button icons via Lucide SVGs */
+    .nav-btn .nav-icon {
+        width: 18px;
+        height: 18px;
         flex-shrink: 0;
-        width: 20px;
-        text-align: center;
-        font-style: normal;
     }
 
-    .nav-btn[data-view="home"]::before         { content: "\2302"; }
-    .nav-btn[data-view="planning"]::before     { content: "\25A6"; }
-    .nav-btn[data-view="employees"]::before    { content: "\2637"; }
-    .nav-btn[data-view="profile"]::before      { content: "\25CB"; }
-    .nav-btn[data-view="availability"]::before { content: "\25D1"; }
-    .nav-btn[data-view="swaps"]::before        { content: "\21C4"; }
-    .nav-btn[data-view="settings"]::before     { content: "\2699"; }
+    /* Nav icons are now Lucide SVGs inside .nav-icon elements */
 
     .nav-right {
         margin-top: auto;
@@ -5690,8 +5710,9 @@ textarea {
         gap: 0;
     }
 
-    .sidebar-toggle-input:checked ~ .main-nav .nav-btn::before {
-        font-size: 18px;
+    .sidebar-toggle-input:checked ~ .main-nav .nav-btn .nav-icon {
+        width: 20px;
+        height: 20px;
     }
 
     .sidebar-toggle-input:checked ~ .main-nav .nav-right .user-badge {
@@ -5707,9 +5728,10 @@ textarea {
         min-width: 0;
     }
 
-    .sidebar-toggle-input:checked ~ .main-nav .nav-right #logout-btn::before {
-        content: "\2192";
-        font-size: 16px;
+    .sidebar-toggle-input:checked ~ .main-nav .nav-right #logout-btn .logout-icon {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
     }
 
     .sidebar-toggle-input:checked ~ .main-nav .role-switcher {
