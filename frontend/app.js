@@ -44,6 +44,15 @@ const UndoManager = {
 
     push(action) {
         if (this._executing) return; // Don't record actions triggered by undo/redo
+        // Validate action has required data before storing
+        if (action.type === 'update' && !action.shiftId) {
+            console.warn('[UndoManager] Skipping update action with missing shiftId');
+            return;
+        }
+        if (action.type === 'delete' && !action.resultId && !action.shiftId) {
+            console.warn('[UndoManager] Skipping delete action with missing ID');
+            return;
+        }
         this.actions = this.actions.slice(0, this.pointer + 1);
         this.actions.push(action);
         if (this.actions.length > this.maxHistory) {

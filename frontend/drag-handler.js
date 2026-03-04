@@ -164,7 +164,7 @@ const DragHandler = {
             // Permission check for transfer operations (after threshold, not on mousedown)
             // This allows clicks and resize operations but blocks transfer drags for medewerkers
             if (this.state.dragType === 'transfer') {
-                const shift = getShift(this.state.dragShiftId);
+                const shift = getShift(this.state.shiftId);
                 if (shift && !canUserTransferShift(shift)) {
                     console.log('[DragHandler] User cannot transfer shifts - cancelling drag');
                     showToast('Je kunt alleen je eigen shift tijden aanpassen, niet naar anderen verplaatsen. Gebruik "Shift afstaan" om je shift over te dragen.', 'warning');
@@ -204,17 +204,19 @@ const DragHandler = {
                 // Click on shift block - open edit modal
                 openEditShiftModal(this.state.shiftId);
             }
+            this.reset();
         } else if (this.state.isDragging) {
-            // Complete drag operation
+            // Complete drag operation - async handlers manage their own cleanup
             if (this.state.dragType === 'transfer') {
                 this.completeTransferDrag(e);
             } else if (this.state.dragType === 'resize-start' || this.state.dragType === 'resize-end') {
                 this.completeResizeDrag(e);
+            } else {
+                this.reset();
             }
+        } else {
+            this.reset();
         }
-
-        // Reset state
-        this.reset();
     },
 
     // Handle keyboard events
@@ -306,30 +308,32 @@ const DragHandler = {
 
     // Complete transfer drag
     async completeTransferDrag(e) {
+        // 1. Capture all needed state SYNCHRONOUSLY before any async work
         const dayCell = this.getDayCellFromPoint(e.clientX, e.clientY);
+        const shiftId = this.state.shiftId;
+        const originalData = { ...this.state.originalData };
+        const targetEmployee = dayCell ? this.getEmployeeFromRow(dayCell) : null;
+        const targetDate = dayCell ? this.getDateFromCell(dayCell) : null;
 
+        // 2. Reset visual state immediately (before async API call)
+        this.reset();
+
+        // 3. Validate using captured data
         if (!dayCell) {
             console.log('[DragHandler] Invalid drop target - cancelling');
             showToast('Ongeldige locatie. Sleep de shift naar een dag in de planner.', 'warning');
-            this.cancelDrag();
             return;
         }
 
         if (dayCell.classList.contains('closed')) {
             console.log('[DragHandler] Drop target is closed day');
             showToast('Deze dag is gesloten. Je kunt hier geen shift toewijzen.', 'warning');
-            this.cancelDrag();
             return;
         }
-
-        // Get target employee and date
-        const targetEmployee = this.getEmployeeFromRow(dayCell);
-        const targetDate = this.getDateFromCell(dayCell);
 
         if (!targetEmployee || !targetDate) {
             console.log('[DragHandler] Could not determine target employee/date');
             showToast('Kon de medewerker of datum niet bepalen. Probeer opnieuw.', 'warning');
-            this.cancelDrag();
             return;
         }
 
@@ -340,7 +344,6 @@ const DragHandler = {
             if (targetEmployee.mainTeam !== userTeamId) {
                 console.log('[DragHandler] Teamverantwoordelijke cannot transfer to different team');
                 showToast('Je kan alleen shifts toewijzen aan medewerkers van je eigen team', 'warning');
-                this.cancelDrag();
                 return;
             }
         }
@@ -358,26 +361,24 @@ const DragHandler = {
             const reason = absenceLabels[availability.type] || 'afwezig is';
             console.log('[DragHandler] Employee has absence - cancelling');
             showToast(`${targetEmployee.name} ${reason} op ${targetDate}. Je kunt geen shift toewijzen als iemand afwezig is.`, 'warning');
-            this.cancelDrag();
             return;
         }
 
-        console.log(`[DragHandler] Transferring shift ${this.state.shiftId} to ${targetEmployee.name} on ${targetDate}`);
+        console.log(`[DragHandler] Transferring shift ${shiftId} to ${targetEmployee.name} on ${targetDate}`);
 
-        // Update shift via API
+        // 4. Update shift via API (using captured data, not this.state)
         try {
-            const shift = this.state.originalData;
-            const originalEmployeeId = shift.employeeId;
-            const originalDate = shift.date;
+            const originalEmployeeId = originalData.employeeId;
+            const originalDate2 = originalData.date;
 
             // Update shift - mark as manual to prevent auto-schedule from replacing it
-            await updateShift(this.state.shiftId, {
+            await updateShift(shiftId, {
                 employeeId: targetEmployee.id,
                 date: targetDate,
-                team: shift.team,
-                startTime: shift.startTime,
-                endTime: shift.endTime,
-                notes: shift.notes || '',
+                team: originalData.team,
+                startTime: originalData.startTime,
+                endTime: originalData.endTime,
+                notes: originalData.notes || '',
                 source: 'manual' // Mark as manual so it persists
             });
 
@@ -392,39 +393,35 @@ const DragHandler = {
                     },
                     body: JSON.stringify({
                         user_id: originalEmployeeId,
-                        date: originalDate,
+                        date: originalDate2,
                         reason: 'Shift transferred via drag & drop'
                     })
                 });
-                console.log(`[DragHandler] Created shift block for original employee ${originalEmployeeId} on ${originalDate}`);
+                console.log(`[DragHandler] Created shift block for original employee ${originalEmployeeId} on ${originalDate2}`);
             } catch (blockError) {
                 console.warn('[DragHandler] Could not create shift block:', blockError);
                 // Continue anyway - shift was already transferred
             }
 
-            // Record undo action for drag transfer
+            // Record undo action for drag transfer (using captured shiftId)
             if (typeof UndoManager !== 'undefined') {
                 UndoManager.push({
                     type: 'update',
-                    shiftId: this.state.shiftId,
-                    shiftData: { employeeId: targetEmployee.id, date: targetDate, team: shift.team, startTime: shift.startTime, endTime: shift.endTime, notes: shift.notes || '' },
-                    previousData: { employeeId: originalEmployeeId, date: originalDate, team: shift.team, startTime: shift.startTime, endTime: shift.endTime, notes: shift.notes || '' }
+                    shiftId: shiftId,
+                    shiftData: { employeeId: targetEmployee.id, date: targetDate, team: originalData.team, startTime: originalData.startTime, endTime: originalData.endTime, notes: originalData.notes || '' },
+                    previousData: { employeeId: originalEmployeeId, date: originalDate2, team: originalData.team, startTime: originalData.startTime, endTime: originalData.endTime, notes: originalData.notes || '' }
                 });
             }
 
             // Refresh view
             renderPlanning();
 
-            // Show success message
-            if (typeof showToast === 'function') {
-                showToast(`Shift overgedragen aan ${targetEmployee.name}`, 'success');
-            } else {
-                alert(`Shift overgedragen aan ${targetEmployee.name}`);
-            }
+            showToast(`Shift overgedragen aan ${targetEmployee.name}`, 'success');
         } catch (error) {
             console.error('[DragHandler] Error transferring shift:', error);
             showToast(`Fout bij overdragen shift: ${error.message}`, 'error');
-            this.cancelDrag();
+            // Re-sync from server to ensure UI matches DB
+            try { await loadDataFromAPI(); renderPlanning(); } catch (_) {}
         }
     },
 
@@ -510,20 +507,32 @@ const DragHandler = {
 
     // Complete resize drag
     async completeResizeDrag(e) {
-        const dayCell = this.state.targetElement.parentElement;
-        const rect = dayCell.getBoundingClientRect();
-        const newTime = this.getTimeFromX(e.clientX, rect);
+        // 1. Capture all needed state SYNCHRONOUSLY before any async work
+        const targetElement = this.state.targetElement;
+        const dayCell = targetElement ? targetElement.parentElement : null;
+        const shiftId = this.state.shiftId;
+        const originalData = { ...this.state.originalData };
+        const dragType = this.state.dragType;
 
-        if (!newTime) {
-            this.cancelDrag();
+        if (!dayCell) {
+            this.reset();
             return;
         }
 
-        const shift = this.state.originalData;
-        let newStartTime = shift.startTime;
-        let newEndTime = shift.endTime;
+        const rect = dayCell.getBoundingClientRect();
+        const newTime = this.getTimeFromX(e.clientX, rect);
 
-        if (this.state.dragType === 'resize-start') {
+        // 2. Reset visual state immediately
+        this.reset();
+
+        if (!newTime) {
+            return;
+        }
+
+        let newStartTime = originalData.startTime;
+        let newEndTime = originalData.endTime;
+
+        if (dragType === 'resize-start') {
             newStartTime = newTime;
         } else {
             newEndTime = newTime;
@@ -533,40 +542,39 @@ const DragHandler = {
         const duration = this.calculateDuration(newStartTime, newEndTime);
         if (duration < 1) {
             showToast('Een shift moet minimaal 1 uur duren', 'warning');
-            this.cancelDrag();
             return;
         }
 
-        console.log(`[DragHandler] Resizing shift ${this.state.shiftId} to ${newStartTime} - ${newEndTime}`);
+        console.log(`[DragHandler] Resizing shift ${shiftId} to ${newStartTime} - ${newEndTime}`);
 
-        // Update shift via API
+        // 3. Update shift via API (using captured data, not this.state)
         try {
             const previousData = {
-                employeeId: shift.employeeId,
-                date: shift.date,
-                team: shift.team,
-                startTime: shift.startTime,
-                endTime: shift.endTime,
-                notes: shift.notes || ''
+                employeeId: originalData.employeeId,
+                date: originalData.date,
+                team: originalData.team,
+                startTime: originalData.startTime,
+                endTime: originalData.endTime,
+                notes: originalData.notes || ''
             };
             const newData = {
-                employeeId: shift.employeeId,
-                date: shift.date,
-                team: shift.team,
+                employeeId: originalData.employeeId,
+                date: originalData.date,
+                team: originalData.team,
                 startTime: newStartTime,
                 endTime: newEndTime,
-                notes: shift.notes || '',
+                notes: originalData.notes || '',
                 source: 'manual'
             };
 
             // Mark as manual so resized shifts persist across auto-schedule regeneration
-            await updateShift(this.state.shiftId, newData);
+            await updateShift(shiftId, newData);
 
-            // Record undo action for drag resize
+            // Record undo action for drag resize (using captured shiftId)
             if (typeof UndoManager !== 'undefined') {
                 UndoManager.push({
                     type: 'update',
-                    shiftId: this.state.shiftId,
+                    shiftId: shiftId,
                     shiftData: newData,
                     previousData: previousData
                 });
@@ -575,14 +583,12 @@ const DragHandler = {
             // Refresh view
             renderPlanning();
 
-            // Show success message
-            if (typeof showToast === 'function') {
-                showToast('Shift aangepast', 'success');
-            }
+            showToast('Shift aangepast', 'success');
         } catch (error) {
             console.error('[DragHandler] Error resizing shift:', error);
             showToast(`Fout bij aanpassen shift: ${error.message}`, 'error');
-            this.cancelDrag();
+            // Re-sync from server to ensure UI matches DB
+            try { await loadDataFromAPI(); renderPlanning(); } catch (_) {}
         }
     },
 
