@@ -2170,7 +2170,7 @@ function renderTimelineView() {
     const weekDates = getWeekDates(startDateStr);
     const dayNames = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
 
-    // Get all employees who have shifts this week
+    // Get all shifts this week (filtered by visible teams)
     let allShifts = [];
     weekDates.forEach(date => {
         let shifts = getShiftsByDate(date);
@@ -2179,9 +2179,21 @@ function renderTimelineView() {
         allShifts = allShifts.concat(shifts);
     });
 
-    // Get unique employees with shifts
-    const employeeIds = [...new Set(allShifts.map(s => s.employeeId))];
-    let employees = employeeIds.map(id => getEmployee(id)).filter(e => e);
+    // Get employees: those with shifts + all active employees in visible teams
+    const employeeIdsWithShifts = new Set(allShifts.map(s => s.employeeId));
+    const activeEmployees = getAllEmployees(true).filter(emp =>
+        emp.mainTeam && AppState.visibleTeams.includes(emp.mainTeam)
+    );
+    // Merge: start with active employees, add any with shifts not yet included
+    const employeeMap = new Map();
+    activeEmployees.forEach(emp => employeeMap.set(emp.id, emp));
+    employeeIdsWithShifts.forEach(id => {
+        if (!employeeMap.has(id)) {
+            const emp = getEmployee(id);
+            if (emp) employeeMap.set(id, emp);
+        }
+    });
+    let employees = [...employeeMap.values()];
 
     // Group employees by their main team - only show visible teams
     const teams = DataStore.settings.teams || {};
@@ -2615,7 +2627,7 @@ function renderMonthView() {
     const weeks = getMonthWeeks(monthStart);
     const allDates = getMonthDates(monthStart);
 
-    // Get all employees with shifts in this month
+    // Get all shifts this month (filtered by visible teams)
     let allShifts = [];
     allDates.forEach(date => {
         let shifts = getShiftsByDate(date);
@@ -2623,8 +2635,20 @@ function renderMonthView() {
         allShifts = allShifts.concat(shifts);
     });
 
-    const employeeIds = [...new Set(allShifts.map(s => s.employeeId))];
-    let employees = employeeIds.map(id => getEmployee(id)).filter(e => e);
+    // Get employees: those with shifts + all active employees in visible teams
+    const employeeIdsWithShifts = new Set(allShifts.map(s => s.employeeId));
+    const activeEmployees = getAllEmployees(true).filter(emp =>
+        emp.mainTeam && AppState.visibleTeams.includes(emp.mainTeam)
+    );
+    const employeeMap = new Map();
+    activeEmployees.forEach(emp => employeeMap.set(emp.id, emp));
+    employeeIdsWithShifts.forEach(id => {
+        if (!employeeMap.has(id)) {
+            const emp = getEmployee(id);
+            if (emp) employeeMap.set(id, emp);
+        }
+    });
+    let employees = [...employeeMap.values()];
 
     // Group by team (reuse logic from renderTimelineView)
     const teams = DataStore.settings.teams || {};
