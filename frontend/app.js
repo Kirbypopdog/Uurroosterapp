@@ -477,7 +477,7 @@ function updateShiftRefreshRange() {
     if (!AppState.currentWeekStart) return;
     const start = new Date(AppState.currentWeekStart);
     start.setDate(start.getDate() - 14);
-    const horizon = DataStore.settings?.planningHorizon || 4;
+    const horizon = DataStore.settings?.planningHorizon?.weeks || 4;
     const end = new Date(AppState.currentWeekStart);
     end.setDate(end.getDate() + (horizon * 7) + 14);
     setActiveShiftRange(formatDateYYYYMMDD(start), formatDateYYYYMMDD(end));
