@@ -910,24 +910,34 @@ app.put('/users/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Delete user (admin only)
+// Delete user (admin only) — explicit transaction with FOR UPDATE lock
 app.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = Number(req.params.id);
   if (!userId) {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
+  // Don't allow deleting the currently logged in admin
+  if (userId === req.user.id) {
+    return res.status(400).json({ error: 'Je kunt je eigen account niet verwijderen' });
+  }
+  const client = await pool.connect();
   try {
-    // Don't allow deleting the currently logged in admin
-    if (userId === req.user.id) {
-      return res.status(400).json({ error: 'Je kunt je eigen account niet verwijderen' });
+    await client.query('BEGIN');
+    const deletedUser = await client.query('SELECT name, email, role FROM users WHERE id = $1 FOR UPDATE', [userId]);
+    if (deletedUser.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Gebruiker niet gevonden' });
     }
-    const deletedUser = await pool.query('SELECT name, email, role FROM users WHERE id = $1', [userId]);
-    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
-    await logAudit(req, 'DELETE', 'user', userId, { user: deletedUser.rows[0] || {} });
+    await client.query('DELETE FROM users WHERE id = $1', [userId]);
+    await client.query('COMMIT');
+    await logAudit(req, 'DELETE', 'user', userId, { user: deletedUser.rows[0] });
     res.json({ ok: true });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error(err);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 
@@ -952,6 +962,183 @@ app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (re
 
 // ===== APPLY SCHEDULE (shift regeneration in single transaction) =====
 
+// Helper: regenerate shifts for a single user within an existing transaction
+// Returns { created, deleted, blocksCleared, userName }
+async function regenerateShiftsForUser(client, userId, { clearBlocks = false } = {}) {
+  // 1. Fetch user with week schedules
+  const userResult = await client.query(
+    `SELECT id, name, main_team as "mainTeam",
+            week_schedules as "weekSchedules",
+            week_schedule_week1 as "weekScheduleWeek1",
+            week_schedule_week2 as "weekScheduleWeek2"
+     FROM users WHERE id = $1 AND active = true`,
+    [userId]
+  );
+  if (userResult.rows.length === 0) {
+    return { created: 0, deleted: 0, blocksCleared: 0, userName: null, skipped: true };
+  }
+  const user = userResult.rows[0];
+
+  // 2. Check if user has any week schedule configured
+  const weekSchedules = user.weekSchedules;
+  const week1 = user.weekScheduleWeek1;
+  const week2 = user.weekScheduleWeek2;
+
+  let hasSchedule = false;
+  if (Array.isArray(weekSchedules)) {
+    hasSchedule = weekSchedules.some(ws => Array.isArray(ws) && ws.length > 0);
+  } else {
+    hasSchedule = (Array.isArray(week1) && week1.length > 0) ||
+                  (Array.isArray(week2) && week2.length > 0);
+  }
+
+  if (!hasSchedule) {
+    return { created: 0, deleted: 0, blocksCleared: 0, userName: user.name };
+  }
+
+  // 3. Read planning horizon from settings (default 4 weeks)
+  const horizonResult = await client.query(
+    `SELECT value FROM settings WHERE key = 'planning_horizon'`
+  );
+  let horizonWeeks = 4;
+  if (horizonResult.rows.length > 0) {
+    const val = horizonResult.rows[0].value;
+    if (val && val.weeks !== null && val.weeks !== undefined) {
+      horizonWeeks = val.weeks;
+    }
+  }
+
+  // 4. Read schedule_pattern from settings (cycleLength, referenceDate)
+  const patternResult = await client.query(
+    `SELECT value FROM settings WHERE key = 'schedule_pattern'`
+  );
+  let cycleLength = 2;
+  let referenceDate = '2025-01-06';
+
+  if (patternResult.rows.length > 0 && patternResult.rows[0].value) {
+    const pattern = patternResult.rows[0].value;
+    if (pattern.cycleLength) cycleLength = pattern.cycleLength;
+    if (pattern.referenceDate) referenceDate = pattern.referenceDate;
+  }
+
+  // 5. Calculate date range: today through horizon
+  const today = new Date();
+  const startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let endDate;
+  if (horizonWeeks === null || horizonWeeks === 'unlimited') {
+    endDate = new Date(today);
+    endDate.setFullYear(endDate.getFullYear() + 1);
+  } else {
+    endDate = new Date(today);
+    endDate.setDate(endDate.getDate() + (Number(horizonWeeks) * 7));
+  }
+  const startStr = formatDateYYYYMMDD(startDate);
+  const endStr = formatDateYYYYMMDD(endDate);
+
+  // 6. Optionally clear shift_blocks from auto-shift deletions only
+  let blocksCleared = 0;
+  if (clearBlocks) {
+    const blockResult = await client.query(
+      `DELETE FROM shift_blocks
+       WHERE user_id = $1 AND date >= $2::date AND date <= $3::date
+       AND reason = 'auto shift deleted by user'`,
+      [userId, startStr, endStr]
+    );
+    blocksCleared = blockResult.rowCount;
+  }
+
+  // 7. Delete existing auto-generated shifts in range
+  const deleteResult = await client.query(
+    `DELETE FROM shifts
+     WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`,
+    [userId, startStr, endStr]
+  );
+  const deletedCount = deleteResult.rowCount;
+
+  // 8. Fetch skip-sets: existing manual shifts, absences, remaining blocks
+  const existingShifts = await client.query(
+    `SELECT date::text as date FROM shifts
+     WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
+    [userId, startStr, endStr]
+  );
+  const occupiedDates = new Set(existingShifts.rows.map(r => r.date));
+
+  const absences = await client.query(
+    `SELECT date::text as date FROM availability
+     WHERE user_id = $1 AND date >= $2::date AND date <= $3::date
+     AND type IS NOT NULL AND type != ''`,
+    [userId, startStr, endStr]
+  );
+  const absenceDates = new Set(absences.rows.map(r => r.date));
+
+  const blocks = await client.query(
+    `SELECT date::text as date FROM shift_blocks
+     WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
+    [userId, startStr, endStr]
+  );
+  const blockedDates = new Set(blocks.rows.map(r => r.date));
+
+  // 9. Generate shifts day by day
+  const refDate = parseLocalDate(referenceDate);
+  const refMonday = getMonday(refDate);
+  let createdCount = 0;
+
+  for (let d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+       d <= endDate;
+       d.setDate(d.getDate() + 1)) {
+    const dateStr = formatDateYYYYMMDD(d);
+
+    if (occupiedDates.has(dateStr)) continue;
+    if (absenceDates.has(dateStr)) continue;
+    if (blockedDates.has(dateStr)) continue;
+
+    // Calculate week number (replicates getWeekNumber from data.js)
+    const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+    const diffMs = currMonday.getTime() - refMonday.getTime();
+    const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+    const mod = diffWeeks % cycleLength;
+    const weekNumber = (mod < 0 ? mod + cycleLength : mod) + 1;
+
+    // Get week schedule for this week number
+    let weekSchedule = [];
+    if (Array.isArray(weekSchedules) && weekSchedules.length > 0) {
+      weekSchedule = weekSchedules[weekNumber - 1] || [];
+    } else if (weekNumber === 1) {
+      weekSchedule = week1 || [];
+    } else if (weekNumber === 2) {
+      weekSchedule = week2 || [];
+    }
+
+    // Find schedule entry for this day of week
+    const dayOfWeek = d.getDay();
+    const entry = weekSchedule.find(s => s.dayOfWeek === dayOfWeek && s.enabled);
+
+    if (entry) {
+      await client.query(
+        `INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
+         VALUES ($1, $2, $3::date, $4, $5, $6, 'auto')`,
+        [
+          userId,
+          entry.team || user.mainTeam,
+          dateStr,
+          entry.startTime,
+          entry.endTime,
+          `Automatisch ingepland via basisrooster (Week ${weekNumber})`
+        ]
+      );
+      createdCount++;
+    }
+  }
+
+  return {
+    created: createdCount,
+    deleted: deletedCount,
+    blocksCleared,
+    userName: user.name,
+    dateRange: { start: startStr, end: endStr }
+  };
+}
+
 app.post('/users/:id/apply-schedule', requireAuth, async (req, res) => {
   const userId = Number(req.params.id);
   if (!userId) {
@@ -970,173 +1157,10 @@ app.post('/users/:id/apply-schedule', requireAuth, async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // 1. Fetch user with week schedules
-    const userResult = await client.query(
-      `SELECT id, name, main_team as "mainTeam",
-              week_schedules as "weekSchedules",
-              week_schedule_week1 as "weekScheduleWeek1",
-              week_schedule_week2 as "weekScheduleWeek2"
-       FROM users WHERE id = $1 AND active = true`,
-      [userId]
-    );
-    if (userResult.rows.length === 0) {
+    const result = await regenerateShiftsForUser(client, userId, { clearBlocks });
+    if (result.skipped) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Gebruiker niet gevonden of niet actief' });
-    }
-    const user = userResult.rows[0];
-
-    // 2. Check if user has any week schedule configured
-    const weekSchedules = user.weekSchedules;
-    const week1 = user.weekScheduleWeek1;
-    const week2 = user.weekScheduleWeek2;
-
-    let hasSchedule = false;
-    if (Array.isArray(weekSchedules)) {
-      hasSchedule = weekSchedules.some(ws => Array.isArray(ws) && ws.length > 0);
-    } else {
-      hasSchedule = (Array.isArray(week1) && week1.length > 0) ||
-                    (Array.isArray(week2) && week2.length > 0);
-    }
-
-    if (!hasSchedule) {
-      await client.query('COMMIT');
-      return res.json({ created: 0, deleted: 0, blocksCleared: 0 });
-    }
-
-    // 3. Read planning horizon from settings (default 4 weeks)
-    const horizonResult = await client.query(
-      `SELECT value FROM settings WHERE key = 'planning_horizon'`
-    );
-    let horizonWeeks = 4;
-    if (horizonResult.rows.length > 0) {
-      const val = horizonResult.rows[0].value;
-      if (val && val.weeks !== null && val.weeks !== undefined) {
-        horizonWeeks = val.weeks;
-      }
-    }
-
-    // 4. Read schedule_pattern from settings (cycleLength, referenceDate)
-    const patternResult = await client.query(
-      `SELECT value FROM settings WHERE key = 'schedule_pattern'`
-    );
-    let cycleLength = 2;
-    let referenceDate = '2025-01-06';
-
-    if (patternResult.rows.length > 0 && patternResult.rows[0].value) {
-      const pattern = patternResult.rows[0].value;
-      if (pattern.cycleLength) cycleLength = pattern.cycleLength;
-      if (pattern.referenceDate) referenceDate = pattern.referenceDate;
-    }
-
-    // 5. Calculate date range: today through horizon
-    //    Using today (not Monday) prevents wiping shifts earlier in the current week
-    const today = new Date();
-    const startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    let endDate;
-    if (horizonWeeks === null || horizonWeeks === 'unlimited') {
-      endDate = new Date(today);
-      endDate.setFullYear(endDate.getFullYear() + 1);
-    } else {
-      endDate = new Date(today);
-      endDate.setDate(endDate.getDate() + (Number(horizonWeeks) * 7));
-    }
-    const startStr = formatDateYYYYMMDD(startDate);
-    const endStr = formatDateYYYYMMDD(endDate);
-
-    // 6. Optionally clear shift_blocks from auto-shift deletions only
-    //    Blocks from manual shift deletions ('manual shift deleted by user') are preserved
-    let blocksCleared = 0;
-    if (clearBlocks) {
-      const blockResult = await client.query(
-        `DELETE FROM shift_blocks
-         WHERE user_id = $1 AND date >= $2::date AND date <= $3::date
-         AND reason = 'auto shift deleted by user'`,
-        [userId, startStr, endStr]
-      );
-      blocksCleared = blockResult.rowCount;
-    }
-
-    // 7. Delete existing auto-generated shifts in range
-    const deleteResult = await client.query(
-      `DELETE FROM shifts
-       WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`,
-      [userId, startStr, endStr]
-    );
-    const deletedCount = deleteResult.rowCount;
-
-    // 8. Fetch skip-sets: existing manual shifts, absences, remaining blocks
-    const existingShifts = await client.query(
-      `SELECT date::text as date FROM shifts
-       WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
-      [userId, startStr, endStr]
-    );
-    const occupiedDates = new Set(existingShifts.rows.map(r => r.date));
-
-    const absences = await client.query(
-      `SELECT date::text as date FROM availability
-       WHERE user_id = $1 AND date >= $2::date AND date <= $3::date
-       AND type IS NOT NULL AND type != ''`,
-      [userId, startStr, endStr]
-    );
-    const absenceDates = new Set(absences.rows.map(r => r.date));
-
-    const blocks = await client.query(
-      `SELECT date::text as date FROM shift_blocks
-       WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
-      [userId, startStr, endStr]
-    );
-    const blockedDates = new Set(blocks.rows.map(r => r.date));
-
-    // 9. Generate shifts day by day
-    const refDate = parseLocalDate(referenceDate);
-    const refMonday = getMonday(refDate);
-    let createdCount = 0;
-
-    for (let d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-         d <= endDate;
-         d.setDate(d.getDate() + 1)) {
-      const dateStr = formatDateYYYYMMDD(d);
-
-      if (occupiedDates.has(dateStr)) continue;
-      if (absenceDates.has(dateStr)) continue;
-      if (blockedDates.has(dateStr)) continue;
-
-      // Calculate week number (replicates getWeekNumber from data.js)
-      const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
-      const diffMs = currMonday.getTime() - refMonday.getTime();
-      const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
-      const mod = diffWeeks % cycleLength;
-      const weekNumber = (mod < 0 ? mod + cycleLength : mod) + 1;
-
-      // Get week schedule for this week number
-      let weekSchedule = [];
-      if (Array.isArray(weekSchedules) && weekSchedules.length > 0) {
-        weekSchedule = weekSchedules[weekNumber - 1] || [];
-      } else if (weekNumber === 1) {
-        weekSchedule = week1 || [];
-      } else if (weekNumber === 2) {
-        weekSchedule = week2 || [];
-      }
-
-      // Find schedule entry for this day of week
-      const dayOfWeek = d.getDay();
-      const entry = weekSchedule.find(s => s.dayOfWeek === dayOfWeek && s.enabled);
-
-      if (entry) {
-        await client.query(
-          `INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
-           VALUES ($1, $2, $3::date, $4, $5, $6, 'auto')`,
-          [
-            userId,
-            entry.team || user.mainTeam,
-            dateStr,
-            entry.startTime,
-            entry.endTime,
-            `Automatisch ingepland via basisrooster (Week ${weekNumber})`
-          ]
-        );
-        createdCount++;
-      }
     }
 
     await client.query('COMMIT');
@@ -1144,18 +1168,18 @@ app.post('/users/:id/apply-schedule', requireAuth, async (req, res) => {
     await logAudit(req, 'UPDATE', 'shift', '', {
       action: 'apply_schedule',
       userId,
-      userName: user.name,
-      created: createdCount,
-      deleted: deletedCount,
-      blocksCleared,
+      userName: result.userName,
+      created: result.created,
+      deleted: result.deleted,
+      blocksCleared: result.blocksCleared,
       clearBlocks,
-      dateRange: { start: startStr, end: endStr }
+      dateRange: result.dateRange
     });
 
     res.json({
-      created: createdCount,
-      deleted: deletedCount,
-      blocksCleared,
+      created: result.created,
+      deleted: result.deleted,
+      blocksCleared: result.blocksCleared,
       userId,
       employeeId: userId
     });
@@ -1546,6 +1570,143 @@ app.delete('/availability', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== AVAILABILITY BULK WITH TAKEOVER (atomic transaction) =====
+
+app.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
+  const { userId, startDate, endDate, type, reason, createTakeoverRequests } = req.body || {};
+
+  if (!userId || !startDate || !endDate || !type) {
+    return res.status(400).json({ error: 'Verplichte velden ontbreken (userId, startDate, endDate, type)' });
+  }
+
+  // Permission check (same logic as POST /availability)
+  const { role, team_id } = req.user;
+  if (role === 'medewerker' && userId !== req.user.id) {
+    return res.status(403).json({ error: 'Je kunt alleen je eigen beschikbaarheid registreren' });
+  }
+
+  if (role === 'teamverantwoordelijke') {
+    try {
+      const targetUser = await pool.query('SELECT main_team FROM users WHERE id = $1', [userId]);
+      if (targetUser.rows.length === 0) {
+        return res.status(404).json({ error: 'Gebruiker niet gevonden' });
+      }
+      if (targetUser.rows[0].main_team !== team_id && userId !== req.user.id) {
+        return res.status(403).json({ error: 'Je kunt alleen beschikbaarheid van je eigen team registreren' });
+      }
+    } catch (e) {
+      console.error('Team permission check failed:', e.message);
+      return res.status(500).json({ error: 'Fout bij permissiecontrole' });
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Generate all dates in range
+    const dates = [];
+    const startParts = startDate.split('-').map(Number);
+    const endParts = endDate.split('-').map(Number);
+    let current = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+    const endObj = new Date(endParts[0], endParts[1] - 1, endParts[2]);
+
+    while (current <= endObj) {
+      const y = current.getFullYear();
+      const m = String(current.getMonth() + 1).padStart(2, '0');
+      const d = String(current.getDate()).padStart(2, '0');
+      dates.push(`${y}-${m}-${d}`);
+      current.setDate(current.getDate() + 1);
+    }
+
+    if (dates.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Geen geldige datums in bereik' });
+    }
+
+    // 2. Upsert availability for each date
+    const availability = [];
+    for (const dateStr of dates) {
+      const result = await client.query(`
+        INSERT INTO availability (user_id, date, type, reason, updated_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (user_id, date)
+        DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
+        RETURNING id, user_id as "userId", date::text as date, type, reason
+      `, [userId, dateStr, type, reason || '']);
+      availability.push(result.rows[0]);
+    }
+
+    // 3. Optionally create takeover requests for conflicting shifts
+    let takeoverCount = 0;
+    let conflictingShiftCount = 0;
+
+    if (createTakeoverRequests) {
+      // Find shifts for this user on the affected dates
+      const shiftsResult = await client.query(`
+        SELECT id, user_id, date::text as date, start_time, end_time, team
+        FROM shifts
+        WHERE user_id = $1 AND date = ANY($2::date[])
+        ORDER BY date, start_time
+      `, [userId, dates]);
+
+      conflictingShiftCount = shiftsResult.rows.length;
+
+      // Filter: only create takeover for future shifts
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+
+      for (const shift of shiftsResult.rows) {
+        const shiftDate = new Date(shift.date);
+        if (shiftDate < now) continue;
+
+        // Check if a pending takeover request already exists for this shift
+        const existing = await client.query(
+          `SELECT id FROM shift_swap_requests
+           WHERE requester_shift_id = $1 AND request_type = 'takeover' AND status = 'pending'`,
+          [shift.id]
+        );
+        if (existing.rows.length > 0) continue;
+
+        const message = type === 'ziek'
+          ? 'Ik ben ziek, wie kan mijn shift overnemen?'
+          : 'Ik heb verlof, wie kan mijn shift overnemen?';
+
+        await client.query(
+          `INSERT INTO shift_swap_requests
+           (requester_user_id, requester_shift_id, target_user_id, target_shift_id, request_type, message, status)
+           VALUES ($1, $2, NULL, NULL, 'takeover', $3, 'pending')`,
+          [userId, shift.id, message]
+        );
+        takeoverCount++;
+      }
+    }
+
+    await client.query('COMMIT');
+
+    // Audit log (outside transaction)
+    await logAudit(req, 'CREATE', 'availability', '', {
+      type: 'bulk_sick_with_takeover',
+      userId, startDate, endDate, absenceType: type,
+      daysCreated: dates.length,
+      takeoverRequestsCreated: takeoverCount,
+      conflictingShifts: conflictingShiftCount
+    });
+
+    res.status(201).json({
+      availability,
+      takeoverRequests: takeoverCount,
+      conflictingShifts: conflictingShiftCount
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('POST /availability/sick-with-takeover error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 
@@ -2225,20 +2386,25 @@ app.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Reden voor afwijzing is verplicht' });
   }
 
+  const client = await pool.connect();
   try {
-    // Fetch swap request met shifts info
-    const swapResult = await pool.query(
+    await client.query('BEGIN');
+
+    // Fetch swap request met shifts info (FOR UPDATE prevents concurrent approve+reject)
+    const swapResult = await client.query(
       `SELECT sr.*,
               s1.team as requester_team,
               s2.team as target_team
        FROM shift_swap_requests sr
        JOIN shifts s1 ON sr.requester_shift_id = s1.id
        JOIN shifts s2 ON sr.target_shift_id = s2.id
-       WHERE sr.id = $1`,
+       WHERE sr.id = $1
+       FOR UPDATE OF sr`,
       [swapId]
     );
 
     if (swapResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Swap request niet gevonden' });
     }
 
@@ -2246,6 +2412,7 @@ app.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
 
     // Verify status is pending
     if (swap.status !== 'pending') {
+      await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Swap request is al verwerkt' });
     }
 
@@ -2253,26 +2420,32 @@ app.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
     if (!['admin', 'hoofdverantwoordelijke'].includes(role)) {
       if (role === 'teamverantwoordelijke') {
         if (swap.requester_team !== team_id && swap.target_team !== team_id) {
+          await client.query('ROLLBACK');
           return res.status(403).json({ error: 'Je kunt alleen swaps van je eigen team afwijzen' });
         }
       } else {
+        await client.query('ROLLBACK');
         return res.status(403).json({ error: 'Geen toestemming om swaps af te wijzen' });
       }
     }
 
     // Update swap request status
-    await pool.query(
+    await client.query(
       `UPDATE shift_swap_requests
        SET status = 'rejected', response_notes = $1, responded_at = NOW(), responded_by = $2
        WHERE id = $3`,
       [responseNotes, currentUserId, swapId]
     );
 
+    await client.query('COMMIT');
     await logAudit(req, 'REJECT', 'swap_request', swapId, { type: 'lead_rejection', requester: swap.requester_user_id, target: swap.target_user_id, reason: responseNotes, rejectedBy: currentUserId });
     res.json({ ok: true, message: 'Swap afgewezen' });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('PUT /swap-requests/:id/reject error:', err);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 
@@ -2469,6 +2642,142 @@ app.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'hoofdveran
   } catch (err) {
     console.error('Error deleting schedule draft:', err);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== APPLY SCHEDULE DRAFT (atomic transaction for all employees) =====
+
+app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+  const draftId = req.params.id;
+  const { clearBlocks = true } = req.body || {};
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Load draft with FOR UPDATE lock
+    const draftResult = await client.query(
+      `SELECT id, name, week_number, team_filter, grid, created_by
+       FROM schedule_drafts WHERE id = $1 FOR UPDATE`,
+      [draftId]
+    );
+
+    if (draftResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Concept niet gevonden' });
+    }
+
+    const draft = draftResult.rows[0];
+    const grid = draft.grid || {};
+    const weekNumber = draft.week_number || 1;
+
+    // 2. Process each employee in the grid
+    let appliedCount = 0;
+    let totalCreated = 0;
+    let totalDeleted = 0;
+    const employeeIds = Object.keys(grid).map(Number).filter(id => id > 0);
+
+    for (const empId of employeeIds) {
+      const empGrid = grid[String(empId)] || grid[empId] || {};
+
+      // Load current user data
+      const userResult = await client.query(
+        `SELECT id, name, email, main_team as "mainTeam", extra_teams as "extraTeams",
+                contract_hours as "contractHours", active,
+                week_schedules as "weekSchedules",
+                week_schedule_week1 as "weekScheduleWeek1",
+                week_schedule_week2 as "weekScheduleWeek2"
+         FROM users WHERE id = $1 AND active = true`,
+        [empId]
+      );
+      if (userResult.rows.length === 0) continue;
+      const emp = userResult.rows[0];
+
+      // Convert grid entries (dayIndex 0-6 = Mon-Sun) to weekSchedule entries
+      const entries = [];
+      for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const assignment = empGrid[String(dayIndex)] || empGrid[dayIndex];
+        if (assignment) {
+          const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
+          entries.push({
+            dayOfWeek: jsDayOfWeek,
+            enabled: true,
+            startTime: assignment.startTime,
+            endTime: assignment.endTime,
+            team: assignment.team || emp.mainTeam
+          });
+        }
+      }
+
+      // Build weekSchedules array: replace target week, keep others
+      const currentSchedules = Array.isArray(emp.weekSchedules) ? emp.weekSchedules : [emp.weekScheduleWeek1 || [], emp.weekScheduleWeek2 || []];
+
+      // Read cycle length from settings
+      const patternResult = await client.query(`SELECT value FROM settings WHERE key = 'schedule_pattern'`);
+      let cycleLength = 2;
+      if (patternResult.rows.length > 0 && patternResult.rows[0].value && patternResult.rows[0].value.cycleLength) {
+        cycleLength = patternResult.rows[0].value.cycleLength;
+      }
+
+      // Ensure array has enough slots
+      const allWeeks = [];
+      for (let w = 0; w < cycleLength; w++) {
+        allWeeks.push(w === weekNumber - 1 ? entries : (currentSchedules[w] || []));
+      }
+
+      const week1Json = JSON.stringify(allWeeks[0] || []);
+      const week2Json = JSON.stringify(allWeeks[1] || []);
+      const weekSchedulesJson = JSON.stringify(allWeeks);
+
+      // Update user week schedules
+      await client.query(
+        `UPDATE users SET
+           week_schedule_week1 = $1::jsonb,
+           week_schedule_week2 = $2::jsonb,
+           week_schedules = $3::jsonb
+         WHERE id = $4`,
+        [week1Json, week2Json, weekSchedulesJson, empId]
+      );
+
+      // Regenerate shifts using the extracted helper
+      const regenResult = await regenerateShiftsForUser(client, empId, { clearBlocks });
+      totalCreated += regenResult.created;
+      totalDeleted += regenResult.deleted;
+      appliedCount++;
+    }
+
+    // 3. Mark draft as applied
+    await client.query(
+      `UPDATE schedule_drafts SET last_applied_at = NOW(), last_applied_by = $1, updated_at = NOW() WHERE id = $2`,
+      [req.user.name, draftId]
+    );
+
+    await client.query('COMMIT');
+
+    // Audit log (outside transaction)
+    await logAudit(req, 'UPDATE', 'settings', draftId, {
+      type: 'draft_apply',
+      draftName: draft.name,
+      weekNumber,
+      employeesApplied: appliedCount,
+      shiftsCreated: totalCreated,
+      shiftsDeleted: totalDeleted,
+      clearBlocks
+    });
+
+    res.json({
+      applied: appliedCount,
+      shifts: { created: totalCreated, deleted: totalDeleted },
+      draftName: draft.name,
+      weekNumber
+    });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('POST /schedule-drafts/:id/apply error:', err);
+    res.status(500).json({ error: 'Server error bij concept toepassen' });
+  } finally {
+    client.release();
   }
 });
 

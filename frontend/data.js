@@ -860,6 +860,15 @@ async function targetRejectSwapRequest(id, responseNotes) {
     }
 }
 
+async function saveBulkAvailabilityWithTakeover(userId, startDate, endDate, type, reason, createTakeoverRequests) {
+    const data = await dataApiFetch('/availability/sick-with-takeover', {
+        method: 'POST',
+        body: JSON.stringify({ userId, startDate, endDate, type, reason, createTakeoverRequests })
+    });
+    await refreshAvailability();
+    return data;
+}
+
 async function createTakeoverRequest(shiftId, message) {
     try {
         await dataApiFetch('/shift-requests/takeover', {
@@ -1538,6 +1547,13 @@ async function updateScheduleDraft(id, data) {
 async function deleteScheduleDraft(id) {
     return dataApiFetch(`/schedule-drafts/${id}`, {
         method: 'DELETE'
+    });
+}
+
+async function applyScheduleDraft(draftId, { clearBlocks = true } = {}) {
+    return dataApiFetch(`/schedule-drafts/${draftId}/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ clearBlocks })
     });
 }
 

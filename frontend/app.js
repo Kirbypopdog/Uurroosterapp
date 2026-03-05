@@ -6432,7 +6432,7 @@ async function applyBuilderDraft(draftId) {
     const weekNumber = draft.weekNumber || 1;
     const empCount = Object.keys(grid).length;
 
-    // Build preview of changes
+    // Build preview of changes (client-side, for confirm dialog)
     let changesSummary = '';
     let changesCount = 0;
     for (const [empIdStr, empGrid] of Object.entries(grid)) {
@@ -6471,104 +6471,28 @@ async function applyBuilderDraft(draftId) {
     );
     if (!confirmed) return;
 
-    let savedCount = 0;
-    let errorCount = 0;
+    showSectionLoading('planning-view', 'Concept toepassen...');
+    try {
+        // Single atomic backend call: saves schedules + regenerates shifts + marks draft
+        const result = await applyScheduleDraft(draftId, { clearBlocks: true });
 
-    for (const [empIdStr, empGrid] of Object.entries(grid)) {
-        const empId = Number(empIdStr);
-        const emp = getEmployee(empId);
-        if (!emp) continue;
+        showToast(`Basisrooster week ${weekNumber} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt)`, 'success');
 
-        const entries = [];
-        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-            const assignment = empGrid[dayIndex];
-            if (assignment) {
-                const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
-                entries.push({
-                    dayOfWeek: jsDayOfWeek,
-                    enabled: true,
-                    startTime: assignment.startTime,
-                    endTime: assignment.endTime,
-                    team: assignment.team || emp.mainTeam
-                });
-            }
+        // Update local draft cache
+        const draftToMark = (DataStore.settings.schedule_drafts || []).find(d => d.id === draftId);
+        if (draftToMark) {
+            draftToMark.lastAppliedAt = new Date().toISOString();
+            draftToMark.lastAppliedBy = AppState.currentUser?.name || 'Onbekend';
         }
 
-        const prevSchedule = getEmployeeWeekSchedule(emp, weekNumber);
-        const hadPrevious = prevSchedule && prevSchedule.length > 0;
-        if (entries.length === 0 && !hadPrevious) continue;
-
-        try {
-            // Build week1/week2 payload: update the target week, keep others intact
-            const body = {
-                name: emp.name,
-                email: emp.email,
-                mainTeam: emp.mainTeam,
-                extraTeams: emp.extraTeams || [],
-                contractHours: emp.contractHours || emp.contract_hours || 0,
-                active: emp.active !== false
-            };
-            // Build all weeks: update the target week, keep others intact
-            const cl = getCycleLength();
-            const allWeeks = [];
-            for (let w = 1; w <= cl; w++) {
-                allWeeks.push(w === weekNumber ? entries : getEmployeeWeekSchedule(emp, w));
-            }
-            // Backward compat: always send weekScheduleWeek1/2 for dual-write
-            body.weekScheduleWeek1 = allWeeks[0] || [];
-            body.weekScheduleWeek2 = allWeeks[1] || [];
-            body.weekSchedules = allWeeks;
-
-            await dataApiFetch(`/users/${emp.id}`, {
-                method: 'PUT',
-                body: JSON.stringify(body)
-            });
-            savedCount++;
-        } catch (error) {
-            console.error(`Fout bij opslaan rooster voor ${emp.name}:`, error);
-            errorCount++;
-        }
+        await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshUsers()]);
+        renderBuilder();
+    } catch (error) {
+        console.error('Error applying builder draft:', error);
+        showToast('Fout bij toepassen concept: ' + error.message, 'error');
+    } finally {
+        hideSectionLoading('planning-view');
     }
-
-    // Regenerate shifts via backend for all saved employees
-    let regenCount = 0;
-    for (const empIdStr of Object.keys(grid)) {
-        const empId = Number(empIdStr);
-        try {
-            await applyScheduleViaBackend(empId, { clearBlocks: true });
-            regenCount++;
-        } catch (err) {
-            console.error(`Shift regeneration failed for employee ${empId}:`, err);
-        }
-    }
-    console.log(`[Builder] Regenerated shifts for ${regenCount} employees`);
-
-    if (errorCount > 0) {
-        showToast(`${savedCount} opgeslagen, ${errorCount} fouten`, 'warning');
-    } else {
-        showToast(`Basisrooster week ${weekNumber} toegepast voor ${savedCount} medewerkers`, 'success');
-    }
-
-    // Mark draft as applied with timestamp
-    const appliedAt = new Date().toISOString();
-    const appliedBy = AppState.currentUser?.name || 'Onbekend';
-    const draftToMark = (DataStore.settings.schedule_drafts || []).find(d => d.id === draftId);
-    if (draftToMark) {
-        draftToMark.lastAppliedAt = appliedAt;
-        draftToMark.lastAppliedBy = appliedBy;
-        try {
-            if (DataStore._draftsFromTable) {
-                await updateScheduleDraft(draftId, { lastAppliedAt: appliedAt, lastAppliedBy: appliedBy });
-            } else {
-                await saveSettings('schedule_drafts', DataStore.settings.schedule_drafts);
-            }
-        } catch (err) {
-            console.error('Error marking draft as applied:', err);
-        }
-    }
-
-    await Promise.all([refreshShifts(), fetchShiftBlocks()]);
-    renderBuilder();
 }
 
 // --- Builder: Helpers ---
@@ -8692,32 +8616,24 @@ async function handleAvailabilitySave() {
             }
         }
 
-        showSectionLoading('availability-view', 'Afwezigheid opslaan...');
-
-        // Apply absence for each day in range
-        // Reuse date parsing from conflict check above
-        let currentDate = new Date(startParts[0], startParts[1] - 1, startParts[2]);
-        let daysSet = 0;
-        const savePromises = [];
-
-        while (currentDate <= endDateObj) {
-            // Format as YYYY-MM-DD without timezone conversion
-            const year = currentDate.getFullYear();
-            const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-            const day = String(currentDate.getDate()).padStart(2, '0');
-            const dateStr = `${year}-${month}-${day}`;
-
-            savePromises.push(setAvailability(employeeId, dateStr, {
-                type: absenceType,
-                reason: reason
-            }, { skipRefresh: true }));
-            daysSet++;
-            currentDate.setDate(currentDate.getDate() + 1);
+        // Determine if we should offer takeover creation (sick/vacation with conflicts)
+        let createTakeoverRequests = false;
+        if ((absenceType === 'ziek' || absenceType === 'verlof') && conflictDates.length > 0) {
+            const confirmTakeover = await showConfirm(
+                `Er zijn ${conflictDates.length} dienst(en) op deze dagen.\n\n` +
+                `Wil je deze automatisch beschikbaar stellen zodat collega's ze kunnen overnemen?\n\n` +
+                `(Ze verschijnen in "Beschikbare shifts" op de Ruilen pagina)`,
+                'Shifts beschikbaar stellen?'
+            );
+            createTakeoverRequests = confirmTakeover;
         }
 
-        // Wait for all saves to complete, then refresh once
-        await Promise.all(savePromises);
-        await refreshAvailability();
+        showSectionLoading('availability-view', 'Afwezigheid opslaan...');
+
+        // Single atomic API call: availability + optional takeover requests
+        const result = await saveBulkAvailabilityWithTakeover(
+            employeeId, startDate, endDate, absenceType, reason, createTakeoverRequests
+        );
 
         closeAvailabilityModal();
         renderAvailability();
@@ -8725,6 +8641,7 @@ async function handleAvailabilitySave() {
 
         const employee = getEmployee(employeeId);
         const employeeName = employee?.name || 'de medewerker';
+        const daysSet = result.availability?.length || 0;
         const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid' }[absenceType] || 'Afwezigheid';
 
         let msg = `${typeName} geregistreerd voor ${employeeName} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
@@ -8734,69 +8651,8 @@ async function handleAvailabilitySave() {
             showToast(`Vergeet niet de ${conflictDates.length} conflicterende dienst(en) aan te passen in de planning!`, 'warning');
         }
 
-        // Auto-create takeover requests for shifts during sick leave or vacation
-        if ((absenceType === 'ziek' || absenceType === 'verlof') && conflictDates.length > 0) {
-            try {
-                console.log('[Auto-create] Starting takeover request creation');
-                console.log('[Auto-create] Conflict dates:', conflictDates);
-
-                const affectedShifts = [];
-                for (const dateStr of conflictDates) {
-                    const shifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
-                    console.log(`[Auto-create] Date ${dateStr}: Found ${shifts.length} shift(s)`, shifts.map(s => ({ id: s.id, date: s.date, start: s.startTime, end: s.endTime })));
-                    affectedShifts.push(...shifts);
-                }
-
-                console.log('[Auto-create] Total affected shifts:', affectedShifts.length, affectedShifts.map(s => ({ id: s.id, date: s.date })));
-
-                if (affectedShifts.length > 0) {
-                    const confirmTakeover = await showConfirm(
-                        `Je hebt ${affectedShifts.length} dienst(en) op deze dagen.\n\n` +
-                        `Wil je deze automatisch beschikbaar stellen zodat collega's ze kunnen overnemen?\n\n` +
-                        `(Ze verschijnen in "Beschikbare shifts" op de Ruilen pagina)`,
-                        'Shifts beschikbaar stellen?'
-                    );
-
-                    if (confirmTakeover) {
-                        let createdCount = 0;
-                        let failedCount = 0;
-                        const createPromises = [];
-                        const defaultMessage = absenceType === 'ziek'
-                            ? 'Ik ben ziek, wie kan mijn shift overnemen?'
-                            : 'Ik heb verlof, wie kan mijn shift overnemen?';
-
-                        for (const shift of affectedShifts) {
-                            console.log(`[Auto-create] Creating takeover request for shift ${shift.id}...`);
-                            createPromises.push(
-                                createTakeoverRequest(shift.id, defaultMessage)
-                                    .then(() => {
-                                        createdCount++;
-                                        console.log(`[Auto-create] ✓ Success for shift ${shift.id}`);
-                                    })
-                                    .catch(err => {
-                                        failedCount++;
-                                        console.error(`[Auto-create] ✗ Failed for shift ${shift.id}:`, err);
-                                    })
-                            );
-                        }
-
-                        await Promise.all(createPromises);
-
-                        console.log(`[Auto-create] Complete: ${createdCount} created, ${failedCount} failed`);
-
-                        if (createdCount > 0) {
-                            showToast(`${createdCount} takeover verzoek(en) aangemaakt! Collega's kunnen deze shifts nu overnemen via de Ruilen pagina.`, 'success');
-                        }
-                    } else {
-                        console.log('[Auto-create] User cancelled takeover creation');
-                    }
-                } else {
-                    console.log('[Auto-create] No affected shifts found');
-                }
-            } catch (error) {
-                console.error('[Auto-create] Error creating takeover requests:', error);
-                // Don't block the flow if takeover creation fails
-            }
+        if (result.takeoverRequests > 0) {
+            showToast(`${result.takeoverRequests} takeover verzoek(en) aangemaakt! Collega's kunnen deze shifts nu overnemen via de Ruilen pagina.`, 'success');
         }
 
         // Show type-specific reminders
