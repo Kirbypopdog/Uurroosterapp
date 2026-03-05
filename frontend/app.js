@@ -1587,6 +1587,12 @@ async function switchView(viewName) {
     }
 
     AppState.currentView = viewName;
+    // Reset shift range when leaving planning, set when entering
+    if (viewName === 'planning') {
+        updateShiftRefreshRange();
+    } else {
+        setActiveShiftRange(null, null);
+    }
     // Save to localStorage so we can restore after refresh
     localStorage.setItem('hetvlot_activeView', viewName);
     DOM.navButtons.forEach(btn => {
