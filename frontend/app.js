@@ -944,6 +944,18 @@ function setupEventListeners() {
 
     DOM.addEmployeeBtn.addEventListener('click', openAddEmployeeModal);
     DOM.shiftForm.addEventListener('submit', handleShiftSubmit);
+    DOM.shiftForm.addEventListener('input', () => {
+        if (AppState._shiftForceOverride) {
+            resetShiftSubmitBtn();
+            DOM.shiftValidationErrors.innerHTML = '';
+        }
+    });
+    DOM.shiftForm.addEventListener('change', () => {
+        if (AppState._shiftForceOverride) {
+            resetShiftSubmitBtn();
+            DOM.shiftValidationErrors.innerHTML = '';
+        }
+    });
     DOM.shiftCancelBtn.addEventListener('click', closeShiftModal);
     DOM.shiftDeleteBtn.addEventListener('click', handleShiftDelete);
     DOM.shiftTemplate.addEventListener('change', handleShiftTemplateChange);
@@ -2651,6 +2663,15 @@ function renderTimelineView() {
     DOM.rosterCalendar.innerHTML = html;
     IconHelper.init(DOM.rosterCalendar);
 
+    // Set team-header sticky offset based on actual header height
+    const header = DOM.rosterCalendar.querySelector('.timeline-header');
+    if (header) {
+        const headerHeight = header.offsetHeight;
+        DOM.rosterCalendar.querySelectorAll('.timeline-team-header').forEach(th => {
+            th.style.top = (headerHeight - 1) + 'px';
+        });
+    }
+
     // Initialize drag & drop handlers
     if (typeof DragHandler !== 'undefined') {
         DragHandler.init();
@@ -3152,6 +3173,7 @@ function openAddShiftModal() {
 
     // Show submit button, hide delete button
     DOM.shiftSubmitBtn.style.display = 'inline-block';
+    resetShiftSubmitBtn();
 
     DOM.shiftModal.classList.remove('hidden');
 }
@@ -3262,6 +3284,7 @@ function openShiftModal(shift, canEdit) {
     // Show/hide action buttons
     DOM.shiftSubmitBtn.style.display = canEdit ? 'inline-block' : 'none';
     DOM.shiftDeleteBtn.style.display = canEdit ? 'block' : 'none';
+    resetShiftSubmitBtn();
 
     // Add combined "Shift afstaan" button if user can request swap
     const existingAfstaanBtn = document.getElementById('shift-afstaan-btn');
@@ -3330,10 +3353,18 @@ function openShiftModal(shift, canEdit) {
     DOM.shiftModal.classList.remove('hidden');
 }
 
+function resetShiftSubmitBtn() {
+    DOM.shiftSubmitBtn.textContent = 'Opslaan';
+    DOM.shiftSubmitBtn.classList.remove('btn-warning');
+    DOM.shiftSubmitBtn.classList.add('btn-primary');
+    AppState._shiftForceOverride = false;
+}
+
 function closeShiftModal() {
     DOM.shiftModal.classList.add('hidden');
     DOM.shiftForm.reset();
     AppState.editingShiftId = null;
+    resetShiftSubmitBtn();
 }
 
 async function handleShiftDelete(shiftId = null) {
@@ -3918,37 +3949,50 @@ async function handleShiftSubmit(e) {
         const validation = validateShift(shiftData, AppState.editingShiftId);
         console.log('Validation result:', validation);
 
-        if (!validation.isValid) {
-            let html = '<div class="conflict-resolution">';
-            validation.errors.forEach(error => {
-                const suggestions = generateSuggestions(error, shiftData);
-                html += `<div class="conflict-item">
-                    <div class="conflict-error">${escapeHtml(error.message)}</div>`;
-                if (suggestions.length > 0) {
-                    html += '<div class="conflict-suggestions"><span class="suggestions-label">Suggesties:</span>';
-                    suggestions.forEach(s => {
-                        html += `<button type="button" class="btn btn-sm suggestion-btn"
-                            data-field="${escapeHtml(s.field)}"
-                            data-value="${s.value !== null ? escapeHtml(String(s.value)) : ''}"
-                            ${s.action ? `data-action="${escapeHtml(s.action)}"` : ''}
-                            onclick="applySuggestion(this)">${escapeHtml(s.label)}</button>`;
-                    });
+        if (!validation.isValid || validation.hasWarnings) {
+            // If user already confirmed (flag set), skip validation and proceed
+            if (AppState._shiftForceOverride) {
+                AppState._shiftForceOverride = false;
+                // Fall through to save
+            } else {
+                // Combine errors and warnings into one overview
+                let html = '<div class="conflict-resolution">';
+
+                // Show errors
+                validation.errors.forEach(error => {
+                    const suggestions = generateSuggestions(error, shiftData);
+                    html += `<div class="conflict-item">
+                        <div class="conflict-error">${escapeHtml(error.message)}</div>`;
+                    if (suggestions.length > 0) {
+                        html += '<div class="conflict-suggestions"><span class="suggestions-label">Suggesties:</span>';
+                        suggestions.forEach(s => {
+                            html += `<button type="button" class="btn btn-sm suggestion-btn"
+                                data-field="${escapeHtml(s.field)}"
+                                data-value="${s.value !== null ? escapeHtml(String(s.value)) : ''}"
+                                ${s.action ? `data-action="${escapeHtml(s.action)}"` : ''}
+                                onclick="applySuggestion(this)">${escapeHtml(s.label)}</button>`;
+                        });
+                        html += '</div>';
+                    }
                     html += '</div>';
-                }
+                });
+
+                // Show warnings
+                validation.warnings.forEach(warning => {
+                    html += `<div class="conflict-item">
+                        <div class="conflict-warning">${escapeHtml(warning.message)}</div>
+                    </div>`;
+                });
+
                 html += '</div>';
-            });
-            html += '</div>';
-            DOM.shiftValidationErrors.innerHTML = html;
-            IconHelper.init(DOM.shiftValidationErrors);
-            return;
-        }
-        if (validation.hasWarnings) {
-            let warningMsg = 'Waarschuwingen:\n\n';
-            validation.warnings.forEach(warning => {
-                warningMsg += `- ${warning.message}\n`;
-            });
-            warningMsg += '\nToch opslaan?';
-            if (!await showConfirm(warningMsg, 'Waarschuwingen')) {
+                DOM.shiftValidationErrors.innerHTML = html;
+                IconHelper.init(DOM.shiftValidationErrors);
+
+                // Change submit button to indicate override
+                DOM.shiftSubmitBtn.textContent = 'Toch opslaan';
+                DOM.shiftSubmitBtn.classList.remove('btn-primary');
+                DOM.shiftSubmitBtn.classList.add('btn-warning');
+                AppState._shiftForceOverride = true;
                 return;
             }
         }
@@ -4002,6 +4046,7 @@ function applySuggestion(btn) {
     }
 
     DOM.shiftValidationErrors.innerHTML = '';
+    resetShiftSubmitBtn();
     showToast('Suggestie toegepast - controleer en klik Opslaan', 'info');
 }
 

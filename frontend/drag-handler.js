@@ -348,7 +348,7 @@ const DragHandler = {
             }
         }
 
-        // Check if employee has availability/absence on this date
+        // Check if employee has availability/absence on this date - warn but allow override
         const availability = getAvailability(targetEmployee.id, targetDate);
         if (availability && availability.type) {
             const absenceLabels = {
@@ -359,9 +359,27 @@ const DragHandler = {
                 'andere': 'afwezig is'
             };
             const reason = absenceLabels[availability.type] || 'afwezig is';
-            console.log('[DragHandler] Employee has absence - cancelling');
-            showToast(`${targetEmployee.name} ${reason} op ${targetDate}. Je kunt geen shift toewijzen als iemand afwezig is.`, 'warning');
-            return;
+            const confirmed = await showConfirm(
+                `${targetEmployee.name} ${reason} op ${formatDate(targetDate)}.\n\nToch shift toewijzen?`,
+                'Medewerker afwezig'
+            );
+            if (!confirmed) return;
+        }
+
+        // Check validation rules (11-hour rule, overlap, etc.) - warn but allow override
+        const testShift = {
+            ...originalData,
+            employeeId: targetEmployee.id,
+            date: targetDate
+        };
+        const validation = validateShift(testShift, shiftId);
+        if (!validation.isValid || validation.hasWarnings) {
+            const issues = [...validation.errors, ...validation.warnings].map(i => `- ${i.message}`).join('\n');
+            const confirmed = await showConfirm(
+                `Er zijn opmerkingen:\n\n${issues}\n\nToch shift toewijzen?`,
+                'Validatie opmerkingen'
+            );
+            if (!confirmed) return;
         }
 
         console.log(`[DragHandler] Transferring shift ${shiftId} to ${targetEmployee.name} on ${targetDate}`);
@@ -734,25 +752,8 @@ const DragHandler = {
 
         if (!targetEmployee || !targetDate) return false;
 
-        // Check if employee has availability/absence on this date
-        const availability = getAvailability(targetEmployee.id, targetDate);
-        if (availability && availability.type) {
-            // Employee is absent - invalid target
-            return false;
-        }
-
-        // Run validation for shift with new employee
-        const shift = this.state.originalData;
-        const testShift = {
-            ...shift,
-            employeeId: targetEmployee.id,
-            date: targetDate
-        };
-
-        const validation = validateShift(testShift, shift.id);
-
-        // Allow drop if valid OR only warnings (not errors)
-        return validation.isValid || (!validation.isValid && validation.errors.length === 0);
+        // Always allow drop - validation issues are shown as warnings after drop
+        return true;
     },
 
     // Helper: Get employee from row containing day cell

@@ -2260,7 +2260,6 @@ textarea {
     position: sticky;
     top: 0;
     z-index: 20;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 @media (max-width: 1400px) {
@@ -2430,8 +2429,8 @@ textarea {
     color: white;
     font-weight: 600;
     position: sticky;
-    top: 93px; /* After header (72px) + scale row (21px) */
-    z-index: 10; /* Below scale, above rows and shift blocks */
+    top: 0;
+    z-index: 10; /* Below header, above rows and shift blocks */
 }
 
 .timeline-team-header.team-vlot1 {
@@ -3440,6 +3439,17 @@ textarea {
     background: #dc2626;
     transform: translateY(-1px);
     box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.3);
+}
+
+.btn-warning {
+    background: #f59e0b;
+    color: white;
+}
+
+.btn-warning:hover {
+    background: #d97706;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.3);
 }
 
 .btn-success {
@@ -8118,6 +8128,16 @@ textarea {
 @keyframes suggestion-flash {
     0%, 40% { box-shadow: 0 0 0 3px var(--primary-color); }
     100% { box-shadow: none; }
+}
+.conflict-item:has(.conflict-warning) {
+    border-color: var(--warning-color, #f59e0b);
+    background: #fffbeb;
+}
+.conflict-warning {
+    font-weight: 500;
+    color: #92400e;
+    font-size: 13px;
+    line-height: 1.4;
 }
 
 /* ===== UNDO/REDO ===== */
