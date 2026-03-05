@@ -466,7 +466,8 @@ async function removeShiftsInDateRange(startDate, endDate) {
     }
 }
 
-// Remove only auto-generated shifts, preserve manually edited shifts
+// @deprecated — Gebruik applyScheduleViaBackend() voor atomische shift regeneratie via backend.
+// Deze functie wordt niet meer actief aangeroepen maar blijft beschikbaar als fallback.
 async function removeAutoShiftsInDateRange(startDate, endDate) {
     try {
         // Get auto shifts in range
@@ -552,6 +553,7 @@ function getISOWeekNumber(date) {
     return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
+// @deprecated — Gebruik applyScheduleViaBackend() voor atomische shift regeneratie via backend.
 async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
     const employee = getEmployee(employeeId);
     if (!employee) {
@@ -615,6 +617,7 @@ async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
     return createdShifts;
 }
 
+// @deprecated — Gebruik applyScheduleViaBackend() voor atomische shift regeneratie via backend.
 async function applyWeekScheduleForAllEmployees(startDate, endDate) {
     const employees = getAllEmployees(true);
     let totalShifts = 0;

@@ -1028,9 +1028,10 @@ app.post('/users/:id/apply-schedule', requireAuth, async (req, res) => {
       if (pattern.referenceDate) referenceDate = pattern.referenceDate;
     }
 
-    // 5. Calculate date range: this week's Monday through horizon
+    // 5. Calculate date range: today through horizon
+    //    Using today (not Monday) prevents wiping shifts earlier in the current week
     const today = new Date();
-    const startDate = getMonday(today);
+    const startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     let endDate;
     if (horizonWeeks === null || horizonWeeks === 'unlimited') {
       endDate = new Date(today);
@@ -1042,13 +1043,14 @@ app.post('/users/:id/apply-schedule', requireAuth, async (req, res) => {
     const startStr = formatDateYYYYMMDD(startDate);
     const endStr = formatDateYYYYMMDD(endDate);
 
-    // 6. Optionally clear auto-created shift_blocks
+    // 6. Optionally clear shift_blocks from auto-shift deletions only
+    //    Blocks from manual shift deletions ('manual shift deleted by user') are preserved
     let blocksCleared = 0;
     if (clearBlocks) {
       const blockResult = await client.query(
         `DELETE FROM shift_blocks
          WHERE user_id = $1 AND date >= $2::date AND date <= $3::date
-         AND reason LIKE '%shift deleted by user%'`,
+         AND reason = 'auto shift deleted by user'`,
         [userId, startStr, endStr]
       );
       blocksCleared = blockResult.rowCount;
