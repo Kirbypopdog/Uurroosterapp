@@ -2671,7 +2671,14 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'hoofdv
     const grid = draft.grid || {};
     const weekNumber = draft.week_number || 1;
 
-    // 2. Process each employee in the grid
+    // 2. Read cycle length once before the loop
+    const patternResult = await client.query(`SELECT value FROM settings WHERE key = 'schedule_pattern'`);
+    let cycleLength = 2;
+    if (patternResult.rows.length > 0 && patternResult.rows[0].value && patternResult.rows[0].value.cycleLength) {
+      cycleLength = patternResult.rows[0].value.cycleLength;
+    }
+
+    // 3. Process each employee in the grid
     let appliedCount = 0;
     let totalCreated = 0;
     let totalDeleted = 0;
@@ -2711,13 +2718,6 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'hoofdv
 
       // Build weekSchedules array: replace target week, keep others
       const currentSchedules = Array.isArray(emp.weekSchedules) ? emp.weekSchedules : [emp.weekScheduleWeek1 || [], emp.weekScheduleWeek2 || []];
-
-      // Read cycle length from settings
-      const patternResult = await client.query(`SELECT value FROM settings WHERE key = 'schedule_pattern'`);
-      let cycleLength = 2;
-      if (patternResult.rows.length > 0 && patternResult.rows[0].value && patternResult.rows[0].value.cycleLength) {
-        cycleLength = patternResult.rows[0].value.cycleLength;
-      }
 
       // Ensure array has enough slots
       const allWeeks = [];
