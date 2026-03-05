@@ -65,9 +65,8 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 | Rol | Kan |
 |-----|-----|
 | `admin` | Alles, inclusief user management |
-| `hoofdverantwoordelijke` | Alle shifts/users beheren |
-| `teamverantwoordelijke` | Eigen team beheren |
-| `medewerker` | Eigen shifts bekijken, ruilen, verlof aanvragen |
+| `roosterverantwoordelijke` | Alle shifts/roosters/teams beheren (geen accountbeheer) |
+| `medewerker` | Eigen shifts bekijken/bewerken, ruilen, verlof aanvragen (geen basisrooster) |
 
 ## Belangrijke Regels
 

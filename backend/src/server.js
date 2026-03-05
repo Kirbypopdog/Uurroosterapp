@@ -397,6 +397,29 @@ async function ensureSchema() {
         console.log(`  Error creating schedule_drafts table: ${e.message}`);
       }
     }
+
+    // Migrate old roles to new 3-role system
+    // Must drop constraint FIRST, then update, then re-add
+    try {
+      await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+    } catch (e) { /* constraint may not exist */ }
+
+    const oldRolesCheck = await client.query(
+      `SELECT COUNT(*) FROM users WHERE role IN ('hoofdverantwoordelijke', 'teamverantwoordelijke')`
+    );
+    if (parseInt(oldRolesCheck.rows[0].count) > 0) {
+      console.log('Migrating old roles to roosterverantwoordelijke...');
+      const result = await client.query(
+        `UPDATE users SET role = 'roosterverantwoordelijke' WHERE role IN ('hoofdverantwoordelijke', 'teamverantwoordelijke')`
+      );
+      console.log(`  Migrated ${result.rowCount} users to roosterverantwoordelijke`);
+    }
+
+    try {
+      await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'roosterverantwoordelijke', 'medewerker'))`);
+    } catch (e) {
+      // Constraint may already exist with correct values
+    }
   } catch (err) {
     console.error('Schema check error:', err.message);
   } finally {
@@ -423,6 +446,10 @@ async function requireAuth(req, res, next) {
   }
   try {
     req.user = jwt.verify(token, JWT_SECRET);
+    // Normalize legacy role names from old JWTs (7-day transition period)
+    if (req.user.role === 'hoofdverantwoordelijke' || req.user.role === 'teamverantwoordelijke') {
+      req.user.role = 'roosterverantwoordelijke';
+    }
     return next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid token' });
@@ -844,20 +871,17 @@ app.put('/users/:id', requireAuth, async (req, res) => {
   const userId = Number(req.params.id);
   const { name, email, mainTeam, extraTeams, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
 
-  // Permission check: admin/hoofdverantwoordelijke can edit anyone,
-  // teamverantwoordelijke and medewerker can only edit themselves
+  // Permission check: admin/roosterverantwoordelijke can edit anyone,
+  // medewerker can only edit themselves
   const { role, team_id } = req.user;
 
   if (role === 'medewerker' && userId !== req.user.id) {
     return res.status(403).json({ error: 'Je kunt alleen je eigen profiel bewerken' });
   }
 
-  // Teamverantwoordelijke: may edit own profile, and may update week schedules for any employee
-  if (role === 'teamverantwoordelijke' && userId !== req.user.id) {
-    const onlyScheduleUpdate = weekScheduleWeek1 !== undefined || weekScheduleWeek2 !== undefined;
-    if (!onlyScheduleUpdate) {
-      return res.status(403).json({ error: 'Alleen hoofdverantwoordelijke mag medewerkergegevens bewerken' });
-    }
+  // Medewerker cannot modify base schedule fields
+  if (role === 'medewerker' && (weekScheduleWeek1 !== undefined || weekScheduleWeek2 !== undefined || weekSchedules !== undefined)) {
+    return res.status(403).json({ error: 'Medewerkers kunnen hun basisrooster niet aanpassen. Neem contact op met je roosterverantwoordelijke.' });
   }
 
   if (!name) {
@@ -1145,10 +1169,10 @@ app.post('/users/:id/apply-schedule', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'User ID is verplicht' });
   }
 
-  // Permission: medewerker can only apply own schedule
+  // Permission: medewerker cannot apply schedules at all
   const { role, id: currentUserId } = req.user;
-  if (role === 'medewerker' && userId !== currentUserId) {
-    return res.status(403).json({ error: 'Je kunt alleen je eigen rooster genereren' });
+  if (role === 'medewerker') {
+    return res.status(403).json({ error: 'Medewerkers kunnen geen basisrooster toepassen' });
   }
 
   const { clearBlocks = false } = req.body || {};
@@ -1224,6 +1248,13 @@ app.post('/shifts', requireAuth, async (req, res) => {
   if (!userId || !date || !startTime || !endTime) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
+
+  // Permission check: medewerker can only create shifts for themselves
+  const { role, id: currentUserId } = req.user;
+  if (role === 'medewerker' && Number(userId) !== currentUserId) {
+    return res.status(403).json({ error: 'Je kunt alleen diensten voor jezelf aanmaken' });
+  }
+
   // source defaults to 'manual' if not specified
   const shiftSource = source === 'auto' ? 'auto' : 'manual';
 
@@ -1261,6 +1292,16 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
   if (!id) {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
+
+  // Permission check: medewerker can only edit own shifts
+  const { role, id: currentUserId } = req.user;
+  if (role === 'medewerker') {
+    const existing = await pool.query('SELECT user_id FROM shifts WHERE id = $1', [id]);
+    if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
+      return res.status(403).json({ error: 'Je kunt alleen je eigen diensten bewerken' });
+    }
+  }
+
   // When editing, automatically set source to 'manual' to protect from auto-regeneration
   // Unless explicitly setting to 'auto' (for reset-to-base functionality)
   const shiftSource = source === 'auto' ? 'auto' : 'manual';
@@ -1325,14 +1366,8 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
     // AUTO shifts can be deleted by anyone (they're temporary/regenerated)
     if (shift.source !== 'auto') {
       // Permission checks for MANUAL shifts based on role
-      if (role === 'admin' || role === 'hoofdverantwoordelijke') {
-        // Admin/hoofdverantwoordelijke can delete anything
-      } else if (role === 'teamverantwoordelijke') {
-        // Teamverantwoordelijke can only delete shifts from own team
-        if (shift.team !== userTeam) {
-          await client.query('ROLLBACK');
-          return res.status(403).json({ error: 'Je kunt alleen diensten van je eigen team verwijderen' });
-        }
+      if (role === 'admin' || role === 'roosterverantwoordelijke') {
+        // Admin/roosterverantwoordelijke can delete anything
       } else if (role === 'medewerker') {
         // Medewerker can only delete own shifts
         if (shift.user_id !== userId) {
@@ -1376,8 +1411,8 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
 });
 
 // Bulk delete shifts in date range
-// Only supervisors can do bulk delete (admin, hoofdverantwoordelijke, teamverantwoordelijke)
-app.delete('/shifts', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+// Only supervisors can do bulk delete
+app.delete('/shifts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { startDate, endDate } = req.query;
   if (!startDate || !endDate) {
     return res.status(400).json({ error: 'startDate en endDate zijn verplicht' });
@@ -1396,7 +1431,7 @@ app.delete('/shifts', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'
 });
 
 // Bulk create shifts (for schedule builder)
-app.post('/shifts/bulk', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+app.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { shifts: shiftsToCreate, overwriteExisting } = req.body || {};
 
   if (!Array.isArray(shiftsToCreate) || shiftsToCreate.length === 0) {
@@ -1409,13 +1444,7 @@ app.post('/shifts/bulk', requireAuth, requireRole('admin', 'hoofdverantwoordelij
 
   const { role, team_id: userTeam } = req.user;
 
-  // Teamverantwoordelijke: all shifts must be for their team
-  if (role === 'teamverantwoordelijke') {
-    const invalidShift = shiftsToCreate.find(s => s.team !== userTeam);
-    if (invalidShift) {
-      return res.status(403).json({ error: 'Je mag alleen shifts voor je eigen team aanmaken' });
-    }
-  }
+  // Role check already handled by requireRole middleware
 
   const client = await pool.connect();
   try {
@@ -1504,20 +1533,6 @@ app.post('/availability', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'Je kunt alleen je eigen beschikbaarheid registreren' });
   }
 
-  if (role === 'teamverantwoordelijke') {
-    try {
-      const targetUser = await pool.query('SELECT main_team FROM users WHERE id = $1', [userId]);
-      if (targetUser.rows.length === 0) {
-        return res.status(404).json({ error: 'Gebruiker niet gevonden' });
-      }
-      if (targetUser.rows[0].main_team !== team_id && userId !== req.user.id) {
-        return res.status(403).json({ error: 'Je kunt alleen beschikbaarheid van je eigen team registreren' });
-      }
-    } catch (e) {
-      console.error('Team permission check failed:', e.message);
-      return res.status(500).json({ error: 'Fout bij permissiecontrole' });
-    }
-  }
 
   try {
     const result = await pool.query(`
@@ -1548,18 +1563,6 @@ app.delete('/availability', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'Je kunt alleen je eigen beschikbaarheid verwijderen' });
   }
 
-  if (role === 'teamverantwoordelijke') {
-    try {
-      const targetUser = await pool.query('SELECT main_team FROM users WHERE id = $1', [userId]);
-      if (targetUser.rows.length > 0 && targetUser.rows[0].main_team !== team_id && Number(userId) !== req.user.id) {
-        return res.status(403).json({ error: 'Je kunt alleen beschikbaarheid van je eigen team verwijderen' });
-      }
-    } catch (e) {
-      console.error('Team permission check failed:', e.message);
-      return res.status(500).json({ error: 'Fout bij permissiecontrole' });
-    }
-  }
-
   try {
     await pool.query(
       'DELETE FROM availability WHERE user_id = $1 AND date = $2',
@@ -1586,21 +1589,6 @@ app.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
   const { role, team_id } = req.user;
   if (role === 'medewerker' && userId !== req.user.id) {
     return res.status(403).json({ error: 'Je kunt alleen je eigen beschikbaarheid registreren' });
-  }
-
-  if (role === 'teamverantwoordelijke') {
-    try {
-      const targetUser = await pool.query('SELECT main_team FROM users WHERE id = $1', [userId]);
-      if (targetUser.rows.length === 0) {
-        return res.status(404).json({ error: 'Gebruiker niet gevonden' });
-      }
-      if (targetUser.rows[0].main_team !== team_id && userId !== req.user.id) {
-        return res.status(403).json({ error: 'Je kunt alleen beschikbaarheid van je eigen team registreren' });
-      }
-    } catch (e) {
-      console.error('Team permission check failed:', e.message);
-      return res.status(500).json({ error: 'Fout bij permissiecontrole' });
-    }
   }
 
   const client = await pool.connect();
@@ -1754,7 +1742,7 @@ app.post('/shift-blocks', requireAuth, async (req, res) => {
 });
 
 // Bulk delete shift blocks by date range (for schedule regeneration)
-app.delete('/shift-blocks/range', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+app.delete('/shift-blocks/range', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const { startDate, endDate, userId } = req.query;
     if (!startDate || !endDate) {
@@ -1778,7 +1766,7 @@ app.delete('/shift-blocks/range', requireAuth, requireRole('admin', 'hoofdverant
   }
 });
 
-app.delete('/shift-blocks/:id', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'), async (req, res) => {
+app.delete('/shift-blocks/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const blockId = parseInt(req.params.id, 10);
     if (!blockId) {
@@ -1804,8 +1792,8 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
     let params = [];
 
     // Role-based filtering
-    if (['admin', 'hoofdverantwoordelijke'].includes(role)) {
-      // Admin/hoofdverantwoordelijke: alle requests
+    if (['admin', 'roosterverantwoordelijke'].includes(role)) {
+      // Admin/roosterverantwoordelijke: alle requests
       query = `
         SELECT
           sr.*,
@@ -1829,33 +1817,6 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
         LEFT JOIN users resp ON sr.responded_by = resp.id
         ORDER BY sr.created_at DESC
       `;
-    } else if (role === 'teamverantwoordelijke') {
-      // Teamverantwoordelijke: alleen hun team (including takeover requests)
-      query = `
-        SELECT
-          sr.*,
-          u1.name as requester_name,
-          u2.name as target_name,
-          s1.date::text as requester_shift_date,
-          s1.start_time as requester_shift_start,
-          s1.end_time as requester_shift_end,
-          s1.team as requester_shift_team,
-          s1.notes as requester_shift_notes,
-          s2.date::text as target_shift_date,
-          s2.start_time as target_shift_start,
-          s2.end_time as target_shift_end,
-          s2.team as target_shift_team,
-          resp.name as responded_by_name
-        FROM shift_swap_requests sr
-        JOIN users u1 ON sr.requester_user_id = u1.id
-        LEFT JOIN users u2 ON sr.target_user_id = u2.id
-        JOIN shifts s1 ON sr.requester_shift_id = s1.id
-        LEFT JOIN shifts s2 ON sr.target_shift_id = s2.id
-        LEFT JOIN users resp ON sr.responded_by = resp.id
-        WHERE s1.team = $1 OR s2.team = $1 OR (sr.request_type = 'takeover' AND sr.status = 'pending' AND s1.team = $1)
-        ORDER BY sr.created_at DESC
-      `;
-      params = [team_id];
     } else {
       // Medewerker: own requests + open takeover requests from own team only
       query = `
@@ -2151,13 +2112,12 @@ app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
 
     const shift = shiftResult.rows[0];
 
-    // Permission check: Allow admin, hoofdverantwoordelijke, teamverantwoordelijke (for their team), or own shifts
+    // Permission check: Allow admin, roosterverantwoordelijke, or own shifts
     const isOwnShift = shift.user_id === currentUserId;
     const isAdmin = role === 'admin';
-    const isHoofdverantwoordelijke = role === 'hoofdverantwoordelijke';
-    const isTeamverantwoordelijkeForShift = role === 'teamverantwoordelijke' && shift.team === team_id;
+    const isRoosterverantwoordelijke = role === 'roosterverantwoordelijke';
 
-    if (!isOwnShift && !isAdmin && !isHoofdverantwoordelijke && !isTeamverantwoordelijkeForShift) {
+    if (!isOwnShift && !isAdmin && !isRoosterverantwoordelijke) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Je kunt alleen je eigen shifts aanbieden, tenzij je admin of verantwoordelijke bent' });
     }
@@ -2321,17 +2281,9 @@ app.put('/swap-requests/:id/approve', requireAuth, async (req, res) => {
     }
 
     // Permission check
-    if (!['admin', 'hoofdverantwoordelijke'].includes(role)) {
-      if (role === 'teamverantwoordelijke') {
-        // Must be team of one of the shifts
-        if (swap.requester_team !== team_id && swap.target_team !== team_id) {
-          await client.query('ROLLBACK');
-          return res.status(403).json({ error: 'Je kunt alleen swaps van je eigen team goedkeuren' });
-        }
-      } else {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ error: 'Geen toestemming om swaps goed te keuren' });
-      }
+    if (!['admin', 'roosterverantwoordelijke'].includes(role)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Geen toestemming om swaps goed te keuren' });
     }
 
     // Verify shifts not in past
@@ -2417,16 +2369,9 @@ app.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
     }
 
     // Permission check (same as approve)
-    if (!['admin', 'hoofdverantwoordelijke'].includes(role)) {
-      if (role === 'teamverantwoordelijke') {
-        if (swap.requester_team !== team_id && swap.target_team !== team_id) {
-          await client.query('ROLLBACK');
-          return res.status(403).json({ error: 'Je kunt alleen swaps van je eigen team afwijzen' });
-        }
-      } else {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ error: 'Geen toestemming om swaps af te wijzen' });
-      }
+    if (!['admin', 'roosterverantwoordelijke'].includes(role)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Geen toestemming om swaps af te wijzen' });
     }
 
     // Update swap request status
@@ -2473,14 +2418,12 @@ app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
 
     const swap = swapResult.rows[0];
 
-    // Permission check: Allow requester, admin, hoofdverantwoordelijke, or teamverantwoordelijke (for their team)
+    // Permission check: Allow requester, admin, or roosterverantwoordelijke
     const isRequester = swap.requester_user_id === currentUserId;
     const isAdmin = role === 'admin';
-    const isHoofdverantwoordelijke = role === 'hoofdverantwoordelijke';
-    const isTeamverantwoordelijkeForRequest = role === 'teamverantwoordelijke' &&
-      (swap.requester_team === team_id || swap.target_team === team_id);
+    const isRoosterverantwoordelijke = role === 'roosterverantwoordelijke';
 
-    if (!isRequester && !isAdmin && !isHoofdverantwoordelijke && !isTeamverantwoordelijkeForRequest) {
+    if (!isRequester && !isAdmin && !isRoosterverantwoordelijke) {
       return res.status(403).json({ error: 'Alleen de aanvrager of een verantwoordelijke kan dit verzoek annuleren' });
     }
 
@@ -2526,14 +2469,8 @@ app.put('/settings/:key', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Key en value zijn verplicht' });
   }
 
-  // Teamverantwoordelijke may save schedule_templates and schedule_drafts
-  // schedule_pattern is admin/hoofdverantwoordelijke only
   const { role } = req.user;
-  const allowedRoles = ['admin', 'hoofdverantwoordelijke'];
-  if (key === 'schedule_templates' || key === 'schedule_drafts') {
-    allowedRoles.push('teamverantwoordelijke');
-  }
-  if (!allowedRoles.includes(role)) {
+  if (!['admin', 'roosterverantwoordelijke'].includes(role)) {
     return res.status(403).json({ error: 'Onvoldoende rechten' });
   }
   try {
@@ -2553,7 +2490,7 @@ app.put('/settings/:key', requireAuth, async (req, res) => {
 
 // ===== SCHEDULE DRAFTS API =====
 
-app.get('/schedule-drafts', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+app.get('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, name, week_number as "weekNumber", team_filter as "teamFilter",
@@ -2570,7 +2507,7 @@ app.get('/schedule-drafts', requireAuth, requireRole('admin', 'hoofdverantwoorde
   }
 });
 
-app.post('/schedule-drafts', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+app.post('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id, name, weekNumber, teamFilter, grid } = req.body;
   const draftId = id || `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -2592,7 +2529,7 @@ app.post('/schedule-drafts', requireAuth, requireRole('admin', 'hoofdverantwoord
   }
 });
 
-app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
   const { name, weekNumber, teamFilter, grid, lastAppliedAt, lastAppliedBy } = req.body;
 
@@ -2630,7 +2567,7 @@ app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'hoofdverantwo
   }
 });
 
-app.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+app.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query('DELETE FROM schedule_drafts WHERE id = $1 RETURNING name', [id]);
@@ -2647,7 +2584,7 @@ app.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'hoofdveran
 
 // ===== APPLY SCHEDULE DRAFT (atomic transaction for all employees) =====
 
-app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'), async (req, res) => {
+app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const draftId = req.params.id;
   const { clearBlocks = true } = req.body || {};
 
@@ -2783,7 +2720,7 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'hoofdv
 
 // ===== AUDIT LOG API =====
 
-app.get('/audit-log', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'), async (req, res) => {
+app.get('/audit-log', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { page = 1, limit = 50, actorId, action, resourceType, startDate, endDate } = req.query;
   const offset = (Number(page) - 1) * Number(limit);
 
@@ -2816,7 +2753,7 @@ app.get('/audit-log', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'
 
 // ===== DATA IMPORT API =====
 
-app.post('/import', requireAuth, requireRole('admin', 'hoofdverantwoordelijke'), async (req, res) => {
+app.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { users, shifts, availability, settings } = req.body || {};
   const results = { imported: 0, skipped: 0, errors: [] };
 

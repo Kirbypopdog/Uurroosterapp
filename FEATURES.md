@@ -30,7 +30,7 @@
 - [x] Validate team assignments with warnings (flexible approach)
 - [x] Check against mainTeam and extraTeams
 - [x] Clear messaging when employee works for wrong team
-- [x] Allow manual override with admin/teamverantwoordelijke approval
+- [x] Allow manual override with admin/roosterverantwoordelijke approval
 
 ### Settings Persistence ✅ COMPLETED (2026-02-09)
 - [x] Planning horizon persists across page refreshes
@@ -105,7 +105,7 @@
 
 - [ ] **Audit Log**
   - Track who changed what and when
-  - Zichtbaar voor hoofdverantwoordelijke/admin
+  - Zichtbaar voor roosterverantwoordelijke/admin
   - Filterbaar per medewerker/datum/actie type
   - Export naar CSV
 

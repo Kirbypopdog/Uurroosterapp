@@ -153,24 +153,26 @@ function getEffectiveRole() {
     if (AppState.currentUser?.role === 'admin' && AppState.simulatedRole) {
         return AppState.simulatedRole;
     }
-    return AppState.currentUser?.role || 'medewerker';
+    // Normalize legacy role names from old sessions
+    const role = AppState.currentUser?.role || 'medewerker';
+    if (role === 'hoofdverantwoordelijke' || role === 'teamverantwoordelijke') {
+        return 'roosterverantwoordelijke';
+    }
+    return role;
 }
 
 // ===== PERMISSIONS SYSTEM =====
 const PERMISSIONS = {
-    VIEW_ALL_EMPLOYEES: ['admin', 'hoofdverantwoordelijke'],
-    EDIT_ALL_EMPLOYEES: ['admin', 'hoofdverantwoordelijke'],
-    // Medewerkergegevens bewerken: alleen admin en hoofdverantwoordelijke
-    // Teamverantwoordelijke mag wel shifts beheren maar niet employee data aanpassen
-    EDIT_TEAM_EMPLOYEES: ['admin', 'hoofdverantwoordelijke'],
-    ADD_EMPLOYEES: ['admin', 'hoofdverantwoordelijke'],
-    VIEW_ALL_AVAILABILITY: ['admin', 'hoofdverantwoordelijke'],
-    MANAGE_AVAILABILITY: ['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'],
-    // Shifts beheren: teamverantwoordelijke mag wel shifts aanpassen
-    MANAGE_SHIFTS: ['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'],
-    CHANGE_SETTINGS: ['admin', 'hoofdverantwoordelijke'],
+    VIEW_ALL_EMPLOYEES: ['admin', 'roosterverantwoordelijke'],
+    EDIT_ALL_EMPLOYEES: ['admin', 'roosterverantwoordelijke'],
+    EDIT_TEAM_EMPLOYEES: ['admin', 'roosterverantwoordelijke'],
+    ADD_EMPLOYEES: ['admin', 'roosterverantwoordelijke'],
+    VIEW_ALL_AVAILABILITY: ['admin', 'roosterverantwoordelijke'],
+    MANAGE_AVAILABILITY: ['admin', 'roosterverantwoordelijke'],
+    MANAGE_SHIFTS: ['admin', 'roosterverantwoordelijke'],
+    CHANGE_SETTINGS: ['admin', 'roosterverantwoordelijke'],
     MANAGE_ACCOUNTS: ['admin'],
-    EXPORT_DATA: ['admin', 'hoofdverantwoordelijke']
+    EXPORT_DATA: ['admin', 'roosterverantwoordelijke']
 };
 
 // ===== LUCIDE ICON HELPERS =====
@@ -263,21 +265,14 @@ function hasPermission(permission) {
 
 function canManageEmployee(employee) {
     const role = getEffectiveRole();
-    // Alleen admin en hoofdverantwoordelijke mogen medewerkergegevens bewerken
-    // Teamverantwoordelijke mag wel shifts beheren, maar niet employee data
-    return ['admin', 'hoofdverantwoordelijke'].includes(role);
+    return ['admin', 'roosterverantwoordelijke'].includes(role);
 }
 
 function canManageAvailability(employeeId) {
     const role = getEffectiveRole();
     const userId = AppState.currentUser?.id;
-    const userTeam = AppState.currentUser?.team_id;
 
-    if (['admin', 'hoofdverantwoordelijke'].includes(role)) return true;
-    if (role === 'teamverantwoordelijke') {
-        const emp = DataStore.employees.find(e => String(e.id) === String(employeeId));
-        return emp?.mainTeam === userTeam;
-    }
+    if (['admin', 'roosterverantwoordelijke'].includes(role)) return true;
     if (role === 'medewerker') return String(employeeId) === String(userId);
     return false;
 }
@@ -297,15 +292,8 @@ function canApproveSwap(swapRequest) {
 
     if (!currentUser || !swapRequest) return false;
 
-    // Admin/hoofdverantwoordelijke: all swaps
-    if (['admin', 'hoofdverantwoordelijke'].includes(role)) return true;
-
-    // Teamverantwoordelijke: only their team
-    if (role === 'teamverantwoordelijke') {
-        const userTeam = currentUser.teamId || currentUser.mainTeam;
-        return swapRequest.requester_shift_team === userTeam ||
-               swapRequest.target_shift_team === userTeam;
-    }
+    // Admin/roosterverantwoordelijke: all swaps
+    if (['admin', 'roosterverantwoordelijke'].includes(role)) return true;
 
     return false;
 }
@@ -1233,13 +1221,13 @@ function applyRoleVisibility() {
         allowedViews.add('employees');
     }
 
-    // Builder tab: teamverantwoordelijke, hoofdverantwoordelijke, admin
-    if (['teamverantwoordelijke', 'hoofdverantwoordelijke', 'admin'].includes(role)) {
+    // Builder tab: roosterverantwoordelijke and admin
+    if (['roosterverantwoordelijke', 'admin'].includes(role)) {
         allowedViews.add('builder');
     }
 
-    // Settings only for hoofdverantwoordelijke and admin
-    if (['hoofdverantwoordelijke', 'admin'].includes(role)) {
+    // Settings only for roosterverantwoordelijke and admin
+    if (['roosterverantwoordelijke', 'admin'].includes(role)) {
         allowedViews.add('settings');
     }
 
@@ -1253,20 +1241,10 @@ function applyRoleVisibility() {
         AppState.currentView = 'home';
     }
 
-    // Team filters:
-    // - Planning view: Always visible (all roles can filter)
-    // - Employee view: Hide only for teamverantwoordelijke (they only see their own team anyway)
+    // Team filters: always visible for roles that can see the employee tab
     const employeeFilters = document.getElementById('employee-team-toggles');
-
     if (employeeFilters) {
-        employeeFilters.style.display = role === 'teamverantwoordelijke' ? 'none' : '';
-    }
-
-    // For teamverantwoordelijke, limit visible teams to their own
-    if (role === 'teamverantwoordelijke') {
-        const visibleTeams = getVisibleTeamsForRole();
-        AppState.visibleTeams = visibleTeams;
-        AppState.visibleEmployeeTeams = visibleTeams;
+        employeeFilters.style.display = '';
     }
 
     // Hide "Medewerker toevoegen" button - new employees are created via account management
@@ -1286,8 +1264,7 @@ function renderHome() {
     if (!user) return;
 
     const role = getEffectiveRole();
-    const isLeadOrAdmin = ['admin', 'hoofdverantwoordelijke'].includes(role);
-    const isTeamLead = role === 'teamverantwoordelijke';
+    const isLeadOrAdmin = ['admin', 'roosterverantwoordelijke'].includes(role);
 
     let html = '';
     html += renderHomeWelcome(user, role);
@@ -1332,8 +1309,7 @@ function renderHome() {
 function renderHomeWelcome(user, role) {
     const roleLabels = {
         admin: 'Admin',
-        hoofdverantwoordelijke: 'Hoofdverantwoordelijke',
-        teamverantwoordelijke: 'Teamverantwoordelijke',
+        roosterverantwoordelijke: 'Roosterverantwoordelijke',
         medewerker: 'Medewerker'
     };
     const today = new Date();
@@ -1422,7 +1398,7 @@ function renderHomeShifts(user) {
 function renderHomeQuickActions(role) {
     let actions = '';
 
-    if (['admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(role)) {
+    if (['admin', 'roosterverantwoordelijke'].includes(role)) {
         actions += `<button class="home-action-btn" data-action="add-shift"><span class="home-action-icon">${IconHelper.html('plus', 'md')}</span>Dienst toevoegen</button>`;
     }
 
@@ -1430,7 +1406,7 @@ function renderHomeQuickActions(role) {
     actions += `<button class="home-action-btn" data-action="request-absence"><span class="home-action-icon">${IconHelper.html(ICONS.availability, 'md')}</span>Afwezigheid melden</button>`;
     actions += `<button class="home-action-btn" data-action="request-swap"><span class="home-action-icon">${IconHelper.html(ICONS.swap, 'md')}</span>Dienst ruilen</button>`;
 
-    if (['admin', 'hoofdverantwoordelijke'].includes(role)) {
+    if (['admin', 'roosterverantwoordelijke'].includes(role)) {
         actions += `<button class="home-action-btn" data-action="add-employee"><span class="home-action-icon">${IconHelper.html(ICONS.profile, 'md')}</span>Accounts beheren</button>`;
     }
 
@@ -1447,16 +1423,12 @@ function renderHomeQuickActions(role) {
 function renderHomeRequests(user, role) {
     const userId = Number(user.id || user.userId);
     const userTeam = user.team_id || user.mainTeam;
-    const isLeadOrAdmin = ['admin', 'hoofdverantwoordelijke'].includes(role);
-    const isTeamLead = role === 'teamverantwoordelijke';
+    const isLeadOrAdmin = ['admin', 'roosterverantwoordelijke'].includes(role);
 
     let pendingRequests = (DataStore.swapRequests || []).filter(r => {
         if (r.status !== 'pending') return false;
 
         if (isLeadOrAdmin) return true;
-        if (isTeamLead) {
-            return r.requester_shift_team === userTeam || r.target_shift_team === userTeam;
-        }
         // Medewerker: eigen requests + takeover requests van eigen team
         return r.requester_user_id === userId || r.target_user_id === userId ||
                (r.request_type === 'takeover' && r.requester_shift_team === userTeam);
@@ -1517,7 +1489,7 @@ function renderHomeTeamCoverage(role, user) {
 
     // Filter teams based on role
     const teamIds = Object.keys(teams).filter(id => {
-        if (['admin', 'hoofdverantwoordelijke'].includes(role)) return true;
+        if (['admin', 'roosterverantwoordelijke'].includes(role)) return true;
         return id === userTeam;
     });
 
@@ -3199,14 +3171,9 @@ function canUserEditShift(shift) {
     const currentUserId = AppState.currentUser.id;
     const isOwnShift = shift.employeeId === currentUserId || shift.userId === currentUserId;
 
-    if (currentRole === 'admin' || currentRole === 'hoofdverantwoordelijke') {
+    if (currentRole === 'admin' || currentRole === 'roosterverantwoordelijke') {
         return true;
-    } else if (currentRole === 'teamverantwoordelijke') {
-        // Can edit shifts from own team
-        const userTeam = AppState.currentUser.team_id || AppState.currentUser.mainTeam;
-        return shift.team === userTeam;
     } else if (currentRole === 'medewerker') {
-        // Can only edit own shifts
         return isOwnShift;
     }
 
@@ -3214,23 +3181,17 @@ function canUserEditShift(shift) {
 }
 
 function canUserTransferShift(shift) {
-    // Only admin, hoofdverantwoordelijke, and teamverantwoordelijke can transfer shifts between employees
-    // Medewerkers can only resize their own shifts, not transfer them
+    // Only admin and roosterverantwoordelijke can transfer shifts between employees
     if (!shift || !AppState.currentUser) {
         return false;
     }
 
     const currentRole = getEffectiveRole();
 
-    if (currentRole === 'admin' || currentRole === 'hoofdverantwoordelijke') {
+    if (currentRole === 'admin' || currentRole === 'roosterverantwoordelijke') {
         return true;
-    } else if (currentRole === 'teamverantwoordelijke') {
-        // Can transfer shifts from own team
-        const userTeam = AppState.currentUser.team_id || AppState.currentUser.mainTeam;
-        return shift.team === userTeam;
     }
 
-    // Medewerkers cannot transfer shifts
     return false;
 }
 
@@ -3888,13 +3849,8 @@ function populateEmployeeDropdown() {
     if (currentRole === 'medewerker') {
         // Medewerkers can only create shifts for themselves
         employees = employees.filter(emp => emp.id === currentUserId);
-    } else if (currentRole === 'teamverantwoordelijke') {
-        // Team leaders can create shifts for their team
-        employees = employees.filter(emp =>
-            emp.mainTeam === currentUserTeam || emp.id === currentUserId
-        );
     }
-    // Admin and hoofdverantwoordelijke see everyone (no filter)
+    // Admin and roosterverantwoordelijke see everyone (no filter)
 
     let html = '<option value="">-- Selecteer medewerker --</option>';
     employees.forEach(emp => {
@@ -4077,8 +4033,8 @@ function renderEmployees() {
         .filter(t => AppState.visibleEmployeeTeams.includes(t));
     let teamOrder = baseTeamOrder;
 
-    // Filter teams based on role
-    if (['medewerker', 'teamverantwoordelijke'].includes(role)) {
+    // Medewerker only sees own team
+    if (role === 'medewerker') {
         const userTeam = AppState.currentUser?.team_id
             || employees.find(emp => emp.user_id === AppState.currentUser?.id)?.mainTeam
             || employees.find(emp => emp.email && emp.email.toLowerCase() === String(AppState.currentUser?.email || '').toLowerCase())?.mainTeam;
@@ -4169,8 +4125,7 @@ function renderProfile() {
 
     const roleLabels = {
         admin: 'Admin',
-        hoofdverantwoordelijke: 'Hoofdverantwoordelijke',
-        teamverantwoordelijke: 'Teamverantwoordelijke',
+        roosterverantwoordelijke: 'Roosterverantwoordelijke',
         medewerker: 'Medewerker'
     };
     const role = roleLabels[user.role] || user.role || 'Onbekend';
@@ -4181,9 +4136,8 @@ function renderProfile() {
         : 'Niet gekoppeld';
     const accessMap = {
         admin: 'Alle paginas + instellingen + accountbeheer',
-        hoofdverantwoordelijke: 'Alle paginas + instellingen (zonder accountbeheer)',
-        teamverantwoordelijke: 'Eigen team beheren + verlof registreren',
-        medewerker: 'Alle paginas behalve instellingen'
+        roosterverantwoordelijke: 'Alle paginas + instellingen (zonder accountbeheer)',
+        medewerker: 'Eigen rooster bekijken, verlof en ruilen'
     };
     const accessSummary = accessMap[user.role] || 'Planning + profiel';
 
@@ -4225,10 +4179,29 @@ function renderProfile() {
 
             <div class="settings-card">
                 <div class="settings-card-header">
+                    <h3><span class="settings-icon">${IconHelper.html(ICONS.calendar, 'md')}</span> Vast werkrooster</h3>
+                </div>
+                <div class="settings-card-body">
+                    <div class="profile-week-toggle" id="profile-week-tabs">
+                        ${(() => {
+                            const cl = getCycleLength();
+                            let tabs = '';
+                            for (let w = 1; w <= cl; w++) {
+                                tabs += `<button type="button" class="profile-week-btn ${w === 1 ? 'active' : ''}" data-week="${w}">Week ${w}</button>`;
+                            }
+                            return tabs;
+                        })()}
+                    </div>
+                    <div id="profile-week-schedule-container" class="week-schedule-container"></div>
+                </div>
+            </div>
+
+            <div class="settings-card" style="grid-column: 1 / -1;">
+                <div class="settings-card-header">
                     <h3><span class="settings-icon">${IconHelper.html(ICONS.search, 'md')}</span> Account overzicht</h3>
                 </div>
                 <div class="settings-card-body">
-                    <div class="profile-meta">
+                    <div class="profile-meta profile-meta-inline">
                         <div class="profile-meta-row">
                             <span class="profile-meta-label">Rol</span>
                             <span class="profile-meta-value role-${roleClass}">${escapeHtml(role)}</span>
@@ -4241,33 +4214,6 @@ function renderProfile() {
                             <span class="profile-meta-label">Toegang</span>
                             <span class="profile-meta-value">${escapeHtml(accessSummary)}</span>
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-card" style="grid-column: 1 / -1;">
-                <div class="settings-card-header">
-                    <h3><span class="settings-icon">${IconHelper.html(ICONS.calendar, 'md')}</span> Mijn Vast Werkrooster</h3>
-                    <p class="settings-description">Je vaste werktijden per week</p>
-                </div>
-                <div class="settings-card-body">
-                    <div class="week-schedule-tabs" id="profile-week-tabs">
-                        ${(() => {
-                            const cl = getCycleLength();
-                            let tabs = '';
-                            for (let w = 1; w <= cl; w++) {
-                                const label = getWeekLabel(w);
-                                tabs += `<button type="button" class="week-tab ${w === 1 ? 'active' : ''}" data-week="${w}">Week ${w} (${escapeHtml(label)})</button>`;
-                            }
-                            return tabs;
-                        })()}
-                    </div>
-                    <div id="profile-week-schedule-container" class="week-schedule-container"></div>
-                    <div id="profile-schedule-message" class="form-message info" aria-live="polite">
-                        Klik op een dag om werktijden in te stellen.
-                    </div>
-                    <div class="form-actions">
-                        <button type="button" id="save-profile-schedule-btn" class="btn btn-primary">Rooster Opslaan</button>
                     </div>
                 </div>
             </div>
@@ -4351,45 +4297,26 @@ function generateProfileWeekScheduleHTML() {
     const container = document.getElementById('profile-week-schedule-container');
     if (!container) return;
 
-    const dayNames = {
-        1: 'Maandag', 2: 'Dinsdag', 3: 'Woensdag',
-        4: 'Donderdag', 5: 'Vrijdag', 6: 'Zaterdag', 0: 'Zondag'
+    const dayAbbrev = {
+        1: 'Ma', 2: 'Di', 3: 'Wo', 4: 'Do', 5: 'Vr', 6: 'Za', 0: 'Zo'
     };
-
-    // Build template options
-    const templateOptions = Object.keys(DataStore.settings.shiftTemplates || {}).map(templateId => {
-        const template = DataStore.settings.shiftTemplates[templateId];
-        return `<option value="${templateId}">${escapeHtml(template.name)} (${template.start}-${template.end})</option>`;
-    }).join('');
 
     function generateWeekHTML(weekNumber, days) {
         let html = `<div class="week-content ${weekNumber === 1 ? 'active' : ''}" data-profile-week="${weekNumber}">`;
+        html += '<div class="profile-schedule-grid">';
 
         days.forEach(dayNum => {
             html += `
-            <div class="week-schedule-day">
-                <label class="week-schedule-label">
-                    <input type="checkbox" class="profile-week-schedule-enabled" data-week="${weekNumber}" data-day="${dayNum}">
-                    <span class="day-name">${dayNames[dayNum]}</span>
-                </label>
-                <select class="profile-week-schedule-template" data-week="${weekNumber}" data-day="${dayNum}" disabled>
-                    <option value="">-- Kies template --</option>
-                    ${templateOptions}
-                    <option value="custom">Aangepast...</option>
-                </select>
-                <div class="week-schedule-times">
-                    <input type="time" class="profile-week-schedule-start" data-week="${weekNumber}" data-day="${dayNum}" disabled>
-                    <span class="time-separator">-</span>
-                    <input type="time" class="profile-week-schedule-end" data-week="${weekNumber}" data-day="${dayNum}" disabled>
-                </div>
+            <div class="profile-schedule-row profile-schedule-off" data-profile-row-week="${weekNumber}" data-profile-row-day="${dayNum}">
+                <span class="profile-schedule-day">${dayAbbrev[dayNum]}</span>
+                <span class="profile-schedule-detail">Vrij</span>
             </div>`;
         });
 
-        html += '</div>';
+        html += '</div></div>';
         return html;
     }
 
-    // Dynamisch: genereer HTML voor elke week in de cyclus
     const cycleLen = getCycleLength();
     let weeksHtml = '';
     for (let w = 1; w <= cycleLen; w++) {
@@ -4418,199 +4345,46 @@ function loadProfileWeekScheduleData(weekNumber, weekSchedule) {
     weekSchedule.forEach(daySchedule => {
         if (!daySchedule.enabled) return;
 
-        const checkbox = document.querySelector(`.profile-week-schedule-enabled[data-week="${weekNumber}"][data-day="${daySchedule.dayOfWeek}"]`);
-        const templateSelect = document.querySelector(`.profile-week-schedule-template[data-week="${weekNumber}"][data-day="${daySchedule.dayOfWeek}"]`);
-        const startInput = document.querySelector(`.profile-week-schedule-start[data-week="${weekNumber}"][data-day="${daySchedule.dayOfWeek}"]`);
-        const endInput = document.querySelector(`.profile-week-schedule-end[data-week="${weekNumber}"][data-day="${daySchedule.dayOfWeek}"]`);
+        const row = document.querySelector(`.profile-schedule-row[data-profile-row-week="${weekNumber}"][data-profile-row-day="${daySchedule.dayOfWeek}"]`);
+        if (!row) return;
 
-        if (checkbox && templateSelect && startInput && endInput) {
-            checkbox.checked = true;
-            templateSelect.disabled = false;
-            startInput.disabled = false;
-            endInput.disabled = false;
+        const start = daySchedule.startTime || '';
+        const end = daySchedule.endTime || '';
+        if (!start || !end) return;
 
-            startInput.value = daySchedule.startTime || '';
-            endInput.value = daySchedule.endTime || '';
+        // Find matching template name
+        let templateName = '';
+        const matchedId = Object.keys(DataStore.settings.shiftTemplates || {}).find(id => {
+            const t = DataStore.settings.shiftTemplates[id];
+            return t.start === start && t.end === end;
+        });
+        if (matchedId) {
+            templateName = DataStore.settings.shiftTemplates[matchedId].name;
+        }
 
-            // Try to find matching template
-            const matchedTemplate = Object.keys(DataStore.settings.shiftTemplates || {}).find(templateId => {
-                const template = DataStore.settings.shiftTemplates[templateId];
-                return template.start === daySchedule.startTime && template.end === daySchedule.endTime;
-            });
-
-            if (matchedTemplate) {
-                templateSelect.value = matchedTemplate;
-                startInput.readOnly = true;
-                endInput.readOnly = true;
-            } else {
-                templateSelect.value = 'custom';
-                startInput.readOnly = false;
-                endInput.readOnly = false;
-            }
+        row.classList.remove('profile-schedule-off');
+        row.classList.add('profile-schedule-active');
+        const detailEl = row.querySelector('.profile-schedule-detail');
+        if (detailEl) {
+            detailEl.innerHTML = templateName
+                ? `${start} – ${end} <span class="profile-schedule-badge">${escapeHtml(templateName)}</span>`
+                : `${start} – ${end}`;
         }
     });
 }
 
 function setupProfileWeekScheduleListeners() {
-    // Tab switching
-    document.querySelectorAll('#profile-week-tabs .week-tab').forEach(tab => {
+    // Tab switching only — profile schedule is read-only, editing via employees tab
+    document.querySelectorAll('#profile-week-tabs .profile-week-btn').forEach(tab => {
         tab.addEventListener('click', () => {
             const weekNumber = tab.dataset.week;
-            // Update tab active state
-            document.querySelectorAll('#profile-week-tabs .week-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('#profile-week-tabs .profile-week-btn').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
-            // Show correct week content
             document.querySelectorAll('[data-profile-week]').forEach(content => {
                 content.classList.toggle('active', content.dataset.profileWeek === weekNumber);
             });
         });
     });
-
-    // Checkbox listeners
-    document.querySelectorAll('.profile-week-schedule-enabled').forEach(checkbox => {
-        checkbox.addEventListener('change', () => {
-            const weekNumber = checkbox.dataset.week;
-            const dayOfWeek = checkbox.dataset.day;
-            const isEnabled = checkbox.checked;
-
-            const templateSelect = document.querySelector(`.profile-week-schedule-template[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
-            const startInput = document.querySelector(`.profile-week-schedule-start[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
-            const endInput = document.querySelector(`.profile-week-schedule-end[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
-
-            if (templateSelect) templateSelect.disabled = !isEnabled;
-            if (startInput) startInput.disabled = !isEnabled;
-            if (endInput) endInput.disabled = !isEnabled;
-
-            if (!isEnabled) {
-                if (templateSelect) templateSelect.value = '';
-                if (startInput) startInput.value = '';
-                if (endInput) endInput.value = '';
-            }
-        });
-    });
-
-    // Template select listeners
-    document.querySelectorAll('.profile-week-schedule-template').forEach(select => {
-        select.addEventListener('change', () => {
-            const weekNumber = select.dataset.week;
-            const dayOfWeek = select.dataset.day;
-            const templateId = select.value;
-
-            const startInput = document.querySelector(`.profile-week-schedule-start[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
-            const endInput = document.querySelector(`.profile-week-schedule-end[data-week="${weekNumber}"][data-day="${dayOfWeek}"]`);
-
-            if (templateId && templateId !== 'custom') {
-                const template = DataStore.settings.shiftTemplates[templateId];
-                if (template) {
-                    startInput.value = template.start;
-                    endInput.value = template.end;
-                    startInput.readOnly = true;
-                    endInput.readOnly = true;
-                }
-            } else {
-                startInput.readOnly = false;
-                endInput.readOnly = false;
-            }
-        });
-    });
-
-    // Save button
-    const saveBtn = document.getElementById('save-profile-schedule-btn');
-    if (saveBtn) {
-        saveBtn.addEventListener('click', saveProfileWeekSchedule);
-    }
-}
-
-async function saveProfileWeekSchedule() {
-    const saveBtn = document.getElementById('save-profile-schedule-btn');
-    const message = document.getElementById('profile-schedule-message');
-
-    const setMessage = (text, type = 'info') => {
-        message.textContent = text;
-        message.className = `form-message ${type}`;
-    };
-
-    try {
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Opslaan...';
-
-        // Collect week schedule data for all weeks in cycle
-        const cycleLen = getCycleLength();
-        const weekSchedules = [];
-        for (let w = 1; w <= cycleLen; w++) {
-            weekSchedules.push(getProfileWeekScheduleFromForm(w));
-        }
-
-        // Build payload with backward compat (weekScheduleWeek1/2 for old columns)
-        const payload = {
-            name: AppState.currentUser.name,
-            email: AppState.currentUser.email,
-            mainTeam: AppState.currentUser.mainTeam,
-            extraTeams: AppState.currentUser.extraTeams,
-            contractHours: AppState.currentUser.contractHours,
-            active: AppState.currentUser.active,
-            weekScheduleWeek1: weekSchedules[0] || [],
-            weekScheduleWeek2: weekSchedules[1] || [],
-            weekSchedules: weekSchedules
-        };
-
-        const data = await apiFetch(`/users/${AppState.currentUser.id}`, {
-            method: 'PUT',
-            body: JSON.stringify(payload)
-        });
-
-        // Update local state
-        AppState.currentUser.weekScheduleWeek1 = weekSchedules[0] || [];
-        AppState.currentUser.weekScheduleWeek2 = weekSchedules[1] || [];
-        AppState.currentUser.weekSchedules = weekSchedules;
-        sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
-
-        // Also update in DataStore.users
-        const userIndex = DataStore.users.findIndex(u => u.id === AppState.currentUser.id);
-        if (userIndex !== -1) {
-            DataStore.users[userIndex].weekScheduleWeek1 = weekSchedules[0] || [];
-            DataStore.users[userIndex].weekScheduleWeek2 = weekSchedules[1] || [];
-            DataStore.users[userIndex].weekSchedules = weekSchedules;
-        }
-
-        // Regenerate auto-shifts via backend (atomic transaction)
-        await applyScheduleViaBackend(AppState.currentUser.id, { clearBlocks: true });
-        await Promise.all([refreshShifts(), fetchShiftBlocks()]);
-
-        // Refresh planning view if currently visible
-        if (AppState.currentView === 'planning') {
-            renderPlanning();
-        }
-
-        setMessage('Basisrooster opgeslagen en diensten geregenereerd!\n\nHandmatige diensten blijven behouden.', 'success');
-    } catch (error) {
-        setMessage(`Opslaan mislukt: ${error.message}`, 'error');
-    } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Rooster Opslaan';
-    }
-}
-
-function getProfileWeekScheduleFromForm(weekNumber) {
-    const schedule = [];
-    const days = getOpenDaysForWeek(weekNumber);
-
-    days.forEach(dayNum => {
-        const checkbox = document.querySelector(`.profile-week-schedule-enabled[data-week="${weekNumber}"][data-day="${dayNum}"]`);
-        const startInput = document.querySelector(`.profile-week-schedule-start[data-week="${weekNumber}"][data-day="${dayNum}"]`);
-        const endInput = document.querySelector(`.profile-week-schedule-end[data-week="${weekNumber}"][data-day="${dayNum}"]`);
-
-        if (checkbox && startInput && endInput) {
-            schedule.push({
-                dayOfWeek: dayNum,
-                enabled: checkbox.checked,
-                startTime: startInput.value || '',
-                endTime: endInput.value || ''
-            });
-        }
-    });
-
-    return schedule;
 }
 
 function renderEmployeeCard(emp) {
@@ -5079,8 +4853,8 @@ function renderAvailability() {
 
     // Group employees by team (same order as Timeline)
     let teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'];
-    // Filter by team for medewerker and teamverantwoordelijke
-    if (['medewerker', 'teamverantwoordelijke'].includes(role)) {
+    // Medewerker only sees own team
+    if (role === 'medewerker') {
         const userTeam = AppState.currentUser?.team_id
             || employees.find(emp => emp.user_id === AppState.currentUser?.id)?.mainTeam
             || employees.find(emp => emp.email && emp.email.toLowerCase() === String(AppState.currentUser?.email || '').toLowerCase())?.mainTeam;
@@ -5769,7 +5543,7 @@ function renderBuilder() {
     const role = getEffectiveRole();
     const userTeam = AppState.currentUser?.team_id || AppState.currentUser?.mainTeam;
 
-    // Don't auto-lock team filter - teamverantwoordelijke can build for all teams
+    // Don't auto-lock team filter - roosterverantwoordelijke can build for all teams
 
     let html = '';
     html += renderBuilderControls(role, userTeam);
@@ -6732,8 +6506,7 @@ function renderSettingsTabContent(tabName) {
 function getRoleDescription(role) {
     const descriptions = {
         'medewerker': 'Kan eigen rooster bekijken, diensten ruilen en verlof aanvragen.',
-        'teamverantwoordelijke': 'Kan diensten en medewerkers van het eigen team beheren.',
-        'hoofdverantwoordelijke': 'Kan alle diensten en medewerkers van alle teams beheren.',
+        'roosterverantwoordelijke': 'Kan alle diensten, medewerkers en roosters van alle teams beheren.',
         'admin': 'Volledige toegang inclusief accountbeheer, instellingen en systeembeheer.'
     };
     return descriptions[role] || '';
@@ -6811,8 +6584,7 @@ async function loadAdminUsers(container) {
 
         const roleOptions = `
             <option value="admin">Admin</option>
-            <option value="hoofdverantwoordelijke">Hoofdverantwoordelijke</option>
-            <option value="teamverantwoordelijke">Teamverantwoordelijke</option>
+            <option value="roosterverantwoordelijke">Roosterverantwoordelijke</option>
             <option value="medewerker">Medewerker</option>
         `;
 
@@ -6940,8 +6712,7 @@ function showAddUserModal(teams) {
                         <label for="new-user-role">Rol</label>
                         <select id="new-user-role" class="form-input" required>
                             <option value="medewerker">Medewerker</option>
-                            <option value="teamverantwoordelijke">Teamverantwoordelijke</option>
-                            <option value="hoofdverantwoordelijke">Hoofdverantwoordelijke</option>
+                            <option value="roosterverantwoordelijke">Roosterverantwoordelijke</option>
                             <option value="admin">Admin</option>
                         </select>
                         <span class="form-hint role-hint" id="new-user-role-hint">${getRoleDescription('medewerker')}</span>
@@ -7058,8 +6829,7 @@ function showEditAccountModal(user, teams, onSave) {
                         <label for="edit-user-role">Rol</label>
                         <select id="edit-user-role" class="form-input" required>
                             <option value="medewerker" ${user.role === 'medewerker' ? 'selected' : ''}>Medewerker</option>
-                            <option value="teamverantwoordelijke" ${user.role === 'teamverantwoordelijke' ? 'selected' : ''}>Teamverantwoordelijke</option>
-                            <option value="hoofdverantwoordelijke" ${user.role === 'hoofdverantwoordelijke' ? 'selected' : ''}>Hoofdverantwoordelijke</option>
+                            <option value="roosterverantwoordelijke" ${user.role === 'roosterverantwoordelijke' ? 'selected' : ''}>Roosterverantwoordelijke</option>
                             <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
                         </select>
                         <span class="form-hint role-hint" id="edit-user-role-hint">${getRoleDescription(user.role)}</span>
@@ -7628,7 +7398,7 @@ function renderSettingsSystem(container) {
 // ===== SETTINGS TAB: AUDIT LOG =====
 function renderSettingsAudit(container) {
     const role = getEffectiveRole();
-    if (!['admin', 'hoofdverantwoordelijke'].includes(role)) {
+    if (!['admin', 'roosterverantwoordelijke'].includes(role)) {
         container.innerHTML = `<div class="settings-card"><div class="settings-card-body">
             <div class="info-box neutral"><p>Je hebt geen toegang tot het audit log.</p></div>
         </div></div>`;

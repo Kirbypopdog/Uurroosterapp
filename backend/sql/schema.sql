@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'hoofdverantwoordelijke', 'teamverantwoordelijke', 'medewerker')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'roosterverantwoordelijke', 'medewerker')),
   team_id TEXT REFERENCES teams(id),
   -- Employee/schedule fields
   main_team TEXT REFERENCES teams(id),

@@ -139,7 +139,7 @@ function validateTeamAssignment(employeeId, teamId) {
             warnings.push({
                 type: ValidationRules.WARNING,
                 rule: 'Team mismatch',
-                message: `${employee.name} hoort bij ${employeeTeamName}, niet bij ${teamName}. Een teamverantwoordelijke van ${teamName} of admin moet deze shift goedkeuren/aanpassen.`
+                message: `${employee.name} hoort bij ${employeeTeamName}, niet bij ${teamName}. Een roosterverantwoordelijke of admin moet deze shift goedkeuren/aanpassen.`
             });
         }
     }

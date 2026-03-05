@@ -337,16 +337,7 @@ const DragHandler = {
             return;
         }
 
-        // Check team permissions for teamverantwoordelijke
-        const role = getEffectiveRole();
-        if (role === 'teamverantwoordelijke') {
-            const userTeamId = AppState.currentUser.team_id;
-            if (targetEmployee.mainTeam !== userTeamId) {
-                console.log('[DragHandler] Teamverantwoordelijke cannot transfer to different team');
-                showToast('Je kan alleen shifts toewijzen aan medewerkers van je eigen team', 'warning');
-                return;
-            }
-        }
+        // Permission check handled by canUserTransferShift() at drag start
 
         // Check if employee has availability/absence on this date - warn but allow override
         const availability = getAvailability(targetEmployee.id, targetDate);
@@ -629,7 +620,6 @@ const DragHandler = {
 
         // Check permissions - can user create shifts for this team?
         const role = getEffectiveRole();
-        const userTeamId = AppState.currentUser.team_id;
 
         if (role === 'medewerker') {
             // Medewerkers can only create shifts for themselves
@@ -637,13 +627,8 @@ const DragHandler = {
                 showToast('Je kan alleen shifts voor jezelf aanmaken', 'warning');
                 return;
             }
-        } else if (role === 'teamverantwoordelijke') {
-            // Teamverantwoordelijke can only create for own team
-            if (employee.mainTeam !== userTeamId) {
-                showToast('Je kan alleen shifts aanmaken voor je eigen team', 'warning');
-                return;
-            }
         }
+        // Admin and roosterverantwoordelijke can create for any team
 
         // Get default times from employee's week schedule for this day
         const dayOfWeek = new Date(date).getDay();
