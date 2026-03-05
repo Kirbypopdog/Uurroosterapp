@@ -80,6 +80,37 @@ function normalizeSettings(settings) {
     return merged;
 }
 
+// ===== NORMALIZATION HELPERS =====
+// Gebruikt door refresh functies en loadDataFromAPI() voor consistente data transformatie
+
+function normalizeShift(s) {
+    return {
+        ...s,
+        date: typeof s.date === 'string' ? s.date.split('T')[0] : s.date,
+        employeeId: s.userId || s.employeeId,
+        userId: s.userId || s.employeeId,
+        source: s.source || 'manual'
+    };
+}
+
+function normalizeAvailability(a) {
+    const date = typeof a.date === 'string' ? a.date.split('T')[0] : a.date;
+    return {
+        ...a,
+        date,
+        employeeId: a.userId || a.employeeId,
+        userId: a.userId || a.employeeId,
+        key: `${a.userId || a.employeeId}_${date}`
+    };
+}
+
+function normalizeShiftBlock(b) {
+    return {
+        ...b,
+        date: typeof b.date === 'string' ? b.date.split('T')[0] : b.date
+    };
+}
+
 // Globale data store (in-memory cache van database data)
 // NOTE: employees is nu een alias voor users (minus admin users)
 const DataStore = {
@@ -146,31 +177,9 @@ async function loadDataFromAPI() {
         // Users now contain employee/schedule data
         DataStore.users = usersData.users || [];
 
-        // Shifts now use userId instead of employeeId
-        DataStore.shifts = (shiftsData.shifts || []).map(s => ({
-            ...s,
-            date: typeof s.date === 'string' ? s.date.split('T')[0] : s.date,
-            // Support both old (employeeId) and new (userId) field names
-            employeeId: s.userId || s.employeeId,
-            userId: s.userId || s.employeeId,
-            // Source defaults to 'manual' for old data without source field
-            source: s.source || 'manual'
-        }));
-
-        // Availability now uses userId instead of employeeId
-        DataStore.availability = (availabilityData.availability || []).map(a => ({
-            ...a,
-            date: typeof a.date === 'string' ? a.date.split('T')[0] : a.date,
-            employeeId: a.userId || a.employeeId,
-            userId: a.userId || a.employeeId,
-            key: `${a.userId || a.employeeId}_${typeof a.date === 'string' ? a.date.split('T')[0] : a.date}`
-        }));
-
-        // Shift blocks (prevents auto-regeneration of deleted shifts)
-        DataStore.shiftBlocks = (Array.isArray(shiftBlocksData) ? shiftBlocksData : []).map(b => ({
-            ...b,
-            date: typeof b.date === 'string' ? b.date.split('T')[0] : b.date
-        }));
+        DataStore.shifts = (shiftsData.shifts || []).map(normalizeShift);
+        DataStore.availability = (availabilityData.availability || []).map(normalizeAvailability);
+        DataStore.shiftBlocks = (Array.isArray(shiftBlocksData) ? shiftBlocksData : []).map(normalizeShiftBlock);
 
         // Merge API settings with defaults
         const apiSettings = settingsData.settings || {};
@@ -227,7 +236,7 @@ async function addEmployee(employeeData) {
             body: JSON.stringify(userData)
         });
         const user = data.user;
-        DataStore.users.push(user);
+        await refreshUsers();
         return user;
     } catch (error) {
         console.error('Fout bij toevoegen medewerker:', error);
@@ -248,8 +257,9 @@ async function updateEmployee(id, updates) {
             body: JSON.stringify(updatedData)
         });
 
-        DataStore.users[index] = data.user;
-        return data.user;
+        const user = data.user;
+        await refreshUsers();
+        return user;
     } catch (error) {
         console.error('Fout bij bijwerken medewerker:', error);
         throw error;
@@ -260,13 +270,8 @@ async function deleteEmployee(id) {
     try {
         await dataApiFetch(`/admin/users/${id}`, { method: 'DELETE' });
 
-        const index = DataStore.users.findIndex(e => e.id === id);
-        if (index !== -1) {
-            DataStore.users.splice(index, 1);
-        }
-        // Remove related shifts and availability from cache
-        DataStore.shifts = DataStore.shifts.filter(shift => shift.userId !== id && shift.employeeId !== id);
-        DataStore.availability = DataStore.availability.filter(entry => entry.userId !== id && entry.employeeId !== id);
+        // Server cascade deletes related data; refresh all affected caches
+        await Promise.all([refreshUsers(), refreshShifts(), refreshAvailability()]);
 
         return true;
     } catch (error) {
@@ -313,15 +318,9 @@ async function addShift(shiftData) {
             body: JSON.stringify(apiData)
         });
 
-        const shift = {
-            ...data.shift,
-            date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date,
-            employeeId: data.shift.userId, // Backward compat
-            userId: data.shift.userId,
-            source: data.shift.source || 'manual'
-        };
-
-        DataStore.shifts.push(shift);
+        const shift = normalizeShift(data.shift);
+        await refreshShifts();
+        await fetchShiftBlocks();
         return shift;
     } catch (error) {
         console.error('Fout bij toevoegen dienst:', error);
@@ -346,20 +345,9 @@ async function addShiftsBulk(shiftsArray, overwriteExisting = false) {
             })
         });
 
-        const newShifts = (data.shifts || []).map(s => ({
-            ...s,
-            date: typeof s.date === 'string' ? s.date.split('T')[0] : s.date,
-            employeeId: s.userId,
-            source: s.source || 'manual'
-        }));
-
-        if (overwriteExisting) {
-            // Remove old shifts for these user/date pairs from cache
-            const pairSet = new Set(newShifts.map(s => `${s.userId}|${s.date}`));
-            DataStore.shifts = DataStore.shifts.filter(s => !pairSet.has(`${s.userId || s.employeeId}|${s.date}`));
-        }
-
-        DataStore.shifts.push(...newShifts);
+        const newShifts = (data.shifts || []).map(normalizeShift);
+        await refreshShifts();
+        await fetchShiftBlocks();
         return newShifts;
     } catch (error) {
         console.error('Fout bij bulk toevoegen diensten:', error);
@@ -381,18 +369,8 @@ async function updateShift(id, updates) {
             body: JSON.stringify(apiData)
         });
 
-        const shift = {
-            ...data.shift,
-            date: typeof data.shift.date === 'string' ? data.shift.date.split('T')[0] : data.shift.date,
-            employeeId: data.shift.userId,
-            userId: data.shift.userId,
-            source: data.shift.source || 'manual'
-        };
-
-        const index = DataStore.shifts.findIndex(s => s.id === id);
-        if (index !== -1) {
-            DataStore.shifts[index] = shift;
-        }
+        const shift = normalizeShift(data.shift);
+        await refreshShifts();
         return shift;
     } catch (error) {
         console.error('Fout bij bijwerken dienst:', error);
@@ -400,17 +378,46 @@ async function updateShift(id, updates) {
     }
 }
 
-// Fetch shift blocks from backend and update DataStore
+// ===== GRANULAIRE REFRESH FUNCTIES =====
+// Herladen van specifieke data types van de server (DataStore als pure cache)
+
+async function refreshShifts() {
+    try {
+        const data = await dataApiFetch('/shifts');
+        DataStore.shifts = (data.shifts || []).map(normalizeShift);
+        return DataStore.shifts;
+    } catch (error) {
+        console.error('[Refresh] Failed to refresh shifts:', error);
+        throw error;
+    }
+}
+
+async function refreshUsers() {
+    try {
+        const data = await dataApiFetch('/users');
+        DataStore.users = data.users || [];
+        return DataStore.users;
+    } catch (error) {
+        console.error('[Refresh] Failed to refresh users:', error);
+        throw error;
+    }
+}
+
+async function refreshAvailability() {
+    try {
+        const data = await dataApiFetch('/availability');
+        DataStore.availability = (data.availability || []).map(normalizeAvailability);
+        return DataStore.availability;
+    } catch (error) {
+        console.error('[Refresh] Failed to refresh availability:', error);
+        throw error;
+    }
+}
+
 async function fetchShiftBlocks() {
     try {
         const data = await dataApiFetch('/shift-blocks').catch(() => []);
-
-        // Normalize shift blocks data (ensure date format is YYYY-MM-DD)
-        DataStore.shiftBlocks = (Array.isArray(data) ? data : []).map(b => ({
-            ...b,
-            date: typeof b.date === 'string' ? b.date.split('T')[0] : b.date
-        }));
-
+        DataStore.shiftBlocks = (Array.isArray(data) ? data : []).map(normalizeShiftBlock);
         return DataStore.shiftBlocks;
     } catch (error) {
         console.error('Error fetching shift blocks:', error);
@@ -422,13 +429,7 @@ async function deleteShift(id) {
     try {
         await dataApiFetch(`/shifts/${id}`, { method: 'DELETE' });
 
-        // Remove shift from local DataStore
-        const index = DataStore.shifts.findIndex(s => s.id === id);
-        if (index !== -1) {
-            DataStore.shifts.splice(index, 1);
-        }
-
-        // Refresh shift blocks (backend creates a block when shift is deleted)
+        await refreshShifts();
         await fetchShiftBlocks();
 
         return true;
@@ -456,10 +457,9 @@ async function removeShiftsInDateRange(startDate, endDate) {
             method: 'DELETE'
         });
 
-        // Update local cache
-        DataStore.shifts = DataStore.shifts.filter(shift => shift.date < startDate || shift.date > endDate);
-
-        return data.deleted || 0;
+        const deletedCount = data.deleted || 0;
+        await refreshShifts();
+        return deletedCount;
     } catch (error) {
         console.error('Fout bij verwijderen diensten:', error);
         throw error;
@@ -654,38 +654,26 @@ function getAvailability(employeeId, date) {
     );
 }
 
-async function setAvailability(employeeId, date, absenceData) {
+async function setAvailability(employeeId, date, absenceData, { skipRefresh = false } = {}) {
     if (!absenceData.type) {
-        return removeAvailability(employeeId, date);
+        return removeAvailability(employeeId, date, { skipRefresh });
     }
 
     try {
         const data = await dataApiFetch('/availability', {
             method: 'POST',
             body: JSON.stringify({
-                userId: employeeId, // Use userId for API
+                userId: employeeId,
                 date,
                 type: absenceData.type,
                 reason: absenceData.reason || ''
             })
         });
 
-        const absence = {
-            ...data.availability,
-            date: typeof data.availability.date === 'string' ? data.availability.date.split('T')[0] : data.availability.date,
-            employeeId: data.availability.userId, // Backward compat
-            userId: data.availability.userId,
-            key: `${data.availability.userId}_${date}`
-        };
-
-        // Update cache
-        const index = DataStore.availability.findIndex(a => a.key === absence.key);
-        if (index !== -1) {
-            DataStore.availability[index] = absence;
-        } else {
-            DataStore.availability.push(absence);
+        const absence = normalizeAvailability(data.availability);
+        if (!skipRefresh) {
+            await refreshAvailability();
         }
-
         return absence;
     } catch (error) {
         console.error('Fout bij instellen afwezigheid:', error);
@@ -693,16 +681,14 @@ async function setAvailability(employeeId, date, absenceData) {
     }
 }
 
-async function removeAvailability(employeeId, date) {
+async function removeAvailability(employeeId, date, { skipRefresh = false } = {}) {
     try {
         await dataApiFetch(`/availability?userId=${employeeId}&date=${date}`, {
             method: 'DELETE'
         });
 
-        const key = `${employeeId}_${date}`;
-        const index = DataStore.availability.findIndex(a => a.key === key);
-        if (index !== -1) {
-            DataStore.availability.splice(index, 1);
+        if (!skipRefresh) {
+            await refreshAvailability();
         }
         return true;
     } catch (error) {
@@ -765,8 +751,9 @@ async function approveSwapRequest(id, responseNotes) {
             body: JSON.stringify({ responseNotes })
         });
 
-        // Refresh swap requests (shifts will be reloaded by renderPlanning)
+        // Refresh swap requests + shifts (approval can swap shift ownership)
         await getSwapRequests();
+        await refreshShifts();
 
         return true;
     } catch (error) {
@@ -782,7 +769,6 @@ async function rejectSwapRequest(id, responseNotes) {
             body: JSON.stringify({ responseNotes })
         });
 
-        // Refresh swap requests list
         await getSwapRequests();
 
         return true;
@@ -815,8 +801,9 @@ async function targetApproveSwapRequest(id, responseNotes) {
             body: JSON.stringify({ responseNotes })
         });
 
-        // Refresh swap requests (shifts will be reloaded by renderPlanning)
+        // Refresh swap requests + shifts (target approval executes the swap)
         await getSwapRequests();
+        await refreshShifts();
 
         return true;
     } catch (error) {

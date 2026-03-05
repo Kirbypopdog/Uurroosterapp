@@ -8170,3 +8170,44 @@ textarea {
         animation-duration: 0.01ms !important;
     }
 }
+
+/* ===== DATA LOADING OVERLAY ===== */
+
+.data-loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.4);
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    pointer-events: all;
+    backdrop-filter: blur(1px);
+}
+
+.data-loading-overlay.hidden {
+    display: none;
+}
+
+.data-loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2.5px solid var(--border-color, #ccc);
+    border-top-color: var(--primary-color, #4a90d9);
+    border-radius: 50%;
+    animation: data-loading-spin 0.6s linear infinite;
+}
+
+@keyframes data-loading-spin {
+    to { transform: rotate(360deg); }
+}
+
+.data-loading-text {
+    font-size: 14px;
+    color: var(--text-secondary, #666);
+    font-weight: 500;
+}

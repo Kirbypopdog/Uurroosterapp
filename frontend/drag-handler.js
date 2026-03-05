@@ -367,6 +367,7 @@ const DragHandler = {
         console.log(`[DragHandler] Transferring shift ${shiftId} to ${targetEmployee.name} on ${targetDate}`);
 
         // 4. Update shift via API (using captured data, not this.state)
+        showDataLoading('Shift verplaatsen...');
         try {
             const originalEmployeeId = originalData.employeeId;
             const originalDate2 = originalData.date;
@@ -398,6 +399,7 @@ const DragHandler = {
                     })
                 });
                 console.log(`[DragHandler] Created shift block for original employee ${originalEmployeeId} on ${originalDate2}`);
+                await fetchShiftBlocks(); // Sync blocks cache with server
             } catch (blockError) {
                 console.warn('[DragHandler] Could not create shift block:', blockError);
                 // Continue anyway - shift was already transferred
@@ -422,6 +424,8 @@ const DragHandler = {
             showToast(`Fout bij overdragen shift: ${error.message}`, 'error');
             // Re-sync from server to ensure UI matches DB
             try { await loadDataFromAPI(); renderPlanning(); } catch (_) {}
+        } finally {
+            hideDataLoading();
         }
     },
 

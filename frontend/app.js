@@ -442,6 +442,23 @@ function showToast(message, type = 'info', duration = null) {
     return ToastManager.show(message, type, duration);
 }
 
+// ===== DATA LOADING OVERLAY =====
+function showDataLoading(message = 'Bezig met opslaan...') {
+    const overlay = document.getElementById('data-loading-overlay');
+    if (overlay) {
+        const textEl = overlay.querySelector('.data-loading-text');
+        if (textEl) textEl.textContent = message;
+        overlay.classList.remove('hidden');
+    }
+}
+
+function hideDataLoading() {
+    const overlay = document.getElementById('data-loading-overlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+    }
+}
+
 // ===== CONFIRMATION DIALOG SYSTEM =====
 function showConfirm(message, title = 'Bevestig actie') {
     return new Promise((resolve) => {
@@ -3678,6 +3695,7 @@ async function handleSwapApprove() {
         return;
     }
 
+    showDataLoading('Ruil verwerken...');
     try {
         await approveSwapRequest(swapReviewState.swapRequestId, responseNotes || null);
         showToast('Ruil goedgekeurd en uitgevoerd', 'success');
@@ -3687,6 +3705,8 @@ async function handleSwapApprove() {
     } catch (error) {
         console.error('Error approving swap:', error);
         showToast('Fout bij goedkeuren: ' + (error.message || 'Onbekende fout'), 'error');
+    } finally {
+        hideDataLoading();
     }
 }
 
@@ -3705,6 +3725,7 @@ async function handleSwapReject() {
         return;
     }
 
+    showDataLoading('Ruil verwerken...');
     try {
         await rejectSwapRequest(swapReviewState.swapRequestId, responseNotes);
         showToast('Ruil afgewezen', 'success');
@@ -3713,6 +3734,8 @@ async function handleSwapReject() {
     } catch (error) {
         console.error('Error rejecting swap:', error);
         showToast('Fout bij afwijzen: ' + (error.message || 'Onbekende fout'), 'error');
+    } finally {
+        hideDataLoading();
     }
 }
 
@@ -3912,18 +3935,23 @@ async function handleShiftSubmit(e) {
             }
         }
 
-        if (AppState.editingShiftId) {
-            const oldShift = getShift(AppState.editingShiftId);
-            const previousData = oldShift ? { employeeId: oldShift.employeeId, team: oldShift.team, date: oldShift.date, startTime: oldShift.startTime, endTime: oldShift.endTime, notes: oldShift.notes } : null;
-            await updateShift(AppState.editingShiftId, shiftData);
-            UndoManager.push({ type: 'update', shiftId: AppState.editingShiftId, shiftData: { ...shiftData }, previousData });
-        } else {
-            const newShift = await addShift(shiftData);
-            UndoManager.push({ type: 'create', shiftData: { ...shiftData }, resultId: newShift.id });
-        }
+        showDataLoading('Dienst opslaan...');
+        try {
+            if (AppState.editingShiftId) {
+                const oldShift = getShift(AppState.editingShiftId);
+                const previousData = oldShift ? { employeeId: oldShift.employeeId, team: oldShift.team, date: oldShift.date, startTime: oldShift.startTime, endTime: oldShift.endTime, notes: oldShift.notes } : null;
+                await updateShift(AppState.editingShiftId, shiftData);
+                UndoManager.push({ type: 'update', shiftId: AppState.editingShiftId, shiftData: { ...shiftData }, previousData });
+            } else {
+                const newShift = await addShift(shiftData);
+                UndoManager.push({ type: 'create', shiftData: { ...shiftData }, resultId: newShift.id });
+            }
 
-        closeShiftModal();
-        renderPlanning();
+            closeShiftModal();
+            renderPlanning();
+        } finally {
+            hideDataLoading();
+        }
     } catch (error) {
         console.error('Error in handleShiftSubmit:', error);
         DOM.shiftValidationErrors.innerHTML = '<ul><li>Er is een fout opgetreden: ' + error.message + '</li></ul>';
@@ -3965,10 +3993,15 @@ async function deleteShiftConfirm(shiftId) {
     const employee = getEmployee(shift.employeeId);
     const msg = `Dienst verwijderen?\n\n${employee?.name || 'Onbekend'}\n${formatDate(shift.date)}\n${shift.startTime} - ${shift.endTime}`;
     if (await showConfirm(msg, 'Dienst verwijderen?')) {
-        const shiftCopy = { employeeId: shift.employeeId, team: shift.team, date: shift.date, startTime: shift.startTime, endTime: shift.endTime, notes: shift.notes };
-        await deleteShift(shiftId);
-        UndoManager.push({ type: 'delete', previousData: shiftCopy, resultId: shiftId });
-        renderPlanning();
+        showDataLoading('Dienst verwijderen...');
+        try {
+            const shiftCopy = { employeeId: shift.employeeId, team: shift.team, date: shift.date, startTime: shift.startTime, endTime: shift.endTime, notes: shift.notes };
+            await deleteShift(shiftId);
+            UndoManager.push({ type: 'delete', previousData: shiftCopy, resultId: shiftId });
+            renderPlanning();
+        } finally {
+            hideDataLoading();
+        }
     }
 }
 
@@ -4660,24 +4693,32 @@ async function handleEmployeeSubmit(e) {
         weekSchedules: weekSchedules
     };
     let targetEmployeeId = AppState.editingEmployeeId;
-    if (AppState.editingEmployeeId) {
-        await updateEmployee(AppState.editingEmployeeId, employeeData);
-    } else {
-        const newEmp = await addEmployee(employeeData);
-        targetEmployeeId = newEmp?.id;
-    }
-    closeEmployeeModal();
-    renderEmployees();
+    showDataLoading('Medewerker opslaan...');
+    try {
+        if (AppState.editingEmployeeId) {
+            await updateEmployee(AppState.editingEmployeeId, employeeData);
+        } else {
+            const newEmp = await addEmployee(employeeData);
+            targetEmployeeId = newEmp?.id;
+        }
+        closeEmployeeModal();
+        renderEmployees();
 
-    // Regenerate auto-shifts via backend (atomic transaction)
-    if (targetEmployeeId) {
-        await applyScheduleViaBackend(targetEmployeeId, { clearBlocks: true });
-    }
-    await loadDataFromAPI();
+        // Regenerate auto-shifts via backend (atomic transaction)
+        if (targetEmployeeId) {
+            await applyScheduleViaBackend(targetEmployeeId, { clearBlocks: true });
+        }
+        await loadDataFromAPI();
 
-    // Refresh planning view if currently visible
-    if (AppState.currentView === 'planning') {
-        renderPlanning();
+        // Refresh planning view if currently visible
+        if (AppState.currentView === 'planning') {
+            renderPlanning();
+        }
+    } catch (error) {
+        console.error('Error saving employee:', error);
+        showToast('Fout bij opslaan medewerker: ' + (error.message || 'Onbekende fout'), 'error');
+    } finally {
+        hideDataLoading();
     }
 }
 
@@ -4691,10 +4732,18 @@ async function handleEmployeeDelete() {
 
     if (!await showConfirm(confirmMsg, 'Medewerker verwijderen')) return;
 
-    await deleteEmployee(employee.id);
-    closeEmployeeModal();
-    renderEmployees();
-    renderPlanning();
+    showDataLoading('Medewerker verwijderen...');
+    try {
+        await deleteEmployee(employee.id);
+        closeEmployeeModal();
+        renderEmployees();
+        renderPlanning();
+    } catch (error) {
+        console.error('Error deleting employee:', error);
+        showToast('Fout bij verwijderen: ' + (error.message || 'Onbekende fout'), 'error');
+    } finally {
+        hideDataLoading();
+    }
 }
 
 // ===== BASISROOSTER FUNCTIES =====
@@ -8610,6 +8659,8 @@ async function handleAvailabilitySave() {
             }
         }
 
+        showDataLoading('Afwezigheid opslaan...');
+
         // Apply absence for each day in range
         // Reuse date parsing from conflict check above
         let currentDate = new Date(startParts[0], startParts[1] - 1, startParts[2]);
@@ -8626,13 +8677,14 @@ async function handleAvailabilitySave() {
             savePromises.push(setAvailability(employeeId, dateStr, {
                 type: absenceType,
                 reason: reason
-            }));
+            }, { skipRefresh: true }));
             daysSet++;
             currentDate.setDate(currentDate.getDate() + 1);
         }
 
-        // Wait for all saves to complete before updating UI
+        // Wait for all saves to complete, then refresh once
         await Promise.all(savePromises);
+        await refreshAvailability();
 
         closeAvailabilityModal();
         renderAvailability();
@@ -8723,6 +8775,8 @@ async function handleAvailabilitySave() {
     } catch (error) {
         console.error('Error saving availability:', error);
         showToast('Er ging iets mis bij het opslaan: ' + error.message, 'error');
+    } finally {
+        hideDataLoading();
     }
 }
 
@@ -8750,18 +8804,21 @@ async function handleRemoveAbsence() {
         return;
     }
 
+    showDataLoading('Afwezigheid verwijderen...');
+
     // Remove absence for each day in range
     let currentDate = parseDateOnly(start);
     const removePromises = [];
 
     while (currentDate <= end) {
         const dateStr = formatDateYYYYMMDD(currentDate);
-        removePromises.push(removeAvailability(employeeId, dateStr));
+        removePromises.push(removeAvailability(employeeId, dateStr, { skipRefresh: true }));
         currentDate.setDate(currentDate.getDate() + 1);
     }
 
-    // Wait for all deletions to complete before updating UI
+    // Wait for all deletions to complete, then refresh once
     await Promise.all(removePromises);
+    await refreshAvailability();
 
     // Cancel any pending takeover requests for shifts on these dates
     try {
@@ -8832,6 +8889,7 @@ async function handleRemoveAbsence() {
     closeAvailabilityModal();
     renderAvailability();
     renderPlanning(); // Update planning view
+    hideDataLoading();
 }
 
 function exportData() {
