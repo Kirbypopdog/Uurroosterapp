@@ -422,6 +422,7 @@ textarea {
     max-width: 1400px;
     margin: 0 auto;
     flex: 1;
+    position: relative;
 }
 
 .view.active {
@@ -8207,6 +8208,38 @@ textarea {
 }
 
 .data-loading-text {
+    font-size: 14px;
+    color: var(--text-secondary, #666);
+    font-weight: 500;
+}
+
+/* Per-section loading overlay */
+.section-loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(1px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    z-index: 100;
+    border-radius: 8px;
+    min-height: 120px;
+    pointer-events: all;
+}
+.section-loading-overlay.hidden {
+    display: none;
+}
+.section-loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2.5px solid var(--border-color, #ccc);
+    border-top-color: var(--primary-color, #4a90d9);
+    border-radius: 50%;
+    animation: data-loading-spin 0.6s linear infinite;
+}
+.section-loading-text {
     font-size: 14px;
     color: var(--text-secondary, #666);
     font-weight: 500;

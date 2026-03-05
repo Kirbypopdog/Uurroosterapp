@@ -75,7 +75,7 @@ const UndoManager = {
         } catch (err) {
             this.pointer++; // Restore pointer
             // Re-sync UI from server data to ensure consistency
-            try { await loadDataFromAPI(); renderPlanning(); } catch (_) {}
+            try { await refreshShifts(); renderPlanning(); } catch (_) {}
             showToast('Undo mislukt: ' + err.message, 'error');
         }
         this._executing = false;
@@ -94,7 +94,7 @@ const UndoManager = {
         } catch (err) {
             this.pointer--; // Restore pointer
             // Re-sync UI from server data to ensure consistency
-            try { await loadDataFromAPI(); renderPlanning(); } catch (_) {}
+            try { await refreshShifts(); renderPlanning(); } catch (_) {}
             showToast('Redo mislukt: ' + err.message, 'error');
         }
         this._executing = false;
@@ -457,6 +457,30 @@ function hideDataLoading() {
     if (overlay) {
         overlay.classList.add('hidden');
     }
+}
+
+function showSectionLoading(viewId, message) {
+    const overlay = document.querySelector(`#${viewId} .section-loading-overlay`);
+    if (overlay) {
+        const text = overlay.querySelector('.section-loading-text');
+        if (text) text.textContent = message;
+        overlay.classList.remove('hidden');
+    }
+}
+
+function hideSectionLoading(viewId) {
+    const overlay = document.querySelector(`#${viewId} .section-loading-overlay`);
+    if (overlay) overlay.classList.add('hidden');
+}
+
+function updateShiftRefreshRange() {
+    if (!AppState.currentWeekStart) return;
+    const start = new Date(AppState.currentWeekStart);
+    start.setDate(start.getDate() - 14);
+    const horizon = DataStore.settings?.planningHorizon || 4;
+    const end = new Date(AppState.currentWeekStart);
+    end.setDate(end.getDate() + (horizon * 7) + 14);
+    setActiveShiftRange(formatDateYYYYMMDD(start), formatDateYYYYMMDD(end));
 }
 
 // ===== CONFIRMATION DIALOG SYSTEM =====
@@ -1084,6 +1108,7 @@ async function handleLogin(e) {
         sessionStorage.setItem('hetvlot_token', data.token);
         // Load data from database
         await loadDataFromAPI();
+        updateShiftRefreshRange();
         applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
         // Auto-apply base schedules after data loads
@@ -1137,6 +1162,7 @@ async function checkSession() {
         sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
         // Load data from database
         await loadDataFromAPI();
+        updateShiftRefreshRange();
         applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
         // Auto-apply base schedules after data loads
@@ -1616,6 +1642,7 @@ function setCurrentWeek(date) {
     d.setDate(diff);
     d.setHours(0, 0, 0, 0);
     AppState.currentWeekStart = d;
+    updateShiftRefreshRange();
     updatePeriodDisplay();
 }
 
@@ -3695,7 +3722,7 @@ async function handleSwapApprove() {
         return;
     }
 
-    showDataLoading('Ruil verwerken...');
+    showSectionLoading('swaps-view', 'Ruil verwerken...');
     try {
         await approveSwapRequest(swapReviewState.swapRequestId, responseNotes || null);
         showToast('Ruil goedgekeurd en uitgevoerd', 'success');
@@ -3706,7 +3733,7 @@ async function handleSwapApprove() {
         console.error('Error approving swap:', error);
         showToast('Fout bij goedkeuren: ' + (error.message || 'Onbekende fout'), 'error');
     } finally {
-        hideDataLoading();
+        hideSectionLoading('swaps-view');
     }
 }
 
@@ -3725,7 +3752,7 @@ async function handleSwapReject() {
         return;
     }
 
-    showDataLoading('Ruil verwerken...');
+    showSectionLoading('swaps-view', 'Ruil verwerken...');
     try {
         await rejectSwapRequest(swapReviewState.swapRequestId, responseNotes);
         showToast('Ruil afgewezen', 'success');
@@ -3735,7 +3762,7 @@ async function handleSwapReject() {
         console.error('Error rejecting swap:', error);
         showToast('Fout bij afwijzen: ' + (error.message || 'Onbekende fout'), 'error');
     } finally {
-        hideDataLoading();
+        hideSectionLoading('swaps-view');
     }
 }
 
@@ -3935,7 +3962,7 @@ async function handleShiftSubmit(e) {
             }
         }
 
-        showDataLoading('Dienst opslaan...');
+        showSectionLoading('planning-view', 'Dienst opslaan...');
         try {
             if (AppState.editingShiftId) {
                 const oldShift = getShift(AppState.editingShiftId);
@@ -3950,7 +3977,7 @@ async function handleShiftSubmit(e) {
             closeShiftModal();
             renderPlanning();
         } finally {
-            hideDataLoading();
+            hideSectionLoading('planning-view');
         }
     } catch (error) {
         console.error('Error in handleShiftSubmit:', error);
@@ -3993,14 +4020,14 @@ async function deleteShiftConfirm(shiftId) {
     const employee = getEmployee(shift.employeeId);
     const msg = `Dienst verwijderen?\n\n${employee?.name || 'Onbekend'}\n${formatDate(shift.date)}\n${shift.startTime} - ${shift.endTime}`;
     if (await showConfirm(msg, 'Dienst verwijderen?')) {
-        showDataLoading('Dienst verwijderen...');
+        showSectionLoading('planning-view', 'Dienst verwijderen...');
         try {
             const shiftCopy = { employeeId: shift.employeeId, team: shift.team, date: shift.date, startTime: shift.startTime, endTime: shift.endTime, notes: shift.notes };
             await deleteShift(shiftId);
             UndoManager.push({ type: 'delete', previousData: shiftCopy, resultId: shiftId });
             renderPlanning();
         } finally {
-            hideDataLoading();
+            hideSectionLoading('planning-view');
         }
     }
 }
@@ -4512,7 +4539,7 @@ async function saveProfileWeekSchedule() {
 
         // Regenerate auto-shifts via backend (atomic transaction)
         await applyScheduleViaBackend(AppState.currentUser.id, { clearBlocks: true });
-        await loadDataFromAPI();
+        await Promise.all([refreshShifts(), fetchShiftBlocks()]);
 
         // Refresh planning view if currently visible
         if (AppState.currentView === 'planning') {
@@ -4693,7 +4720,7 @@ async function handleEmployeeSubmit(e) {
         weekSchedules: weekSchedules
     };
     let targetEmployeeId = AppState.editingEmployeeId;
-    showDataLoading('Medewerker opslaan...');
+    showSectionLoading('employees-view', 'Medewerker opslaan...');
     try {
         if (AppState.editingEmployeeId) {
             await updateEmployee(AppState.editingEmployeeId, employeeData);
@@ -4708,7 +4735,7 @@ async function handleEmployeeSubmit(e) {
         if (targetEmployeeId) {
             await applyScheduleViaBackend(targetEmployeeId, { clearBlocks: true });
         }
-        await loadDataFromAPI();
+        await Promise.all([refreshShifts(), fetchShiftBlocks()]);
 
         // Refresh planning view if currently visible
         if (AppState.currentView === 'planning') {
@@ -4718,7 +4745,7 @@ async function handleEmployeeSubmit(e) {
         console.error('Error saving employee:', error);
         showToast('Fout bij opslaan medewerker: ' + (error.message || 'Onbekende fout'), 'error');
     } finally {
-        hideDataLoading();
+        hideSectionLoading('employees-view');
     }
 }
 
@@ -4732,7 +4759,7 @@ async function handleEmployeeDelete() {
 
     if (!await showConfirm(confirmMsg, 'Medewerker verwijderen')) return;
 
-    showDataLoading('Medewerker verwijderen...');
+    showSectionLoading('employees-view', 'Medewerker verwijderen...');
     try {
         await deleteEmployee(employee.id);
         closeEmployeeModal();
@@ -4742,7 +4769,7 @@ async function handleEmployeeDelete() {
         console.error('Error deleting employee:', error);
         showToast('Fout bij verwijderen: ' + (error.message || 'Onbekende fout'), 'error');
     } finally {
-        hideDataLoading();
+        hideSectionLoading('employees-view');
     }
 }
 
@@ -4776,8 +4803,8 @@ async function autoApplyBaseSchedules({ clearBlocks = false } = {}) {
 
     console.log(`[Auto Schedule] Created ${totalCreated} shifts (replaced ${totalDeleted} auto shifts)`);
 
-    // Refresh all data after batch operation
-    await loadDataFromAPI();
+    // Refresh shifts and blocks after batch operation
+    await Promise.all([refreshShifts(), fetchShiftBlocks()]);
 
     // Mark as generated
     AppState.schedulesGenerated = true;
@@ -5682,8 +5709,8 @@ function attachSwapActionListeners() {
                 if (await showConfirm('Weet je zeker dat je deze shift wilt overnemen?')) {
                     try {
                         await acceptTakeoverRequest(requestId, notes);
-                        // Reload shifts to see the newly acquired shift
-                        await loadDataFromAPI();
+                        // Refresh shifts and swap requests
+                        await Promise.all([refreshShifts(), getSwapRequests()]);
                         showToast('Shift overgenomen! Je kunt hem nu zien in je planning.', 'success');
                         switchView('planning'); // Go to planning to see the new shift
                     } catch (error) {
@@ -6534,7 +6561,7 @@ async function applyBuilderDraft(draftId) {
         }
     }
 
-    await loadDataFromAPI();
+    await Promise.all([refreshShifts(), fetchShiftBlocks()]);
     renderBuilder();
 }
 
@@ -8659,7 +8686,7 @@ async function handleAvailabilitySave() {
             }
         }
 
-        showDataLoading('Afwezigheid opslaan...');
+        showSectionLoading('availability-view', 'Afwezigheid opslaan...');
 
         // Apply absence for each day in range
         // Reuse date parsing from conflict check above
@@ -8776,7 +8803,7 @@ async function handleAvailabilitySave() {
         console.error('Error saving availability:', error);
         showToast('Er ging iets mis bij het opslaan: ' + error.message, 'error');
     } finally {
-        hideDataLoading();
+        hideSectionLoading('availability-view');
     }
 }
 
@@ -8804,7 +8831,7 @@ async function handleRemoveAbsence() {
         return;
     }
 
-    showDataLoading('Afwezigheid verwijderen...');
+    showSectionLoading('availability-view', 'Afwezigheid verwijderen...');
 
     // Remove absence for each day in range
     let currentDate = parseDateOnly(start);
@@ -8889,7 +8916,7 @@ async function handleRemoveAbsence() {
     closeAvailabilityModal();
     renderAvailability();
     renderPlanning(); // Update planning view
-    hideDataLoading();
+    hideSectionLoading('availability-view');
 }
 
 function exportData() {

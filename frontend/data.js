@@ -80,6 +80,15 @@ function normalizeSettings(settings) {
     return merged;
 }
 
+// ===== ACTIVE SHIFT RANGE =====
+// Gezet door app.js na initial load en bij week-navigatie.
+// Als gezet, gebruikt refreshShifts() deze range + merge-strategie.
+let _activeShiftRange = null;
+
+function setActiveShiftRange(startDate, endDate) {
+    _activeShiftRange = startDate && endDate ? { startDate, endDate } : null;
+}
+
 // ===== NORMALIZATION HELPERS =====
 // Gebruikt door refresh functies en loadDataFromAPI() voor consistente data transformatie
 
@@ -381,10 +390,32 @@ async function updateShift(id, updates) {
 // ===== GRANULAIRE REFRESH FUNCTIES =====
 // Herladen van specifieke data types van de server (DataStore als pure cache)
 
-async function refreshShifts() {
+async function refreshShifts({ startDate, endDate, merge = false } = {}) {
     try {
-        const data = await dataApiFetch('/shifts');
-        DataStore.shifts = (data.shifts || []).map(normalizeShift);
+        // Auto-use active range if set and no explicit params given
+        if (!startDate && !endDate && _activeShiftRange) {
+            startDate = _activeShiftRange.startDate;
+            endDate = _activeShiftRange.endDate;
+            merge = true;
+        }
+
+        const params = new URLSearchParams();
+        if (startDate && endDate) {
+            params.set('startDate', startDate);
+            params.set('endDate', endDate);
+        }
+        const url = '/shifts' + (params.toString() ? '?' + params.toString() : '');
+        const data = await dataApiFetch(url);
+        const freshShifts = (data.shifts || []).map(normalizeShift);
+
+        if (merge && startDate && endDate) {
+            // Partial refresh: replace shifts in range, keep the rest
+            DataStore.shifts = DataStore.shifts
+                .filter(s => s.date < startDate || s.date > endDate)
+                .concat(freshShifts);
+        } else {
+            DataStore.shifts = freshShifts;
+        }
         return DataStore.shifts;
     } catch (error) {
         console.error('[Refresh] Failed to refresh shifts:', error);

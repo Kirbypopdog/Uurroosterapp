@@ -367,7 +367,7 @@ const DragHandler = {
         console.log(`[DragHandler] Transferring shift ${shiftId} to ${targetEmployee.name} on ${targetDate}`);
 
         // 4. Update shift via API (using captured data, not this.state)
-        showDataLoading('Shift verplaatsen...');
+        showSectionLoading('planning-view', 'Shift verplaatsen...');
         try {
             const originalEmployeeId = originalData.employeeId;
             const originalDate2 = originalData.date;
@@ -423,9 +423,9 @@ const DragHandler = {
             console.error('[DragHandler] Error transferring shift:', error);
             showToast(`Fout bij overdragen shift: ${error.message}`, 'error');
             // Re-sync from server to ensure UI matches DB
-            try { await loadDataFromAPI(); renderPlanning(); } catch (_) {}
+            try { await refreshShifts(); renderPlanning(); } catch (_) {}
         } finally {
-            hideDataLoading();
+            hideSectionLoading('planning-view');
         }
     },
 
@@ -592,7 +592,7 @@ const DragHandler = {
             console.error('[DragHandler] Error resizing shift:', error);
             showToast(`Fout bij aanpassen shift: ${error.message}`, 'error');
             // Re-sync from server to ensure UI matches DB
-            try { await loadDataFromAPI(); renderPlanning(); } catch (_) {}
+            try { await refreshShifts(); renderPlanning(); } catch (_) {}
         }
     },
 
