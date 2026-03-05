@@ -1160,17 +1160,24 @@ textarea {
 }
 
 .validation-summary-item.validation-error {
-    background: #fee2e2;
-    color: #991b1b;
+    background: #eff6ff;
+    color: #1e40af;
+    cursor: pointer;
+}
+
+.validation-summary-item.validation-error:hover {
+    background: #dbeafe;
+    box-shadow: var(--shadow-sm);
 }
 
 .validation-summary-item.validation-warning {
-    background: #fef3c7;
-    color: #92400e;
+    background: #f8fafc;
+    color: #475569;
+    cursor: pointer;
 }
 
 .validation-summary-item.validation-warning:hover {
-    cursor: pointer;
+    background: #f1f5f9;
     box-shadow: var(--shadow-sm);
 }
 
@@ -1520,46 +1527,51 @@ textarea {
     pointer-events: all;
     box-shadow: 0 1px 3px rgba(0,0,0,0.12);
     border: 1px solid rgba(0,0,0,0.1);
-    transition: all 0.2s ease;
+    transition: box-shadow 0.2s ease, background 0.2s ease;
     overflow: hidden;
     box-sizing: border-box;
 }
 
 .shift-block:hover {
-    box-shadow: 0 6px 12px rgba(0,0,0,0.2);
-    transform: scale(1.02) translateX(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
     z-index: 100;
-    filter: brightness(1.05);
+    background: #f1f5f9;
 }
 
 .shift-block.team-vlot1 {
-    background: linear-gradient(135deg, var(--team-vlot1) 0%, var(--team-vlot1-dark) 100%);
-    color: white;
+    background: #f8fafc;
+    border-left: 4px solid var(--team-vlot1);
+    color: var(--text-primary);
 }
 
 .shift-block.team-vlot2 {
-    background: linear-gradient(135deg, var(--team-vlot2) 0%, var(--team-vlot2-dark) 100%);
-    color: white;
+    background: #f8fafc;
+    border-left: 4px solid var(--team-vlot2);
+    color: var(--text-primary);
 }
 
 .shift-block.team-cargo {
-    background: linear-gradient(135deg, var(--team-cargo) 0%, var(--team-cargo-dark) 100%);
-    color: white;
+    background: #f8fafc;
+    border-left: 4px solid var(--team-cargo);
+    color: var(--text-primary);
 }
 
 .shift-block.team-overkoepelend {
-    background: linear-gradient(135deg, var(--team-overkoepelend) 0%, var(--team-overkoepelend-dark) 100%);
-    color: white;
+    background: #f8fafc;
+    border-left: 4px solid var(--team-overkoepelend);
+    color: var(--text-primary);
 }
 
 .shift-block.team-jobstudent {
-    background: linear-gradient(135deg, var(--team-jobstudent) 0%, var(--team-jobstudent-dark) 100%);
-    color: white;
+    background: #f8fafc;
+    border-left: 4px solid var(--team-jobstudent);
+    color: var(--text-primary);
 }
 
 .shift-block.shift-nacht {
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-    color: white;
+    background: #f1f5f9;
+    border-left: 4px solid #1e293b;
+    color: var(--text-primary);
 }
 
 .shift-block.shift-error {
@@ -1636,15 +1648,15 @@ textarea {
 
 .shift-block .shift-time {
     font-size: 11px;
-    opacity: 0.9;
+    opacity: 0.7;
 }
 
 .shift-block .shift-delete-btn {
     position: absolute;
     top: 4px;
     right: 4px;
-    background: rgba(0,0,0,0.3);
-    color: white;
+    background: rgba(0,0,0,0.15);
+    color: var(--text-secondary);
     border: none;
     width: 20px;
     height: 20px;
@@ -1674,7 +1686,6 @@ textarea {
 }
 
 .shift-block.shift-stacked:hover {
-    transform: translateY(-2px);
     box-shadow: 0 6px 12px rgba(0,0,0,0.25);
 }
 
@@ -6668,12 +6679,12 @@ textarea {
 
 .shift-block.shift-auto,
 .timeline-block.shift-auto {
-    border-left: 3px solid #f59e0b; /* Orange accent for auto-generated */
+    border-right: 3px solid #f59e0b; /* Orange accent for auto-generated */
 }
 
 .shift-block.shift-manual,
 .timeline-block.shift-manual {
-    border-left: 3px solid #10b981; /* Green accent for manually edited */
+    border-right: 3px solid #10b981; /* Green accent for manually edited */
 }
 
 /* Source indicator badge (optional, shown on hover) */

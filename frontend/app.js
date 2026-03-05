@@ -1415,7 +1415,7 @@ function renderHomeQuickActions(role) {
     }
 
     actions += `<button class="home-action-btn" data-action="view-planning"><span class="home-action-icon">${IconHelper.html(ICONS.planning, 'md')}</span>Planning bekijken</button>`;
-    actions += `<button class="home-action-btn" data-action="request-absence"><span class="home-action-icon">${IconHelper.html(ICONS.availability, 'md')}</span>Verlof aanvragen</button>`;
+    actions += `<button class="home-action-btn" data-action="request-absence"><span class="home-action-icon">${IconHelper.html(ICONS.availability, 'md')}</span>Afwezigheid melden</button>`;
     actions += `<button class="home-action-btn" data-action="request-swap"><span class="home-action-icon">${IconHelper.html(ICONS.swap, 'md')}</span>Dienst ruilen</button>`;
 
     if (['admin', 'hoofdverantwoordelijke'].includes(role)) {
@@ -2003,8 +2003,8 @@ function renderValidationAlerts() {
         if (totalErrors > 0) {
             AppState.errorBreakdown = buildIssueBreakdown(summary, 'errors');
             html += `<div class="validation-summary-item validation-error">
-                <span class="validation-icon">${IconHelper.html(ICONS.warning, 'sm')}</span>
-                <span class="validation-text">${totalErrors} fout${totalErrors > 1 ? 'en' : ''} (klik voor details)</span>
+                <span class="validation-icon">${IconHelper.html(ICONS.info, 'sm')}</span>
+                <span class="validation-text">${totalErrors} opmerking${totalErrors > 1 ? 'en' : ''}</span>
             </div>`;
         } else {
             AppState.errorBreakdown = null;
@@ -2014,13 +2014,13 @@ function renderValidationAlerts() {
             AppState.warningBreakdown = buildIssueBreakdown(summary, 'warnings');
             html += `<div class="validation-summary-item validation-warning">
                 <span class="validation-icon">${IconHelper.html(ICONS.zap, 'sm')}</span>
-                <span class="validation-text">${totalWarnings} waarschuwing${totalWarnings > 1 ? 'en' : ''} (klik voor details)</span>
+                <span class="validation-text">${totalWarnings} opmerking${totalWarnings > 1 ? 'en' : ''}</span>
             </div>`;
         } else {
             AppState.warningBreakdown = null;
         }
 
-        html += '<div class="validation-summary-note">Klik op een dienst in de kalender om details te zien</div>';
+        html += '<div class="validation-summary-note">Klik voor details per regel</div>';
         html += '</div>';
 
     }
@@ -2303,21 +2303,6 @@ function renderTimelineView() {
             <span class="day-name">${dayName}</span>
             <span class="day-num">${dateNum}${holidayBadge}</span>
         </div>`;
-    });
-    html += '</div>';
-
-    // Time scale row
-    html += '<div class="timeline-scale-row">';
-    html += '<div class="timeline-scale-label"></div>';
-    weekDates.forEach((date) => {
-        html += '<div class="timeline-scale">';
-        // Show markers at 7u, 11u, 15u, 19u, 23u, 24u
-        for (let h = START_HOUR; h <= END_HOUR; h += 4) {
-            const leftPercent = ((h - START_HOUR) / TOTAL_HOURS) * 100;
-            const label = h === 24 ? '0u' : `${h}u`;
-            html += `<span class="scale-marker" style="left: ${leftPercent}%">${label}</span>`;
-        }
-        html += '</div>';
     });
     html += '</div>';
 
