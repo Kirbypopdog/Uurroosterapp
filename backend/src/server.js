@@ -30,6 +30,34 @@ const corsOptions = process.env.FRONTEND_URL
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// ===== DATE HELPER FUNCTIONS =====
+// Used by apply-schedule endpoint (replicates frontend data.js logic)
+
+function getMonday(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  return d;
+}
+
+function formatDateYYYYMMDD(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseLocalDate(value) {
+  if (typeof value === 'string') {
+    const parts = value.split('-').map(Number);
+    if (parts.length === 3) {
+      return new Date(parts[0], parts[1] - 1, parts[2]);
+    }
+  }
+  return new Date(value);
+}
+
 // ===== AUTO-MIGRATION ON STARTUP =====
 // Ensures the database schema is up-to-date
 async function ensureSchema() {
@@ -919,6 +947,223 @@ app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (re
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== APPLY SCHEDULE (shift regeneration in single transaction) =====
+
+app.post('/users/:id/apply-schedule', requireAuth, async (req, res) => {
+  const userId = Number(req.params.id);
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID is verplicht' });
+  }
+
+  // Permission: medewerker can only apply own schedule
+  const { role, id: currentUserId } = req.user;
+  if (role === 'medewerker' && userId !== currentUserId) {
+    return res.status(403).json({ error: 'Je kunt alleen je eigen rooster genereren' });
+  }
+
+  const { clearBlocks = false } = req.body || {};
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch user with week schedules
+    const userResult = await client.query(
+      `SELECT id, name, main_team as "mainTeam",
+              week_schedules as "weekSchedules",
+              week_schedule_week1 as "weekScheduleWeek1",
+              week_schedule_week2 as "weekScheduleWeek2"
+       FROM users WHERE id = $1 AND active = true`,
+      [userId]
+    );
+    if (userResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Gebruiker niet gevonden of niet actief' });
+    }
+    const user = userResult.rows[0];
+
+    // 2. Check if user has any week schedule configured
+    const weekSchedules = user.weekSchedules;
+    const week1 = user.weekScheduleWeek1;
+    const week2 = user.weekScheduleWeek2;
+
+    let hasSchedule = false;
+    if (Array.isArray(weekSchedules)) {
+      hasSchedule = weekSchedules.some(ws => Array.isArray(ws) && ws.length > 0);
+    } else {
+      hasSchedule = (Array.isArray(week1) && week1.length > 0) ||
+                    (Array.isArray(week2) && week2.length > 0);
+    }
+
+    if (!hasSchedule) {
+      await client.query('COMMIT');
+      return res.json({ created: 0, deleted: 0, blocksCleared: 0 });
+    }
+
+    // 3. Read planning horizon from settings (default 4 weeks)
+    const horizonResult = await client.query(
+      `SELECT value FROM settings WHERE key = 'planning_horizon'`
+    );
+    let horizonWeeks = 4;
+    if (horizonResult.rows.length > 0) {
+      const val = horizonResult.rows[0].value;
+      if (val && val.weeks !== null && val.weeks !== undefined) {
+        horizonWeeks = val.weeks;
+      }
+    }
+
+    // 4. Read schedule_pattern from settings (cycleLength, referenceDate)
+    const patternResult = await client.query(
+      `SELECT value FROM settings WHERE key = 'schedule_pattern'`
+    );
+    let cycleLength = 2;
+    let referenceDate = '2025-01-06';
+
+    if (patternResult.rows.length > 0 && patternResult.rows[0].value) {
+      const pattern = patternResult.rows[0].value;
+      if (pattern.cycleLength) cycleLength = pattern.cycleLength;
+      if (pattern.referenceDate) referenceDate = pattern.referenceDate;
+    }
+
+    // 5. Calculate date range: this week's Monday through horizon
+    const today = new Date();
+    const startDate = getMonday(today);
+    let endDate;
+    if (horizonWeeks === null || horizonWeeks === 'unlimited') {
+      endDate = new Date(today);
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    } else {
+      endDate = new Date(today);
+      endDate.setDate(endDate.getDate() + (Number(horizonWeeks) * 7));
+    }
+    const startStr = formatDateYYYYMMDD(startDate);
+    const endStr = formatDateYYYYMMDD(endDate);
+
+    // 6. Optionally clear auto-created shift_blocks
+    let blocksCleared = 0;
+    if (clearBlocks) {
+      const blockResult = await client.query(
+        `DELETE FROM shift_blocks
+         WHERE user_id = $1 AND date >= $2::date AND date <= $3::date
+         AND reason LIKE '%shift deleted by user%'`,
+        [userId, startStr, endStr]
+      );
+      blocksCleared = blockResult.rowCount;
+    }
+
+    // 7. Delete existing auto-generated shifts in range
+    const deleteResult = await client.query(
+      `DELETE FROM shifts
+       WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`,
+      [userId, startStr, endStr]
+    );
+    const deletedCount = deleteResult.rowCount;
+
+    // 8. Fetch skip-sets: existing manual shifts, absences, remaining blocks
+    const existingShifts = await client.query(
+      `SELECT date::text as date FROM shifts
+       WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
+      [userId, startStr, endStr]
+    );
+    const occupiedDates = new Set(existingShifts.rows.map(r => r.date));
+
+    const absences = await client.query(
+      `SELECT date::text as date FROM availability
+       WHERE user_id = $1 AND date >= $2::date AND date <= $3::date
+       AND type IS NOT NULL AND type != ''`,
+      [userId, startStr, endStr]
+    );
+    const absenceDates = new Set(absences.rows.map(r => r.date));
+
+    const blocks = await client.query(
+      `SELECT date::text as date FROM shift_blocks
+       WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
+      [userId, startStr, endStr]
+    );
+    const blockedDates = new Set(blocks.rows.map(r => r.date));
+
+    // 9. Generate shifts day by day
+    const refDate = parseLocalDate(referenceDate);
+    const refMonday = getMonday(refDate);
+    let createdCount = 0;
+
+    for (let d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+         d <= endDate;
+         d.setDate(d.getDate() + 1)) {
+      const dateStr = formatDateYYYYMMDD(d);
+
+      if (occupiedDates.has(dateStr)) continue;
+      if (absenceDates.has(dateStr)) continue;
+      if (blockedDates.has(dateStr)) continue;
+
+      // Calculate week number (replicates getWeekNumber from data.js)
+      const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+      const diffMs = currMonday.getTime() - refMonday.getTime();
+      const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+      const mod = diffWeeks % cycleLength;
+      const weekNumber = (mod < 0 ? mod + cycleLength : mod) + 1;
+
+      // Get week schedule for this week number
+      let weekSchedule = [];
+      if (Array.isArray(weekSchedules) && weekSchedules.length > 0) {
+        weekSchedule = weekSchedules[weekNumber - 1] || [];
+      } else if (weekNumber === 1) {
+        weekSchedule = week1 || [];
+      } else if (weekNumber === 2) {
+        weekSchedule = week2 || [];
+      }
+
+      // Find schedule entry for this day of week
+      const dayOfWeek = d.getDay();
+      const entry = weekSchedule.find(s => s.dayOfWeek === dayOfWeek && s.enabled);
+
+      if (entry) {
+        await client.query(
+          `INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
+           VALUES ($1, $2, $3::date, $4, $5, $6, 'auto')`,
+          [
+            userId,
+            entry.team || user.mainTeam,
+            dateStr,
+            entry.startTime,
+            entry.endTime,
+            `Automatisch ingepland via basisrooster (Week ${weekNumber})`
+          ]
+        );
+        createdCount++;
+      }
+    }
+
+    await client.query('COMMIT');
+
+    await logAudit(req, 'UPDATE', 'shift', '', {
+      action: 'apply_schedule',
+      userId,
+      userName: user.name,
+      created: createdCount,
+      deleted: deletedCount,
+      blocksCleared,
+      clearBlocks,
+      dateRange: { start: startStr, end: endStr }
+    });
+
+    res.json({
+      created: createdCount,
+      deleted: deletedCount,
+      blocksCleared,
+      userId,
+      employeeId: userId
+    });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('ERROR in POST /users/:id/apply-schedule:', err);
+    res.status(500).json({ error: 'Server error bij rooster generatie' });
+  } finally {
+    client.release();
   }
 });
 

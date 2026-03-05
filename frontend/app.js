@@ -4477,10 +4477,9 @@ async function saveProfileWeekSchedule() {
             DataStore.users[userIndex].weekSchedules = weekSchedules;
         }
 
-        // Regenerate auto-shifts based on new base schedule
-        // clearBlocks: true ensures old shift_blocks don't prevent new schedule from being applied
-        AppState.schedulesGenerated = false;
-        await autoApplyBaseSchedules({ clearBlocks: true });
+        // Regenerate auto-shifts via backend (atomic transaction)
+        await applyScheduleViaBackend(AppState.currentUser.id, { clearBlocks: true });
+        await loadDataFromAPI();
 
         // Refresh planning view if currently visible
         if (AppState.currentView === 'planning') {
@@ -4660,18 +4659,21 @@ async function handleEmployeeSubmit(e) {
         weekScheduleWeek2: weekSchedules[1] || [],
         weekSchedules: weekSchedules
     };
+    let targetEmployeeId = AppState.editingEmployeeId;
     if (AppState.editingEmployeeId) {
         await updateEmployee(AppState.editingEmployeeId, employeeData);
     } else {
-        await addEmployee(employeeData);
+        const newEmp = await addEmployee(employeeData);
+        targetEmployeeId = newEmp?.id;
     }
     closeEmployeeModal();
     renderEmployees();
 
-    // Regenerate auto-shifts based on new base schedule
-    // clearBlocks: true ensures old shift_blocks don't prevent new schedule from being applied
-    AppState.schedulesGenerated = false;
-    await autoApplyBaseSchedules({ clearBlocks: true });
+    // Regenerate auto-shifts via backend (atomic transaction)
+    if (targetEmployeeId) {
+        await applyScheduleViaBackend(targetEmployeeId, { clearBlocks: true });
+    }
+    await loadDataFromAPI();
 
     // Refresh planning view if currently visible
     if (AppState.currentView === 'planning') {
@@ -4704,59 +4706,34 @@ async function autoApplyBaseSchedules({ clearBlocks = false } = {}) {
         return { created: 0, removed: 0 };
     }
 
-    console.log('[Auto Schedule] Starting automatic base schedule application...');
+    console.log('[Auto Schedule] Starting server-side schedule application...');
 
-    // Get planning horizon setting
-    const horizonWeeks = DataStore.settings.planningHorizon?.weeks || 4;
-
-    // Calculate date range
-    const today = new Date();
-    const startDate = formatDateYYYYMMDD(getMonday(today));
-
-    let endDate;
-    if (horizonWeeks === null || horizonWeeks === 'unlimited') {
-        // Unlimited: generate for 1 year
-        const oneYearLater = new Date(today);
-        oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
-        endDate = formatDateYYYYMMDD(oneYearLater);
-    } else {
-        const endDateObj = new Date(today);
-        endDateObj.setDate(endDateObj.getDate() + (horizonWeeks * 7));
-        endDate = formatDateYYYYMMDD(endDateObj);
-    }
-
-    console.log(`[Auto Schedule] Applying base schedules from ${startDate} to ${endDate} (horizon: ${horizonWeeks || 'unlimited'} weeks)`);
-
-    // Count employees with base schedules
     const employees = getAllEmployees(true);
     const employeesWithSchedule = employees.filter(emp => hasAnyWeekSchedule(emp));
     console.log(`[Auto Schedule] Found ${employees.length} active employees, ${employeesWithSchedule.length} with base schedules configured`);
 
-    // Remove auto-generated shifts in this range
-    const removedShifts = await removeAutoShiftsInDateRange(startDate, endDate);
+    let totalCreated = 0;
+    let totalDeleted = 0;
 
-    // Clear shift_blocks when explicitly regenerating (base schedule change)
-    // This ensures old blocks from manual deletions don't prevent new schedule from being applied
-    if (clearBlocks) {
+    for (const emp of employeesWithSchedule) {
         try {
-            const result = await dataApiFetch(`/shift-blocks/range?startDate=${startDate}&endDate=${endDate}`, { method: 'DELETE' });
-            console.log(`[Auto Schedule] Cleared ${result.deleted || 0} shift blocks in range`);
-            // Refresh local cache
-            await fetchShiftBlocks();
+            const result = await applyScheduleViaBackend(emp.id, { clearBlocks });
+            totalCreated += result.created || 0;
+            totalDeleted += result.deleted || 0;
         } catch (err) {
-            console.warn('[Auto Schedule] Could not clear shift blocks:', err);
+            console.error(`[Auto Schedule] Failed for ${emp.name}:`, err);
         }
     }
 
-    // Apply base schedules for all employees
-    const totalShifts = await applyWeekScheduleForAllEmployees(startDate, endDate);
+    console.log(`[Auto Schedule] Created ${totalCreated} shifts (replaced ${totalDeleted} auto shifts)`);
 
-    console.log(`[Auto Schedule] Created ${totalShifts} shifts (replaced ${removedShifts} auto shifts)`);
+    // Refresh all data after batch operation
+    await loadDataFromAPI();
 
     // Mark as generated
     AppState.schedulesGenerated = true;
 
-    return { created: totalShifts, removed: removedShifts };
+    return { created: totalCreated, removed: totalDeleted };
 }
 
 function generateWeekScheduleHTML() {
@@ -6470,6 +6447,19 @@ async function applyBuilderDraft(draftId) {
             errorCount++;
         }
     }
+
+    // Regenerate shifts via backend for all saved employees
+    let regenCount = 0;
+    for (const empIdStr of Object.keys(grid)) {
+        const empId = Number(empIdStr);
+        try {
+            await applyScheduleViaBackend(empId, { clearBlocks: true });
+            regenCount++;
+        } catch (err) {
+            console.error(`Shift regeneration failed for employee ${empId}:`, err);
+        }
+    }
+    console.log(`[Builder] Regenerated shifts for ${regenCount} employees`);
 
     if (errorCount > 0) {
         showToast(`${savedCount} opgeslagen, ${errorCount} fouten`, 'warning');

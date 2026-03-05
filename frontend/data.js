@@ -627,6 +627,21 @@ async function applyWeekScheduleForAllEmployees(startDate, endDate) {
     return totalShifts;
 }
 
+// Apply schedule via backend (atomic, single transaction)
+async function applyScheduleViaBackend(userId, { clearBlocks = false } = {}) {
+    try {
+        const result = await dataApiFetch(`/users/${userId}/apply-schedule`, {
+            method: 'POST',
+            body: JSON.stringify({ clearBlocks })
+        });
+        console.log(`[Backend Schedule] User ${userId}: created ${result.created}, deleted ${result.deleted}, blocks cleared ${result.blocksCleared || 0}`);
+        return result;
+    } catch (error) {
+        console.error(`[Backend Schedule] Error for user ${userId}:`, error);
+        throw error;
+    }
+}
+
 // ===== AFWEZIGHEID FUNCTIES =====
 
 function getAvailability(employeeId, date) {
