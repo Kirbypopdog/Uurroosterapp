@@ -592,19 +592,12 @@
 
     <!-- Input Prompt Modal (replaces browser prompt()) -->
     <div id="input-prompt-modal" class="modal hidden">
-        <div class="modal-content confirm-modal-content">
-            <div class="modal-header">
-                <h2 id="input-prompt-title">Invoer</h2>
-            </div>
-            <div class="modal-body">
-                <p id="input-prompt-message"></p>
-                <div class="form-group" style="margin-top: 12px;">
-                    <input type="text" id="input-prompt-value" class="form-input" placeholder="">
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn btn-secondary" id="input-prompt-cancel">Annuleren</button>
-                <button type="button" class="btn btn-primary" id="input-prompt-ok">OK</button>
+        <div class="modal-content input-prompt-content">
+            <label id="input-prompt-message" class="input-prompt-label"></label>
+            <input type="text" id="input-prompt-value" class="form-input">
+            <div class="input-prompt-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="input-prompt-cancel">Annuleren</button>
+                <button type="button" class="btn btn-primary btn-sm" id="input-prompt-ok">OK</button>
             </div>
         </div>
     </div>

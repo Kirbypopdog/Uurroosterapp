@@ -598,13 +598,11 @@ function showConfirm(message, title = 'Bevestig actie') {
 function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
     return new Promise((resolve) => {
         const modal = document.getElementById('input-prompt-modal');
-        const titleEl = document.getElementById('input-prompt-title');
         const messageEl = document.getElementById('input-prompt-message');
         const inputEl = document.getElementById('input-prompt-value');
         const okBtn = document.getElementById('input-prompt-ok');
         const cancelBtn = document.getElementById('input-prompt-cancel');
 
-        titleEl.textContent = title;
         messageEl.textContent = message;
         inputEl.value = defaultValue;
         modal.classList.remove('hidden');

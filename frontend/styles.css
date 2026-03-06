@@ -7421,34 +7421,27 @@ body[data-view-mode="day"] .timeline-header {
     gap: 0.75rem;
 }
 
-#input-prompt-modal .modal-content {
-    max-width: 380px;
+.input-prompt-content {
+    max-width: 340px !important;
+    padding: 20px !important;
 }
 
-#input-prompt-modal .modal-header {
-    padding: 16px 20px 12px;
-}
-
-#input-prompt-modal .modal-header h2 {
-    font-size: 1rem;
-}
-
-#input-prompt-modal .modal-body {
-    padding: 0 20px 12px;
-}
-
-#input-prompt-modal .modal-body p {
-    margin: 0 0 8px;
+.input-prompt-label {
+    display: block;
     font-size: 0.9rem;
-    color: var(--text-secondary);
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 8px;
 }
 
-#input-prompt-modal .modal-body .form-group {
-    margin-bottom: 0;
+.input-prompt-content .form-input {
+    margin-bottom: 12px;
 }
 
-#input-prompt-modal .modal-actions {
-    padding: 12px 20px;
+.input-prompt-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
 }
 
 .confirm-modal-content #confirm-modal-ok {
