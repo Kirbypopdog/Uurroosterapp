@@ -1320,13 +1320,10 @@ function renderHome() {
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
     html += renderHomeQuickActions(role);
-    html += renderHomeRequests(user, role);
-    if (isLeadOrAdmin || isTeamLead) {
-        html += renderHomeTeamCoverage(role, user);
-    }
     if (isLeadOrAdmin) {
         html += renderHomeWeekendInfo();
     }
+    html += renderHomeRequests(user, role);
     html += '</div>';
 
     container.innerHTML = html;
