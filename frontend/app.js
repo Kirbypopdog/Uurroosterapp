@@ -7541,6 +7541,7 @@ async function editTeam(teamId) {
         DataStore.settings.teams[teamId].name = name;
         await saveSettings('teams', DataStore.settings.teams);
         applyTeamColors();
+        AppState.apiTeams = null; // Invalidate cache
 
         // Also update teams DB table (for FK constraints)
         try {
@@ -7587,6 +7588,7 @@ async function openAddTeamModal() {
         await saveSettings('teams', DataStore.settings.teams);
         syncTeamFilters();
         applyTeamColors();
+        AppState.apiTeams = null; // Invalidate cache
 
         // Also create in teams DB table (for FK constraints)
         try {
@@ -7873,11 +7875,31 @@ function formatAuditDiff(before, after) {
 }
 
 async function ensureTeamsLoaded() {
-    if (AppState.apiTeams && AppState.apiTeams.length > 0) {
-        return AppState.apiTeams;
+    // Try loading from API, merge with settings teams
+    try {
+        const data = await apiFetch('/teams');
+        AppState.apiTeams = data.teams || [];
+    } catch (e) {
+        AppState.apiTeams = AppState.apiTeams || [];
     }
-    const data = await apiFetch('/teams');
-    AppState.apiTeams = data.teams || [];
+
+    // Merge teams from settings that might not be in DB yet
+    const settingsTeams = DataStore.settings.teams || {};
+    const apiIds = new Set(AppState.apiTeams.map(t => t.id));
+    Object.entries(settingsTeams).forEach(([id, team]) => {
+        if (!apiIds.has(id)) {
+            AppState.apiTeams.push({ id, name: team.name, color: team.color });
+        }
+    });
+
+    // Also update names from settings (settings is source of truth for names)
+    AppState.apiTeams.forEach(t => {
+        if (settingsTeams[t.id]) {
+            t.name = settingsTeams[t.id].name;
+            t.color = settingsTeams[t.id].color;
+        }
+    });
+
     return AppState.apiTeams;
 }
 
