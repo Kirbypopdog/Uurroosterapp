@@ -105,12 +105,10 @@
                     <button id="next-week" class="btn"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
                 </div>
                 <div id="current-period" class="period-display"></div>
-                <!-- Month view toggle hidden for now
                 <div class="view-toggle-controls">
-                    <button class="view-toggle-btn active" data-mode="week">📅 Week</button>
-                    <button class="view-toggle-btn" data-mode="month">🗓️ Maand</button>
+                    <button class="view-toggle-btn active" data-mode="week">Week</button>
+                    <button class="view-toggle-btn" data-mode="day">Dag</button>
                 </div>
-                -->
                 <div class="team-toggles" id="team-toggles">
                     <button class="team-toggle active" data-team="vlot1">Vlot 1</button>
                     <button class="team-toggle active" data-team="jobstudent">Jobstudent</button>
@@ -149,6 +147,14 @@
                 <button id="add-employee-btn" class="btn btn-primary">+ Medewerker toevoegen</button>
             </div>
             <div class="employees-filters">
+                <div class="employee-sort-controls">
+                    <label for="employee-sort">Sorteren:</label>
+                    <select id="employee-sort" class="form-control">
+                        <option value="name">Naam (A-Z)</option>
+                        <option value="hours-low">Minste uren t.o.v. contract</option>
+                        <option value="hours-high">Overuren (meeste eerst)</option>
+                    </select>
+                </div>
                 <div class="team-toggles" id="employee-team-toggles">
                     <button class="team-toggle active" data-team="vlot1">Vlot 1</button>
                     <button class="team-toggle active" data-team="vlot2">Vlot 2</button>

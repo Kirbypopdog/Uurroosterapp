@@ -29,7 +29,9 @@ const AppState = {
     builderGrid: {},             // { [userId]: { [dayIndex0to6]: { startTime, endTime, team } } }
     builderIsDirty: false,
     showHeatmap: false,
-    settingsDirty: false
+    settingsDirty: false,
+    employeeSortMode: 'name',
+    swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
 };
 
 // ===== UNDO/REDO MANAGER =====
@@ -781,6 +783,7 @@ function init() {
         initDOM();
         applyTeamColors();
         console.log('DOM initialized');
+        document.body.setAttribute('data-view-mode', AppState.viewMode);
         setCurrentWeek(new Date());
         // Set initial mobile day to today's day of the week
         const today = new Date();
@@ -843,6 +846,8 @@ function setupEventListeners() {
     DOM.prevWeekBtn.addEventListener('click', () => {
         if (AppState.viewMode === 'month') {
             changeMonth(-1);
+        } else if (AppState.viewMode === 'day') {
+            changeMobileDay(-1);
         } else {
             changeWeek(-1);
         }
@@ -850,6 +855,8 @@ function setupEventListeners() {
     DOM.nextWeekBtn.addEventListener('click', () => {
         if (AppState.viewMode === 'month') {
             changeMonth(1);
+        } else if (AppState.viewMode === 'day') {
+            changeMobileDay(1);
         } else {
             changeWeek(1);
         }
@@ -929,6 +936,15 @@ function setupEventListeners() {
             renderEmployees();
         });
     });
+
+    // Employee sort dropdown
+    const employeeSortSelect = document.getElementById('employee-sort');
+    if (employeeSortSelect) {
+        employeeSortSelect.addEventListener('change', (e) => {
+            AppState.employeeSortMode = e.target.value;
+            renderEmployees();
+        });
+    }
 
     DOM.addEmployeeBtn.addEventListener('click', openAddEmployeeModal);
     DOM.shiftForm.addEventListener('submit', handleShiftSubmit);
@@ -1291,8 +1307,6 @@ function renderHome() {
                 switchView('availability');
             } else if (action === 'request-swap') {
                 switchView('swaps');
-            } else if (action === 'add-employee') {
-                switchView('settings');
             } else if (action === 'view-planning') {
                 switchView('planning');
             }
@@ -1405,10 +1419,6 @@ function renderHomeQuickActions(role) {
     actions += `<button class="home-action-btn" data-action="view-planning"><span class="home-action-icon">${IconHelper.html(ICONS.planning, 'md')}</span>Planning bekijken</button>`;
     actions += `<button class="home-action-btn" data-action="request-absence"><span class="home-action-icon">${IconHelper.html(ICONS.availability, 'md')}</span>Afwezigheid melden</button>`;
     actions += `<button class="home-action-btn" data-action="request-swap"><span class="home-action-icon">${IconHelper.html(ICONS.swap, 'md')}</span>Dienst ruilen</button>`;
-
-    if (['admin', 'roosterverantwoordelijke'].includes(role)) {
-        actions += `<button class="home-action-btn" data-action="add-employee"><span class="home-action-icon">${IconHelper.html(ICONS.profile, 'md')}</span>Accounts beheren</button>`;
-    }
 
     return `
         <div class="home-card">
@@ -1680,9 +1690,8 @@ function changeMonth(direction) {
 // Jump to today (unified function for both views)
 function jumpToToday() {
     const today = new Date();
-    if (AppState.viewMode === 'week') {
+    if (AppState.viewMode === 'week' || AppState.viewMode === 'day') {
         setCurrentWeek(today);
-        // Set mobile day to today
         const dayOfWeek = today.getDay();
         AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
     } else {
@@ -1705,6 +1714,9 @@ function changeMobileDay(direction) {
     } else {
         updateMobileDayDisplay();
         updateTimelineMobileDayAttribute();
+        if (AppState.viewMode === 'day') {
+            updatePeriodDisplay();
+        }
     }
 }
 
@@ -1802,20 +1814,28 @@ function changeViewMode(mode) {
     if (mode === 'month' && AppState.viewMode === 'week') {
         // Switching week → month
         AppState.previousWeekStart = AppState.currentWeekStart;
-        // Set month to the month containing current week
         setCurrentMonth(AppState.currentWeekStart || new Date());
     } else if (mode === 'week' && AppState.viewMode === 'month') {
         // Switching month → week
         if (AppState.previousWeekStart) {
-            // Restore previous week
             AppState.currentWeekStart = AppState.previousWeekStart;
         } else {
-            // Default: use first week of current month
             setCurrentWeek(AppState.currentMonthStart || new Date());
         }
+    } else if (mode === 'day') {
+        // Switching to day mode: default to today's day in current week
+        if (!AppState.currentWeekStart) {
+            setCurrentWeek(new Date());
+        }
+        const today = new Date();
+        const todayDow = today.getDay();
+        AppState.mobileDayIndex = todayDow === 0 ? 6 : todayDow - 1;
+    } else if (mode === 'week' && AppState.viewMode === 'day') {
+        // Switching day → week: keep current week, no changes needed
     }
 
     AppState.viewMode = mode;
+    document.body.setAttribute('data-view-mode', mode);
 
     DOM.viewToggleBtns.forEach(btn => {
         if (btn.dataset.mode === mode) {
@@ -1837,6 +1857,17 @@ function updatePeriodDisplay() {
             return;
         }
         DOM.currentPeriod.textContent = formatMonthDisplay(AppState.currentMonthStart);
+    } else if (AppState.viewMode === 'day') {
+        // Day view: show "Maandag, 3 maart 2026"
+        if (!AppState.currentWeekStart) {
+            setCurrentWeek(new Date());
+            return;
+        }
+        const dayNames = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
+        const currentDate = new Date(AppState.currentWeekStart);
+        currentDate.setDate(currentDate.getDate() + AppState.mobileDayIndex);
+        const dateStr = currentDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+        DOM.currentPeriod.textContent = `${dayNames[AppState.mobileDayIndex]}, ${dateStr}`;
     } else {
         // Week view: show "Week 6 | 3 februari 2026 - 9 februari 2026"
         if (!AppState.currentWeekStart) {
@@ -4042,10 +4073,30 @@ function renderEmployees() {
     }
     const employeesByTeam = {};
 
+    // Determine current week start for hours calculations
+    const currentWeekStartDate = AppState.currentWeekStart
+        ? formatDateYYYYMMDD(AppState.currentWeekStart)
+        : formatDateYYYYMMDD(new Date());
+
     teamOrder.forEach(teamKey => {
-        employeesByTeam[teamKey] = employees
-            .filter(emp => emp.mainTeam === teamKey)
-            .sort((a, b) => a.name.localeCompare(b.name));
+        const teamEmps = employees.filter(emp => emp.mainTeam === teamKey);
+
+        if (AppState.employeeSortMode === 'hours-low' || AppState.employeeSortMode === 'hours-high') {
+            teamEmps.forEach(emp => {
+                const hoursThisWeek = getEmployeeHoursThisWeek(emp.id, currentWeekStartDate);
+                const contractHours = emp.contractHours || 0;
+                emp._hoursDiff = contractHours > 0 ? hoursThisWeek - contractHours : hoursThisWeek;
+            });
+            if (AppState.employeeSortMode === 'hours-low') {
+                teamEmps.sort((a, b) => a._hoursDiff - b._hoursDiff);
+            } else {
+                teamEmps.sort((a, b) => b._hoursDiff - a._hoursDiff);
+            }
+        } else {
+            teamEmps.sort((a, b) => a.name.localeCompare(b.name));
+        }
+
+        employeesByTeam[teamKey] = teamEmps;
     });
 
     let html = '';
@@ -4937,7 +4988,8 @@ function renderAvailability() {
 
         // Employee rows for this team
         teamEmployees.forEach(emp => {
-            html += `<div class="availability-employee-row">
+            const isCurrentUser = emp.id === AppState.currentUser?.id;
+            html += `<div class="availability-employee-row${isCurrentUser ? ' current-user' : ''}">
                 <div class="availability-employee-col">
                     <span class="emp-name">${escapeHtml(emp.name)}</span>
                 </div>
@@ -5129,10 +5181,20 @@ async function renderSwaps() {
         const openTakeoverRequests = swapRequests.filter(sr =>
             sr.request_type === 'takeover' &&
             sr.status === 'pending' &&
-            sr.requester_user_id !== currentUser.id
-        );
+            sr.requester_user_id !== currentUser.id &&
+            AppState.swapTeamFilter.includes(sr.requester_shift_team)
+        ).sort((a, b) => (a.requester_shift_date || '').localeCompare(b.requester_shift_date || ''));
 
-        let html = '<div class="swaps-container">';
+        // Team filter toggles
+        const teamNames = { vlot1: 'Vlot 1', jobstudent: 'Jobstudent', vlot2: 'Vlot 2', cargo: 'Cargo', overkoepelend: 'Overkoepelend' };
+        let html = '<div class="swaps-team-filter"><div class="team-toggles" id="swaps-team-toggles">';
+        ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'].forEach(team => {
+            const isActive = AppState.swapTeamFilter.includes(team);
+            html += `<button class="team-toggle ${isActive ? 'active' : ''}" data-team="${team}">${teamNames[team]}</button>`;
+        });
+        html += '</div></div>';
+
+        html += '<div class="swaps-container">';
 
         // Section 1: Voor mij (target approval)
         if (targetPendingRequests.length > 0) {
@@ -5198,7 +5260,7 @@ async function renderSwaps() {
         if (myRequests.length === 0) {
             html += `<div class="swap-empty-state">
                 <p>Je hebt nog geen ruilverzoeken ingediend</p>
-                <p style="font-size: 0.9rem; margin-top: 1rem;">Ga naar Planning en klik op een van je shifts om een ruil aan te vragen</p>
+                <button class="btn btn-primary" onclick="switchView('planning')" style="margin-top: 1rem;">Bekijk mijn shifts in de planning</button>
             </div>`;
         } else {
             myRequests.forEach(sr => {
@@ -5235,6 +5297,19 @@ async function renderSwaps() {
 
         swapsList.innerHTML = html;
         IconHelper.init(swapsList);
+
+        // Attach team filter toggle listeners
+        swapsList.querySelectorAll('#swaps-team-toggles .team-toggle').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const team = btn.dataset.team;
+                if (AppState.swapTeamFilter.includes(team)) {
+                    AppState.swapTeamFilter = AppState.swapTeamFilter.filter(t => t !== team);
+                } else {
+                    AppState.swapTeamFilter.push(team);
+                }
+                renderSwaps();
+            });
+        });
 
         // Attach event listeners to action buttons
         attachSwapActionListeners();
@@ -7365,11 +7440,13 @@ function renderSettingsSystem(container) {
                     <button class="btn btn-secondary" onclick="showDebugInfo()" style="margin-left: 8px;">Debug info</button>
                 </div>
                 ` : ''}
+                ${isAdmin ? `
                 <div class="danger-zone">
                     <h4>Gevarenzone</h4>
                     <p>Deze actie kan niet ongedaan worden gemaakt!</p>
                     <button class="btn btn-danger" onclick="resetData()">Alle data wissen</button>
                 </div>
+                ` : ''}
             </div>
         </div>
 

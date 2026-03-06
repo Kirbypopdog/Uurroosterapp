@@ -451,6 +451,29 @@ textarea {
     box-shadow: var(--shadow-sm);
 }
 
+.employee-sort-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.employee-sort-controls label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.employee-sort-controls select {
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    background: white;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
 .employees-filters .filter-label {
     font-size: 12px;
     font-weight: 600;
@@ -1130,6 +1153,59 @@ textarea {
     background: var(--primary-color);
     color: white;
     box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
+}
+
+/* ===== DESKTOP DAY VIEW ===== */
+/* Hide all day columns in day mode, show only selected */
+body[data-view-mode="day"] .timeline-scale,
+body[data-view-mode="day"] .timeline-day-cell {
+    display: none !important;
+}
+
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="0"] .timeline-scale:nth-child(2),
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="0"] .timeline-day-cell:nth-child(2) {
+    display: block !important;
+}
+
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="1"] .timeline-scale:nth-child(3),
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="1"] .timeline-day-cell:nth-child(3) {
+    display: block !important;
+}
+
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="2"] .timeline-scale:nth-child(4),
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="2"] .timeline-day-cell:nth-child(4) {
+    display: block !important;
+}
+
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="3"] .timeline-scale:nth-child(5),
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="3"] .timeline-day-cell:nth-child(5) {
+    display: block !important;
+}
+
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="4"] .timeline-scale:nth-child(6),
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="4"] .timeline-day-cell:nth-child(6) {
+    display: block !important;
+}
+
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="5"] .timeline-scale:nth-child(7),
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="5"] .timeline-day-cell:nth-child(7) {
+    display: block !important;
+}
+
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="6"] .timeline-scale:nth-child(8),
+body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="6"] .timeline-day-cell:nth-child(8) {
+    display: block !important;
+}
+
+/* In day mode, adjust grid to give more space to the single day column */
+body[data-view-mode="day"] .timeline-scale-row,
+body[data-view-mode="day"] .timeline-row {
+    grid-template-columns: 140px 1fr !important;
+}
+
+/* Hide the header row (day names) in day mode since period display shows the day */
+body[data-view-mode="day"] .timeline-header {
+    display: none !important;
 }
 
 /* ===== ALERTS ===== */
@@ -5024,6 +5100,15 @@ textarea {
     background: #f8fafc;
 }
 
+.availability-employee-row.current-user {
+    background: rgba(37, 99, 235, 0.05);
+    border-left: 3px solid var(--primary-color);
+}
+
+.availability-employee-row.current-user .emp-name {
+    font-weight: 600;
+}
+
 .availability-employee-row .availability-employee-col {
     background: #fafbfc;
     border-right: 1px solid var(--border-color);
@@ -7005,6 +7090,15 @@ textarea {
 .swap-request-actions .btn {
     padding: 0.5rem 1rem;
     font-size: 0.9rem;
+}
+
+.swaps-team-filter {
+    margin-bottom: 1rem;
+    padding: 10px 12px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
 }
 
 .swap-section {
