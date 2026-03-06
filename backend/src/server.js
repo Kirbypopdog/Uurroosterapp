@@ -693,6 +693,36 @@ app.post('/teams', requireAuth, requireRole('admin', 'roosterverantwoordelijke')
   }
 });
 
+app.put('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  const { id } = req.params;
+  const { name, color } = req.body;
+
+  if (!name && !color) {
+    return res.status(400).json({ error: 'name of color is verplicht' });
+  }
+
+  try {
+    const existing = await pool.query('SELECT * FROM teams WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Team niet gevonden' });
+    }
+
+    const newName = name || existing.rows[0].name;
+    const newColor = color || existing.rows[0].color;
+
+    const result = await pool.query(
+      'UPDATE teams SET name = $1, color = $2 WHERE id = $3 RETURNING *',
+      [newName, newColor, id]
+    );
+
+    await logAudit(req, 'UPDATE', 'settings', id, { action: 'update_team', name: newName, color: newColor });
+    res.json({ team: result.rows[0] });
+  } catch (err) {
+    console.error('PUT /teams/:id error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // ===== USERS API (replaces employees) =====
 
 // Get all users (with schedule data) - for planning views

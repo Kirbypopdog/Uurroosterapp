@@ -7532,6 +7532,36 @@ function renderSettingsTeams(container) {
     document.getElementById('btn-add-team')?.addEventListener('click', openAddTeamModal);
 }
 
+async function editTeam(teamId) {
+    const team = DataStore.settings.teams[teamId];
+    if (!team) return;
+
+    const newName = await showInputPrompt('Nieuwe teamnaam:', 'Team bewerken', team.name);
+    if (!newName || !newName.trim() || newName.trim() === team.name) return;
+
+    const name = newName.trim();
+
+    try {
+        await apiFetch(`/teams/${teamId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ name })
+        });
+
+        // Update local DataStore
+        DataStore.settings.teams[teamId].name = name;
+        await saveSettings('teams', DataStore.settings.teams);
+        applyTeamColors();
+
+        showToast(`Team "${name}" bijgewerkt`, 'success');
+
+        // Re-render settings teams tab
+        const content = document.getElementById('settings-content');
+        if (content) renderSettingsTeams(content);
+    } catch (error) {
+        showToast(error.message || 'Fout bij bewerken team', 'error');
+    }
+}
+
 async function openAddTeamModal() {
     const teamName = await showInputPrompt('Team naam:', 'Nieuw team aanmaken');
     if (!teamName || !teamName.trim()) return;
@@ -7860,6 +7890,7 @@ function renderTeamsConfig() {
                 <span class="team-id">${teamKey}</span>
             </div>
             <div class="team-actions">
+                <button class="btn-icon-only" onclick="editTeam('${teamId}')" title="Naam bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
                 <input type="color" class="color-picker" value="${team.color}"
                        onchange="updateTeamColor('${teamId}', this.value)" title="Kleur wijzigen"/>
             </div>
