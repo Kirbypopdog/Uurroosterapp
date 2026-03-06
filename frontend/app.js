@@ -7554,10 +7554,7 @@ async function editTeam(teamId) {
         }
 
         showToast(`Team "${name}" bijgewerkt`, 'success');
-
-        // Re-render settings teams tab
-        const content = document.getElementById('settings-content');
-        if (content) renderSettingsTeams(content);
+        renderSettings();
     } catch (error) {
         showToast(error.message || 'Fout bij bewerken team', 'error');
     }
@@ -7601,10 +7598,7 @@ async function openAddTeamModal() {
         }
 
         showToast(`Team "${name}" aangemaakt`, 'success');
-
-        // Re-render settings teams tab
-        const content = document.getElementById('settings-content');
-        if (content) renderSettingsTeams(content);
+        renderSettings();
     } catch (error) {
         showToast(error.message || 'Fout bij aanmaken team', 'error');
     }
@@ -7908,13 +7902,11 @@ function renderTeamsConfig() {
     Object.keys(DataStore.settings.teams).forEach(teamId => {
         const team = DataStore.settings.teams[teamId];
         const teamName = escapeHtml(team.name);
-        const teamKey = escapeHtml(teamId);
         html += `
         <div class="team-config-item" data-team-id="${teamId}">
             <div class="team-color-dot" style="background: ${team.color}"></div>
             <div class="team-info">
                 <span class="team-name">${teamName}</span>
-                <span class="team-id">${teamKey}</span>
             </div>
             <div class="team-actions">
                 <button class="btn-icon-only" onclick="editTeam('${teamId}')" title="Naam bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
