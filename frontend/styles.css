@@ -7421,6 +7421,26 @@ body[data-view-mode="day"] .timeline-header {
     gap: 0.75rem;
 }
 
+#input-prompt-modal .modal-content {
+    max-width: 380px;
+}
+
+#input-prompt-modal .modal-header {
+    padding: 16px 20px 12px;
+}
+
+#input-prompt-modal .modal-header h2 {
+    font-size: 1rem;
+}
+
+#input-prompt-modal .modal-body {
+    padding: 0 20px 16px;
+}
+
+#input-prompt-modal .modal-actions {
+    padding: 12px 20px;
+}
+
 .confirm-modal-content #confirm-modal-ok {
     min-width: 100px;
 }
