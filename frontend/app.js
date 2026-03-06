@@ -7564,6 +7564,15 @@ async function deleteTeam(teamId) {
     const team = DataStore.settings.teams[teamId];
     if (!team) return;
 
+    // Check if team still has members
+    const members = DataStore.users.filter(u => u.main_team === teamId || u.team_id === teamId);
+    if (members.length > 0) {
+        const names = members.slice(0, 5).map(u => u.name).join(', ');
+        const extra = members.length > 5 ? ` en ${members.length - 5} anderen` : '';
+        showToast(`Kan team "${team.name}" niet verwijderen: ${members.length} medewerker(s) zitten nog in dit team (${names}${extra}). Verplaats ze eerst naar een ander team.`, 'error');
+        return;
+    }
+
     const confirmed = await showConfirm(`Weet je zeker dat je team "${team.name}" wilt verwijderen?`);
     if (!confirmed) return;
 
@@ -7583,7 +7592,6 @@ async function deleteTeam(teamId) {
         showToast(`Team "${team.name}" verwijderd`, 'success');
         renderSettings();
     } catch (error) {
-        // Restore on failure
         DataStore.settings.teams[teamId] = team;
         showToast(error.message || 'Fout bij verwijderen team', 'error');
     }
