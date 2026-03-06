@@ -2528,7 +2528,7 @@ app.put('/settings/:key', requireAuth, async (req, res) => {
   }
 
   const { role } = req.user;
-  if (!['admin', 'roosterverantwoordelijke'].includes(role)) {
+  if (!['admin', 'roosterverantwoordelijke', 'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(role)) {
     return res.status(403).json({ error: 'Onvoldoende rechten' });
   }
   try {
