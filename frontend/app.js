@@ -7537,15 +7537,20 @@ async function editTeam(teamId) {
     const name = newName.trim();
 
     try {
-        await apiFetch(`/teams/${teamId}`, {
-            method: 'PUT',
-            body: JSON.stringify({ name })
-        });
-
-        // Update local DataStore
+        // Update settings (primary source of truth for frontend)
         DataStore.settings.teams[teamId].name = name;
         await saveSettings('teams', DataStore.settings.teams);
         applyTeamColors();
+
+        // Also update teams DB table (for FK constraints)
+        try {
+            await apiFetch(`/teams/${teamId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ name })
+            });
+        } catch (e) {
+            console.warn('Teams DB update skipped:', e.message);
+        }
 
         showToast(`Team "${name}" bijgewerkt`, 'success');
 
@@ -7577,16 +7582,21 @@ async function openAddTeamModal() {
     const color = '#64748b'; // Default gray
 
     try {
-        await apiFetch('/teams', {
-            method: 'POST',
-            body: JSON.stringify({ id: teamId, name, color })
-        });
-
-        // Update local DataStore
+        // Update settings (primary source of truth for frontend)
         DataStore.settings.teams[teamId] = { name, color };
         await saveSettings('teams', DataStore.settings.teams);
         syncTeamFilters();
         applyTeamColors();
+
+        // Also create in teams DB table (for FK constraints)
+        try {
+            await apiFetch('/teams', {
+                method: 'POST',
+                body: JSON.stringify({ id: teamId, name, color })
+            });
+        } catch (e) {
+            console.warn('Teams DB insert skipped:', e.message);
+        }
 
         showToast(`Team "${name}" aangemaakt`, 'success');
 
