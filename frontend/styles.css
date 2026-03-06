@@ -7434,7 +7434,17 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 #input-prompt-modal .modal-body {
-    padding: 0 20px 16px;
+    padding: 0 20px 12px;
+}
+
+#input-prompt-modal .modal-body p {
+    margin: 0 0 8px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+#input-prompt-modal .modal-body .form-group {
+    margin-bottom: 0;
 }
 
 #input-prompt-modal .modal-actions {
