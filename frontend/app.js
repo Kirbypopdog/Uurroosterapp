@@ -34,6 +34,70 @@ const AppState = {
     swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
 };
 
+// ===== TEAM HELPERS =====
+function getTeamOrder() {
+    return Object.keys(DataStore.settings.teams || {});
+}
+
+function syncTeamFilters() {
+    const teams = getTeamOrder();
+    if (teams.length > 0) {
+        AppState.visibleTeams = [...teams];
+        AppState.visibleEmployeeTeams = [...teams];
+        AppState.swapTeamFilter = [...teams];
+    }
+}
+
+function renderTeamToggles() {
+    const container = document.getElementById('team-toggles');
+    if (!container) return;
+    const teams = DataStore.settings.teams || {};
+    container.innerHTML = '';
+    getTeamOrder().forEach(teamId => {
+        const team = teams[teamId];
+        const isActive = AppState.visibleTeams.includes(teamId);
+        const btn = document.createElement('button');
+        btn.className = `team-toggle ${isActive ? 'active' : ''}`;
+        btn.dataset.team = teamId;
+        btn.textContent = team?.name || teamId;
+        btn.addEventListener('click', () => {
+            btn.classList.toggle('active');
+            if (btn.classList.contains('active')) {
+                if (!AppState.visibleTeams.includes(teamId)) AppState.visibleTeams.push(teamId);
+            } else {
+                AppState.visibleTeams = AppState.visibleTeams.filter(t => t !== teamId);
+            }
+            renderCalendar();
+        });
+        container.appendChild(btn);
+    });
+}
+
+function renderEmployeeTeamToggles() {
+    const container = document.getElementById('employee-team-toggles');
+    if (!container) return;
+    const teams = DataStore.settings.teams || {};
+    container.innerHTML = '';
+    getTeamOrder().forEach(teamId => {
+        const team = teams[teamId];
+        const isActive = AppState.visibleEmployeeTeams.includes(teamId);
+        const btn = document.createElement('button');
+        btn.className = `team-toggle ${isActive ? 'active' : ''}`;
+        btn.dataset.team = teamId;
+        btn.textContent = team?.name || teamId;
+        btn.addEventListener('click', () => {
+            btn.classList.toggle('active');
+            if (btn.classList.contains('active')) {
+                if (!AppState.visibleEmployeeTeams.includes(teamId)) AppState.visibleEmployeeTeams.push(teamId);
+            } else {
+                AppState.visibleEmployeeTeams = AppState.visibleEmployeeTeams.filter(t => t !== teamId);
+            }
+            renderEmployees();
+        });
+        container.appendChild(btn);
+    });
+}
+
 // ===== UNDO/REDO MANAGER =====
 const UndoManager = {
     actions: [],
@@ -319,8 +383,7 @@ function canTargetRespondToSwap(swapRequest) {
 
 function getVisibleTeamsForRole() {
     // Iedereen met een login kan alle teams zien in de planner
-    const allTeams = ['vlot1', 'vlot2', 'cargo', 'overkoepelend', 'jobstudent'];
-    return allTeams;
+    return getTeamOrder();
 }
 
 // Demo users
@@ -901,41 +964,9 @@ function setupEventListeners() {
         btn.addEventListener('click', () => changeViewMode(btn.dataset.mode));
     });
 
-    // Team toggle buttons for planning view
-    document.querySelectorAll('#team-toggles .team-toggle').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const team = btn.dataset.team;
-            btn.classList.toggle('active');
+    // Team toggle buttons for planning view — attached dynamically via renderTeamToggles()
 
-            if (btn.classList.contains('active')) {
-                if (!AppState.visibleTeams.includes(team)) {
-                    AppState.visibleTeams.push(team);
-                }
-            } else {
-                AppState.visibleTeams = AppState.visibleTeams.filter(t => t !== team);
-            }
-
-            renderCalendar();
-        });
-    });
-
-    // Team toggle buttons for employees view
-    document.querySelectorAll('#employee-team-toggles .team-toggle').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const team = btn.dataset.team;
-            btn.classList.toggle('active');
-
-            if (btn.classList.contains('active')) {
-                if (!AppState.visibleEmployeeTeams.includes(team)) {
-                    AppState.visibleEmployeeTeams.push(team);
-                }
-            } else {
-                AppState.visibleEmployeeTeams = AppState.visibleEmployeeTeams.filter(t => t !== team);
-            }
-
-            renderEmployees();
-        });
-    });
+    // Team toggle buttons for employees view — attached dynamically via renderEmployeeTeamToggles()
 
     // Employee sort dropdown
     const employeeSortSelect = document.getElementById('employee-sort');
@@ -1124,6 +1155,7 @@ async function handleLogin(e) {
         sessionStorage.setItem('hetvlot_token', data.token);
         // Load data from database
         await loadDataFromAPI();
+        syncTeamFilters();
         updateShiftRefreshRange();
         applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
@@ -1178,6 +1210,7 @@ async function checkSession() {
         sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
         // Load data from database
         await loadDataFromAPI();
+        syncTeamFilters();
         updateShiftRefreshRange();
         applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
@@ -1290,6 +1323,9 @@ function renderHome() {
     html += renderHomeRequests(user, role);
     if (isLeadOrAdmin || isTeamLead) {
         html += renderHomeTeamCoverage(role, user);
+    }
+    if (isLeadOrAdmin) {
+        html += renderHomeWeekendInfo();
     }
     html += '</div>';
 
@@ -1558,6 +1594,79 @@ function renderHomeTeamCoverage(role, user) {
         <div class="home-card home-card-full">
             <div class="home-card-header">Team bezetting deze week</div>
             ${coverageHtml}
+        </div>
+    `;
+}
+
+function renderHomeWeekendInfo() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Get Monday of current week
+    const thisMonday = getMonday(today);
+
+    // Check if currently in a holiday period
+    const isHoliday = typeof isHolidayPeriod === 'function' && isHolidayPeriod(today);
+    const holidayPeriod = isHoliday && typeof getHolidayPeriod === 'function' ? getHolidayPeriod(today) : null;
+
+    // Find upcoming open weekends (next 4 weeks)
+    const upcomingWeekends = [];
+    for (let i = 0; i < 4; i++) {
+        const weekMonday = new Date(thisMonday);
+        weekMonday.setDate(weekMonday.getDate() + (i * 7));
+
+        if (typeof isWeekendOrHolidayWeek === 'function' && isWeekendOrHolidayWeek(weekMonday)) {
+            const saturday = new Date(weekMonday);
+            saturday.setDate(saturday.getDate() + 5);
+            const resp = typeof getOrCalculateResponsible === 'function' ? getOrCalculateResponsible(weekMonday) : null;
+            upcomingWeekends.push({ date: saturday, responsible: resp, weekMonday });
+        }
+    }
+
+    let bodyHtml = '<div class="home-card-body">';
+
+    // Holiday indicator
+    if (isHoliday && holidayPeriod) {
+        bodyHtml += `
+            <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(245, 158, 11, 0.1); border-radius: 8px; margin-bottom: 12px; border-left: 3px solid var(--warning-color);">
+                <div>
+                    <strong>Vakantiewerking actief</strong>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(holidayPeriod.name || 'Vakantieperiode')}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Upcoming weekends
+    if (upcomingWeekends.length > 0) {
+        upcomingWeekends.forEach(weekend => {
+            const dateStr = weekend.date.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+            const respName = weekend.responsible ? escapeHtml(weekend.responsible.name) : '<em>Niet toegewezen</em>';
+            const isThisWeek = weekend.weekMonday.getTime() === thisMonday.getTime();
+
+            bodyHtml += `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-color); ${!isThisWeek ? 'opacity: 0.7;' : ''}">
+                    <div>
+                        <span style="font-weight: ${isThisWeek ? '600' : '400'};">Weekend ${dateStr}</span>
+                        ${isThisWeek ? '<span style="font-size: 0.75rem; background: var(--primary-color); color: white; padding: 1px 6px; border-radius: 4px; margin-left: 6px;">Deze week</span>' : ''}
+                    </div>
+                    <span style="font-size: 0.9rem; color: var(--text-secondary);">${respName}</span>
+                </div>
+            `;
+        });
+    } else {
+        bodyHtml += '<div style="color: var(--text-secondary); font-size: 0.9rem; padding: 8px 0;">Geen open weekenden komende 4 weken</div>';
+    }
+
+    bodyHtml += '</div>';
+
+    return `
+        <div class="home-card">
+            <div class="home-card-header">
+                Weekend & Vakantie
+                ${isHoliday ? '<span class="card-count" style="background: var(--warning-color); color: white; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">Vakantie</span>' : ''}
+            </div>
+            ${bodyHtml}
         </div>
     `;
 }
@@ -1893,6 +2002,7 @@ function renderPlanning() {
     }
     updatePeriodDisplay();
     updateMobileDayDisplay();
+    renderTeamToggles();
     renderValidationAlerts();
     renderCalendar();
     // Set mobile day attribute after calendar is rendered
@@ -1905,6 +2015,12 @@ function renderPlanning() {
         IconHelper.init(heatmapContainer);
     }
 
+    // Sync heatmap button active class with state
+    const heatmapBtn = document.getElementById('heatmap-toggle-btn');
+    if (heatmapBtn) {
+        heatmapBtn.classList.toggle('active', AppState.showHeatmap);
+    }
+
     // Restore window scroll position after DOM updates
     requestAnimationFrame(() => {
         window.scrollTo(0, savedScrollY);
@@ -1915,7 +2031,7 @@ function renderCoverageHeatmap() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
     const teams = DataStore.settings.teams || {};
-    const teamOrder = ['vlot1', 'vlot2', 'cargo', 'overkoepelend', 'jobstudent']
+    const teamOrder = getTeamOrder()
         .filter(t => AppState.visibleTeams.includes(t) && teams[t]);
     const minStaffingDay = DataStore.settings.rules?.minStaffingDay || 2;
 
@@ -2262,8 +2378,7 @@ function renderTimelineView() {
 
     // Group employees by their main team - only show visible teams
     const teams = DataStore.settings.teams || {};
-    // Custom order: Vlot 1, Jobstudent, Vlot 2, Cargo, Overkoepelend
-    const teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
+    const teamOrder = getTeamOrder()
         .filter(t => AppState.visibleTeams.includes(t));
     const employeesByTeam = {};
 
@@ -2711,7 +2826,7 @@ function renderMonthView() {
 
     // Group by team (reuse logic from renderTimelineView)
     const teams = DataStore.settings.teams || {};
-    const teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
+    const teamOrder = getTeamOrder()
         .filter(t => AppState.visibleTeams.includes(t));
     const employeesByTeam = {};
 
@@ -4056,11 +4171,12 @@ async function deleteShiftConfirm(shiftId) {
 }
 
 function renderEmployees() {
+    renderEmployeeTeamToggles();
     const role = getEffectiveRole();
     const employees = getAllEmployees();
     // Groepeer medewerkers per team - alleen zichtbare teams
     const teams = DataStore.settings.teams;
-    const baseTeamOrder = ['vlot1', 'vlot2', 'cargo', 'overkoepelend', 'jobstudent']
+    const baseTeamOrder = getTeamOrder()
         .filter(t => AppState.visibleEmployeeTeams.includes(t));
     let teamOrder = baseTeamOrder;
 
@@ -4903,7 +5019,7 @@ function renderAvailability() {
     };
 
     // Group employees by team (same order as Timeline)
-    let teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'];
+    let teamOrder = getTeamOrder();
     // Medewerker only sees own team
     if (role === 'medewerker') {
         const userTeam = AppState.currentUser?.team_id
@@ -5185,12 +5301,12 @@ async function renderSwaps() {
             AppState.swapTeamFilter.includes(sr.requester_shift_team)
         ).sort((a, b) => (a.requester_shift_date || '').localeCompare(b.requester_shift_date || ''));
 
-        // Team filter toggles
-        const teamNames = { vlot1: 'Vlot 1', jobstudent: 'Jobstudent', vlot2: 'Vlot 2', cargo: 'Cargo', overkoepelend: 'Overkoepelend' };
+        // Team filter toggles (dynamisch uit settings)
+        const teamSettings = DataStore.settings.teams || {};
         let html = '<div class="swaps-team-filter"><div class="team-toggles" id="swaps-team-toggles">';
-        ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'].forEach(team => {
+        getTeamOrder().forEach(team => {
             const isActive = AppState.swapTeamFilter.includes(team);
-            html += `<button class="team-toggle ${isActive ? 'active' : ''}" data-team="${team}">${teamNames[team]}</button>`;
+            html += `<button class="team-toggle ${isActive ? 'active' : ''}" data-team="${team}">${escapeHtml(teamSettings[team]?.name || team)}</button>`;
         });
         html += '</div></div>';
 
@@ -5381,6 +5497,15 @@ function renderSwapRequestCard(swapRequest, mode) {
         `;
     }
 
+    // Show who accepted the swap
+    let acceptedByHtml = '';
+    if (swapRequest.status === 'approved') {
+        const acceptorName = swapRequest.responded_by_name || swapRequest.target_name;
+        if (acceptorName) {
+            acceptedByHtml = `<div class="swap-accepted-info">${IconHelper.html(ICONS.check, 'xs')} Goedgekeurd door <strong>${escapeHtml(acceptorName)}</strong></div>`;
+        }
+    }
+
     let messageHtml = '';
     if (swapRequest.message) {
         messageHtml = `
@@ -5414,6 +5539,7 @@ function renderSwapRequestCard(swapRequest, mode) {
                 </div>
             </div>
             ${messageHtml}
+            ${acceptedByHtml}
             ${responseHtml}
             <p style="font-size: 0.85rem; color: #64748b; margin: 0.5rem 0 0 0;">
                 Aangevraagd op ${createdDate}
@@ -5465,6 +5591,11 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
         `;
     }
 
+    // Show who accepted the takeover
+    const acceptedByHtml = takeoverRequest.status === 'approved' && takeoverRequest.target_name
+        ? `<div class="swap-accepted-info">${IconHelper.html(ICONS.check, 'xs')} Overgenomen door <strong>${escapeHtml(takeoverRequest.target_name)}</strong></div>`
+        : '';
+
     // Actions based on mode
     let actionsHtml = '';
     if (mode === 'available' && takeoverRequest.status === 'pending') {
@@ -5511,6 +5642,7 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
                     ${shift.notes ? `<br><em>${escapeHtml(shift.notes)}</em>` : ''}
                 </div>
             </div>
+            ${acceptedByHtml}
             ${messageHtml}
             <p style="font-size: 0.85rem; color: #64748b; margin: 0.5rem 0 0 0;">
                 Geplaatst op ${createdDate}
@@ -5685,7 +5817,7 @@ function renderBuilderGrid(role, userTeam) {
         return '<div class="builder-empty">Geen medewerkers gevonden voor het geselecteerde team</div>';
     }
 
-    const teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'];
+    const teamOrder = getTeamOrder();
     const teams = DataStore.settings.teams || {};
 
     let html = '<div class="builder-grid-wrapper">';
@@ -7366,6 +7498,9 @@ function renderSettingsTeams(container) {
                     <h3>Teams</h3>
                     <p class="settings-card-subtitle">Beheer teamnamen en kleuren.</p>
                 </div>
+                <div class="settings-card-actions">
+                    <button class="btn btn-sm btn-secondary" id="btn-add-team">+ Nieuw team</button>
+                </div>
             </div>
             <div class="settings-card-body">
                 <div class="teams-list" id="teams-config">
@@ -7392,6 +7527,50 @@ function renderSettingsTeams(container) {
             </div>
         </div>
     `;
+
+    // Event listener for add team button
+    document.getElementById('btn-add-team')?.addEventListener('click', openAddTeamModal);
+}
+
+async function openAddTeamModal() {
+    const teamName = await showInputPrompt('Team naam:', 'Nieuw team aanmaken');
+    if (!teamName || !teamName.trim()) return;
+
+    const name = teamName.trim();
+    const teamId = name.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+
+    if (!teamId) {
+        showToast('Ongeldige teamnaam', 'error');
+        return;
+    }
+
+    if (DataStore.settings.teams[teamId]) {
+        showToast('Een team met dit ID bestaat al', 'error');
+        return;
+    }
+
+    const color = '#64748b'; // Default gray
+
+    try {
+        await apiFetch('/teams', {
+            method: 'POST',
+            body: JSON.stringify({ id: teamId, name, color })
+        });
+
+        // Update local DataStore
+        DataStore.settings.teams[teamId] = { name, color };
+        await saveSettings('teams', DataStore.settings.teams);
+        syncTeamFilters();
+        applyTeamColors();
+
+        showToast(`Team "${name}" aangemaakt`, 'success');
+
+        // Re-render settings teams tab
+        const content = document.getElementById('settings-content');
+        if (content) renderSettingsTeams(content);
+    } catch (error) {
+        showToast(error.message || 'Fout bij aanmaken team', 'error');
+    }
 }
 
 // ===== SETTINGS TAB: SYSTEEM =====
@@ -8338,7 +8517,7 @@ function populateAbsenceEmployeeDropdown() {
     select.innerHTML = '<option value="">-- Selecteer medewerker --</option>';
 
     // Group by team
-    const teamOrder = ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'];
+    const teamOrder = getTeamOrder();
     teamOrder.forEach(teamId => {
         const teamEmployees = employees.filter(emp => emp.mainTeam === teamId);
         if (teamEmployees.length > 0) {
@@ -8356,6 +8535,15 @@ function populateAbsenceEmployeeDropdown() {
             select.appendChild(optgroup);
         }
     });
+
+    // Medewerkers mogen enkel zichzelf selecteren
+    const role = getEffectiveRole();
+    if (role === 'medewerker') {
+        select.value = AppState.currentUser.id;
+        select.disabled = true;
+    } else {
+        select.disabled = false;
+    }
 }
 
 function openAvailabilityModal(employeeId = null, date = null) {

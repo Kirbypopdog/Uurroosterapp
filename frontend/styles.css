@@ -1141,7 +1141,9 @@ textarea {
     transition: all 0.2s;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
+    min-width: 80px;
 }
 
 .view-toggle-btn:hover {
@@ -7079,6 +7081,19 @@ body[data-view-mode="day"] .timeline-header {
     font-size: 0.9rem;
     color: #475569;
     font-style: italic;
+}
+
+.swap-accepted-info {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(16, 185, 129, 0.1);
+    border-left: 3px solid #10b981;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    color: #065f46;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .swap-request-actions {

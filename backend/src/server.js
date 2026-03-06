@@ -665,6 +665,34 @@ app.get('/teams', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/teams', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  const { id, name, color } = req.body;
+
+  if (!id || !name || !color) {
+    return res.status(400).json({ error: 'id, name en color zijn verplicht' });
+  }
+
+  if (!/^[a-z0-9_]+$/.test(id)) {
+    return res.status(400).json({ error: 'Team ID mag alleen lowercase letters, cijfers en underscores bevatten' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO teams (id, name, color) VALUES ($1, $2, $3) RETURNING *',
+      [id, name, color]
+    );
+
+    await logAudit(req, 'CREATE', 'settings', id, { action: 'create_team', name, color });
+    res.status(201).json({ team: result.rows[0] });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Een team met dit ID bestaat al' });
+    }
+    console.error('POST /teams error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // ===== USERS API (replaces employees) =====
 
 // Get all users (with schedule data) - for planning views
