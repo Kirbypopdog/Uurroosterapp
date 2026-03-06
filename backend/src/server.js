@@ -723,6 +723,31 @@ app.put('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijk
   }
 });
 
+app.delete('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Check if team has users assigned
+    const usersWithTeam = await pool.query(
+      'SELECT COUNT(*) as count FROM users WHERE team_id = $1 OR main_team = $1', [id]
+    );
+    if (parseInt(usersWithTeam.rows[0].count) > 0) {
+      return res.status(409).json({ error: `Team heeft nog ${usersWithTeam.rows[0].count} medewerker(s). Verplaats ze eerst naar een ander team.` });
+    }
+
+    const result = await pool.query('DELETE FROM teams WHERE id = $1 RETURNING *', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Team niet gevonden' });
+    }
+
+    await logAudit(req, 'DELETE', 'settings', id, { action: 'delete_team', name: result.rows[0].name });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /teams/:id error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // ===== USERS API (replaces employees) =====
 
 // Get all users (with schedule data) - for planning views

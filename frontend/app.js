@@ -7560,6 +7560,35 @@ async function editTeam(teamId) {
     }
 }
 
+async function deleteTeam(teamId) {
+    const team = DataStore.settings.teams[teamId];
+    if (!team) return;
+
+    const confirmed = await showConfirm(`Weet je zeker dat je team "${team.name}" wilt verwijderen?`);
+    if (!confirmed) return;
+
+    try {
+        delete DataStore.settings.teams[teamId];
+        await saveSettings('teams', DataStore.settings.teams);
+        applyTeamColors();
+        AppState.apiTeams = null;
+        syncTeamFilters();
+
+        try {
+            await apiFetch(`/teams/${teamId}`, { method: 'DELETE' });
+        } catch (e) {
+            console.warn('Teams DB delete skipped:', e.message);
+        }
+
+        showToast(`Team "${team.name}" verwijderd`, 'success');
+        renderSettings();
+    } catch (error) {
+        // Restore on failure
+        DataStore.settings.teams[teamId] = team;
+        showToast(error.message || 'Fout bij verwijderen team', 'error');
+    }
+}
+
 async function openAddTeamModal() {
     const teamName = await showInputPrompt('Team naam:', 'Nieuw team aanmaken');
     if (!teamName || !teamName.trim()) return;
@@ -7912,6 +7941,7 @@ function renderTeamsConfig() {
                 <button class="btn-icon-only" onclick="editTeam('${teamId}')" title="Naam bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
                 <input type="color" class="color-picker" value="${team.color}"
                        onchange="updateTeamColor('${teamId}', this.value)" title="Kleur wijzigen"/>
+                <button class="btn-icon-only danger" onclick="deleteTeam('${teamId}')" title="Verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
             </div>
         </div>`;
     });
