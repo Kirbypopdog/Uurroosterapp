@@ -7494,7 +7494,7 @@ function renderSettingsTeams(container) {
                     <p class="settings-card-subtitle">Beheer teamnamen en kleuren.</p>
                 </div>
                 <div class="settings-card-actions">
-                    <button class="btn btn-sm btn-secondary" id="btn-add-team">+ Nieuw team</button>
+                    <button class="btn btn-sm btn-secondary" id="btn-add-team">+ Nieuw</button>
                 </div>
             </div>
             <div class="settings-card-body">
