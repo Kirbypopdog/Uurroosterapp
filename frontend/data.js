@@ -203,7 +203,8 @@ async function loadDataFromAPI() {
             planningHorizon: apiSettings.planning_horizon || DataStore.settings.planningHorizon,
             schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
             schedule_drafts: apiSettings.schedule_drafts || DataStore.settings.schedule_drafts || [],
-            schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern
+            schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern,
+            emailNotifications: apiSettings.email_notifications || DataStore.settings.emailNotifications
         });
 
         // Use schedule_drafts from dedicated table if available (overrides settings fallback)

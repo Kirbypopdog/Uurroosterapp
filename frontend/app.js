@@ -4376,6 +4376,15 @@ function renderProfile() {
                             <span class="profile-meta-label">Toegang</span>
                             <span class="profile-meta-value">${escapeHtml(accessSummary)}</span>
                         </div>
+                        <div class="profile-meta-row">
+                            <span class="profile-meta-label">Email notificaties</span>
+                            <span class="profile-meta-value">
+                                <label class="toggle-switch" title="Ontvang email meldingen bij ruilverzoeken, overnames en ziekmeldingen">
+                                    <input type="checkbox" id="email-notifications-toggle" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -4396,6 +4405,25 @@ function renderProfile() {
         message.textContent = text;
         message.className = `form-message ${type}`;
     };
+
+    // Email notifications toggle
+    const emailToggle = document.getElementById('email-notifications-toggle');
+    if (emailToggle) {
+        emailToggle.addEventListener('change', async () => {
+            try {
+                const data = await apiFetch('/me/email-preferences', {
+                    method: 'PUT',
+                    body: JSON.stringify({ emailNotificationsEnabled: emailToggle.checked })
+                });
+                AppState.currentUser.emailNotificationsEnabled = data.emailNotificationsEnabled;
+                sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+                showToast(emailToggle.checked ? 'Email notificaties ingeschakeld' : 'Email notificaties uitgeschakeld', 'success');
+            } catch (error) {
+                emailToggle.checked = !emailToggle.checked;
+                showToast('Kon voorkeur niet opslaan: ' + error.message, 'error');
+            }
+        });
+    }
 
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -6689,6 +6717,9 @@ function renderSettingsTabContent(tabName) {
         case 'teams':
             renderSettingsTeams(content);
             break;
+        case 'email':
+            renderSettingsEmail(content);
+            break;
         case 'systeem':
             renderSettingsSystem(content);
             break;
@@ -6700,7 +6731,7 @@ function renderSettingsTabContent(tabName) {
     }
     IconHelper.init(content);
     // Track unsaved changes for all settings tabs with form inputs
-    if (['planning', 'rooster', 'teams'].includes(tabName)) {
+    if (['planning', 'rooster', 'teams', 'email'].includes(tabName)) {
         trackSettingsDirty(content);
     }
 }
@@ -7043,6 +7074,13 @@ function showEditAccountModal(user, teams, onSave) {
                             ${teamOptions}
                         </select>
                     </div>
+                    <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                        <label class="toggle-switch" style="flex-shrink: 0;">
+                            <input type="checkbox" id="edit-user-email-notif" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <label for="edit-user-email-notif" style="margin: 0; cursor: pointer;">Email notificaties</label>
+                    </div>
                     <div class="modal-actions" style="display: flex; justify-content: space-between; gap: 8px; width: 100%;">
                         <button type="button" class="btn btn-danger" id="edit-account-delete-btn">Verwijderen</button>
                         <div style="display: flex; gap: 8px;">
@@ -7085,6 +7123,7 @@ function showEditAccountModal(user, teams, onSave) {
         }
 
         try {
+            const emailNotif = form.querySelector('#edit-user-email-notif').checked;
             await apiFetch(`/admin/users/${user.id}`, {
                 method: 'PATCH',
                 body: JSON.stringify({
@@ -7092,7 +7131,8 @@ function showEditAccountModal(user, teams, onSave) {
                     email: newEmail,
                     role: newRole,
                     team_id: newTeamId,
-                    mainTeam: newTeamId
+                    mainTeam: newTeamId,
+                    emailNotificationsEnabled: emailNotif
                 })
             });
 
@@ -7639,6 +7679,124 @@ async function openAddTeamModal() {
     } catch (error) {
         showToast(error.message || 'Fout bij aanmaken team', 'error');
     }
+}
+
+// ===== SETTINGS TAB: EMAIL =====
+function renderSettingsEmail(container) {
+    const effectiveRole = getEffectiveRole();
+    if (effectiveRole !== 'admin' && effectiveRole !== 'roosterverantwoordelijke') {
+        container.innerHTML = '<p>Je hebt geen toegang tot deze instellingen.</p>';
+        return;
+    }
+
+    const emailSettings = DataStore.settings.emailNotifications || {
+        globalEnabled: true,
+        types: {
+            swap_request: true,
+            takeover_available: true,
+            sick_leave: true,
+            swap_approved: true,
+            swap_rejected: true,
+            takeover_accepted: true,
+            request_cancelled: true,
+            welcome: true
+        }
+    };
+
+    const emailTypes = [
+        { key: 'swap_request', label: 'Ruilverzoek aangemaakt', desc: 'Collega ontvangt mail bij een nieuw ruilverzoek' },
+        { key: 'takeover_available', label: 'Dienst beschikbaar voor overname', desc: 'Teamleden worden gemaild wanneer een dienst beschikbaar is' },
+        { key: 'sick_leave', label: 'Ziekmelding', desc: 'Verantwoordelijken worden gemaild bij een ziekmelding' },
+        { key: 'swap_approved', label: 'Ruil goedgekeurd', desc: 'Beide partijen worden gemaild na goedkeuring' },
+        { key: 'swap_rejected', label: 'Ruil afgewezen', desc: 'Aanvrager wordt gemaild bij afwijzing' },
+        { key: 'takeover_accepted', label: 'Dienst overgenomen', desc: 'Oorspronkelijke eigenaar wordt gemaild' },
+        { key: 'request_cancelled', label: 'Verzoek geannuleerd', desc: 'Betrokkenen worden gemaild bij annulering' },
+        { key: 'welcome', label: 'Welkomst-email', desc: 'Nieuwe medewerker ontvangt inloggegevens per mail' }
+    ];
+
+    const typeToggles = emailTypes.map(t => `
+        <div class="email-setting-row" id="email-type-row-${t.key}">
+            <div class="email-setting-info">
+                <span class="email-setting-label">${t.label}</span>
+                <span class="email-setting-desc">${t.desc}</span>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" data-email-type="${t.key}" ${emailSettings.types?.[t.key] !== false ? 'checked' : ''} ${!emailSettings.globalEnabled ? 'disabled' : ''} />
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+    `).join('');
+
+    container.innerHTML = `
+        <div class="settings-card">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Email & Notificaties</h3>
+                    <p class="settings-card-subtitle">Beheer welke emails automatisch verstuurd worden.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="email-setting-row email-setting-global">
+                    <div class="email-setting-info">
+                        <span class="email-setting-label" style="font-weight: 600;">Alle email notificaties</span>
+                        <span class="email-setting-desc">Schakel alle email notificaties in of uit</span>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="email-global-toggle" ${emailSettings.globalEnabled ? 'checked' : ''} />
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 8px 0;" />
+                ${typeToggles}
+                <div class="form-actions" style="margin-top: 16px;">
+                    <button type="button" class="btn btn-primary" id="email-settings-save-btn">Opslaan</button>
+                </div>
+                <div id="email-settings-message" class="form-message" style="display: none; margin-top: 8px;"></div>
+            </div>
+        </div>
+    `;
+
+    // Global toggle enables/disables individual toggles
+    const globalToggle = container.querySelector('#email-global-toggle');
+    const typeCheckboxes = container.querySelectorAll('[data-email-type]');
+
+    globalToggle.addEventListener('change', () => {
+        typeCheckboxes.forEach(cb => {
+            cb.disabled = !globalToggle.checked;
+        });
+    });
+
+    // Save button
+    container.querySelector('#email-settings-save-btn').addEventListener('click', async () => {
+        const saveBtn = container.querySelector('#email-settings-save-btn');
+        const msg = container.querySelector('#email-settings-message');
+        const settings = {
+            globalEnabled: globalToggle.checked,
+            types: {}
+        };
+        typeCheckboxes.forEach(cb => {
+            settings.types[cb.dataset.emailType] = cb.checked;
+        });
+
+        try {
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Opslaan...';
+            await saveSettings('email_notifications', settings);
+            DataStore.settings.emailNotifications = settings;
+            msg.textContent = 'Email instellingen opgeslagen.';
+            msg.className = 'form-message success';
+            msg.style.display = 'block';
+            markSettingsSaved();
+            showToast('Email instellingen opgeslagen', 'success');
+        } catch (err) {
+            msg.textContent = 'Opslaan mislukt: ' + (err.message || 'Onbekende fout');
+            msg.className = 'form-message error';
+            msg.style.display = 'block';
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Opslaan';
+        }
+    });
 }
 
 // ===== SETTINGS TAB: SYSTEEM =====

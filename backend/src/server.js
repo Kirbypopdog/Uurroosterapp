@@ -3,6 +3,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool } = require('./db');
+const emailService = require('./email');
 
 require('dotenv').config();
 
@@ -420,6 +421,11 @@ async function ensureSchema() {
     } catch (e) {
       // Constraint may already exist with correct values
     }
+
+    // Email notifications preference column
+    try {
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notifications_enabled BOOLEAN DEFAULT true`);
+    } catch (e) { /* already exists */ }
   } catch (err) {
     console.error('Schema check error:', err.message);
   } finally {
@@ -580,7 +586,8 @@ app.get('/me', requireAuth, async (req, res) => {
                 contract_hours as "contractHours", active,
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2",
-                week_schedules as "weekSchedules"
+                week_schedules as "weekSchedules",
+                email_notifications_enabled as "emailNotificationsEnabled"
          FROM users WHERE id = $1`,
         [req.user.id]
       );
@@ -647,6 +654,27 @@ app.put('/me', requireAuth, async (req, res) => {
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== EMAIL PREFERENCES =====
+
+app.put('/me/email-preferences', requireAuth, async (req, res) => {
+  const { emailNotificationsEnabled } = req.body || {};
+  if (typeof emailNotificationsEnabled !== 'boolean') {
+    return res.status(400).json({ error: 'emailNotificationsEnabled (boolean) is verplicht' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE users SET email_notifications_enabled = $1 WHERE id = $2
+       RETURNING email_notifications_enabled as "emailNotificationsEnabled"`,
+      [emailNotificationsEnabled, req.user.id]
+    );
+    await logAudit(req, 'UPDATE', 'user', req.user.id, { action: 'email_preferences', emailNotificationsEnabled });
+    res.json({ emailNotificationsEnabled: result.rows[0].emailNotificationsEnabled });
+  } catch (err) {
+    console.error('PUT /me/email-preferences error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -822,7 +850,8 @@ app.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
               contract_hours as "contractHours", active,
               week_schedule_week1 as "weekScheduleWeek1",
               week_schedule_week2 as "weekScheduleWeek2",
-                week_schedules as "weekSchedules"
+              week_schedules as "weekSchedules",
+              email_notifications_enabled as "emailNotificationsEnabled"
        FROM users ORDER BY name`
     );
     res.json({ users: result.rows });
@@ -877,6 +906,10 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
       ]
     );
     await logAudit(req, 'CREATE', 'user', result.rows[0].id, { user: { name, email, role, mainTeam } });
+
+    // Welkomst-email (fire-and-forget)
+    emailService.notifyWelcome({ name, email: email.toLowerCase() }, password);
+
     res.status(201).json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -887,7 +920,7 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
 // Update user (role, team, and schedule data)
 app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = Number(req.params.id);
-  const { role, team_id, name, email, mainTeam, extraTeams, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
+  const { role, team_id, name, email, mainTeam, extraTeams, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules, emailNotificationsEnabled } = req.body || {};
   if (!userId || !role) {
     return res.status(400).json({ error: 'Missing fields' });
   }
@@ -917,14 +950,16 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
            week_schedules = COALESCE($11::jsonb, jsonb_build_array(
              COALESCE($9::jsonb, week_schedule_week1),
              COALESCE($10::jsonb, week_schedule_week2)
-           ))
+           )),
+           email_notifications_enabled = COALESCE($13, email_notifications_enabled)
        WHERE id = $12
        RETURNING id, name, email, role, team_id,
                  main_team as "mainTeam", extra_teams as "extraTeams",
                  contract_hours as "contractHours", active,
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
-                week_schedules as "weekSchedules"`,
+                 week_schedules as "weekSchedules",
+                 email_notifications_enabled as "emailNotificationsEnabled"`,
       [
         role,
         team_id || mainTeam || null,
@@ -937,7 +972,8 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
         week1Json,
         week2Json,
         weekSchedulesJson,
-        userId
+        userId,
+        typeof emailNotificationsEnabled === 'boolean' ? emailNotificationsEnabled : null
       ]
     );
 
@@ -1767,6 +1803,24 @@ app.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
       conflictingShifts: conflictingShiftCount
     });
 
+    // Email notification to managers (fire-and-forget)
+    if (type === 'ziek') {
+      (async () => {
+        try {
+          const mgrs = await pool.query(
+            `SELECT id, name, email, email_notifications_enabled FROM users
+             WHERE role IN ('admin', 'roosterverantwoordelijke') AND active = true`
+          );
+          const emp = await pool.query(
+            'SELECT id, name, email FROM users WHERE id = $1', [userId]
+          );
+          if (emp.rows[0] && mgrs.rows.length > 0) {
+            emailService.notifySickLeave(mgrs.rows, emp.rows[0], startDate, endDate, conflictingShiftCount);
+          }
+        } catch (e) { console.error('Email notification error:', e.message); }
+      })();
+    }
+
     res.status(201).json({
       availability,
       takeoverRequests: takeoverCount,
@@ -1999,6 +2053,28 @@ app.post('/swap-requests', requireAuth, async (req, res) => {
     );
 
     await logAudit(req, 'CREATE', 'swap_request', insertResult.rows[0].id, { requester: currentUserId, target: targetShift.user_id, type: 'swap' });
+
+    // Email notification (fire-and-forget)
+    (async () => {
+      try {
+        const usersResult = await pool.query(
+          'SELECT id, name, email, email_notifications_enabled FROM users WHERE id = ANY($1)',
+          [[currentUserId, targetShift.user_id]]
+        );
+        const fullShifts = await pool.query(
+          'SELECT id, user_id, date::text as date, start_time, end_time, team FROM shifts WHERE id = ANY($1)',
+          [[requesterShiftId, targetShiftId]]
+        );
+        const requesterUser = usersResult.rows.find(u => u.id === currentUserId);
+        const targetUser = usersResult.rows.find(u => u.id === targetShift.user_id);
+        const rShift = fullShifts.rows.find(s => s.id === parseInt(requesterShiftId));
+        const tShift = fullShifts.rows.find(s => s.id === parseInt(targetShiftId));
+        if (requesterUser && targetUser && rShift && tShift) {
+          emailService.notifySwapRequest(targetUser, requesterUser, rShift, tShift);
+        }
+      } catch (e) { console.error('Email notification error:', e.message); }
+    })();
+
     res.status(201).json({ swapRequest: insertResult.rows[0] });
   } catch (err) {
     console.error('POST /swap-requests error:', err);
@@ -2092,6 +2168,22 @@ app.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     await client.query('COMMIT');
     await logAudit(req, 'APPROVE', 'swap_request', swapId, { swap: { requester: swap.requester_user_id, target: swap.target_user_id, type: 'swap' } });
 
+    // Email notification (fire-and-forget)
+    (async () => {
+      try {
+        const usersResult = await pool.query(
+          'SELECT id, name, email, email_notifications_enabled FROM users WHERE id = ANY($1)',
+          [[swap.requester_user_id, swap.target_user_id]]
+        );
+        const requesterUser = usersResult.rows.find(u => u.id === swap.requester_user_id);
+        const targetUser = usersResult.rows.find(u => u.id === swap.target_user_id);
+        const approverName = targetUser ? targetUser.name : 'Collega';
+        const rShift = { date: swap.requester_date, start_time: swap.requester_start, end_time: swap.requester_end, team: swap.requester_team };
+        const tShift = { date: swap.target_date, start_time: swap.target_start, end_time: swap.target_end, team: swap.target_team };
+        emailService.notifySwapApproved([requesterUser, targetUser].filter(Boolean), approverName, rShift, tShift);
+      } catch (e) { console.error('Email notification error:', e.message); }
+    })();
+
     res.json({ ok: true, message: 'Swap geaccepteerd en uitgevoerd' });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -2156,6 +2248,22 @@ app.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
 
     await client.query('COMMIT');
     await logAudit(req, 'REJECT', 'swap_request', swapId, { swap: { requester: swap.requester_user_id, target: swap.target_user_id, reason: responseNotes } });
+
+    // Email notification (fire-and-forget)
+    (async () => {
+      try {
+        const usersResult = await pool.query(
+          'SELECT id, name, email, email_notifications_enabled FROM users WHERE id = ANY($1)',
+          [[swap.requester_user_id, swap.target_user_id]]
+        );
+        const requesterUser = usersResult.rows.find(u => u.id === swap.requester_user_id);
+        const targetUser = usersResult.rows.find(u => u.id === swap.target_user_id);
+        const rejectorName = targetUser ? targetUser.name : 'Collega';
+        if (requesterUser) {
+          emailService.notifySwapRejected([requesterUser], rejectorName, responseNotes);
+        }
+      } catch (e) { console.error('Email notification error:', e.message); }
+    })();
 
     res.json({ ok: true, message: 'Swap afgewezen' });
   } catch (err) {
@@ -2227,6 +2335,25 @@ app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
 
     await client.query('COMMIT');
     await logAudit(req, 'CREATE', 'swap_request', '', { type: 'takeover', shiftId, shiftOwner: shift.user_id, createdBy: currentUserId });
+
+    // Email notification to team members (fire-and-forget)
+    (async () => {
+      try {
+        const shiftTeam = shift.team;
+        const teamMembers = await pool.query(
+          `SELECT id, name, email, email_notifications_enabled FROM users
+           WHERE active = true AND (main_team = $1 OR $1 = ANY(extra_teams))`,
+          [shiftTeam]
+        );
+        const requester = await pool.query(
+          'SELECT id, name, email FROM users WHERE id = $1', [shift.user_id]
+        );
+        if (requester.rows[0]) {
+          const fullShift = { date: shift.date, start_time: shift.start_time, end_time: shift.end_time, team: shift.team };
+          emailService.notifyTakeoverAvailable(teamMembers.rows, requester.rows[0], fullShift);
+        }
+      } catch (e) { console.error('Email notification error:', e.message); }
+    })();
 
     res.json({ ok: true, message: 'Open verzoek aangemaakt' });
   } catch (err) {
@@ -2316,6 +2443,22 @@ app.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => 
     await client.query('COMMIT');
     await logAudit(req, 'APPROVE', 'swap_request', requestId, { type: 'takeover', requester: request.requester_user_id, acceptedBy: currentUserId });
 
+    // Email notification to original owner (fire-and-forget)
+    (async () => {
+      try {
+        const usersResult = await pool.query(
+          'SELECT id, name, email, email_notifications_enabled FROM users WHERE id = ANY($1)',
+          [[request.requester_user_id, currentUserId]]
+        );
+        const originalOwner = usersResult.rows.find(u => u.id === request.requester_user_id);
+        const acceptor = usersResult.rows.find(u => u.id === currentUserId);
+        if (originalOwner && acceptor) {
+          const shiftInfo = { date: request.date, start_time: request.start_time, end_time: request.end_time, team: request.team };
+          emailService.notifyTakeoverAccepted(originalOwner, acceptor, shiftInfo);
+        }
+      } catch (e) { console.error('Email notification error:', e.message); }
+    })();
+
     res.json({ ok: true, message: 'Shift overgenomen' });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -2402,6 +2545,23 @@ app.put('/swap-requests/:id/approve', requireAuth, async (req, res) => {
     await client.query('COMMIT');
     await logAudit(req, 'APPROVE', 'swap_request', swapId, { type: 'lead_approval', requester: swap.requester_user_id, target: swap.target_user_id, approvedBy: currentUserId });
 
+    // Email notification (fire-and-forget)
+    (async () => {
+      try {
+        const usersResult = await pool.query(
+          'SELECT id, name, email, email_notifications_enabled FROM users WHERE id = ANY($1)',
+          [[swap.requester_user_id, swap.target_user_id, currentUserId]]
+        );
+        const requesterUser = usersResult.rows.find(u => u.id === swap.requester_user_id);
+        const targetUser = usersResult.rows.find(u => u.id === swap.target_user_id);
+        const approver = usersResult.rows.find(u => u.id === currentUserId);
+        const approverName = approver ? approver.name : 'Verantwoordelijke';
+        const rShift = { date: swap.requester_date, start_time: null, end_time: null, team: swap.requester_team };
+        const tShift = { date: swap.target_date, start_time: null, end_time: null, team: swap.target_team };
+        emailService.notifySwapApproved([requesterUser, targetUser].filter(Boolean), approverName, rShift, tShift);
+      } catch (e) { console.error('Email notification error:', e.message); }
+    })();
+
     res.json({ ok: true, message: 'Swap goedgekeurd en uitgevoerd' });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -2467,6 +2627,22 @@ app.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
 
     await client.query('COMMIT');
     await logAudit(req, 'REJECT', 'swap_request', swapId, { type: 'lead_rejection', requester: swap.requester_user_id, target: swap.target_user_id, reason: responseNotes, rejectedBy: currentUserId });
+
+    // Email notification (fire-and-forget)
+    (async () => {
+      try {
+        const usersResult = await pool.query(
+          'SELECT id, name, email, email_notifications_enabled FROM users WHERE id = ANY($1)',
+          [[swap.requester_user_id, swap.target_user_id, currentUserId]]
+        );
+        const requesterUser = usersResult.rows.find(u => u.id === swap.requester_user_id);
+        const targetUser = usersResult.rows.find(u => u.id === swap.target_user_id);
+        const rejector = usersResult.rows.find(u => u.id === currentUserId);
+        const rejectorName = rejector ? rejector.name : 'Verantwoordelijke';
+        emailService.notifySwapRejected([requesterUser, targetUser].filter(Boolean), rejectorName, responseNotes);
+      } catch (e) { console.error('Email notification error:', e.message); }
+    })();
+
     res.json({ ok: true, message: 'Swap afgewezen' });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -2522,6 +2698,30 @@ app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
     );
 
     await logAudit(req, 'CANCEL', 'swap_request', swapId, { type: swap.request_type, requester: swap.requester_user_id, cancelledBy: currentUserId });
+
+    // Email notification (fire-and-forget)
+    (async () => {
+      try {
+        const affectedIds = [swap.requester_user_id, swap.target_user_id].filter(Boolean);
+        if (affectedIds.length > 0) {
+          const usersResult = await pool.query(
+            'SELECT id, name, email, email_notifications_enabled FROM users WHERE id = ANY($1)',
+            [affectedIds]
+          );
+          const canceller = usersResult.rows.find(u => u.id === currentUserId);
+          const cancellerName = canceller ? canceller.name : 'Iemand';
+          const recipients = usersResult.rows.filter(u => u.id !== currentUserId);
+          if (recipients.length > 0) {
+            const shiftResult = await pool.query(
+              'SELECT date::text as date, start_time, end_time, team FROM shifts WHERE id = $1',
+              [swap.requester_shift_id]
+            );
+            emailService.notifyRequestCancelled(recipients, cancellerName, shiftResult.rows[0] || null);
+          }
+        }
+      } catch (e) { console.error('Email notification error:', e.message); }
+    })();
+
     res.json({ ok: true, message: 'Swap request geannuleerd' });
   } catch (err) {
     console.error('DELETE /swap-requests/:id error:', err);
