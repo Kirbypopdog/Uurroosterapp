@@ -312,8 +312,8 @@ async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom 
             body: JSON.stringify(body)
         });
 
-        // Refresh all affected caches
-        await Promise.all([refreshUsers(), refreshShifts(), refreshAvailability()]);
+        // Refresh all affected caches (including activities which may be transferred)
+        await Promise.all([refreshUsers(), refreshShifts(), refreshAvailability(), refreshActivities()]);
 
         return result;
     } catch (error) {
