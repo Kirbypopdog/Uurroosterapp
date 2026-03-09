@@ -2624,6 +2624,16 @@ function renderTimelineView() {
                             // Remove inline onclick - handled by DragHandler
                             const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
+                            // Render activity chips inside the block
+                            const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
+                            const actTypeLabels = { oudergesprek: 'OG', vorming: 'Vorm', overleg: 'Overl', afspraak: 'Afsp', andere: 'And' };
+                            let actChips = '';
+                            shiftActivities.forEach(act => {
+                                const lbl = actTypeLabels[act.type] || act.type;
+                                const t = `${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}`;
+                                actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
+                            });
+
                             html += `<div class="${blockClass}"
                                          data-shift-id="${shift.id}"
                                          data-employee-id="${shift.employeeId}"
@@ -2632,6 +2642,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 <span class="block-time">${shift.startTime}-${shift.endTime}</span>
+                                ${actChips}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -2776,6 +2787,16 @@ function renderTimelineView() {
                             const canEdit = canUserEditShift(shift);
                             const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
+                            // Render activity chips inside the block
+                            const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
+                            const actTypeLabels = { oudergesprek: 'OG', vorming: 'Vorm', overleg: 'Overl', afspraak: 'Afsp', andere: 'And' };
+                            let actChips = '';
+                            shiftActivities.forEach(act => {
+                                const lbl = actTypeLabels[act.type] || act.type;
+                                const t = `${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}`;
+                                actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
+                            });
+
                             html += `<div class="${blockClass}"
                                          data-shift-id="${shift.id}"
                                          data-employee-id="${shift.employeeId}"
@@ -2784,6 +2805,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 <span class="block-time">${shift.startTime}-${shift.endTime}</span>
+                                ${actChips}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });

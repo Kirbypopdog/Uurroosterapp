@@ -2693,11 +2693,21 @@ body[data-view-mode="day"] .timeline-header {
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 3px;
     cursor: pointer;
     transition: all 0.15s;
     box-shadow: 0 1px 3px rgba(0,0,0,0.15);
     overflow: hidden;
     min-width: 20px;
+}
+
+/* Activity chips inside timeline blocks - compact inline style */
+.timeline-block .activity-chip {
+    padding: 0 3px;
+    font-size: 8px;
+    border-left-width: 2px;
+    border-radius: 2px;
+    line-height: 14px;
 }
 
 .timeline-block:hover {
