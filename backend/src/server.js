@@ -426,6 +426,14 @@ async function ensureSchema() {
     try {
       await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notifications_enabled BOOLEAN DEFAULT true`);
     } catch (e) { /* already exists */ }
+
+    // Add 'expired' to swap request status constraint
+    try {
+      await client.query(`ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS shift_swap_requests_status_check`);
+      await client.query(`ALTER TABLE shift_swap_requests ADD CONSTRAINT shift_swap_requests_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead', 'expired'))`);
+    } catch (e) {
+      console.log(`  Status constraint update: ${e.message}`);
+    }
   } catch (err) {
     console.error('Schema check error:', err.message);
   } finally {
@@ -1925,6 +1933,16 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
   const { role, team_id, id: currentUserId } = req.user;
 
   try {
+    // Lazy expiry: auto-expire pending requests where the shift date has passed
+    await pool.query(`
+      UPDATE shift_swap_requests sr
+      SET status = 'expired', responded_at = NOW()
+      FROM shifts s
+      WHERE sr.requester_shift_id = s.id
+        AND sr.status IN ('pending', 'pending_lead')
+        AND s.date < CURRENT_DATE
+    `);
+
     let query;
     let params = [];
 

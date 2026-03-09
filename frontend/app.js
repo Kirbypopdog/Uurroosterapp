@@ -1311,16 +1311,13 @@ function renderHome() {
     if (!user) return;
 
     const role = getEffectiveRole();
-    const isLeadOrAdmin = ['admin', 'roosterverantwoordelijke'].includes(role);
 
     let html = '';
     html += renderHomeWelcome(user, role);
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
     html += renderHomeQuickActions(role);
-    if (isLeadOrAdmin) {
-        html += renderHomeWeekendInfo();
-    }
+    html += renderHomeWeekendInfo();
     html += renderHomeRequests(user, role);
     html += '</div>';
 
@@ -1467,7 +1464,7 @@ function renderHomeRequests(user, role) {
     const isLeadOrAdmin = ['admin', 'roosterverantwoordelijke'].includes(role);
 
     let pendingRequests = (DataStore.swapRequests || []).filter(r => {
-        if (r.status !== 'pending') return false;
+        if (r.status !== 'pending' && r.status !== 'pending_lead') return false;
 
         if (isLeadOrAdmin) return true;
         // Medewerker: eigen requests + takeover requests van eigen team
@@ -5309,13 +5306,17 @@ async function renderSwaps() {
         // Separate requests by category
         const targetPendingRequests = swapRequests.filter(sr => canTargetRespondToSwap(sr));
         const pendingRequests = swapRequests.filter(sr => sr.status === 'pending' && canApproveSwap(sr));
-        // Mijn verzoeken: only show requests where I am the REQUESTER (not target)
+        // Mijn verzoeken: only show requests where I am the REQUESTER (not target), exclude expired
         const myRequests = swapRequests.filter(sr =>
-            sr.requester_user_id === currentUser.id
+            sr.requester_user_id === currentUser.id && sr.status !== 'expired'
         );
         const historyRequests = swapRequests.filter(sr =>
-            sr.status !== 'pending' && canApproveSwap(sr)
+            sr.status !== 'pending' && sr.status !== 'expired' && canApproveSwap(sr)
         ).slice(0, 10); // Show last 10
+        // Expired requests: own requests that have expired
+        const expiredRequests = swapRequests.filter(sr =>
+            sr.status === 'expired' && sr.requester_user_id === currentUser.id
+        ).slice(0, 10);
         // Open takeover requests: available to everyone except the requester
         const openTakeoverRequests = swapRequests.filter(sr =>
             sr.request_type === 'takeover' &&
@@ -5414,6 +5415,27 @@ async function renderSwaps() {
 
         html += `</div>`;
 
+        // Section 3.5: Expired requests (collapsible)
+        if (expiredRequests.length > 0) {
+            html += `<div class="swap-section swap-section-expired">
+                <h3 style="cursor: pointer; opacity: 0.6;" onclick="this.parentElement.classList.toggle('expanded')">
+                    Verlopen
+                    <span class="swap-section-count" style="background: #94a3b8;">${expiredRequests.length}</span>
+                    <span style="font-size: 0.8rem; font-weight: 400; margin-left: 0.5rem;">klik om te tonen</span>
+                </h3>
+                <div class="expired-requests-list" style="display: none;">`;
+
+            expiredRequests.forEach(sr => {
+                if (sr.request_type === 'takeover') {
+                    html += renderTakeoverRequestCard(sr, 'view');
+                } else {
+                    html += renderSwapRequestCard(sr, 'view');
+                }
+            });
+
+            html += `</div></div>`;
+        }
+
         // Section 4: History (for lead approvers only - hidden for now)
         if (false && canApproveSwap({ requester_shift_team: 'any', target_shift_team: 'any' })) {
             html += `<div class="swap-section">
@@ -5468,7 +5490,8 @@ function renderSwapRequestCard(swapRequest, mode) {
         'pending': 'In behandeling',
         'approved': 'Goedgekeurd',
         'rejected': 'Afgewezen',
-        'cancelled': 'Geannuleerd'
+        'cancelled': 'Geannuleerd',
+        'expired': 'Verlopen'
     };
 
     const createdDate = new Date(swapRequest.created_at).toLocaleDateString('nl-NL', {
@@ -5576,6 +5599,7 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
     const statusLabels = {
         'pending': 'Beschikbaar',
         'approved': 'Overgenomen',
+        'expired': 'Verlopen',
         'rejected': 'Afgewezen',
         'cancelled': 'Geannuleerd'
     };
@@ -8137,6 +8161,11 @@ function renderTemplatesConfig() {
 }
 
 function getTemplateIcon(templateId) {
+    const template = DataStore.settings.shiftTemplates[templateId];
+    if (template?.icon) {
+        return IconHelper.html(template.icon, 'sm');
+    }
+    // Fallback for legacy templates without icon property
     const iconMap = {
         'vroeg': ICONS.early,
         'laat': ICONS.late,
@@ -8253,8 +8282,33 @@ async function deleteTemplate(templateId) {
 function openTemplateModal(templateId = null, template = null) {
     const isEdit = templateId !== null;
     const title = isEdit ? 'Template bewerken' : 'Nieuwe template';
-    const safeTemplateId = escapeHtml(templateId || '');
     const safeTemplateName = escapeHtml(template?.name || '');
+    const currentIcon = template?.icon || '';
+
+    const iconOptions = [
+        { id: 'sunrise', label: 'Ochtend' },
+        { id: 'sun', label: 'Middag' },
+        { id: 'sunset', label: 'Avond' },
+        { id: 'moon', label: 'Nacht' },
+        { id: 'star', label: 'Weekend' },
+        { id: 'clock', label: 'Standaard' },
+        { id: 'coffee', label: 'Pauze' },
+        { id: 'briefcase', label: 'Kantoor' },
+        { id: 'graduation-cap', label: 'Vorming' },
+        { id: 'users', label: 'Overleg' },
+        { id: 'heart', label: 'Zorg' },
+        { id: 'zap', label: 'Spoed' }
+    ];
+
+    let iconPickerHtml = '<div class="template-icon-picker">';
+    iconOptions.forEach(opt => {
+        const selected = currentIcon === opt.id ? 'selected' : '';
+        iconPickerHtml += `<button type="button" class="template-icon-option ${selected}" data-icon="${opt.id}" title="${opt.label}" onclick="selectTemplateIcon(this)">
+            ${IconHelper.html(opt.id, 'md')}
+            <span class="template-icon-label">${opt.label}</span>
+        </button>`;
+    });
+    iconPickerHtml += '</div>';
 
     const modalHtml = `
     <div class="modal" id="template-modal-overlay" onclick="closeTemplateModal()">
@@ -8264,14 +8318,7 @@ function openTemplateModal(templateId = null, template = null) {
                 <button class="modal-close" onclick="closeTemplateModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
-                <div class="form-group">
-                    <label for="template-id">Template ID:</label>
-                    <input type="text" id="template-id" class="form-input"
-                           value="${safeTemplateId}"
-                           ${isEdit ? 'readonly' : ''}
-                           placeholder="bv. vroeg, laat, nacht" />
-                    <span class="form-hint">Korte identifier (geen spaties)</span>
-                </div>
+                <input type="hidden" id="template-id" value="${escapeHtml(templateId || '')}" />
                 <div class="form-group">
                     <label for="template-name">Naam:</label>
                     <input type="text" id="template-name" class="form-input"
@@ -8290,6 +8337,10 @@ function openTemplateModal(templateId = null, template = null) {
                                value="${template ? template.end : '17:00'}" />
                     </div>
                 </div>
+                <div class="form-group">
+                    <label>Icoon:</label>
+                    ${iconPickerHtml}
+                </div>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeTemplateModal()">Annuleren</button>
@@ -8302,43 +8353,51 @@ function openTemplateModal(templateId = null, template = null) {
     IconHelper.init(document.getElementById('template-modal-overlay'));
 }
 
+function selectTemplateIcon(btn) {
+    btn.closest('.template-icon-picker').querySelectorAll('.template-icon-option').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+}
+
 function closeTemplateModal() {
     const modal = document.getElementById('template-modal-overlay');
     if (modal) modal.remove();
 }
 
 function saveTemplate(originalId) {
-    const rawId = document.getElementById('template-id').value.trim().toLowerCase().replace(/\s+/g, '_');
-    const id = rawId.replace(/[^a-z0-9_-]/g, '');
     const name = document.getElementById('template-name').value.trim();
     const start = document.getElementById('template-start').value;
     const end = document.getElementById('template-end').value;
+    const selectedIconBtn = document.querySelector('.template-icon-option.selected');
+    const icon = selectedIconBtn ? selectedIconBtn.dataset.icon : '';
 
-    if (!id || !name || !start || !end) {
+    if (!name || !start || !end) {
         showToast('Vul alle velden in', 'warning');
         return;
     }
 
-    if (start >= end) {
-        showToast('Starttijd moet voor eindtijd liggen', 'warning');
+    // Auto-generate ID from name (slugify)
+    let id = originalId || name.toLowerCase()
+        .replace(/[àáâãäå]/g, 'a').replace(/[èéêë]/g, 'e').replace(/[ìíîï]/g, 'i')
+        .replace(/[òóôõö]/g, 'o').replace(/[ùúûü]/g, 'u')
+        .replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '');
+
+    if (!id) {
+        showToast('Naam moet minstens één letter of cijfer bevatten', 'warning');
         return;
     }
 
-    if (rawId !== id) {
-        showToast('Template ID mag enkel letters, cijfers, _ of - bevatten', 'warning');
-        return;
-    }
-
+    // Ensure unique ID for new templates
     if (!originalId && DataStore.settings.shiftTemplates[id]) {
-        showToast('Een template met deze ID bestaat al', 'warning');
-        return;
+        let suffix = 2;
+        while (DataStore.settings.shiftTemplates[`${id}_${suffix}`]) suffix++;
+        id = `${id}_${suffix}`;
     }
 
     if (originalId && originalId !== id) {
         delete DataStore.settings.shiftTemplates[originalId];
     }
 
-    DataStore.settings.shiftTemplates[id] = { name, start, end };
+    DataStore.settings.shiftTemplates[id] = { name, start, end, icon };
     saveToStorage();
     closeTemplateModal();
     renderSettings();

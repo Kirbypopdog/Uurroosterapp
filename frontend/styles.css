@@ -4426,6 +4426,43 @@ body[data-view-mode="day"] .timeline-header {
     gap: 4px;
 }
 
+.template-icon-picker {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.template-icon-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 4px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary, #f8fafc);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.template-icon-option:hover {
+    border-color: var(--primary-color);
+    background: #eff6ff;
+}
+
+.template-icon-option.selected {
+    border-color: var(--primary-color);
+    background: #dbeafe;
+    box-shadow: 0 0 0 1px var(--primary-color);
+}
+
+.template-icon-label {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
 .btn-icon-only {
     width: 32px;
     height: 32px;
@@ -7191,6 +7228,24 @@ body[data-view-mode="day"] .timeline-header {
 
 .swap-section-available .swap-section-count {
     background: #10b981;
+}
+
+.swap-section-expired .expired-requests-list {
+    display: none;
+}
+
+.swap-section-expired.expanded .expired-requests-list {
+    display: block;
+}
+
+.swap-section-expired .swap-request-card,
+.swap-section-expired .takeover-card {
+    opacity: 0.6;
+}
+
+.swap-status-badge.status-expired {
+    background: #94a3b8;
+    color: white;
 }
 
 #swap-validation-display,
