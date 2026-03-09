@@ -4041,6 +4041,27 @@ body[data-view-mode="day"] .timeline-header {
     transform: translateY(-1px);
 }
 
+.admin-user-row {
+    position: relative;
+}
+
+.admin-user-inactive {
+    opacity: 0.55;
+}
+
+.admin-user-row > .status-badge.inactive {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #fecaca;
+    color: #991b1b;
+    font-size: 10px;
+    font-weight: 600;
+    z-index: 1;
+}
+
 .admin-field label {
     display: block;
     font-size: 12px;

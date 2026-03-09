@@ -301,6 +301,27 @@ async function deleteEmployee(id) {
     }
 }
 
+async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom = null) {
+    try {
+        const body = { replacementUserId };
+        if (transferShiftsFrom) {
+            body.transferShiftsFrom = transferShiftsFrom;
+        }
+        const result = await dataApiFetch(`/admin/users/${oldUserId}/replace`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+
+        // Refresh all affected caches
+        await Promise.all([refreshUsers(), refreshShifts(), refreshAvailability()]);
+
+        return result;
+    } catch (error) {
+        console.error('Fout bij vervangen medewerker:', error);
+        throw error;
+    }
+}
+
 function getEmployee(id) {
     // Find in all users (employees are non-admin users)
     return DataStore.users.find(e => e.id === id);

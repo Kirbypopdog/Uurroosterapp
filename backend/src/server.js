@@ -1129,6 +1129,126 @@ app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (re
   }
 });
 
+// ===== REPLACE EMPLOYEE =====
+
+app.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) => {
+  const oldUserId = Number(req.params.id);
+  const { replacementUserId, transferShiftsFrom } = req.body;
+  const newUserId = Number(replacementUserId);
+
+  if (!oldUserId || !newUserId) {
+    return res.status(400).json({ error: 'Oud en nieuw gebruiker ID zijn verplicht' });
+  }
+  if (oldUserId === newUserId) {
+    return res.status(400).json({ error: 'Oud en nieuw gebruiker mogen niet dezelfde zijn' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Lock both users to prevent race conditions
+    const oldUserResult = await client.query(
+      `SELECT id, name, main_team, team_id, extra_teams, contract_hours,
+              week_schedules, week_schedule_week1, week_schedule_week2
+       FROM users WHERE id = $1 FOR UPDATE`,
+      [oldUserId]
+    );
+    const newUserResult = await client.query(
+      `SELECT id, name, active FROM users WHERE id = $1 FOR UPDATE`,
+      [newUserId]
+    );
+
+    if (oldUserResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Vertrekkende medewerker niet gevonden' });
+    }
+    if (newUserResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Nieuwe medewerker niet gevonden' });
+    }
+
+    const oldUser = oldUserResult.rows[0];
+    const newUser = newUserResult.rows[0];
+
+    // 1. Copy week_schedules from old to new
+    await client.query(
+      `UPDATE users SET
+        week_schedules = $1,
+        week_schedule_week1 = $2,
+        week_schedule_week2 = $3
+       WHERE id = $4`,
+      [
+        JSON.stringify(oldUser.week_schedules),
+        JSON.stringify(oldUser.week_schedule_week1),
+        JSON.stringify(oldUser.week_schedule_week2),
+        newUserId
+      ]
+    );
+
+    // 2. Optionally transfer future shifts
+    let shiftsTransferred = 0;
+    if (transferShiftsFrom) {
+      const transferResult = await client.query(
+        `UPDATE shifts SET user_id = $1 WHERE user_id = $2 AND date >= $3`,
+        [newUserId, oldUserId, transferShiftsFrom]
+      );
+      shiftsTransferred = transferResult.rowCount;
+
+      // Also transfer shift_blocks for transferred dates
+      await client.query(
+        `UPDATE shift_blocks sb SET user_id = $1
+         WHERE sb.user_id = $2 AND sb.date >= $3
+         AND NOT EXISTS (SELECT 1 FROM shift_blocks sb2 WHERE sb2.user_id = $1 AND sb2.date = sb.date)`,
+        [newUserId, oldUserId, transferShiftsFrom]
+      );
+
+      // Transfer activities for transferred dates
+      await client.query(
+        `UPDATE shift_activities SET user_id = $1 WHERE user_id = $2 AND date >= $3`,
+        [newUserId, oldUserId, transferShiftsFrom]
+      );
+    }
+
+    // 3. Deactivate old user
+    await client.query(
+      `UPDATE users SET active = false WHERE id = $1`,
+      [oldUserId]
+    );
+
+    // 4. Regenerate shifts for new user (only if no shift transfer)
+    let regenerateResult = null;
+    if (!transferShiftsFrom) {
+      regenerateResult = await regenerateShiftsForUser(client, newUserId, { clearBlocks: true });
+    }
+
+    await client.query('COMMIT');
+
+    await logAudit(req, 'REPLACE', 'user', oldUserId, {
+      oldUser: { id: oldUserId, name: oldUser.name },
+      newUser: { id: newUserId, name: newUser.name },
+      shiftsTransferred,
+      transferFrom: transferShiftsFrom || null,
+      scheduleCopied: true,
+      regenerated: regenerateResult ? regenerateResult.created : 0
+    });
+
+    res.json({
+      ok: true,
+      oldUser: { id: oldUserId, name: oldUser.name },
+      newUser: { id: newUserId, name: newUser.name },
+      shiftsTransferred,
+      shiftsGenerated: regenerateResult ? regenerateResult.created : 0
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Replace user error:', err);
+    res.status(500).json({ error: 'Server error bij vervanging' });
+  } finally {
+    client.release();
+  }
+});
+
 // ===== APPLY SCHEDULE (shift regeneration in single transaction) =====
 
 // Helper: regenerate shifts for a single user within an existing transaction

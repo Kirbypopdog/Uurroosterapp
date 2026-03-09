@@ -6951,8 +6951,11 @@ async function loadAdminUsers(container) {
             <option value="medewerker">Medewerker</option>
         `;
 
-        const rows = users.map(user => `
-            <div class="admin-user-row" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email)}" data-team="${user.team_id || ''}" data-role="${user.role}">
+        const rows = users.map(user => {
+            const isInactive = user.active === false;
+            return `
+            <div class="admin-user-row${isInactive ? ' admin-user-inactive' : ''}" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email)}" data-team="${user.team_id || ''}" data-role="${user.role}">
+                ${isInactive ? '<span class="status-badge inactive">Inactief</span>' : ''}
                 <div class="admin-user-header">
                     <div>
                         <div class="admin-user-name">${escapeHtml(user.name)}</div>
@@ -6963,8 +6966,8 @@ async function loadAdminUsers(container) {
                         <button type="button" class="btn btn-sm btn-secondary admin-edit-btn">Bewerken</button>
                     </div>
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
 
         const list = container.querySelector('#admin-users-list');
         list.innerHTML = rows || '<p>Geen accounts gevonden.</p>';
@@ -7029,12 +7032,6 @@ async function loadAdminUsers(container) {
 function showAddUserModal(teams) {
     const teamOptions = teams.map(team => `<option value="${team.id}">${escapeHtml(team.name)}</option>`).join('');
 
-    // Get employees that don't have a linked user yet (for linking)
-    const employees = getAllEmployees(true);
-    const employeeOptions = employees.map(emp =>
-        `<option value="${emp.id}" data-name="${escapeHtml(emp.name)}" data-email="${escapeHtml(emp.email || '')}" data-team="${emp.mainTeam || ''}">${escapeHtml(emp.name)}</option>`
-    ).join('');
-
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'add-user-modal';
@@ -7047,14 +7044,6 @@ function showAddUserModal(teams) {
             </div>
             <div class="modal-body">
                 <form id="add-user-form">
-                    <div class="form-group">
-                        <label for="new-user-employee">Koppel aan medewerker</label>
-                        <select id="new-user-employee" class="form-input">
-                            <option value="">(nieuwe medewerker)</option>
-                            ${employeeOptions}
-                        </select>
-                        <span class="form-hint">Selecteer een bestaande medewerker om te koppelen, of laat leeg voor een nieuwe</span>
-                    </div>
                     <div class="form-group">
                         <label for="new-user-name">Naam</label>
                         <input type="text" id="new-user-name" class="form-input" required />
@@ -7099,19 +7088,6 @@ function showAddUserModal(teams) {
     document.body.appendChild(modal);
     IconHelper.init(modal);
 
-    // Auto-fill when selecting an employee
-    const employeeSelect = modal.querySelector('#new-user-employee');
-    employeeSelect.addEventListener('change', () => {
-        const selected = employeeSelect.selectedOptions[0];
-        if (selected && selected.value) {
-            form.querySelector('#new-user-name').value = selected.dataset.name || '';
-            form.querySelector('#new-user-email').value = selected.dataset.email || '';
-            if (selected.dataset.team) {
-                form.querySelector('#new-user-team').value = selected.dataset.team;
-            }
-        }
-    });
-
     // Update role description on change
     const roleSelect = modal.querySelector('#new-user-role');
     const roleHint = modal.querySelector('#new-user-role-hint');
@@ -7122,7 +7098,6 @@ function showAddUserModal(teams) {
     const form = modal.querySelector('#add-user-form');
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const employee_id = form.querySelector('#new-user-employee').value || null;
         const name = form.querySelector('#new-user-name').value.trim();
         const email = form.querySelector('#new-user-email').value.trim();
         const password = form.querySelector('#new-user-password').value;
@@ -7146,7 +7121,7 @@ function showAddUserModal(teams) {
                     role,
                     team_id,
                     mainTeam: team_id, // Also set mainTeam for schedule/employee grouping
-                    employee_id: employee_id ? Number(employee_id) : null
+                    employee_id: null
                 })
             });
             // Add the new user to the local DataStore cache
@@ -7173,50 +7148,55 @@ function showEditAccountModal(user, teams, onSave) {
     modal.id = 'edit-account-modal';
     modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 450px;">
+        <div class="modal-content" style="max-width: 480px;">
             <div class="modal-header">
                 <h2>Account bewerken</h2>
                 <button class="modal-close" onclick="document.getElementById('edit-account-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body" style="padding: 12px 16px;">
                 <form id="edit-account-form">
-                    <div class="form-group">
-                        <label for="edit-user-name">Naam</label>
-                        <input type="text" id="edit-user-name" class="form-input" value="${escapeHtml(user.name)}" required />
+                    <div class="form-row" style="display: flex; gap: 10px;">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="edit-user-name">Naam</label>
+                            <input type="text" id="edit-user-name" class="form-input" value="${escapeHtml(user.name)}" required />
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="edit-user-email">Email</label>
+                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email)}" required />
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="edit-user-email">Email</label>
-                        <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email)}" required />
+                    <div class="form-row" style="display: flex; gap: 10px;">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="edit-user-role">Rol</label>
+                            <select id="edit-user-role" class="form-input" required>
+                                <option value="medewerker" ${user.role === 'medewerker' ? 'selected' : ''}>Medewerker</option>
+                                <option value="roosterverantwoordelijke" ${user.role === 'roosterverantwoordelijke' ? 'selected' : ''}>Roosterverantw.</option>
+                                <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+                            </select>
+                            <span class="form-hint role-hint" id="edit-user-role-hint" style="font-size: 11px;">${getRoleDescription(user.role)}</span>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="edit-user-team">Team</label>
+                            <select id="edit-user-team" class="form-input">
+                                <option value="">(geen team)</option>
+                                ${teamOptions}
+                            </select>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="edit-user-role">Rol</label>
-                        <select id="edit-user-role" class="form-input" required>
-                            <option value="medewerker" ${user.role === 'medewerker' ? 'selected' : ''}>Medewerker</option>
-                            <option value="roosterverantwoordelijke" ${user.role === 'roosterverantwoordelijke' ? 'selected' : ''}>Roosterverantwoordelijke</option>
-                            <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
-                        </select>
-                        <span class="form-hint role-hint" id="edit-user-role-hint">${getRoleDescription(user.role)}</span>
-                    </div>
-                    <div class="form-group">
-                        <label for="edit-user-team">Team</label>
-                        <select id="edit-user-team" class="form-input">
-                            <option value="">(geen team)</option>
-                            ${teamOptions}
-                        </select>
-                    </div>
-                    <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                    <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
                         <label class="toggle-switch" style="flex-shrink: 0;">
                             <input type="checkbox" id="edit-user-email-notif" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
                             <span class="toggle-slider"></span>
                         </label>
-                        <label for="edit-user-email-notif" style="margin: 0; cursor: pointer;">Email notificaties</label>
+                        <label for="edit-user-email-notif" style="margin: 0; cursor: pointer; font-size: 13px;">Email notificaties</label>
                     </div>
-                    <div class="modal-actions" style="display: flex; justify-content: space-between; gap: 8px; width: 100%;">
-                        <button type="button" class="btn btn-danger" id="edit-account-delete-btn">Verwijderen</button>
-                        <div style="display: flex; gap: 8px;">
-                            <button type="button" class="btn btn-secondary" id="edit-account-reset-btn">Reset wachtwoord</button>
-                            <button type="submit" class="btn btn-primary">Opslaan</button>
+                    <div class="modal-actions" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; padding-top: 8px; border-top: 1px solid var(--border-color, #e2e8f0);">
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <button type="button" class="btn btn-danger btn-sm" id="edit-account-delete-btn">${IconHelper.html('trash-2', 'xs')}</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="edit-account-replace-btn">${IconHelper.html('user-round-plus', 'xs')} Vervang</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="edit-account-reset-btn">${IconHelper.html('key-round', 'xs')} Reset ww</button>
                         </div>
+                        <button type="submit" class="btn btn-primary btn-sm">Opslaan</button>
                     </div>
                 </form>
             </div>
@@ -7319,6 +7299,159 @@ function showEditAccountModal(user, teams, onSave) {
             if (onSave) onSave();
         } catch (error) {
             showToast(`Verwijderen mislukt: ${error.message}`, 'error');
+        }
+    });
+
+    // Replace button
+    modal.querySelector('#edit-account-replace-btn').addEventListener('click', () => {
+        modal.remove();
+        showReplaceEmployeeModal(user, onSave);
+    });
+}
+
+function showReplaceEmployeeModal(departingUser, onComplete) {
+    const activeUsers = DataStore.users.filter(u =>
+        u.active !== false && String(u.id) !== String(departingUser.id)
+    );
+
+    if (activeUsers.length === 0) {
+        showToast('Geen andere actieve medewerkers beschikbaar', 'warning');
+        return;
+    }
+
+    const userOptions = activeUsers.map(u =>
+        `<option value="${u.id}">${escapeHtml(u.name)} (${escapeHtml(u.role)})</option>`
+    ).join('');
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.id = 'replace-employee-modal';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>${IconHelper.html('user-round-plus', 'md')} Medewerker vervangen</h2>
+                <button class="modal-close" onclick="document.getElementById('replace-employee-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
+            </div>
+            <div class="modal-body">
+                <div class="info-box neutral" style="margin-bottom: 16px;">
+                    <p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster wordt gekopieerd naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>
+                </div>
+                <form id="replace-employee-form">
+                    <div class="form-group">
+                        <label for="replace-new-user">Nieuwe medewerker *</label>
+                        <select id="replace-new-user" class="form-input" required>
+                            <option value="">-- Kies medewerker --</option>
+                            ${userOptions}
+                        </select>
+                    </div>
+                    <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                        <label class="toggle-switch" style="flex-shrink: 0;">
+                            <input type="checkbox" id="replace-transfer-shifts" />
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <label for="replace-transfer-shifts" style="margin: 0; cursor: pointer;">Toekomstige diensten overnemen</label>
+                    </div>
+                    <div class="form-group" id="replace-date-group" style="display: none;">
+                        <label for="replace-from-date">Overnemen vanaf *</label>
+                        <input type="date" id="replace-from-date" class="form-input" value="${today}" min="${today}" />
+                    </div>
+                    <div id="replace-summary" style="display: none; margin-top: 12px;"></div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('replace-employee-modal').remove()">Annuleren</button>
+                        <button type="submit" class="btn btn-primary">Vervangen</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    IconHelper.init(modal);
+
+    // Toggle date picker
+    const transferCheckbox = modal.querySelector('#replace-transfer-shifts');
+    const dateGroup = modal.querySelector('#replace-date-group');
+    transferCheckbox.addEventListener('change', () => {
+        dateGroup.style.display = transferCheckbox.checked ? '' : 'none';
+        updateReplaceSummary();
+    });
+
+    // Update summary on changes
+    modal.querySelector('#replace-new-user').addEventListener('change', updateReplaceSummary);
+    modal.querySelector('#replace-from-date').addEventListener('change', updateReplaceSummary);
+
+    function updateReplaceSummary() {
+        const summaryEl = modal.querySelector('#replace-summary');
+        const newUserId = modal.querySelector('#replace-new-user').value;
+        const newUser = activeUsers.find(u => String(u.id) === String(newUserId));
+        const transfer = transferCheckbox.checked;
+        const fromDate = modal.querySelector('#replace-from-date').value;
+
+        if (!newUser) {
+            summaryEl.style.display = 'none';
+            return;
+        }
+
+        let summaryHtml = '<div class="info-box warning"><strong>Samenvatting:</strong><ul style="margin: 8px 0 0 0; padding-left: 20px;">';
+        summaryHtml += `<li>Basisrooster van <strong>${escapeHtml(departingUser.name)}</strong> wordt gekopieerd naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
+
+        if (transfer && fromDate) {
+            const futureShifts = DataStore.shifts.filter(s =>
+                String(s.employeeId) === String(departingUser.id) && s.date >= fromDate
+            );
+            summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${fromDate})</li>`;
+        } else {
+            summaryHtml += `<li>Nieuwe diensten worden automatisch gegenereerd op basis van het basisrooster</li>`;
+        }
+
+        summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
+        summaryHtml += '</ul></div>';
+
+        summaryEl.innerHTML = summaryHtml;
+        summaryEl.style.display = '';
+    }
+
+    // Submit handler
+    modal.querySelector('#replace-employee-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const newUserId = modal.querySelector('#replace-new-user').value;
+        if (!newUserId) {
+            showToast('Selecteer een nieuwe medewerker', 'warning');
+            return;
+        }
+
+        const transfer = transferCheckbox.checked;
+        const fromDate = transfer ? modal.querySelector('#replace-from-date').value : null;
+
+        if (transfer && !fromDate) {
+            showToast('Selecteer een datum voor overname', 'warning');
+            return;
+        }
+
+        const newUser = activeUsers.find(u => String(u.id) === String(newUserId));
+        const confirmMsg = `Weet je zeker dat je ${departingUser.name} wilt vervangen door ${newUser.name}?\n\nDeze actie kan niet ongedaan worden gemaakt.`;
+
+        if (!await showConfirm(confirmMsg, 'Medewerker vervangen')) return;
+
+        try {
+            const result = await replaceEmployee(Number(departingUser.id), Number(newUserId), fromDate);
+            modal.remove();
+
+            let msg = `${departingUser.name} vervangen door ${newUser.name}`;
+            if (result.shiftsTransferred > 0) {
+                msg += ` (${result.shiftsTransferred} diensten overgedragen)`;
+            } else if (result.shiftsGenerated > 0) {
+                msg += ` (${result.shiftsGenerated} diensten gegenereerd)`;
+            }
+            showToast(msg, 'success');
+
+            if (onComplete) onComplete();
+        } catch (error) {
+            showToast(`Vervanging mislukt: ${error.message}`, 'error');
         }
     });
 }
