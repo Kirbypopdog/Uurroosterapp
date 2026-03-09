@@ -1133,11 +1133,11 @@ function setupEventListeners() {
             await handleShiftDelete(shiftId);
         }
 
-        // Activity badge click → edit activity
-        const activityBadge = e.target.closest('.activity-badge');
-        if (activityBadge) {
+        // Activity chip/badge click → edit activity
+        const activityEl = e.target.closest('.activity-chip, .activity-badge');
+        if (activityEl) {
             e.stopPropagation();
-            const activityId = activityBadge.dataset.activityId;
+            const activityId = activityEl.dataset.activityId;
             if (activityId) openEditActivityModal(parseInt(activityId, 10));
         }
 
@@ -3227,27 +3227,22 @@ function renderShiftBlock(shift, stackInfo = { offset: 0, total: 1, groupShifts:
         countBadge = `<span class="shift-count-badge">${stackInfo.total}</span>`;
     }
 
-    // Render activities within this shift as overlays
+    // Render activities as visible chips inside the shift block
     const activities = getActivitiesByEmployee(shift.employeeId, shift.date);
     const activityTypeLabels = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', andere: 'Andere' };
     let activitiesHtml = '';
-    activities.forEach(act => {
-        const [aStartH, aStartM] = act.startTime.split(':').map(Number);
-        const [aEndH, aEndM] = act.endTime.split(':').map(Number);
-        const aStartFrac = aStartH + aStartM / 60 - START_HOUR;
-        const aEndFrac = aEndH + aEndM / 60 - START_HOUR;
-        // Position relative to shift block
-        const aTop = (aStartFrac - startFractional) / (endFractional - startFractional) * 100;
-        const aHeight = (aEndFrac - aStartFrac) / (endFractional - startFractional) * 100;
-        const label = activityTypeLabels[act.type] || act.type;
-        const desc = act.description ? ` - ${escapeHtml(act.description)}` : '';
-        activitiesHtml += `<div class="activity-badge activity-type-${escapeHtml(act.type)}"
-            data-activity-id="${act.id}"
-            style="top: ${Math.max(0, aTop)}%; height: ${Math.min(100 - Math.max(0, aTop), aHeight)}%;"
-            title="${escapeHtml(label)}${desc} (${act.startTime}-${act.endTime})">
-            <span class="activity-label">${escapeHtml(label)}</span>
-        </div>`;
-    });
+    if (activities.length > 0) {
+        activitiesHtml = '<div class="shift-activities-chips">';
+        activities.forEach(act => {
+            const label = activityTypeLabels[act.type] || act.type;
+            const timeStr = `${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}`;
+            const desc = act.description ? ` - ${escapeHtml(act.description)}` : '';
+            activitiesHtml += `<div class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(label)}${desc} (${timeStr})">
+                <span class="activity-chip-time">${timeStr}</span> ${escapeHtml(label)}
+            </div>`;
+        });
+        activitiesHtml += '</div>';
+    }
 
     // Add activity button (only if user can edit)
     const canEdit = canUserEditShift(shift);
@@ -3260,11 +3255,11 @@ function renderShiftBlock(shift, stackInfo = { offset: 0, total: 1, groupShifts:
         <div class="shift-block-content">
             <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
             <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
+            ${activitiesHtml}
             ${countBadge}
             ${addActivityBtn}
             ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">${IconHelper.html(ICONS.close, 'xs')}</button>` : ''}
         </div>
-        ${activitiesHtml}
     </div>`;
 }
 

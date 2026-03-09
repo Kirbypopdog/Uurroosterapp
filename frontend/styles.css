@@ -3170,62 +3170,64 @@ body[data-view-mode="day"] .timeline-header {
     font-weight: 500;
 }
 
-/* Activity badges within shift blocks */
-.activity-badge {
-    position: absolute;
-    left: 2px;
-    right: 2px;
-    border-radius: 3px;
-    cursor: pointer;
-    z-index: 5;
+/* Activity chips within shift blocks */
+.shift-activities-chips {
     display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin-top: 2px;
+}
+
+.activity-chip {
+    display: inline-flex;
     align-items: center;
-    padding: 0 4px;
-    overflow: hidden;
-    border-left: 3px solid;
-    opacity: 0.92;
-    transition: opacity 0.15s;
-}
-
-.activity-badge:hover {
-    opacity: 1;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-}
-
-.activity-label {
+    gap: 3px;
+    padding: 1px 5px;
+    border-radius: 3px;
     font-size: 9px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
+    cursor: pointer;
+    border-left: 3px solid;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 100%;
+    transition: filter 0.15s;
+}
+
+.activity-chip:hover {
+    filter: brightness(0.9);
+}
+
+.activity-chip-time {
+    opacity: 0.75;
+    font-weight: 500;
 }
 
 .activity-type-oudergesprek {
-    background: rgba(251, 191, 36, 0.35);
-    border-color: #f59e0b;
-    color: #92400e;
+    background: rgba(251, 191, 36, 0.7);
+    border-color: #d97706;
+    color: #78350f;
 }
 .activity-type-vorming {
-    background: rgba(167, 139, 250, 0.35);
-    border-color: #8b5cf6;
-    color: #5b21b6;
+    background: rgba(196, 181, 253, 0.7);
+    border-color: #7c3aed;
+    color: #4c1d95;
 }
 .activity-type-overleg {
-    background: rgba(52, 211, 153, 0.35);
-    border-color: #10b981;
-    color: #065f46;
+    background: rgba(110, 231, 183, 0.7);
+    border-color: #059669;
+    color: #064e3b;
 }
 .activity-type-afspraak {
-    background: rgba(96, 165, 250, 0.35);
-    border-color: #3b82f6;
-    color: #1e40af;
+    background: rgba(147, 197, 253, 0.7);
+    border-color: #2563eb;
+    color: #1e3a5f;
 }
 .activity-type-andere {
-    background: rgba(156, 163, 175, 0.35);
+    background: rgba(209, 213, 219, 0.7);
     border-color: #6b7280;
-    color: #374151;
+    color: #1f2937;
 }
 
 /* Add activity button on shift block */
