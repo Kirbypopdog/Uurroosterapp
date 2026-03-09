@@ -7671,6 +7671,74 @@ body[data-view-mode="day"] .timeline-header {
 
 /* ===== ROOSTERBOUWER (Schedule Builder) ===== */
 
+/* Builder settings panels (collapsible) */
+.builder-settings-panels {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.builder-settings-panel {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--surface-color);
+    overflow: hidden;
+}
+.builder-settings-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+.builder-settings-header:hover {
+    background: var(--bg-color);
+}
+.builder-settings-header h4 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+}
+.builder-settings-summary {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 60%;
+}
+.builder-settings-chevron {
+    transition: transform 0.2s;
+    flex-shrink: 0;
+}
+.builder-settings-panel.expanded .builder-settings-chevron {
+    transform: rotate(180deg);
+}
+.builder-settings-body {
+    display: none;
+    padding: 0 16px 16px;
+    border-top: 1px solid var(--border-color);
+}
+.builder-settings-panel.expanded .builder-settings-body {
+    display: block;
+}
+.builder-settings-body .form-group {
+    margin-top: 12px;
+}
+.builder-settings-body .form-group:first-child {
+    margin-top: 4px;
+}
+.builder-weekend-responsible {
+    display: block;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--accent-color);
+    margin-top: 2px;
+}
+
 .builder-controls {
     background: var(--surface-color);
     border: 1px solid var(--border-color);
@@ -7710,6 +7778,26 @@ body[data-view-mode="day"] .timeline-header {
     gap: 8px;
     flex-wrap: wrap;
     align-items: center;
+}
+
+.builder-loaded-draft {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #1e40af;
+    margin-left: auto;
+}
+
+.builder-draft-unsaved {
+    color: #92400e;
+    font-weight: 400;
+    font-style: italic;
 }
 
 .builder-team-label-static {
@@ -8439,16 +8527,59 @@ body[data-view-mode="day"] .timeline-header {
     transform: translateX(2px);
 }
 
-/* ===== DRAFT APPLIED BADGE ===== */
-.builder-draft-applied-badge {
+/* ===== DRAFT BADGES ===== */
+.builder-draft-badge {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 4px;
     font-size: 11px;
     font-weight: 600;
+    margin-left: 4px;
+}
+.draft-badge-active {
+    background: #065f46;
+    color: #fff;
+}
+.draft-badge-applied {
     background: #d1fae5;
     color: #065f46;
-    margin-left: 4px;
+}
+.draft-badge-scheduled {
+    background: #fef3c7;
+    color: #92400e;
+}
+.draft-badge-expired {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+.draft-badge-activatable {
+    background: #dbeafe;
+    color: #1e40af;
+}
+.draft-active {
+    border-color: #065f46 !important;
+    box-shadow: 0 0 0 2px #065f46;
+}
+.draft-activatable {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 1px #3b82f6;
+}
+
+/* Builder notification for activatable drafts */
+.builder-notification {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    font-weight: 500;
+}
+.builder-notification.info {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e40af;
 }
 
 /* ===== TEAM COVERAGE HEATMAP ===== */

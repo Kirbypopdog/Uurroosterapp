@@ -13,7 +13,9 @@ function parseDateOnly(value) {
         return new Date(value.getFullYear(), value.getMonth(), value.getDate());
     }
     if (typeof value === 'string') {
-        const parts = value.split('-').map(Number);
+        // Handle ISO timestamps like "2026-03-01T23:00:00.000Z" → extract date part
+        const dateOnly = value.includes('T') ? value.split('T')[0] : value;
+        const parts = dateOnly.split('-').map(Number);
         if (parts.length === 3 && parts.every(part => Number.isFinite(part))) {
             return new Date(parts[0], parts[1] - 1, parts[2]);
         }
@@ -211,11 +213,12 @@ async function loadDataFromAPI() {
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
-            planningHorizon: apiSettings.planning_horizon || DataStore.settings.planningHorizon,
+            // planningHorizon: legacy, replaced by school year logic
             schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
             schedule_drafts: apiSettings.schedule_drafts || DataStore.settings.schedule_drafts || [],
             schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern,
-            emailNotifications: apiSettings.email_notifications || DataStore.settings.emailNotifications
+            emailNotifications: apiSettings.email_notifications || DataStore.settings.emailNotifications,
+            schoolYearStart: apiSettings.school_year_start || DataStore.settings.schoolYearStart
         });
 
         // Use schedule_drafts from dedicated table if available (overrides settings fallback)
@@ -1645,10 +1648,57 @@ async function deleteScheduleDraft(id) {
     });
 }
 
-async function applyScheduleDraft(draftId, { clearBlocks = true } = {}) {
+async function applyScheduleDraft(draftId, { clearBlocks = true, applyStartDate = null, applyEndDate = null } = {}) {
     return dataApiFetch(`/schedule-drafts/${draftId}/apply`, {
         method: 'POST',
-        body: JSON.stringify({ clearBlocks })
+        body: JSON.stringify({ clearBlocks, applyStartDate, applyEndDate })
+    });
+}
+
+// ===== SCHOOLJAAR =====
+
+function getSchoolYearStart() {
+    const raw = DataStore.settings.schoolYearStart?.date || null;
+    if (!raw) {
+        // Default: September 1 of the current school year
+        const now = new Date();
+        const year = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+        return `${year}-09-01`;
+    }
+    // Handle ISO timestamps: extract YYYY-MM-DD part
+    if (raw.includes('T')) return raw.split('T')[0];
+    return raw;
+}
+
+function getSchoolWeekNumber(date) {
+    const start = getSchoolYearStart();
+    if (!start) return null;
+    const currentMonday = getMonday(parseDateOnly(date));
+    currentMonday.setHours(0, 0, 0, 0);
+    // Find the school year that contains this date (adjusts year automatically)
+    const startDate = parseDateOnly(start);
+    const syMonth = startDate.getMonth();
+    const syDay = startDate.getDate();
+    let syYear = currentMonday.getFullYear();
+    let thisYearStart = new Date(syYear, syMonth, syDay);
+    thisYearStart.setHours(0, 0, 0, 0);
+    if (currentMonday < thisYearStart) {
+        syYear--;
+        thisYearStart = new Date(syYear, syMonth, syDay);
+        thisYearStart.setHours(0, 0, 0, 0);
+    }
+    const startMonday = getMonday(thisYearStart);
+    startMonday.setHours(0, 0, 0, 0);
+    const diffWeeks = Math.round((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
+    return diffWeeks + 1; // 1-based
+}
+
+async function saveSchoolYearStart(date) {
+    DataStore.settings.schoolYearStart = { date };
+    saveToStorage();
+    await apiFetch('/settings/school_year_start', {
+        method: 'PUT',
+        body: JSON.stringify({ value: { date } })
     });
 }
 

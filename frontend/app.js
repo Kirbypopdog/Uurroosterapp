@@ -27,7 +27,12 @@ const AppState = {
     builderWeekNumber: 1,        // 1 or 2 (bi-weekly)
     builderTeamFilter: null,
     builderGrid: {},             // { [userId]: { [dayIndex0to6]: { startTime, endTime, team } } }
+    builderGridByWeek: {},       // { [weekNumber]: builderGrid } — cache per week bij switchen
+    builderLoadedDraftId: null,   // ID van het geladen concept (null = geen concept geladen)
+    builderLoadedDraftName: null, // naam van het geladen concept
     builderIsDirty: false,
+    builderPatternExpanded: false,
+    builderRotationExpanded: false,
     showHeatmap: false,
     settingsDirty: false,
     employeeSortMode: 'name',
@@ -532,11 +537,27 @@ function hideSectionLoading(viewId) {
 
 function updateShiftRefreshRange() {
     if (!AppState.currentWeekStart) return;
+    // Start: 2 weeks before current view
     const start = new Date(AppState.currentWeekStart);
     start.setDate(start.getDate() - 14);
-    const horizon = DataStore.settings?.planningHorizon?.weeks || 4;
-    const end = new Date(AppState.currentWeekStart);
-    end.setDate(end.getDate() + (horizon * 7) + 14);
+    // End: end of current school year (default: 31 aug) + 2 weeks buffer
+    const now = new Date();
+    const syStart = getSchoolYearStart();
+    let schoolYearStartMonth = 8; // 0-based September
+    if (syStart) {
+        const syDate = parseDateOnly(syStart);
+        if (syDate) schoolYearStartMonth = syDate.getMonth();
+    }
+    const schoolYearEndMonth = schoolYearStartMonth === 0 ? 11 : schoolYearStartMonth - 1;
+    let schoolYearEndYear = now.getFullYear();
+    const testEnd = new Date(schoolYearEndYear, schoolYearEndMonth + 1, 0); // last day of end month
+    if (testEnd <= now) schoolYearEndYear++;
+    const schoolYearEnd = new Date(schoolYearEndYear, schoolYearEndMonth + 1, 0); // last day of end month
+    // Use whichever is further: current view + 2 weeks or school year end + 2 weeks
+    const viewEnd = new Date(AppState.currentWeekStart);
+    viewEnd.setDate(viewEnd.getDate() + 21); // current week + 2 weeks buffer
+    const end = new Date(Math.max(schoolYearEnd.getTime(), viewEnd.getTime()));
+    end.setDate(end.getDate() + 14); // extra buffer
     setActiveShiftRange(formatDateYYYYMMDD(start), formatDateYYYYMMDD(end));
 }
 
@@ -2014,8 +2035,9 @@ function updatePeriodDisplay() {
         const options = { day: 'numeric', month: 'long', year: 'numeric' };
         const startStr = AppState.currentWeekStart.toLocaleDateString('nl-BE', options);
         const endStr = weekEnd.toLocaleDateString('nl-BE', options);
-        const weekNumber = getWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart));
-        DOM.currentPeriod.textContent = `Week ${weekNumber} | ${startStr} - ${endStr}`;
+        const schoolWeek = getSchoolWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart));
+        const weekLabel = schoolWeek ? `Week ${schoolWeek}` : `Week ${getISOWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart))}`;
+        DOM.currentPeriod.textContent = `${weekLabel} | ${startStr} - ${endStr}`;
     }
 }
 
@@ -5906,6 +5928,10 @@ function renderBuilder() {
     // Don't auto-lock team filter - roosterverantwoordelijke can build for all teams
 
     let html = '';
+    html += `<div class="builder-settings-panels">`;
+    html += renderBuilderPatternPanel();
+    html += renderBuilderRotationPanel();
+    html += `</div>`;
     html += renderBuilderControls(role, userTeam);
     html += renderBuilderGrid(role, userTeam);
     html += renderBuilderActions();
@@ -5913,6 +5939,96 @@ function renderBuilder() {
     container.innerHTML = html;
     IconHelper.init(container);
     attachBuilderEventListeners(container);
+}
+
+function renderBuilderPatternPanel() {
+    const pattern = getSchedulePattern();
+    const cl = pattern.cycleLength || 2;
+    const dayLabels = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
+
+    // Summary text
+    let summaryParts = [`${cl} weken`];
+    for (let w = 1; w <= cl; w++) {
+        const closed = getClosedDaysForWeek(w);
+        const label = closed.length > 0 ? formatClosedDays(closed) : 'alle dagen open';
+        summaryParts.push(`W${w}: ${label}`);
+    }
+    const summary = summaryParts.join(' | ');
+
+    // Week rows for editing
+    let weekRows = '';
+    for (let w = 1; w <= cl; w++) {
+        const closed = getClosedDaysForWeek(w);
+        weekRows += `<div class="form-group schedule-pattern-week">
+            <label>Week ${w} - Gesloten dagen:</label>
+            <div class="schedule-pattern-days">
+                ${[1,2,3,4,5,6,0].map(d => `<label class="schedule-day-checkbox">
+                    <input type="checkbox" class="pattern-closed-day" data-week="${w}" data-day="${d}" ${closed.includes(d) ? 'checked' : ''}>
+                    <span>${dayLabels[d]}</span>
+                </label>`).join('')}
+            </div>
+        </div>`;
+    }
+
+    const expanded = AppState.builderPatternExpanded;
+    return `
+        <div class="builder-settings-panel${expanded ? ' expanded' : ''}" id="builder-pattern-panel">
+            <div class="builder-settings-header" id="builder-pattern-toggle">
+                <i data-lucide="settings" style="width:14px;height:14px;flex-shrink:0"></i>
+                <h4>Roosterpatroon</h4>
+                <span class="builder-settings-summary">${escapeHtml(summary)}</span>
+                <i data-lucide="chevron-down" class="builder-settings-chevron" style="width:14px;height:14px"></i>
+            </div>
+            <div class="builder-settings-body">
+                <div class="form-group">
+                    <label for="schedule-cycle-length">Cycluslengte (weken):</label>
+                    <input type="number" id="schedule-cycle-length" class="form-input" min="1" max="8" value="${cl}" style="width: 80px;" />
+                </div>
+                <div id="schedule-pattern-weeks">${weekRows}</div>
+                <div class="form-group">
+                    <label for="schedule-reference-date">Referentie maandag (Week 1 start):</label>
+                    <input type="date" id="schedule-reference-date" class="form-input" value="${pattern.referenceDate || DataStore.settings.biWeeklyReferenceDate || ''}" />
+                    <span class="form-hint">Selecteer altijd een maandag</span>
+                </div>
+                <button class="btn btn-primary btn-sm" id="save-schedule-pattern-btn">Patroon opslaan</button>
+            </div>
+        </div>`;
+}
+
+function renderBuilderRotationPanel() {
+    const rotation = DataStore.settings.responsibleRotation || {};
+    const eligibleTeams = rotation.eligibleTeams || [];
+    const teams = DataStore.settings.teams || {};
+    const teamNames = eligibleTeams.map(t => teams[t]?.name || t).join(', ') || 'geen';
+    const startEmp = rotation.rotationStartEmployee
+        ? getAllEmployees(true).find(e => String(e.id) === String(rotation.rotationStartEmployee))
+        : null;
+    const summary = `Teams: ${teamNames}${startEmp ? ` | Start: ${startEmp.name}` : ''}`;
+
+    const expanded = AppState.builderRotationExpanded;
+    return `
+        <div class="builder-settings-panel${expanded ? ' expanded' : ''}" id="builder-rotation-panel">
+            <div class="builder-settings-header" id="builder-rotation-toggle">
+                <i data-lucide="refresh-cw" style="width:14px;height:14px;flex-shrink:0"></i>
+                <h4>Weekendverantwoordelijke</h4>
+                <span class="builder-settings-summary">${escapeHtml(summary)}</span>
+                <i data-lucide="chevron-down" class="builder-settings-chevron" style="width:14px;height:14px"></i>
+            </div>
+            <div class="builder-settings-body">
+                <div class="eligible-teams-compact" style="margin-top:4px">
+                    ${renderEligibleTeamsCheckboxes()}
+                </div>
+                <div class="rotation-form" style="margin-top:12px">
+                    ${renderRotationSettingsCompact()}
+                </div>
+                <div class="upcoming-section" style="margin-top:16px">
+                    <h4 style="font-size:13px;margin:0 0 8px">Komende open weekenden</h4>
+                    <div class="upcoming-responsibles">
+                        ${renderUpcomingResponsibles()}
+                    </div>
+                </div>
+            </div>
+        </div>`;
 }
 
 function renderBuilderControls(role, userTeam) {
@@ -5950,6 +6066,13 @@ function renderBuilderControls(role, userTeam) {
                     <button class="btn btn-secondary btn-sm" id="builder-load-base">Huidig basisrooster laden</button>
                     <button class="btn btn-secondary btn-sm" id="builder-load-blank">Leeg beginnen</button>
                 </div>
+                ${AppState.builderLoadedDraftName ? `
+                    <div class="builder-loaded-draft">
+                        <i data-lucide="file-text" style="width:14px;height:14px"></i>
+                        Concept: <strong>${escapeHtml(AppState.builderLoadedDraftName)}</strong>
+                        ${AppState.builderIsDirty ? '<span class="builder-draft-unsaved">(gewijzigd)</span>' : '<span class="builder-draft-saved">(opgeslagen)</span>'}
+                    </div>
+                ` : ''}
             </div>
         </div>
     `;
@@ -5983,6 +6106,21 @@ function renderBuilderGrid(role, userTeam) {
         return dayIndex === 6 ? 0 : dayIndex + 1;
     }
 
+    // Calculate weekend responsible for open weekends
+    let weekendResponsibleName = '';
+    const weekendOpen = !builderClosedDays.includes(6) || !builderClosedDays.includes(0); // Za=6 or Zo=0
+    if (weekendOpen && typeof getOrCalculateResponsible === 'function') {
+        // Use reference date + current builder week to find a representative weekend
+        const pattern = getSchedulePattern();
+        const refDate = parseDateOnly(pattern.referenceDate || DataStore.settings.biWeeklyReferenceDate || '2025-01-06');
+        // Find next occurrence of this cycle week from reference
+        const weekOffset = (AppState.builderWeekNumber - 1);
+        const sampleMonday = new Date(refDate);
+        sampleMonday.setDate(sampleMonday.getDate() + weekOffset * 7);
+        const resp = getOrCalculateResponsible(sampleMonday);
+        if (resp) weekendResponsibleName = resp.name;
+    }
+
     // Header
     html += '<div class="builder-grid-header">';
     html += '<div class="builder-name-header">Medewerker</div>';
@@ -5994,7 +6132,9 @@ function renderBuilderGrid(role, userTeam) {
         if (isWeekend) headerClass += ' weekend';
         if (isClosed) headerClass += ' closed';
         const label = isClosed ? `${name} (Gesloten)` : name;
-        html += `<div class="${headerClass}"><span class="day-name">${label}</span></div>`;
+        const respBadge = (isWeekend && !isClosed && weekendResponsibleName)
+            ? `<span class="builder-weekend-responsible">${escapeHtml(weekendResponsibleName)}</span>` : '';
+        html += `<div class="${headerClass}"><span class="day-name">${label}</span>${respBadge}</div>`;
     });
     html += '<div class="builder-hours-header">Uren</div>';
     html += '</div>';
@@ -6244,14 +6384,74 @@ function renderBuilderActions() {
     const hasData = Object.keys(AppState.builderGrid).length > 0 &&
         Object.values(AppState.builderGrid).some(d => Object.keys(d).length > 0);
 
+    const saveLabel = AppState.builderLoadedDraftId ? 'Opslaan' : 'Concept opslaan';
+    const showSaveAs = !!AppState.builderLoadedDraftId;
+
     return `
         <div class="builder-actions">
             <button class="btn btn-primary" id="builder-save-draft" ${!hasData ? 'disabled' : ''}>
-                Concept opslaan
+                ${saveLabel}
             </button>
+            ${showSaveAs ? `<button class="btn btn-secondary" id="builder-save-draft-as" ${!hasData ? 'disabled' : ''}>Opslaan als...</button>` : ''}
         </div>
         ${renderBuilderDrafts()}
     `;
+}
+
+function getDraftStatus(draft, newestActiveId) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (draft.lastAppliedAt) {
+        if (draft.lastAppliedFrom && draft.lastAppliedUntil) {
+            const fromDate = parseDateOnly(draft.lastAppliedFrom);
+            const untilDate = parseDateOnly(draft.lastAppliedUntil);
+            fromDate.setHours(0, 0, 0, 0);
+            untilDate.setHours(0, 0, 0, 0);
+            const from = fromDate.toLocaleDateString('nl-BE');
+            const until = untilDate.toLocaleDateString('nl-BE');
+            if (today >= fromDate && today <= untilDate) {
+                // Only the most recently applied draft with overlapping period is "active"
+                if (newestActiveId && draft.id !== newestActiveId) {
+                    return { label: `Overschreven: ${from} – ${until}`, cls: 'expired' };
+                }
+                return { label: `Actief: ${from} – ${until}`, cls: 'active' };
+            }
+            if (fromDate > today) {
+                return { label: `Ingepland: ${from} – ${until}`, cls: 'scheduled' };
+            }
+            return { label: `Verlopen: ${from} – ${until}`, cls: 'expired' };
+        }
+        return { label: `Toegepast ${new Date(draft.lastAppliedAt).toLocaleDateString('nl-BE')}`, cls: 'applied' };
+    }
+    if (draft.validFrom) {
+        const vf = parseDateOnly(draft.validFrom);
+        vf.setHours(0, 0, 0, 0);
+        if (vf > today) {
+            return { label: `Ingepland vanaf ${vf.toLocaleDateString('nl-BE')}`, cls: 'scheduled' };
+        }
+        return { label: 'Klaar om toe te passen', cls: 'activatable' };
+    }
+    return null;
+}
+
+// Find the most recently applied draft whose period covers today
+function findNewestActiveDraftId(drafts) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let newest = null;
+    for (const d of drafts) {
+        if (!d.lastAppliedAt || !d.lastAppliedFrom || !d.lastAppliedUntil) continue;
+        const from = parseDateOnly(d.lastAppliedFrom);
+        const until = parseDateOnly(d.lastAppliedUntil);
+        from.setHours(0, 0, 0, 0);
+        until.setHours(0, 0, 0, 0);
+        if (today >= from && today <= until) {
+            if (!newest || new Date(d.lastAppliedAt) > new Date(newest.lastAppliedAt)) {
+                newest = d;
+            }
+        }
+    }
+    return newest?.id || null;
 }
 
 function renderBuilderDrafts() {
@@ -6260,10 +6460,44 @@ function renderBuilderDrafts() {
         return '<div class="builder-drafts"><p class="builder-drafts-empty">Nog geen opgeslagen concepten</p></div>';
     }
 
-    const sorted = [...drafts].sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+    // Check for activatable drafts (valid_from <= today, not applied)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const activatable = drafts.filter(d => {
+        if (d.lastAppliedAt || !d.validFrom) return false;
+        const vf = new Date(d.validFrom);
+        vf.setHours(0, 0, 0, 0);
+        return vf <= today;
+    });
+
+    // Determine which draft is the "real" active one (most recently applied covering today)
+    const newestActiveId = findNewestActiveDraftId(drafts);
+
+    // Sort: active first, then scheduled, then rest by date
+    const statusOrder = { active: 0, scheduled: 1, activatable: 2, applied: 3, expired: 4 };
+    const sorted = [...drafts].sort((a, b) => {
+        const sa = getDraftStatus(a, newestActiveId);
+        const sb = getDraftStatus(b, newestActiveId);
+        const oa = statusOrder[sa?.cls] ?? 3;
+        const ob = statusOrder[sb?.cls] ?? 3;
+        if (oa !== ob) return oa - ob;
+        return new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt);
+    });
+
+    let notificationHtml = '';
+    if (activatable.length > 0) {
+        notificationHtml = activatable.map(d => `
+            <div class="builder-notification info">
+                <i data-lucide="calendar-check" style="width:16px;height:16px"></i>
+                Concept "${escapeHtml(d.name)}" is nu geldig!
+                <button class="btn btn-primary btn-sm builder-draft-apply" data-draft-id="${escapeHtml(d.id)}" style="margin-left:auto">Nu toepassen</button>
+            </div>
+        `).join('');
+    }
 
     return `
         <div class="builder-drafts">
+            ${notificationHtml}
             <h3>Opgeslagen concepten</h3>
             <div class="builder-drafts-list">
                 ${sorted.map(draft => {
@@ -6272,13 +6506,29 @@ function renderBuilderDrafts() {
                     const teamLabel = draft.teamFilter
                         ? (DataStore.settings.teams?.[draft.teamFilter]?.name || draft.teamFilter)
                         : 'Alle teams';
-                    const empCount = Object.keys(draft.grid || {}).length;
+                    const draftGrid = draft.grid || {};
+                    let weekLabel, empCount;
+                    if (draftGrid._multiWeek) {
+                        const weeks = Object.keys(draftGrid).filter(k => k !== '_multiWeek').sort((a,b) => Number(a) - Number(b));
+                        weekLabel = weeks.length > 1 ? `Week ${weeks.join(' & ')}` : `Week ${weeks[0] || draft.weekNumber}`;
+                        const allEmpIds = new Set();
+                        weeks.forEach(w => Object.keys(draftGrid[w] || {}).forEach(id => allEmpIds.add(id)));
+                        empCount = allEmpIds.size;
+                    } else {
+                        weekLabel = `Week ${draft.weekNumber}`;
+                        empCount = Object.keys(draftGrid).length;
+                    }
+                    const status = getDraftStatus(draft, newestActiveId);
+                    const dateRange = (draft.validFrom || draft.validUntil)
+                        ? `<span class="builder-draft-meta">Geldig: ${draft.validFrom ? new Date(draft.validFrom).toLocaleDateString('nl-BE') : '...'} – ${draft.validUntil ? new Date(draft.validUntil).toLocaleDateString('nl-BE') : '...'}</span>`
+                        : '';
                     return `
-                        <div class="builder-draft-card" data-draft-id="${escapeHtml(draft.id)}">
+                        <div class="builder-draft-card${status?.cls === 'active' ? ' draft-active' : status?.cls === 'activatable' ? ' draft-activatable' : ''}" data-draft-id="${escapeHtml(draft.id)}">
                             <div class="builder-draft-info">
                                 <strong>${escapeHtml(draft.name)}</strong>
-                                ${draft.lastAppliedAt ? `<span class="builder-draft-applied-badge">Toegepast ${new Date(draft.lastAppliedAt).toLocaleDateString('nl-BE')}</span>` : ''}
-                                <span class="builder-draft-meta">Week ${draft.weekNumber} &middot; ${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers</span>
+                                ${status ? `<span class="builder-draft-badge draft-badge-${status.cls}">${status.label}</span>` : ''}
+                                <span class="builder-draft-meta">${weekLabel} &middot; ${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers</span>
+                                ${dateRange}
                                 <span class="builder-draft-meta">${escapeHtml(draft.createdByName || 'Onbekend')} &middot; ${dateStr}</span>
                             </div>
                             <div class="builder-draft-actions">
@@ -6465,6 +6715,9 @@ function loadBuilderFromBaseSchedules() {
         });
     });
 
+    AppState.builderGridByWeek[weekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+    AppState.builderLoadedDraftId = null;
+    AppState.builderLoadedDraftName = null;
     AppState.builderIsDirty = true;
     renderBuilder();
     showToast(`Basisrooster week ${weekNumber} geladen`, 'success');
@@ -6473,26 +6726,76 @@ function loadBuilderFromBaseSchedules() {
 // --- Builder: Draft management ---
 
 async function saveBuilderDraft() {
-    const grid = AppState.builderGrid;
-    const hasData = Object.keys(grid).length > 0 &&
-        Object.values(grid).some(d => Object.keys(d).length > 0);
-    if (!hasData) return;
+    // Sync current week to cache before saving
+    AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
 
-    const name = await showInputPrompt('Geef een naam voor dit concept:', 'Concept opslaan');
-    if (!name) return;
+    // Build multi-week grid from cache
+    const multiGrid = { _multiWeek: true };
+    let hasAnyData = false;
+    for (const [weekNum, weekGrid] of Object.entries(AppState.builderGridByWeek)) {
+        if (Object.keys(weekGrid).length > 0 && Object.values(weekGrid).some(d => Object.keys(d).length > 0)) {
+            multiGrid[weekNum] = weekGrid;
+            hasAnyData = true;
+        }
+    }
+    if (!hasAnyData) return;
+
+    // If a draft is loaded, UPDATE it directly (no modal needed)
+    if (AppState.builderLoadedDraftId) {
+        try {
+            await updateScheduleDraft(AppState.builderLoadedDraftId, {
+                grid: JSON.parse(JSON.stringify(multiGrid)),
+                weekNumber: AppState.builderWeekNumber,
+                teamFilter: AppState.builderTeamFilter
+            });
+            // Update local cache
+            const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
+            if (cached) {
+                cached.grid = JSON.parse(JSON.stringify(multiGrid));
+                cached.weekNumber = AppState.builderWeekNumber;
+                cached.teamFilter = AppState.builderTeamFilter;
+                cached.updatedAt = new Date().toISOString();
+            }
+            AppState.builderIsDirty = false;
+            renderBuilder();
+            showToast(`Concept "${AppState.builderLoadedDraftName}" bijgewerkt`, 'success');
+
+            // If this draft is currently active, ask if user wants to apply changes
+            const newestActiveId = findNewestActiveDraftId(DataStore.settings.schedule_drafts || []);
+            if (newestActiveId === AppState.builderLoadedDraftId) {
+                const wantsApply = confirm('Dit concept is momenteel actief. Wil je de wijzigingen nu toepassen op het rooster?');
+                if (wantsApply) {
+                    await applyBuilderDraft(AppState.builderLoadedDraftId);
+                }
+            }
+        } catch (err) {
+            console.error('Error updating draft:', err);
+            showToast('Fout bij bijwerken concept', 'error');
+        }
+        return;
+    }
+
+    // No draft loaded: create NEW draft (show save modal)
+    const result = await showDraftSaveModal();
+    if (!result) return;
 
     const draftData = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        name: name.trim(),
+        name: result.name.trim(),
         teamFilter: AppState.builderTeamFilter,
         weekNumber: AppState.builderWeekNumber,
-        grid: JSON.parse(JSON.stringify(grid))
+        grid: JSON.parse(JSON.stringify(multiGrid)),
+        validFrom: result.validFrom || null,
+        validUntil: result.validUntil || null
     };
 
     try {
         if (DataStore._draftsFromTable) {
-            const result = await createScheduleDraft(draftData);
-            DataStore.settings.schedule_drafts.push(result.draft);
+            const apiResult = await createScheduleDraft(draftData);
+            DataStore.settings.schedule_drafts.push(apiResult.draft);
+            // Track as loaded draft
+            AppState.builderLoadedDraftId = apiResult.draft.id;
+            AppState.builderLoadedDraftName = apiResult.draft.name;
         } else {
             const drafts = [...(DataStore.settings.schedule_drafts || [])];
             draftData.createdBy = AppState.currentUser?.id;
@@ -6502,6 +6805,8 @@ async function saveBuilderDraft() {
             drafts.push(draftData);
             await saveSettings('schedule_drafts', drafts);
             DataStore.settings.schedule_drafts = drafts;
+            AppState.builderLoadedDraftId = draftData.id;
+            AppState.builderLoadedDraftName = draftData.name;
         }
     } catch (err) {
         console.error('Error saving draft:', err);
@@ -6512,6 +6817,131 @@ async function saveBuilderDraft() {
     AppState.builderIsDirty = false;
     renderBuilder();
     showToast('Concept opgeslagen', 'success');
+}
+
+async function saveBuilderDraftAs() {
+    // Force "Save As": always show modal and create new draft
+    AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+
+    const multiGrid = { _multiWeek: true };
+    let hasAnyData = false;
+    for (const [weekNum, weekGrid] of Object.entries(AppState.builderGridByWeek)) {
+        if (Object.keys(weekGrid).length > 0 && Object.values(weekGrid).some(d => Object.keys(d).length > 0)) {
+            multiGrid[weekNum] = weekGrid;
+            hasAnyData = true;
+        }
+    }
+    if (!hasAnyData) return;
+
+    const result = await showDraftSaveModal();
+    if (!result) return;
+
+    const draftData = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        name: result.name.trim(),
+        teamFilter: AppState.builderTeamFilter,
+        weekNumber: AppState.builderWeekNumber,
+        grid: JSON.parse(JSON.stringify(multiGrid)),
+        validFrom: result.validFrom || null,
+        validUntil: result.validUntil || null
+    };
+
+    try {
+        if (DataStore._draftsFromTable) {
+            const apiResult = await createScheduleDraft(draftData);
+            DataStore.settings.schedule_drafts.push(apiResult.draft);
+            AppState.builderLoadedDraftId = apiResult.draft.id;
+            AppState.builderLoadedDraftName = apiResult.draft.name;
+        } else {
+            const drafts = [...(DataStore.settings.schedule_drafts || [])];
+            draftData.createdBy = AppState.currentUser?.id;
+            draftData.createdByName = AppState.currentUser?.name || 'Onbekend';
+            draftData.createdAt = new Date().toISOString();
+            draftData.updatedAt = new Date().toISOString();
+            drafts.push(draftData);
+            await saveSettings('schedule_drafts', drafts);
+            DataStore.settings.schedule_drafts = drafts;
+            AppState.builderLoadedDraftId = draftData.id;
+            AppState.builderLoadedDraftName = draftData.name;
+        }
+    } catch (err) {
+        console.error('Error saving draft as:', err);
+        showToast('Fout bij opslaan concept', 'error');
+        return;
+    }
+
+    AppState.builderIsDirty = false;
+    renderBuilder();
+    showToast(`Nieuw concept "${draftData.name}" aangemaakt`, 'success');
+}
+
+function showDraftSaveModal() {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal';
+        overlay.innerHTML = `
+            <div class="modal-content" style="max-width:400px">
+                <div class="modal-header">
+                    <h2>Concept opslaan</h2>
+                    <span class="modal-close" id="draft-save-close"><i data-lucide="x"></i></span>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Naam *</label>
+                        <input type="text" id="draft-save-name" class="form-input" placeholder="Bijv. Schooljaar 2026-2027">
+                    </div>
+                    <div class="form-row" style="gap:12px">
+                        <div class="form-group" style="flex:1">
+                            <label>Geldig vanaf</label>
+                            <input type="date" id="draft-save-valid-from" class="form-input">
+                            <span class="form-hint">Startdatum (optioneel)</span>
+                        </div>
+                        <div class="form-group" style="flex:1">
+                            <label>Geldig tot</label>
+                            <input type="date" id="draft-save-valid-until" class="form-input">
+                            <span class="form-hint">Einddatum (optioneel)</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary btn-sm" id="draft-save-cancel">Annuleren</button>
+                    <button class="btn btn-primary btn-sm" id="draft-save-confirm">Opslaan</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+
+        const nameInput = overlay.querySelector('#draft-save-name');
+        setTimeout(() => nameInput.focus(), 50);
+
+        function cleanup(result) {
+            overlay.remove();
+            resolve(result);
+        }
+
+        overlay.querySelector('#draft-save-close').addEventListener('click', () => cleanup(null));
+        overlay.querySelector('#draft-save-cancel').addEventListener('click', () => cleanup(null));
+        overlay.querySelector('#draft-save-confirm').addEventListener('click', () => {
+            const name = nameInput.value.trim();
+            if (!name) {
+                nameInput.focus();
+                return;
+            }
+            cleanup({
+                name,
+                validFrom: overlay.querySelector('#draft-save-valid-from').value || null,
+                validUntil: overlay.querySelector('#draft-save-valid-until').value || null
+            });
+        });
+        nameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') overlay.querySelector('#draft-save-confirm').click();
+            if (e.key === 'Escape') cleanup(null);
+        });
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) cleanup(null);
+        });
+    });
 }
 
 function loadBuilderDraft(draftId) {
@@ -6530,9 +6960,32 @@ function loadBuilderDraft(draftId) {
 }
 
 function doLoadDraft(draft) {
-    AppState.builderWeekNumber = draft.weekNumber || 1;
+    const grid = draft.grid || {};
     AppState.builderTeamFilter = draft.teamFilter || null;
-    AppState.builderGrid = JSON.parse(JSON.stringify(draft.grid || {}));
+    AppState.builderGridByWeek = {};
+
+    if (grid._multiWeek) {
+        // Multi-week draft: load all weeks into cache
+        let firstWeek = null;
+        for (const [weekNum, weekGrid] of Object.entries(grid)) {
+            if (weekNum === '_multiWeek') continue;
+            const wn = Number(weekNum);
+            AppState.builderGridByWeek[wn] = JSON.parse(JSON.stringify(weekGrid));
+            if (firstWeek === null) firstWeek = wn;
+        }
+        AppState.builderWeekNumber = draft.weekNumber || firstWeek || 1;
+        AppState.builderGrid = AppState.builderGridByWeek[AppState.builderWeekNumber]
+            ? JSON.parse(JSON.stringify(AppState.builderGridByWeek[AppState.builderWeekNumber]))
+            : {};
+    } else {
+        // Backward compat: single-week draft
+        AppState.builderWeekNumber = draft.weekNumber || 1;
+        AppState.builderGrid = JSON.parse(JSON.stringify(grid));
+        AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(grid));
+    }
+
+    AppState.builderLoadedDraftId = draft.id;
+    AppState.builderLoadedDraftName = draft.name;
     AppState.builderIsDirty = false;
     renderBuilder();
     showToast(`Concept "${draft.name}" geladen`, 'info');
@@ -6592,62 +7045,105 @@ async function applyBuilderDraft(draftId) {
     const draft = drafts.find(d => d.id === draftId);
     if (!draft) return;
 
-    const grid = draft.grid || {};
-    const weekNumber = draft.weekNumber || 1;
-    const empCount = Object.keys(grid).length;
+    const draftGrid = draft.grid || {};
+    const isMultiWeek = !!draftGrid._multiWeek;
 
-    // Build preview of changes (client-side, for confirm dialog)
+    // Build list of weeks to apply
+    const weeksToApply = [];
+    if (isMultiWeek) {
+        for (const [key, weekGrid] of Object.entries(draftGrid)) {
+            if (key === '_multiWeek') continue;
+            weeksToApply.push({ weekNumber: Number(key), grid: weekGrid });
+        }
+        weeksToApply.sort((a, b) => a.weekNumber - b.weekNumber);
+    } else {
+        weeksToApply.push({ weekNumber: draft.weekNumber || 1, grid: draftGrid });
+    }
+
+    // Build preview of changes for ALL employees (not just those in the grid)
+    const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
     let changesSummary = '';
     let changesCount = 0;
-    for (const [empIdStr, empGrid] of Object.entries(grid)) {
-        const emp = getEmployee(Number(empIdStr));
-        if (!emp) continue;
-        const prevSchedule = getEmployeeWeekSchedule(emp, weekNumber) || [];
-        const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
-        let empChanges = [];
-        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-            const newAssignment = empGrid[dayIndex];
-            const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
-            const oldEntry = prevSchedule.find(e => e.dayOfWeek === jsDayOfWeek && e.enabled);
-            const hasNew = !!newAssignment;
-            const hasOld = !!oldEntry;
-            if (hasNew && !hasOld) {
-                empChanges.push(`${dayNames[dayIndex]}: + ${newAssignment.startTime}-${newAssignment.endTime}`);
-            } else if (!hasNew && hasOld) {
-                empChanges.push(`${dayNames[dayIndex]}: verwijderd`);
-            } else if (hasNew && hasOld && (oldEntry.startTime !== newAssignment.startTime || oldEntry.endTime !== newAssignment.endTime)) {
-                empChanges.push(`${dayNames[dayIndex]}: ${oldEntry.startTime}-${oldEntry.endTime} -> ${newAssignment.startTime}-${newAssignment.endTime}`);
+
+    // Get all affected employees (filtered by team if applicable)
+    let allEmployees = draft.teamFilter
+        ? getEmployeesByTeam(draft.teamFilter, true)
+        : getAllEmployees(true);
+
+    const empIdsInGrid = new Set();
+    for (const { grid } of weeksToApply) {
+        Object.keys(grid).forEach(id => empIdsInGrid.add(String(id)));
+    }
+
+    for (const emp of allEmployees) {
+        for (const { weekNumber, grid } of weeksToApply) {
+            const empGrid = grid[String(emp.id)] || grid[emp.id];
+            const prevSchedule = getEmployeeWeekSchedule(emp, weekNumber) || [];
+            let empChanges = [];
+            for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+                const newAssignment = empGrid ? empGrid[dayIndex] : null;
+                const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
+                const oldEntry = prevSchedule.find(e => e.dayOfWeek === jsDayOfWeek && e.enabled);
+                const hasNew = !!newAssignment;
+                const hasOld = !!oldEntry;
+                if (hasNew && !hasOld) {
+                    empChanges.push(`${dayNames[dayIndex]}: + ${newAssignment.startTime}-${newAssignment.endTime}`);
+                } else if (!hasNew && hasOld) {
+                    empChanges.push(`${dayNames[dayIndex]}: verwijderd`);
+                } else if (hasNew && hasOld && (oldEntry.startTime !== newAssignment.startTime || oldEntry.endTime !== newAssignment.endTime)) {
+                    empChanges.push(`${dayNames[dayIndex]}: ${oldEntry.startTime}-${oldEntry.endTime} -> ${newAssignment.startTime}-${newAssignment.endTime}`);
+                }
             }
-        }
-        if (empChanges.length > 0) {
-            changesCount++;
-            if (changesCount <= 8) {
-                changesSummary += `\n${emp.name}: ${empChanges.join(', ')}`;
+            if (empChanges.length > 0) {
+                changesCount++;
+                if (changesCount <= 8) {
+                    const weekPrefix = isMultiWeek ? `[W${weekNumber}] ` : '';
+                    changesSummary += `\n${weekPrefix}${emp.name}: ${empChanges.join(', ')}`;
+                }
             }
         }
     }
     if (changesCount > 8) changesSummary += `\n... en ${changesCount - 8} meer`;
     if (changesCount === 0) changesSummary = '\nGeen wijzigingen gevonden.';
 
-    const confirmed = await showConfirm(
-        `Concept "${draft.name}" toepassen op basisrooster week ${weekNumber}?\n\nWijzigingen voor ${changesCount} van ${empCount} medewerkers:${changesSummary}`,
-        'Concept toepassen'
-    );
-    if (!confirmed) return;
+    const weekLabel = weeksToApply.length > 1
+        ? `week ${weeksToApply.map(w => w.weekNumber).join(' & ')}`
+        : `week ${weeksToApply[0].weekNumber}`;
+
+    // Show apply modal with editable dates + changes preview
+    const applyResult = await showDraftApplyModal(draft, weekLabel, changesCount, allEmployees.length, changesSummary);
+    if (!applyResult) return;
 
     showSectionLoading('planning-view', 'Concept toepassen...');
     try {
         // Single atomic backend call: saves schedules + regenerates shifts + marks draft
-        const result = await applyScheduleDraft(draftId, { clearBlocks: true });
+        const result = await applyScheduleDraft(draftId, {
+            clearBlocks: true,
+            applyStartDate: applyResult.startDate,
+            applyEndDate: applyResult.endDate
+        });
 
-        showToast(`Basisrooster week ${weekNumber} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt)`, 'success');
+        if (result.scheduled) {
+            // Future draft — saved as scheduled, not applied yet
+            const vfDate = new Date(result.validFrom).toLocaleDateString('nl-BE');
+            showToast(`Concept "${result.draftName}" ingepland vanaf ${vfDate}`, 'success');
+            renderBuilder();
+            return;
+        }
 
-        // Update local draft cache
+        showToast(`Basisrooster ${weekLabel} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt)`, 'success');
+
+        // Update local draft cache with applied dates
         const draftToMark = (DataStore.settings.schedule_drafts || []).find(d => d.id === draftId);
         if (draftToMark) {
             draftToMark.lastAppliedAt = new Date().toISOString();
             draftToMark.lastAppliedBy = AppState.currentUser?.name || 'Onbekend';
+            draftToMark.lastAppliedFrom = applyResult.startDate;
+            draftToMark.lastAppliedUntil = applyResult.endDate;
         }
+
+        // Auto-update school year start for week numbering
+        await saveSchoolYearStart(applyResult.startDate);
 
         await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshUsers()]);
         renderBuilder();
@@ -6657,6 +7153,82 @@ async function applyBuilderDraft(draftId) {
     } finally {
         hideSectionLoading('planning-view');
     }
+}
+
+function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSummary) {
+    // Default dates: pre-fill from last applied, then draft validity, then school year defaults
+    const now = new Date();
+    let defaultStart, defaultEnd;
+    if (draft.lastAppliedFrom && draft.lastAppliedUntil) {
+        // Previously applied: use same period
+        defaultStart = draft.lastAppliedFrom;
+        defaultEnd = draft.lastAppliedUntil;
+    } else if (draft.validFrom && draft.validUntil) {
+        defaultStart = draft.validFrom;
+        defaultEnd = draft.validUntil;
+    } else {
+        // Smart default: Sept 1 → Aug 31 of current school year
+        const septYear = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+        defaultStart = `${septYear}-09-01`;
+        defaultEnd = `${septYear + 1}-08-31`;
+    }
+
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal';
+        overlay.innerHTML = `
+            <div class="modal-content" style="max-width:500px">
+                <div class="modal-header">
+                    <h2>Concept toepassen</h2>
+                    <span class="modal-close" id="draft-apply-close"><i data-lucide="x"></i></span>
+                </div>
+                <div class="modal-body">
+                    <p style="margin:0 0 12px"><strong>${escapeHtml(draft.name)}</strong> toepassen als basisrooster ${weekLabel}?</p>
+                    <div class="form-row" style="gap:12px">
+                        <div class="form-group" style="flex:1">
+                            <label>Van</label>
+                            <input type="date" id="draft-apply-start-date" class="form-input" value="${defaultStart}" required>
+                        </div>
+                        <div class="form-group" style="flex:1">
+                            <label>Tot</label>
+                            <input type="date" id="draft-apply-end-date" class="form-input" value="${defaultEnd}" required>
+                        </div>
+                    </div>
+                    <span class="form-hint" style="display:block;margin-top:4px">Shifts worden alleen gegenereerd binnen deze periode. Bestaande shifts buiten deze periode blijven ongewijzigd.</span>
+                    <div style="margin-top:12px;padding:10px;background:var(--bg-color);border-radius:6px;font-size:12px;max-height:200px;overflow-y:auto;white-space:pre-wrap;font-family:monospace">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary btn-sm" id="draft-apply-cancel">Annuleren</button>
+                    <button class="btn btn-primary btn-sm" id="draft-apply-confirm">Toepassen</button>
+                </div>
+            </div>`;
+
+        document.body.appendChild(overlay);
+        IconHelper.init(overlay);
+
+        function cleanup() {
+            overlay.remove();
+        }
+
+        overlay.querySelector('#draft-apply-confirm').addEventListener('click', () => {
+            const startDate = overlay.querySelector('#draft-apply-start-date').value;
+            const endDate = overlay.querySelector('#draft-apply-end-date').value;
+            if (!startDate || !endDate) {
+                showToast('Vul beide datums in', 'warning');
+                return;
+            }
+            if (startDate >= endDate) {
+                showToast('Startdatum moet voor einddatum liggen', 'warning');
+                return;
+            }
+            cleanup();
+            resolve({ startDate, endDate });
+        });
+
+        overlay.querySelector('#draft-apply-cancel').addEventListener('click', () => { cleanup(); resolve(null); });
+        overlay.querySelector('#draft-apply-close').addEventListener('click', () => { cleanup(); resolve(null); });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
+    });
 }
 
 // --- Builder: Helpers ---
@@ -6697,6 +7269,57 @@ function calcHoursBetweenTwoAssignments(shift1, shift2) {
 // --- Builder: Event Listeners ---
 
 function attachBuilderEventListeners(container) {
+    // Settings panel toggles
+    const patternToggle = document.getElementById('builder-pattern-toggle');
+    if (patternToggle) {
+        patternToggle.addEventListener('click', () => {
+            AppState.builderPatternExpanded = !AppState.builderPatternExpanded;
+            document.getElementById('builder-pattern-panel')?.classList.toggle('expanded');
+        });
+    }
+    const rotationToggle = document.getElementById('builder-rotation-toggle');
+    if (rotationToggle) {
+        rotationToggle.addEventListener('click', () => {
+            AppState.builderRotationExpanded = !AppState.builderRotationExpanded;
+            document.getElementById('builder-rotation-panel')?.classList.toggle('expanded');
+        });
+    }
+
+    // Pattern panel: save + cycle length change
+    const savePatternBtn = document.getElementById('save-schedule-pattern-btn');
+    if (savePatternBtn) {
+        savePatternBtn.addEventListener('click', async () => {
+            await saveSchedulePattern();
+            renderBuilder();
+        });
+    }
+    const cycleLengthInput = document.getElementById('schedule-cycle-length');
+    if (cycleLengthInput) {
+        cycleLengthInput.addEventListener('change', function() {
+            const newLength = Math.max(1, Math.min(8, parseInt(this.value) || 2));
+            this.value = newLength;
+            // Rebuild week checkboxes inline
+            const weeksContainer = document.getElementById('schedule-pattern-weeks');
+            if (!weeksContainer) return;
+            const pattern = getSchedulePattern();
+            const dayLabels = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
+            let html = '';
+            for (let w = 1; w <= newLength; w++) {
+                const closed = (w <= (pattern.cycleLength || 2)) ? getClosedDaysForWeek(w) : [];
+                html += `<div class="form-group schedule-pattern-week">
+                    <label>Week ${w} - Gesloten dagen:</label>
+                    <div class="schedule-pattern-days">
+                        ${[1,2,3,4,5,6,0].map(d => `<label class="schedule-day-checkbox">
+                            <input type="checkbox" class="pattern-closed-day" data-week="${w}" data-day="${d}" ${closed.includes(d) ? 'checked' : ''}>
+                            <span>${dayLabels[d]}</span>
+                        </label>`).join('')}
+                    </div>
+                </div>`;
+            }
+            weeksContainer.innerHTML = html;
+        });
+    }
+
     // Week toggle buttons (dynamic based on cycle length)
     const cycleLen = getCycleLength();
     for (let w = 1; w <= cycleLen; w++) {
@@ -6710,6 +7333,7 @@ function attachBuilderEventListeners(container) {
         teamSelect.addEventListener('change', (e) => {
             AppState.builderTeamFilter = e.target.value || null;
             AppState.builderGrid = {};
+            AppState.builderGridByWeek = {};
             AppState.builderIsDirty = false;
             renderBuilder();
         });
@@ -6722,6 +7346,9 @@ function attachBuilderEventListeners(container) {
     const loadBlank = document.getElementById('builder-load-blank');
     if (loadBlank) loadBlank.addEventListener('click', () => {
         AppState.builderGrid = {};
+        AppState.builderGridByWeek = {};
+        AppState.builderLoadedDraftId = null;
+        AppState.builderLoadedDraftName = null;
         AppState.builderIsDirty = false;
         renderBuilder();
         showToast('Grid leeggemaakt', 'info');
@@ -6739,6 +7366,10 @@ function attachBuilderEventListeners(container) {
     // Save draft button
     const saveDraftBtn = document.getElementById('builder-save-draft');
     if (saveDraftBtn) saveDraftBtn.addEventListener('click', saveBuilderDraft);
+
+    // Save As button (only visible when a draft is loaded)
+    const saveDraftAsBtn = document.getElementById('builder-save-draft-as');
+    if (saveDraftAsBtn) saveDraftAsBtn.addEventListener('click', saveBuilderDraftAs);
 
     // Draft action buttons (load, apply, delete)
     container.querySelectorAll('.builder-draft-rename').forEach(btn => {
@@ -6768,21 +7399,22 @@ function attachBuilderEventListeners(container) {
 }
 
 function switchBuilderWeek(weekNumber) {
-    if (AppState.builderIsDirty) {
-        showConfirm('Je hebt onopgeslagen wijzigingen. Wil je doorgaan?').then(confirmed => {
-            if (confirmed) {
-                AppState.builderWeekNumber = weekNumber;
-                AppState.builderGrid = {};
-                AppState.builderIsDirty = false;
-                renderBuilder();
-            }
-        });
+    if (weekNumber === AppState.builderWeekNumber) return;
+
+    // Save current week's grid to cache
+    AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+
+    // Switch to new week
+    AppState.builderWeekNumber = weekNumber;
+
+    // Restore from cache or start empty
+    if (AppState.builderGridByWeek[weekNumber]) {
+        AppState.builderGrid = JSON.parse(JSON.stringify(AppState.builderGridByWeek[weekNumber]));
     } else {
-        AppState.builderWeekNumber = weekNumber;
         AppState.builderGrid = {};
-        AppState.builderIsDirty = false;
-        renderBuilder();
     }
+
+    renderBuilder();
 }
 
 // ===== END ROOSTERBOUWER =====
@@ -6840,9 +7472,6 @@ function renderSettingsTabContent(tabName) {
             break;
         case 'planning':
             renderSettingsPlanning(content);
-            break;
-        case 'rooster':
-            renderSettingsRooster(content);
             break;
         case 'teams':
             renderSettingsTeams(content);
@@ -7459,7 +8088,6 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
 // ===== SETTINGS TAB: PLANNING =====
 function renderSettingsPlanning(container) {
     const rules = DataStore.settings.rules;
-    const planningHorizon = DataStore.settings.planningHorizon?.weeks || 4;
 
     // Check if a holiday period is currently active or upcoming
     const today = new Date();
@@ -7493,30 +8121,6 @@ function renderSettingsPlanning(container) {
 
     container.innerHTML = `
         ${holidayBanner}
-        <!-- Planning horizon -->
-        <div class="settings-card" id="settings-horizon">
-            <div class="settings-card-header">
-                <div class="settings-card-title">
-                    <h3>Planning horizon</h3>
-                    <p class="settings-card-subtitle">Hoe ver vooruit worden automatische diensten gegenereerd?</p>
-                </div>
-            </div>
-            <div class="settings-card-body">
-                <div class="form-group">
-                    <label for="planning-horizon-select">Horizon:</label>
-                    <select id="planning-horizon-select" class="form-input">
-                        <option value="4" ${planningHorizon === 4 ? 'selected' : ''}>4 weken</option>
-                        <option value="8" ${planningHorizon === 8 ? 'selected' : ''}>8 weken</option>
-                        <option value="26" ${planningHorizon === 26 ? 'selected' : ''}>6 maanden (26 weken)</option>
-                        <option value="52" ${planningHorizon === 52 ? 'selected' : ''}>1 jaar (52 weken)</option>
-                        <option value="unlimited" ${planningHorizon === null || planningHorizon === 'unlimited' ? 'selected' : ''}>Onbeperkt</option>
-                    </select>
-                    <span class="form-hint">Basisroosters worden automatisch toegepast tot deze horizon</span>
-                </div>
-                <button class="btn btn-primary" onclick="savePlanningHorizon()">Horizon opslaan</button>
-            </div>
-        </div>
-
         <!-- Planning regels -->
         <div class="settings-card" id="settings-rules" style="margin-top: 24px;">
             <div class="settings-card-header">
@@ -7596,136 +8200,6 @@ function renderSettingsPlanning(container) {
 }
 
 // ===== SETTINGS TAB: ROOSTER =====
-function renderSettingsRooster(container) {
-    container.innerHTML = `
-        <!-- Roosterpatroon -->
-        <div class="settings-card" id="settings-schedule-pattern">
-            <div class="settings-card-header">
-                <div class="settings-card-title">
-                    <h3>Roosterpatroon</h3>
-                    <p class="settings-card-subtitle">Configureer de cyclus en gesloten dagen.</p>
-                </div>
-            </div>
-            <div class="settings-card-body">
-                ${(() => {
-                    const pattern = getSchedulePattern();
-                    const cl = pattern.cycleLength || 2;
-                    let weeksInfo = '';
-                    for (let w = 1; w <= cl; w++) {
-                        const closed = getClosedDaysForWeek(w);
-                        const label = closed.length > 0 ? formatClosedDays(closed) : 'alle dagen open';
-                        weeksInfo += `<p><strong>Week ${w}</strong> = ${escapeHtml(label)}</p>`;
-                    }
-                    return `<div class="info-box info">
-                        ${weeksInfo}
-                        <p class="current-setting">Referentie Week 1: <strong>${formatDate(pattern.referenceDate || DataStore.settings.biWeeklyReferenceDate)}</strong></p>
-                    </div>`;
-                })()}
-                <div class="form-group">
-                    <label for="schedule-cycle-length">Cycluslengte (aantal weken):</label>
-                    <input type="number" id="schedule-cycle-length" class="form-input" min="1" max="8" value="${getSchedulePattern().cycleLength || 2}" style="width: 80px;" />
-                </div>
-                <div id="schedule-pattern-weeks">
-                    ${(() => {
-                        const pattern = getSchedulePattern();
-                        const cl = pattern.cycleLength || 2;
-                        const dayLabels = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
-                        let html = '';
-                        for (let w = 1; w <= cl; w++) {
-                            const closed = getClosedDaysForWeek(w);
-                            html += `<div class="form-group schedule-pattern-week">
-                                <label>Week ${w} - Gesloten dagen:</label>
-                                <div class="schedule-pattern-days">
-                                    ${[1,2,3,4,5,6,0].map(d => `<label class="schedule-day-checkbox">
-                                        <input type="checkbox" class="pattern-closed-day" data-week="${w}" data-day="${d}" ${closed.includes(d) ? 'checked' : ''}>
-                                        <span>${dayLabels[d]}</span>
-                                    </label>`).join('')}
-                                </div>
-                            </div>`;
-                        }
-                        return html;
-                    })()}
-                </div>
-                <div class="form-group">
-                    <label for="schedule-reference-date">Referentie maandag (Week 1 start):</label>
-                    <input type="date" id="schedule-reference-date" class="form-input" value="${getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate}" />
-                    <span class="form-hint">Selecteer altijd een maandag</span>
-                </div>
-                <button class="btn btn-primary" id="save-schedule-pattern-btn">Patroon Opslaan</button>
-            </div>
-        </div>
-
-        <!-- Weekendverantwoordelijke rotatie -->
-        <div class="settings-card" id="settings-rotation" style="margin-top: 24px;">
-            <div class="settings-card-header">
-                <div class="settings-card-title">
-                    <h3>Weekendverantwoordelijke Rotatie</h3>
-                    <p class="settings-card-subtitle">Automatische toewijzing tijdens open weekenden.</p>
-                </div>
-            </div>
-            <div class="settings-card-body">
-                <p class="form-help-text">Tijdens open weekenden wordt automatisch een verantwoordelijke aangeduid. De rotatie gaat om de beurt door medewerkers van de geselecteerde teams.</p>
-
-                <div class="eligible-teams-compact" style="margin-top: 16px;">
-                    ${renderEligibleTeamsCheckboxes()}
-                </div>
-
-                <div class="rotation-form" style="margin-top: 16px;">
-                    ${renderRotationSettingsCompact()}
-                </div>
-
-                <div class="upcoming-section" style="margin-top: 24px;">
-                    <h4>Komende open weekenden</h4>
-                    <div class="upcoming-responsibles">
-                        ${renderUpcomingResponsibles()}
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-
-    // Event listener: Save schedule pattern
-    const saveBtn = document.getElementById('save-schedule-pattern-btn');
-    if (saveBtn) {
-        saveBtn.addEventListener('click', saveSchedulePattern);
-    }
-
-    // Event listener: Cycle length change → rebuild week rows
-    const cycleLengthInput = document.getElementById('schedule-cycle-length');
-    if (cycleLengthInput) {
-        cycleLengthInput.addEventListener('change', function() {
-            const newLength = Math.max(1, Math.min(8, parseInt(this.value) || 2));
-            this.value = newLength;
-            rebuildSchedulePatternWeeks(newLength);
-        });
-    }
-}
-
-function rebuildSchedulePatternWeeks(cycleLength) {
-    const container = document.getElementById('schedule-pattern-weeks');
-    if (!container) return;
-
-    const pattern = getSchedulePattern();
-    const dayLabels = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
-    let html = '';
-
-    for (let w = 1; w <= cycleLength; w++) {
-        const closed = (w <= (pattern.cycleLength || 2)) ? getClosedDaysForWeek(w) : [];
-        html += `<div class="form-group schedule-pattern-week">
-            <label>Week ${w} - Gesloten dagen:</label>
-            <div class="schedule-pattern-days">
-                ${[1,2,3,4,5,6,0].map(d => `<label class="schedule-day-checkbox">
-                    <input type="checkbox" class="pattern-closed-day" data-week="${w}" data-day="${d}" ${closed.includes(d) ? 'checked' : ''}>
-                    <span>${dayLabels[d]}</span>
-                </label>`).join('')}
-            </div>
-        </div>`;
-    }
-
-    container.innerHTML = html;
-    IconHelper.init(container);
-}
-
 async function saveSchedulePattern() {
     const cycleLengthInput = document.getElementById('schedule-cycle-length');
     const refDateInput = document.getElementById('schedule-reference-date');
@@ -7776,9 +8250,7 @@ async function saveSchedulePattern() {
         DataStore.settings.responsibleRotation.rotationStart = referenceDate;
 
         saveToStorage();
-        renderSettings();
         renderPlanning();
-        markSettingsSaved();
         showToast('Roosterpatroon opgeslagen', 'success');
     } catch (err) {
         console.error('Error saving schedule pattern:', err);
@@ -8465,36 +8937,23 @@ function saveRules() {
     showToast('Planning regels zijn opgeslagen', 'success');
 }
 
-async function savePlanningHorizon() {
-    const select = document.getElementById('planning-horizon-select');
-    const value = select.value;
-    const weeks = value === 'unlimited' ? null : parseInt(value);
-
-    DataStore.settings.planningHorizon = { weeks };
-    saveToStorage();
-
-    // Sync to backend
+async function handleSaveSchoolYear() {
+    const input = document.getElementById('school-year-start-input');
+    const date = input.value;
+    if (!date) {
+        showToast('Selecteer een startdatum', 'warning');
+        return;
+    }
     try {
-        await apiFetch('/settings/planning_horizon', {
-            method: 'PUT',
-            body: JSON.stringify({ value: { weeks } })
-        });
+        await saveSchoolYearStart(date);
         markSettingsSaved();
-        showToast('Planning horizon is opgeslagen', 'success');
-
-        // Reset flag and re-apply schedules with new horizon
-        AppState.schedulesGenerated = false;
-        await autoApplyBaseSchedules();
-
-        // Refresh planning view if currently visible
-        if (AppState.currentView === 'planning') {
-            renderPlanning();
-        }
+        showToast('Schooljaar startdatum opgeslagen', 'success');
     } catch (error) {
-        console.error('Fout bij opslaan planning horizon:', error);
-        showToast('Planning horizon is lokaal opgeslagen (server sync mislukt)', 'warning');
+        console.error('Fout bij opslaan schooljaar:', error);
+        showToast('Fout bij opslaan schooljaar', 'error');
     }
 }
+
 
 function openAddTemplateModal() {
     openTemplateModal();

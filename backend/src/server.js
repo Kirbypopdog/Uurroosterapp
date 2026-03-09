@@ -51,12 +51,16 @@ function formatDateYYYYMMDD(date) {
 
 function parseLocalDate(value) {
   if (typeof value === 'string') {
-    const parts = value.split('-').map(Number);
-    if (parts.length === 3) {
+    // Handle ISO timestamps like "2026-03-01T23:00:00.000Z" → extract date part
+    const dateOnly = value.includes('T') ? value.split('T')[0] : value;
+    const parts = dateOnly.split('-').map(Number);
+    if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
       return new Date(parts[0], parts[1] - 1, parts[2]);
     }
   }
-  return new Date(value);
+  if (value instanceof Date && !isNaN(value.getTime())) return value;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 // ===== AUTO-MIGRATION ON STARTUP =====
@@ -451,6 +455,38 @@ async function ensureSchema() {
       `);
     } catch (e) {
       console.log(`  shift_activities table: ${e.message}`);
+    }
+
+    // Phase 4: Add valid_from/valid_until to schedule_drafts for school year scheduling
+    try {
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS valid_from DATE`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS valid_until DATE`);
+    } catch (e) {
+      console.log(`  schedule_drafts date columns: ${e.message}`);
+    }
+
+    // Phase 4b: Add last_applied_from/until to schedule_drafts for tracking applied periods
+    try {
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS last_applied_from DATE`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS last_applied_until DATE`);
+    } catch (e) {
+      console.log(`  schedule_drafts applied date columns: ${e.message}`);
+    }
+
+    // Phase 4: school_year_start setting (default: 1 sept current school year)
+    try {
+      const syResult = await client.query(`SELECT 1 FROM settings WHERE key = 'school_year_start'`);
+      if (syResult.rows.length === 0) {
+        const now = new Date();
+        const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+        await client.query(
+          `INSERT INTO settings (key, value) VALUES ('school_year_start', $1)`,
+          [JSON.stringify({ date: `${startYear}-09-01` })]
+        );
+        console.log(`  Created school_year_start setting: ${startYear}-09-01`);
+      }
+    } catch (e) {
+      console.log(`  school_year_start setting: ${e.message}`);
     }
   } catch (err) {
     console.error('Schema check error:', err.message);
@@ -1253,7 +1289,7 @@ app.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res)
 
 // Helper: regenerate shifts for a single user within an existing transaction
 // Returns { created, deleted, blocksCleared, userName }
-async function regenerateShiftsForUser(client, userId, { clearBlocks = false } = {}) {
+async function regenerateShiftsForUser(client, userId, { clearBlocks = false, overrideStartDate = null, overrideEndDate = null } = {}) {
   // 1. Fetch user with week schedules
   const userResult = await client.query(
     `SELECT id, name, main_team as "mainTeam",
@@ -1281,19 +1317,17 @@ async function regenerateShiftsForUser(client, userId, { clearBlocks = false } =
                   (Array.isArray(week2) && week2.length > 0);
   }
 
-  if (!hasSchedule) {
-    return { created: 0, deleted: 0, blocksCleared: 0, userName: user.name };
-  }
-
-  // 3. Read planning horizon from settings (default 4 weeks)
-  const horizonResult = await client.query(
-    `SELECT value FROM settings WHERE key = 'planning_horizon'`
+  // 3. Read school year start from settings (default: 1 sept)
+  const syResult = await client.query(
+    `SELECT value FROM settings WHERE key = 'school_year_start'`
   );
-  let horizonWeeks = 4;
-  if (horizonResult.rows.length > 0) {
-    const val = horizonResult.rows[0].value;
-    if (val && val.weeks !== null && val.weeks !== undefined) {
-      horizonWeeks = val.weeks;
+  let schoolYearStartMonth = 8; // 0-based: 8 = September
+  let schoolYearStartDay = 1;
+  if (syResult.rows.length > 0 && syResult.rows[0].value?.date) {
+    const syDate = parseLocalDate(syResult.rows[0].value.date);
+    if (syDate) {
+      schoolYearStartMonth = syDate.getMonth();
+      schoolYearStartDay = syDate.getDate();
     }
   }
 
@@ -1310,27 +1344,53 @@ async function regenerateShiftsForUser(client, userId, { clearBlocks = false } =
     if (pattern.referenceDate) referenceDate = pattern.referenceDate;
   }
 
-  // 5. Calculate date range: today through horizon
+  // 5. Calculate date range
+  // Default: today → end of current school year (31 aug if school starts 1 sept)
   const today = new Date();
-  const startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  let endDate;
-  if (horizonWeeks === null || horizonWeeks === 'unlimited') {
-    endDate = new Date(today);
-    endDate.setFullYear(endDate.getFullYear() + 1);
-  } else {
-    endDate = new Date(today);
-    endDate.setDate(endDate.getDate() + (Number(horizonWeeks) * 7));
+  let startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  // Calculate end of school year: the day before school_year_start in the next occurrence
+  // E.g. school year starts Sept 1 → ends Aug 31
+  // If we're past the school year start date, the end is next year; otherwise this year
+  const schoolYearEndMonth = schoolYearStartMonth === 0 ? 11 : schoolYearStartMonth - 1;
+  const schoolYearEndDay = schoolYearStartDay === 1
+    ? new Date(today.getFullYear(), schoolYearEndMonth + 1, 0).getDate() // last day of prev month
+    : schoolYearStartDay - 1;
+  let schoolYearEndYear = today.getFullYear();
+  const testEnd = new Date(schoolYearEndYear, schoolYearEndMonth, schoolYearEndDay);
+  if (testEnd <= today) {
+    schoolYearEndYear++;
+  }
+  let endDate = new Date(schoolYearEndYear, schoolYearEndMonth, schoolYearEndDay);
+
+  // Apply explicit overrides if provided (e.g. from draft apply with specific dates)
+  if (overrideStartDate) {
+    startDate = parseLocalDate(overrideStartDate);
+  }
+  if (overrideEndDate) {
+    endDate = parseLocalDate(overrideEndDate);
+  }
+
+  // Only apply schedule_valid_until cap when no explicit endDate was provided
+  if (!overrideEndDate) {
+    const validUntilResult = await client.query(
+      `SELECT value FROM settings WHERE key = 'schedule_valid_until'`
+    );
+    if (validUntilResult.rows.length > 0 && validUntilResult.rows[0].value?.date) {
+      const validUntilDate = parseLocalDate(validUntilResult.rows[0].value.date);
+      if (validUntilDate && validUntilDate < endDate) {
+        endDate = validUntilDate;
+      }
+    }
   }
   const startStr = formatDateYYYYMMDD(startDate);
   const endStr = formatDateYYYYMMDD(endDate);
 
-  // 6. Optionally clear shift_blocks from auto-shift deletions only
+  // 6. Optionally clear ALL shift_blocks (allows new schedule to regenerate fresh)
   let blocksCleared = 0;
   if (clearBlocks) {
     const blockResult = await client.query(
       `DELETE FROM shift_blocks
-       WHERE user_id = $1 AND date >= $2::date AND date <= $3::date
-       AND reason = 'auto shift deleted by user'`,
+       WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
       [userId, startStr, endStr]
     );
     blocksCleared = blockResult.rowCount;
@@ -1342,6 +1402,11 @@ async function regenerateShiftsForUser(client, userId, { clearBlocks = false } =
      WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`,
     [userId, startStr, endStr]
   );
+
+  // If no schedule configured, just clean up (delete shifts + blocks) and return
+  if (!hasSchedule) {
+    return { created: 0, deleted: deleteResult.rowCount, blocksCleared, userName: user.name };
+  }
   const deletedCount = deleteResult.rowCount;
 
   // 8. Fetch skip-sets: existing manual shifts, absences, remaining blocks
@@ -3048,6 +3113,8 @@ app.get('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoor
       SELECT id, name, week_number as "weekNumber", team_filter as "teamFilter",
              grid, created_by as "createdBy", created_by_name as "createdByName",
              last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
+             last_applied_from::text as "lastAppliedFrom", last_applied_until::text as "lastAppliedUntil",
+             valid_from::text as "validFrom", valid_until::text as "validUntil",
              created_at as "createdAt", updated_at as "updatedAt"
       FROM schedule_drafts
       ORDER BY updated_at DESC
@@ -3060,18 +3127,19 @@ app.get('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoor
 });
 
 app.post('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
-  const { id, name, weekNumber, teamFilter, grid } = req.body;
+  const { id, name, weekNumber, teamFilter, grid, validFrom, validUntil } = req.body;
   const draftId = id || `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
   try {
     const result = await pool.query(
-      `INSERT INTO schedule_drafts (id, name, week_number, team_filter, grid, created_by, created_by_name, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      `INSERT INTO schedule_drafts (id, name, week_number, team_filter, grid, created_by, created_by_name, valid_from, valid_until, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
        RETURNING id, name, week_number as "weekNumber", team_filter as "teamFilter",
                  grid, created_by_name as "createdByName",
                  last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
+                 valid_from::text as "validFrom", valid_until::text as "validUntil",
                  created_at as "createdAt", updated_at as "updatedAt"`,
-      [draftId, name || 'Naamloos', weekNumber || 1, teamFilter || null, JSON.stringify(grid || {}), req.user.id, req.user.name]
+      [draftId, name || 'Naamloos', weekNumber || 1, teamFilter || null, JSON.stringify(grid || {}), req.user.id, req.user.name, validFrom || null, validUntil || null]
     );
     await logAudit(req, 'CREATE', 'settings', draftId, { type: 'schedule_draft', name });
     res.json({ draft: result.rows[0] });
@@ -3083,7 +3151,7 @@ app.post('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoo
 
 app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
-  const { name, weekNumber, teamFilter, grid, lastAppliedAt, lastAppliedBy } = req.body;
+  const { name, weekNumber, teamFilter, grid, lastAppliedAt, lastAppliedBy, validFrom, validUntil } = req.body;
 
   try {
     const setClauses = ['updated_at = NOW()'];
@@ -3096,6 +3164,8 @@ app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverant
     if (grid !== undefined) { setClauses.push(`grid = $${paramIndex++}`); params.push(JSON.stringify(grid)); }
     if (lastAppliedAt !== undefined) { setClauses.push(`last_applied_at = $${paramIndex++}`); params.push(lastAppliedAt); }
     if (lastAppliedBy !== undefined) { setClauses.push(`last_applied_by = $${paramIndex++}`); params.push(lastAppliedBy); }
+    if (validFrom !== undefined) { setClauses.push(`valid_from = $${paramIndex++}`); params.push(validFrom || null); }
+    if (validUntil !== undefined) { setClauses.push(`valid_until = $${paramIndex++}`); params.push(validUntil || null); }
 
     params.push(id);
 
@@ -3104,6 +3174,7 @@ app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverant
        RETURNING id, name, week_number as "weekNumber", team_filter as "teamFilter",
                  grid, created_by_name as "createdByName",
                  last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
+                 valid_from::text as "validFrom", valid_until::text as "validUntil",
                  created_at as "createdAt", updated_at as "updatedAt"`,
       params
     );
@@ -3138,7 +3209,7 @@ app.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterver
 
 app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const draftId = req.params.id;
-  const { clearBlocks = true } = req.body || {};
+  const { clearBlocks = true, applyStartDate = null, applyEndDate = null } = req.body || {};
 
   const client = await pool.connect();
   try {
@@ -3146,7 +3217,7 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
 
     // 1. Load draft with FOR UPDATE lock
     const draftResult = await client.query(
-      `SELECT id, name, week_number, team_filter, grid, created_by
+      `SELECT id, name, week_number, team_filter, grid, created_by, valid_from, valid_until
        FROM schedule_drafts WHERE id = $1 FOR UPDATE`,
       [draftId]
     );
@@ -3157,97 +3228,295 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
     }
 
     const draft = draftResult.rows[0];
-    const grid = draft.grid || {};
-    const weekNumber = draft.week_number || 1;
+    const rawGrid = draft.grid || {};
+    const isMultiWeek = !!rawGrid._multiWeek;
 
-    // 2. Read cycle length once before the loop
-    const patternResult = await client.query(`SELECT value FROM settings WHERE key = 'schedule_pattern'`);
-    let cycleLength = 2;
-    if (patternResult.rows.length > 0 && patternResult.rows[0].value && patternResult.rows[0].value.cycleLength) {
-      cycleLength = patternResult.rows[0].value.cycleLength;
+    // Build list of weeks to apply
+    const weeksToApply = [];
+    if (isMultiWeek) {
+      for (const [key, weekGrid] of Object.entries(rawGrid)) {
+        if (key === '_multiWeek') continue;
+        weeksToApply.push({ weekNumber: Number(key), grid: weekGrid });
+      }
+    } else {
+      weeksToApply.push({ weekNumber: draft.week_number || 1, grid: rawGrid });
     }
 
-    // 3. Process each employee in the grid
+    // Check if this is a future-scheduled draft
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (draft.valid_from) {
+      const validFromDate = parseLocalDate(draft.valid_from);
+      if (validFromDate && validFromDate > today) {
+        // Future draft: save as "ingepland" without applying
+        await client.query(
+          `UPDATE schedule_drafts SET updated_at = NOW() WHERE id = $1`,
+          [draftId]
+        );
+        await client.query('COMMIT');
+        await logAudit(req, 'UPDATE', 'settings', draftId, {
+          type: 'draft_schedule',
+          draftName: draft.name,
+          validFrom: draft.valid_from,
+          validUntil: draft.valid_until
+        });
+        return res.json({
+          scheduled: true,
+          validFrom: draft.valid_from,
+          validUntil: draft.valid_until,
+          draftName: draft.name
+        });
+      }
+    }
+
+    // Determine effective date range for shift generation
+    // Only use explicit dates from the request body — never fall back to draft valid_from/valid_until
+    // (draft dates are metadata for scheduling, not for shift generation boundaries)
+    const effectiveStartDate = applyStartDate || null;
+    const effectiveEndDate = applyEndDate || null;
+    const hasDateRange = !!(effectiveStartDate && effectiveEndDate);
+
+    // 2. Read cycle settings
+    const patternResult = await client.query(`SELECT value FROM settings WHERE key = 'schedule_pattern'`);
+    let cycleLength = 2;
+    let referenceDate = '2025-01-06';
+    if (patternResult.rows.length > 0 && patternResult.rows[0].value) {
+      if (patternResult.rows[0].value.cycleLength) cycleLength = patternResult.rows[0].value.cycleLength;
+      if (patternResult.rows[0].value.referenceDate) referenceDate = patternResult.rows[0].value.referenceDate;
+    }
+
     let appliedCount = 0;
     let totalCreated = 0;
     let totalDeleted = 0;
-    const employeeIds = Object.keys(grid).map(Number).filter(id => id > 0);
 
-    for (const empId of employeeIds) {
-      const empGrid = grid[String(empId)] || grid[empId] || {};
-
-      // Load current user data
-      const userResult = await client.query(
-        `SELECT id, name, email, main_team as "mainTeam", extra_teams as "extraTeams",
+    // Load all active employees, optionally filtered by team
+    let employeeQuery = `SELECT id, name, email, main_team as "mainTeam", extra_teams as "extraTeams",
                 contract_hours as "contractHours", active,
                 week_schedules as "weekSchedules",
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2"
-         FROM users WHERE id = $1 AND active = true`,
-        [empId]
-      );
-      if (userResult.rows.length === 0) continue;
-      const emp = userResult.rows[0];
+         FROM users WHERE active = true`;
+    const employeeParams = [];
+    if (draft.team_filter) {
+      employeeQuery += ` AND (main_team = $1 OR extra_teams @> $2::jsonb)`;
+      employeeParams.push(draft.team_filter, JSON.stringify([draft.team_filter]));
+    }
+    const allEmployeesResult = await client.query(employeeQuery, employeeParams);
 
-      // Convert grid entries (dayIndex 0-6 = Mon-Sun) to weekSchedule entries
-      const entries = [];
-      for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-        const assignment = empGrid[String(dayIndex)] || empGrid[dayIndex];
-        if (assignment) {
-          const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
-          entries.push({
-            dayOfWeek: jsDayOfWeek,
-            enabled: true,
-            startTime: assignment.startTime,
-            endTime: assignment.endTime,
-            team: assignment.team || emp.mainTeam
-          });
+    // Build a grid lookup by week number (indexed by weekNumber -> employeeId -> dayIndex -> assignment)
+    const gridByWeek = {};
+    for (const { weekNumber, grid } of weeksToApply) {
+      gridByWeek[weekNumber] = grid;
+    }
+
+    if (hasDateRange) {
+      // ===== DATE RANGE MODE =====
+      // Generate shifts DIRECTLY from draft grid. Do NOT modify weekSchedules.
+      // This allows "apply this roster from date X to date Y" without permanent changes.
+      const rangeStart = parseLocalDate(effectiveStartDate);
+      const rangeEnd = parseLocalDate(effectiveEndDate);
+      const refDate = parseLocalDate(referenceDate);
+      const refMonday = getMonday(refDate);
+
+      for (const emp of allEmployeesResult.rows) {
+        const startStr = formatDateYYYYMMDD(rangeStart);
+        const endStr = formatDateYYYYMMDD(rangeEnd);
+
+        // Clear blocks in range
+        if (clearBlocks) {
+          await client.query(
+            `DELETE FROM shift_blocks WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
+            [emp.id, startStr, endStr]
+          );
+        }
+
+        // Delete ALL auto-generated shifts in range for this employee
+        const deleteResult = await client.query(
+          `DELETE FROM shifts WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`,
+          [emp.id, startStr, endStr]
+        );
+        const deletedCount = deleteResult.rowCount;
+
+        // Fetch skip-sets: manual shifts, absences, remaining blocks
+        const existingShifts = await client.query(
+          `SELECT date::text as date FROM shifts WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
+          [emp.id, startStr, endStr]
+        );
+        const occupiedDates = new Set(existingShifts.rows.map(r => r.date));
+
+        const absences = await client.query(
+          `SELECT date::text as date FROM availability WHERE user_id = $1 AND date >= $2::date AND date <= $3::date AND type IS NOT NULL AND type != ''`,
+          [emp.id, startStr, endStr]
+        );
+        const absenceDates = new Set(absences.rows.map(r => r.date));
+
+        const blocks = await client.query(
+          `SELECT date::text as date FROM shift_blocks WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
+          [emp.id, startStr, endStr]
+        );
+        const blockedDates = new Set(blocks.rows.map(r => r.date));
+
+        // Generate shifts day-by-day from the DRAFT GRID (not from weekSchedules)
+        // Also track which dates got a new shift, so we can create blocks for the rest
+        let createdCount = 0;
+        const datesWithNewShift = new Set();
+
+        for (let d = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
+             d <= rangeEnd;
+             d.setDate(d.getDate() + 1)) {
+          const dateStr = formatDateYYYYMMDD(d);
+
+          if (occupiedDates.has(dateStr)) continue;
+          if (absenceDates.has(dateStr)) continue;
+          if (blockedDates.has(dateStr)) continue;
+
+          // Calculate cycle week number for this date
+          const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+          const diffMs = currMonday.getTime() - refMonday.getTime();
+          const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+          const mod = diffWeeks % cycleLength;
+          const weekNumber = (mod < 0 ? mod + cycleLength : mod) + 1;
+
+          // Look up this employee's entry in the draft grid for this cycle week
+          const weekGrid = gridByWeek[weekNumber];
+          if (!weekGrid) {
+            // Draft doesn't have data for this cycle week → no shift, will get blocked below
+            continue;
+          }
+
+          const empGrid = weekGrid[String(emp.id)] || weekGrid[emp.id];
+          if (!empGrid) {
+            // Employee not in draft grid for this week → no shift, will get blocked below
+            continue;
+          }
+
+          // Map JS dayOfWeek (0=Sun) to grid dayIndex (0=Mon..6=Sun)
+          const jsDow = d.getDay();
+          const dayIndex = jsDow === 0 ? 6 : jsDow - 1;
+          const assignment = empGrid[String(dayIndex)] || empGrid[dayIndex];
+          if (!assignment) continue;
+
+          // Create shift from draft grid
+          await client.query(
+            `INSERT INTO shifts (user_id, date, start_time, end_time, team, source) VALUES ($1, $2, $3, $4, $5, 'auto')`,
+            [emp.id, dateStr, assignment.startTime, assignment.endTime, assignment.team || emp.mainTeam]
+          );
+          createdCount++;
+          datesWithNewShift.add(dateStr);
+        }
+
+        // Create shift_blocks for days where auto-shifts were deleted but NO new shift was created.
+        // This prevents autoApplyBaseSchedules from regenerating the old shifts on page reload.
+        for (let d = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
+             d <= rangeEnd;
+             d.setDate(d.getDate() + 1)) {
+          const dateStr = formatDateYYYYMMDD(d);
+          // Skip days that already have a shift (new or manual), absence, or block
+          if (datesWithNewShift.has(dateStr)) continue;
+          if (occupiedDates.has(dateStr)) continue;
+          if (absenceDates.has(dateStr)) continue;
+          if (blockedDates.has(dateStr)) continue;
+
+          await client.query(
+            `INSERT INTO shift_blocks (user_id, date, reason) VALUES ($1, $2, $3)
+             ON CONFLICT (user_id, date) DO NOTHING`,
+            [emp.id, dateStr, 'draft applied for date range']
+          );
+        }
+
+        if (deletedCount > 0 || createdCount > 0) {
+          appliedCount++;
+          totalCreated += createdCount;
+          totalDeleted += deletedCount;
         }
       }
 
-      // Build weekSchedules array: replace target week, keep others
-      const currentSchedules = Array.isArray(emp.weekSchedules) ? emp.weekSchedules : [emp.weekScheduleWeek1 || [], emp.weekScheduleWeek2 || []];
+    } else {
+      // ===== PERMANENT MODE (no date range) =====
+      // Modify weekSchedules + regenerate shifts for full planning horizon.
+      // This is the "set new base schedule" mode.
 
-      // Ensure array has enough slots
-      const allWeeks = [];
-      for (let w = 0; w < cycleLength; w++) {
-        allWeeks.push(w === weekNumber - 1 ? entries : (currentSchedules[w] || []));
+      for (const emp of allEmployeesResult.rows) {
+        const currentSchedules = Array.isArray(emp.weekSchedules) ? emp.weekSchedules : [emp.weekScheduleWeek1 || [], emp.weekScheduleWeek2 || []];
+        const allWeeks = [];
+        for (let w = 0; w < cycleLength; w++) {
+          allWeeks.push(currentSchedules[w] || []);
+        }
+
+        // Apply ALL cycle weeks — weeks not in the draft grid become empty (cleared)
+        let hasChanges = false;
+        for (let weekNumber = 1; weekNumber <= cycleLength; weekNumber++) {
+          const weekGrid = gridByWeek[weekNumber];
+          const empGrid = weekGrid ? (weekGrid[String(emp.id)] || weekGrid[emp.id]) : null;
+
+          const entries = [];
+          if (empGrid) {
+            for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+              const assignment = empGrid[String(dayIndex)] || empGrid[dayIndex];
+              if (assignment) {
+                const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
+                entries.push({
+                  dayOfWeek: jsDayOfWeek,
+                  enabled: true,
+                  startTime: assignment.startTime,
+                  endTime: assignment.endTime,
+                  team: assignment.team || emp.mainTeam
+                });
+              }
+            }
+          }
+
+          if (weekNumber - 1 < allWeeks.length) {
+            const oldJson = JSON.stringify(allWeeks[weekNumber - 1]);
+            const newJson = JSON.stringify(entries);
+            if (oldJson !== newJson) {
+              allWeeks[weekNumber - 1] = entries;
+              hasChanges = true;
+            }
+          }
+        }
+
+        if (!hasChanges) continue;
+
+        const week1Json = JSON.stringify(allWeeks[0] || []);
+        const week2Json = JSON.stringify(allWeeks[1] || []);
+        const weekSchedulesJson = JSON.stringify(allWeeks);
+
+        await client.query(
+          `UPDATE users SET
+             week_schedule_week1 = $1::jsonb,
+             week_schedule_week2 = $2::jsonb,
+             week_schedules = $3::jsonb
+           WHERE id = $4`,
+          [week1Json, week2Json, weekSchedulesJson, emp.id]
+        );
+
+        const regenOpts = { clearBlocks };
+        // Pass date overrides so shifts are only generated within the specified period
+        if (effectiveStartDate) regenOpts.overrideStartDate = effectiveStartDate;
+        if (effectiveEndDate) regenOpts.overrideEndDate = effectiveEndDate;
+        const regenResult = await regenerateShiftsForUser(client, emp.id, regenOpts);
+        totalCreated += regenResult.created;
+        totalDeleted += regenResult.deleted;
+        appliedCount++;
       }
-
-      const week1Json = JSON.stringify(allWeeks[0] || []);
-      const week2Json = JSON.stringify(allWeeks[1] || []);
-      const weekSchedulesJson = JSON.stringify(allWeeks);
-
-      // Update user week schedules
-      await client.query(
-        `UPDATE users SET
-           week_schedule_week1 = $1::jsonb,
-           week_schedule_week2 = $2::jsonb,
-           week_schedules = $3::jsonb
-         WHERE id = $4`,
-        [week1Json, week2Json, weekSchedulesJson, empId]
-      );
-
-      // Regenerate shifts using the extracted helper
-      const regenResult = await regenerateShiftsForUser(client, empId, { clearBlocks });
-      totalCreated += regenResult.created;
-      totalDeleted += regenResult.deleted;
-      appliedCount++;
     }
 
-    // 3. Mark draft as applied
+    // 3. Mark draft as applied (including the date range that was applied)
     await client.query(
-      `UPDATE schedule_drafts SET last_applied_at = NOW(), last_applied_by = $1, updated_at = NOW() WHERE id = $2`,
-      [req.user.name, draftId]
+      `UPDATE schedule_drafts SET last_applied_at = NOW(), last_applied_by = $1,
+       last_applied_from = $2, last_applied_until = $3, updated_at = NOW() WHERE id = $4`,
+      [req.user.name, effectiveStartDate || null, effectiveEndDate || null, draftId]
     );
 
     await client.query('COMMIT');
 
     // Audit log (outside transaction)
+    const appliedWeekNumbers = weeksToApply.map(w => w.weekNumber);
     await logAudit(req, 'UPDATE', 'settings', draftId, {
       type: 'draft_apply',
       draftName: draft.name,
-      weekNumber,
+      weekNumbers: appliedWeekNumbers,
       employeesApplied: appliedCount,
       shiftsCreated: totalCreated,
       shiftsDeleted: totalDeleted,
@@ -3258,7 +3527,7 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
       applied: appliedCount,
       shifts: { created: totalCreated, deleted: totalDeleted },
       draftName: draft.name,
-      weekNumber
+      weekNumbers: appliedWeekNumbers
     });
 
   } catch (err) {
