@@ -3170,6 +3170,135 @@ body[data-view-mode="day"] .timeline-header {
     font-weight: 500;
 }
 
+/* Activity badges within shift blocks */
+.activity-badge {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    border-radius: 3px;
+    cursor: pointer;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+    overflow: hidden;
+    border-left: 3px solid;
+    opacity: 0.92;
+    transition: opacity 0.15s;
+}
+
+.activity-badge:hover {
+    opacity: 1;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+
+.activity-label {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.activity-type-oudergesprek {
+    background: rgba(251, 191, 36, 0.35);
+    border-color: #f59e0b;
+    color: #92400e;
+}
+.activity-type-vorming {
+    background: rgba(167, 139, 250, 0.35);
+    border-color: #8b5cf6;
+    color: #5b21b6;
+}
+.activity-type-overleg {
+    background: rgba(52, 211, 153, 0.35);
+    border-color: #10b981;
+    color: #065f46;
+}
+.activity-type-afspraak {
+    background: rgba(96, 165, 250, 0.35);
+    border-color: #3b82f6;
+    color: #1e40af;
+}
+.activity-type-andere {
+    background: rgba(156, 163, 175, 0.35);
+    border-color: #6b7280;
+    color: #374151;
+}
+
+/* Add activity button on shift block */
+.add-activity-btn {
+    position: absolute;
+    bottom: 2px;
+    right: 22px;
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    border: none;
+    background: rgba(255,255,255,0.3);
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 6;
+}
+
+.shift-block:hover .add-activity-btn {
+    opacity: 0.7;
+}
+
+.add-activity-btn:hover {
+    opacity: 1 !important;
+    background: rgba(255,255,255,0.5);
+}
+
+/* Activities section in shift modal */
+.shift-activities-section {
+    margin: 8px 0;
+    padding: 8px 10px;
+    background: var(--bg-secondary, #f8f9fa);
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #e2e8f0);
+}
+
+.shift-activities-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+    font-size: 13px;
+}
+
+.shift-activity-item {
+    font-size: 12px;
+    background: white;
+    border: 1px solid var(--border-color, #e2e8f0);
+    transition: background 0.15s;
+}
+
+.shift-activity-item:hover {
+    background: var(--bg-hover, #edf2f7);
+}
+
+/* Activity count badge for card/month view */
+.activity-count-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.25);
+    color: inherit;
+}
+
 .shift-card-footer {
     display: flex;
     justify-content: space-between;

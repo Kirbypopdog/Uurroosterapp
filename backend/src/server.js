@@ -434,6 +434,24 @@ async function ensureSchema() {
     } catch (e) {
       console.log(`  Status constraint update: ${e.message}`);
     }
+
+    // Create shift_activities table for activities within shifts (e.g. meetings, training)
+    try {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS shift_activities (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          date DATE NOT NULL,
+          start_time TIME NOT NULL,
+          end_time TIME NOT NULL,
+          type TEXT NOT NULL,
+          description TEXT DEFAULT '',
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `);
+    } catch (e) {
+      console.log(`  shift_activities table: ${e.message}`);
+    }
   } catch (err) {
     console.error('Schema check error:', err.message);
   } finally {
@@ -1613,6 +1631,119 @@ app.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordel
     res.status(500).json({ error: 'Server error' });
   } finally {
     client.release();
+  }
+});
+
+// ===== SHIFT ACTIVITIES API =====
+
+app.get('/shift-activities', requireAuth, async (req, res) => {
+  const { startDate, endDate } = req.query;
+  try {
+    let query = `
+      SELECT id, user_id as "userId", date::text as "date", start_time as "startTime",
+             end_time as "endTime", type, description, created_at as "createdAt"
+      FROM shift_activities
+    `;
+    const params = [];
+    if (startDate && endDate) {
+      query += ' WHERE date >= $1 AND date <= $2';
+      params.push(startDate, endDate);
+    }
+    query += ' ORDER BY date, start_time';
+    const result = await pool.query(query, params);
+    res.json({ activities: result.rows });
+  } catch (err) {
+    console.error('GET /shift-activities error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/shift-activities', requireAuth, async (req, res) => {
+  const { userId, date, startTime, endTime, type, description } = req.body || {};
+  if (!userId || !date || !startTime || !endTime || !type) {
+    return res.status(400).json({ error: 'Verplichte velden ontbreken (userId, date, startTime, endTime, type)' });
+  }
+
+  // Permission check: medewerker can only create for themselves
+  const { role, id: currentUserId } = req.user;
+  if (role === 'medewerker' && Number(userId) !== currentUserId) {
+    return res.status(403).json({ error: 'Je kunt alleen activiteiten voor jezelf aanmaken' });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, user_id as "userId", date::text as "date", start_time as "startTime",
+                end_time as "endTime", type, description, created_at as "createdAt"
+    `, [userId, date, startTime, endTime, type, description || '']);
+
+    await logAudit(req, 'CREATE', 'shift_activity', result.rows[0].id, { activity: result.rows[0] });
+    res.status(201).json({ activity: result.rows[0] });
+  } catch (err) {
+    console.error('POST /shift-activities error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.put('/shift-activities/:id', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  const { startTime, endTime, type, description } = req.body || {};
+
+  // Permission check: medewerker can only edit own activities
+  const { role, id: currentUserId } = req.user;
+  if (role === 'medewerker') {
+    const existing = await pool.query('SELECT user_id FROM shift_activities WHERE id = $1', [id]);
+    if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
+      return res.status(403).json({ error: 'Je kunt alleen je eigen activiteiten bewerken' });
+    }
+  }
+
+  try {
+    const result = await pool.query(`
+      UPDATE shift_activities
+      SET start_time = COALESCE($1, start_time),
+          end_time = COALESCE($2, end_time),
+          type = COALESCE($3, type),
+          description = COALESCE($4, description)
+      WHERE id = $5
+      RETURNING id, user_id as "userId", date::text as "date", start_time as "startTime",
+                end_time as "endTime", type, description, created_at as "createdAt"
+    `, [startTime, endTime, type, description, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Activiteit niet gevonden' });
+    }
+    await logAudit(req, 'UPDATE', 'shift_activity', id, { activity: result.rows[0] });
+    res.json({ activity: result.rows[0] });
+  } catch (err) {
+    console.error('PUT /shift-activities error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/shift-activities/:id', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+
+  // Permission check: medewerker can only delete own activities
+  const { role, id: currentUserId } = req.user;
+  if (role === 'medewerker') {
+    const existing = await pool.query('SELECT user_id FROM shift_activities WHERE id = $1', [id]);
+    if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
+      return res.status(403).json({ error: 'Je kunt alleen je eigen activiteiten verwijderen' });
+    }
+  }
+
+  try {
+    const result = await pool.query('DELETE FROM shift_activities WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Activiteit niet gevonden' });
+    }
+    await logAudit(req, 'DELETE', 'shift_activity', id, {});
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /shift-activities error:', err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

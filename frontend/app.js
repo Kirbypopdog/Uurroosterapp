@@ -1081,6 +1081,20 @@ function setupEventListeners() {
         });
     }
 
+    // Activity modal
+    const activityForm = document.getElementById('activity-form');
+    if (activityForm) {
+        activityForm.addEventListener('submit', handleActivitySubmit);
+    }
+    document.getElementById('activity-cancel-btn')?.addEventListener('click', closeActivityModal);
+    document.getElementById('activity-delete-btn')?.addEventListener('click', handleActivityDelete);
+    document.querySelectorAll('#activity-modal .modal-close').forEach(btn => {
+        btn.addEventListener('click', closeActivityModal);
+    });
+    document.getElementById('activity-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'activity-modal') closeActivityModal();
+    });
+
     // Undo/Redo buttons
     document.getElementById('undo-btn')?.addEventListener('click', () => UndoManager.undo());
     document.getElementById('redo-btn')?.addEventListener('click', () => UndoManager.redo());
@@ -1117,6 +1131,22 @@ function setupEventListeners() {
 
             // Call handleShiftDelete with the shift ID and wait for completion
             await handleShiftDelete(shiftId);
+        }
+
+        // Activity badge click → edit activity
+        const activityBadge = e.target.closest('.activity-badge');
+        if (activityBadge) {
+            e.stopPropagation();
+            const activityId = activityBadge.dataset.activityId;
+            if (activityId) openEditActivityModal(parseInt(activityId, 10));
+        }
+
+        // Add activity button click
+        const addActivityBtn = e.target.closest('.add-activity-btn');
+        if (addActivityBtn) {
+            e.stopPropagation();
+            const { userId, date, shiftStart, shiftEnd } = addActivityBtn.dataset;
+            if (userId && date) openAddActivityModal(parseInt(userId, 10), date, shiftStart, shiftEnd);
         }
     });
 }
@@ -3197,6 +3227,32 @@ function renderShiftBlock(shift, stackInfo = { offset: 0, total: 1, groupShifts:
         countBadge = `<span class="shift-count-badge">${stackInfo.total}</span>`;
     }
 
+    // Render activities within this shift as overlays
+    const activities = getActivitiesByEmployee(shift.employeeId, shift.date);
+    const activityTypeLabels = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', andere: 'Andere' };
+    let activitiesHtml = '';
+    activities.forEach(act => {
+        const [aStartH, aStartM] = act.startTime.split(':').map(Number);
+        const [aEndH, aEndM] = act.endTime.split(':').map(Number);
+        const aStartFrac = aStartH + aStartM / 60 - START_HOUR;
+        const aEndFrac = aEndH + aEndM / 60 - START_HOUR;
+        // Position relative to shift block
+        const aTop = (aStartFrac - startFractional) / (endFractional - startFractional) * 100;
+        const aHeight = (aEndFrac - aStartFrac) / (endFractional - startFractional) * 100;
+        const label = activityTypeLabels[act.type] || act.type;
+        const desc = act.description ? ` - ${escapeHtml(act.description)}` : '';
+        activitiesHtml += `<div class="activity-badge activity-type-${escapeHtml(act.type)}"
+            data-activity-id="${act.id}"
+            style="top: ${Math.max(0, aTop)}%; height: ${Math.min(100 - Math.max(0, aTop), aHeight)}%;"
+            title="${escapeHtml(label)}${desc} (${act.startTime}-${act.endTime})">
+            <span class="activity-label">${escapeHtml(label)}</span>
+        </div>`;
+    });
+
+    // Add activity button (only if user can edit)
+    const canEdit = canUserEditShift(shift);
+    const addActivityBtn = canEdit ? `<button class="add-activity-btn" data-user-id="${shift.employeeId}" data-date="${shift.date}" data-shift-start="${shift.startTime}" data-shift-end="${shift.endTime}" title="Activiteit toevoegen">${IconHelper.html('calendar-plus', 'xs')}</button>` : '';
+
     const employeeName = escapeHtml(employee.name);
     return `<div class="${cardClass}"
                  data-shift-id="${shift.id}"
@@ -3205,8 +3261,10 @@ function renderShiftBlock(shift, stackInfo = { offset: 0, total: 1, groupShifts:
             <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
             <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
             ${countBadge}
+            ${addActivityBtn}
             ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">${IconHelper.html(ICONS.close, 'xs')}</button>` : ''}
         </div>
+        ${activitiesHtml}
     </div>`;
 }
 
@@ -3248,12 +3306,19 @@ function renderShiftCard(shift) {
         }
     }
 
+    // Activity count for card view
+    const activities = getActivitiesByEmployee(shift.employeeId, shift.date);
+    const activityBadge = activities.length > 0
+        ? `<span class="activity-count-badge" title="${activities.map(a => a.type).join(', ')}">${IconHelper.html('calendar-plus', 'xs')} ${activities.length}</span>`
+        : '';
+
     const employeeName = escapeHtml(employee.name);
     return `<div class="${cardClass}" data-shift-id="${shift.id}">
         <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
         <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
         <div class="shift-card-footer">
             <span class="shift-team-badge team-${shift.team}">${escapeHtml(DataStore.settings.teams[shift.team].name)}</span>
+            ${activityBadge}
             ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">${IconHelper.html(ICONS.close, 'xs')}</button>` : ''}
         </div>
     </div>`;
@@ -3426,7 +3491,33 @@ function openShiftModal(shift, canEdit) {
     const availability = getAvailability(shift.employeeId, shift.date);
     const isAbsent = availability && availability.type;
 
-    let issuesHtml = sourceHtml;
+    // Show activities for this shift
+    const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
+    let activitiesListHtml = '';
+    if (shiftActivities.length > 0 || canEdit) {
+        const actTypeLabels = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', andere: 'Andere' };
+        activitiesListHtml = '<div class="shift-activities-section">';
+        activitiesListHtml += `<div class="shift-activities-header"><strong>Activiteiten</strong>`;
+        if (canEdit) {
+            activitiesListHtml += ` <button type="button" class="btn btn-sm add-activity-btn" data-user-id="${shift.employeeId}" data-date="${shift.date}" data-shift-start="${shift.startTime}" data-shift-end="${shift.endTime}" style="opacity:1;position:static;width:auto;height:auto;">+ Toevoegen</button>`;
+        }
+        activitiesListHtml += '</div>';
+        if (shiftActivities.length > 0) {
+            activitiesListHtml += '<div class="shift-activities-list">';
+            shiftActivities.forEach(act => {
+                const label = actTypeLabels[act.type] || act.type;
+                const desc = act.description ? ` - ${escapeHtml(act.description)}` : '';
+                activitiesListHtml += `<div class="shift-activity-item activity-badge" data-activity-id="${act.id}" style="position:static;display:flex;cursor:pointer;padding:4px 8px;margin-bottom:4px;border-radius:4px;">
+                    <span class="activity-type-${escapeHtml(act.type)}" style="display:inline-block;width:4px;border-radius:2px;margin-right:8px;flex-shrink:0;"></span>
+                    <span><strong>${escapeHtml(label)}</strong> ${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}${desc}</span>
+                </div>`;
+            });
+            activitiesListHtml += '</div>';
+        }
+        activitiesListHtml += '</div>';
+    }
+
+    let issuesHtml = sourceHtml + activitiesListHtml;
     if (isAbsent) {
         const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren opnemen', 'vorming': 'Vorming', 'andere': 'Afwezig' };
         const employeeName = escapeHtml(getEmployee(shift.employeeId)?.name || '');
@@ -4142,6 +4233,87 @@ function applySuggestion(btn) {
     DOM.shiftValidationErrors.innerHTML = '';
     resetShiftSubmitBtn();
     showToast('Suggestie toegepast - controleer en klik Opslaan', 'info');
+}
+
+// ===== ACTIVITY MODAL =====
+
+function openAddActivityModal(userId, date, shiftStart, shiftEnd) {
+    document.getElementById('activity-modal-title').textContent = 'Activiteit toevoegen';
+    document.getElementById('activity-id').value = '';
+    document.getElementById('activity-user-id').value = userId;
+    document.getElementById('activity-date').value = date;
+    document.getElementById('activity-type').value = '';
+    document.getElementById('activity-start').value = shiftStart || '';
+    document.getElementById('activity-end').value = shiftEnd || '';
+    document.getElementById('activity-description').value = '';
+    document.getElementById('activity-delete-btn').style.display = 'none';
+    document.getElementById('activity-modal').classList.remove('hidden');
+    IconHelper.init(document.getElementById('activity-modal'));
+}
+
+function openEditActivityModal(activityId) {
+    const activity = DataStore.activities.find(a => a.id === activityId);
+    if (!activity) return;
+
+    document.getElementById('activity-modal-title').textContent = 'Activiteit bewerken';
+    document.getElementById('activity-id').value = activity.id;
+    document.getElementById('activity-user-id').value = activity.userId;
+    document.getElementById('activity-date').value = activity.date;
+    document.getElementById('activity-type').value = activity.type;
+    document.getElementById('activity-start').value = activity.startTime;
+    document.getElementById('activity-end').value = activity.endTime;
+    document.getElementById('activity-description').value = activity.description || '';
+    document.getElementById('activity-delete-btn').style.display = '';
+    document.getElementById('activity-modal').classList.remove('hidden');
+    IconHelper.init(document.getElementById('activity-modal'));
+}
+
+function closeActivityModal() {
+    document.getElementById('activity-modal').classList.add('hidden');
+}
+
+async function handleActivitySubmit(e) {
+    e.preventDefault();
+    const id = document.getElementById('activity-id').value;
+    const userId = document.getElementById('activity-user-id').value;
+    const date = document.getElementById('activity-date').value;
+    const type = document.getElementById('activity-type').value;
+    const startTime = document.getElementById('activity-start').value;
+    const endTime = document.getElementById('activity-end').value;
+    const description = document.getElementById('activity-description').value;
+
+    if (!type || !startTime || !endTime) {
+        showToast('Vul alle verplichte velden in', 'warning');
+        return;
+    }
+
+    try {
+        if (id) {
+            await updateActivity(parseInt(id, 10), { startTime, endTime, type, description });
+        } else {
+            await addActivity({ userId: parseInt(userId, 10), date, startTime, endTime, type, description });
+        }
+        closeActivityModal();
+        renderPlanning();
+        showToast('Activiteit opgeslagen', 'success');
+    } catch (error) {
+        showToast('Fout bij opslaan: ' + error.message, 'error');
+    }
+}
+
+async function handleActivityDelete() {
+    const id = document.getElementById('activity-id').value;
+    if (!id) return;
+    if (!confirm('Activiteit verwijderen?')) return;
+
+    try {
+        await deleteActivity(parseInt(id, 10));
+        closeActivityModal();
+        renderPlanning();
+        showToast('Activiteit verwijderd', 'success');
+    } catch (error) {
+        showToast('Fout bij verwijderen: ' + error.message, 'error');
+    }
 }
 
 async function deleteShiftConfirm(shiftId) {

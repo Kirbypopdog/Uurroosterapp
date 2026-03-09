@@ -296,6 +296,55 @@
         </div>
     </div>
 
+    <!-- Modal: Activiteit toevoegen/bewerken -->
+    <div id="activity-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h2 id="activity-modal-title">Activiteit toevoegen</h2>
+                <span class="modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <form id="activity-form">
+                <input type="hidden" id="activity-id">
+                <input type="hidden" id="activity-user-id">
+                <input type="hidden" id="activity-date">
+                <div class="form-group">
+                    <label for="activity-type">Type *</label>
+                    <select id="activity-type" required>
+                        <option value="">-- Kies type --</option>
+                        <option value="oudergesprek">Oudergesprek</option>
+                        <option value="vorming">Vorming</option>
+                        <option value="overleg">Overleg</option>
+                        <option value="afspraak">Afspraak</option>
+                        <option value="andere">Andere</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="activity-start">Starttijd *</label>
+                        <input type="time" id="activity-start" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="activity-end">Eindtijd *</label>
+                        <input type="time" id="activity-end" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="activity-description">Omschrijving</label>
+                    <input type="text" id="activity-description" placeholder="Bijv. Oudergesprek met Fam. Jansen">
+                </div>
+                <div class="modal-actions modal-actions-split">
+                    <div class="modal-actions-left">
+                        <button type="button" class="btn btn-danger" id="activity-delete-btn" style="display: none;">Verwijderen</button>
+                    </div>
+                    <div class="modal-actions-right">
+                        <button type="button" class="btn btn-secondary" id="activity-cancel-btn">Annuleren</button>
+                        <button type="submit" class="btn btn-primary" id="activity-submit-btn">Opslaan</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Modal: Waarschuwingen details -->
     <div id="warning-details-modal" class="modal hidden">
         <div class="modal-content">

@@ -120,6 +120,14 @@ function normalizeShiftBlock(b) {
     };
 }
 
+function normalizeActivity(a) {
+    return {
+        ...a,
+        date: typeof a.date === 'string' ? a.date.split('T')[0] : a.date,
+        userId: a.userId || a.user_id
+    };
+}
+
 // Globale data store (in-memory cache van database data)
 // NOTE: employees is nu een alias voor users (minus admin users)
 const DataStore = {
@@ -133,6 +141,7 @@ const DataStore = {
         this.users = [...admins, ...val.filter(u => u.role !== 'admin')];
     },
     shifts: [],
+    activities: [],
     availability: [],
     shiftBlocks: [],
     swapRequests: [],
@@ -168,13 +177,14 @@ async function loadDataFromAPI() {
     try {
         // Load all data in parallel - users now includes employee/schedule data
         const loadErrors = [];
-        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData] = await Promise.all([
+        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData] = await Promise.all([
             dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
             dataApiFetch('/shifts').catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
             dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
             dataApiFetch('/shift-blocks').catch(err => { loadErrors.push('shift-blocks'); console.error('[LoadData] Failed to load shift-blocks:', err); return []; }),
             dataApiFetch('/settings').catch(err => { loadErrors.push('settings'); console.error('[LoadData] Failed to load settings:', err); return { settings: {} }; }),
-            dataApiFetch('/schedule-drafts').catch(err => { console.log('[LoadData] Schedule drafts not available (using settings fallback)'); return { drafts: null }; })
+            dataApiFetch('/schedule-drafts').catch(err => { console.log('[LoadData] Schedule drafts not available (using settings fallback)'); return { drafts: null }; }),
+            dataApiFetch('/shift-activities').catch(err => { console.log('[LoadData] Activities not available'); return { activities: [] }; })
         ]);
 
         if (loadErrors.length > 0) {
@@ -187,6 +197,7 @@ async function loadDataFromAPI() {
         DataStore.users = usersData.users || [];
 
         DataStore.shifts = (shiftsData.shifts || []).map(normalizeShift);
+        DataStore.activities = (activitiesData.activities || []).map(normalizeActivity);
         DataStore.availability = (availabilityData.availability || []).map(normalizeAvailability);
         DataStore.shiftBlocks = (Array.isArray(shiftBlocksData) ? shiftBlocksData : []).map(normalizeShiftBlock);
 
@@ -455,6 +466,68 @@ async function fetchShiftBlocks() {
         console.error('Error fetching shift blocks:', error);
         return [];
     }
+}
+
+async function refreshActivities() {
+    try {
+        const params = new URLSearchParams();
+        if (_activeShiftRange) {
+            params.set('startDate', _activeShiftRange.startDate);
+            params.set('endDate', _activeShiftRange.endDate);
+        }
+        const url = '/shift-activities' + (params.toString() ? '?' + params.toString() : '');
+        const data = await dataApiFetch(url);
+        DataStore.activities = (data.activities || []).map(normalizeActivity);
+        return DataStore.activities;
+    } catch (error) {
+        console.error('[Refresh] Failed to refresh activities:', error);
+        return [];
+    }
+}
+
+async function addActivity(activityData) {
+    try {
+        const data = await dataApiFetch('/shift-activities', {
+            method: 'POST',
+            body: JSON.stringify(activityData)
+        });
+        await refreshActivities();
+        return normalizeActivity(data.activity);
+    } catch (error) {
+        console.error('Fout bij aanmaken activiteit:', error);
+        throw error;
+    }
+}
+
+async function updateActivity(id, updates) {
+    try {
+        const data = await dataApiFetch(`/shift-activities/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(updates)
+        });
+        await refreshActivities();
+        return normalizeActivity(data.activity);
+    } catch (error) {
+        console.error('Fout bij bijwerken activiteit:', error);
+        throw error;
+    }
+}
+
+async function deleteActivity(id) {
+    try {
+        await dataApiFetch(`/shift-activities/${id}`, { method: 'DELETE' });
+        await refreshActivities();
+        return true;
+    } catch (error) {
+        console.error('Fout bij verwijderen activiteit:', error);
+        throw error;
+    }
+}
+
+function getActivitiesByEmployee(userId, date) {
+    return DataStore.activities.filter(a =>
+        String(a.userId) === String(userId) && a.date === date
+    );
 }
 
 async function deleteShift(id) {
