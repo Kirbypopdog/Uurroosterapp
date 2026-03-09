@@ -5305,13 +5305,13 @@ async function renderSwaps() {
 
         // Separate requests by category
         const targetPendingRequests = swapRequests.filter(sr => canTargetRespondToSwap(sr));
-        const pendingRequests = swapRequests.filter(sr => sr.status === 'pending' && canApproveSwap(sr));
+        const pendingRequests = swapRequests.filter(sr => (sr.status === 'pending' || sr.status === 'pending_lead') && canApproveSwap(sr));
         // Mijn verzoeken: only show requests where I am the REQUESTER (not target), exclude expired
         const myRequests = swapRequests.filter(sr =>
             sr.requester_user_id === currentUser.id && sr.status !== 'expired'
         );
         const historyRequests = swapRequests.filter(sr =>
-            sr.status !== 'pending' && sr.status !== 'expired' && canApproveSwap(sr)
+            sr.status !== 'pending' && sr.status !== 'pending_lead' && sr.status !== 'expired' && canApproveSwap(sr)
         ).slice(0, 10); // Show last 10
         // Expired requests: own requests that have expired
         const expiredRequests = swapRequests.filter(sr =>
@@ -5423,7 +5423,7 @@ async function renderSwaps() {
                     <span class="swap-section-count" style="background: #94a3b8;">${expiredRequests.length}</span>
                     <span style="font-size: 0.8rem; font-weight: 400; margin-left: 0.5rem;">klik om te tonen</span>
                 </h3>
-                <div class="expired-requests-list" style="display: none;">`;
+                <div class="expired-requests-list">`;
 
             expiredRequests.forEach(sr => {
                 if (sr.request_type === 'takeover') {
@@ -8372,6 +8372,11 @@ function saveTemplate(originalId) {
 
     if (!name || !start || !end) {
         showToast('Vul alle velden in', 'warning');
+        return;
+    }
+
+    if (start === end) {
+        showToast('Starttijd en eindtijd mogen niet gelijk zijn', 'warning');
         return;
     }
 
