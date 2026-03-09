@@ -241,6 +241,10 @@ const PERMISSIONS = {
     EXPORT_DATA: ['admin', 'roosterverantwoordelijke']
 };
 
+// ===== ACTIVITY TYPE LABELS =====
+const ACTIVITY_TYPE_LABELS_SHORT = { oudergesprek: 'OG', vorming: 'Vorm', overleg: 'Overl', afspraak: 'Afsp', andere: 'And' };
+const ACTIVITY_TYPE_LABELS_FULL = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', andere: 'Andere' };
+
 // ===== LUCIDE ICON HELPERS =====
 const ICONS = {
     // Status & Validation
@@ -2626,10 +2630,9 @@ function renderTimelineView() {
 
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            const actTypeLabels = { oudergesprek: 'OG', vorming: 'Vorm', overleg: 'Overl', afspraak: 'Afsp', andere: 'And' };
                             let actChips = '';
                             shiftActivities.forEach(act => {
-                                const lbl = actTypeLabels[act.type] || act.type;
+                                const lbl = ACTIVITY_TYPE_LABELS_SHORT[act.type] || act.type;
                                 const t = `${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}`;
                                 actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
                             });
@@ -2789,10 +2792,9 @@ function renderTimelineView() {
 
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            const actTypeLabels = { oudergesprek: 'OG', vorming: 'Vorm', overleg: 'Overl', afspraak: 'Afsp', andere: 'And' };
                             let actChips = '';
                             shiftActivities.forEach(act => {
-                                const lbl = actTypeLabels[act.type] || act.type;
+                                const lbl = ACTIVITY_TYPE_LABELS_SHORT[act.type] || act.type;
                                 const t = `${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}`;
                                 actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
                             });
@@ -3175,115 +3177,7 @@ function calculateShiftColumns(shifts) {
     return columns;
 }
 
-// Render shift block for Google Calendar-style view
-function renderShiftBlock(shift, stackInfo = { offset: 0, total: 1, groupShifts: [] }) {
-    const employee = getEmployee(shift.employeeId);
-    if (!employee) return '';
-
-    const validation = validateShift(shift, shift.id);
-    const availability = getAvailability(shift.employeeId, shift.date);
-
-    // Parse shift times
-    const [startHour, startMin] = shift.startTime.split(':').map(Number);
-    const [endHour, endMin] = shift.endTime.split(':').map(Number);
-
-    // Calculate position and height (60px per hour, starting from 7:00)
-    const HOUR_HEIGHT = 60; // pixels per hour
-    const START_HOUR = 7;
-
-    // Convert times to fractional hours from 7:00
-    const startFractional = startHour + startMin / 60 - START_HOUR;
-    const endFractional = (endHour < startHour ? endHour + 24 : endHour) + endMin / 60 - START_HOUR;
-
-    const top = startFractional * HOUR_HEIGHT;
-    const height = (endFractional - startFractional) * HOUR_HEIGHT;
-
-    // Calculate stacking offset for overlapping shifts
-    const STACK_OFFSET = 8; // pixels to offset each stacked shift
-    const leftOffset = stackInfo.offset * STACK_OFFSET;
-    const rightOffset = (stackInfo.total - stackInfo.offset - 1) * STACK_OFFSET;
-
-    // Build CSS class
-    let cardClass = `shift-block team-${shift.team}`;
-
-    // Add auto/manual class for visual distinction
-    if (shift.source === 'auto') {
-        cardClass += ' shift-auto';
-    } else {
-        cardClass += ' shift-manual';
-    }
-
-    // Check if employee is absent - this is a conflict!
-    // Only mark as absent if there's a valid absence type (verlof, ziek, etc.)
-    const validAbsenceTypes = ['verlof', 'ziek', 'overuren', 'vorming', 'andere'];
-    const isAbsent = availability && availability.type && validAbsenceTypes.includes(availability.type);
-
-    if (isAbsent) {
-        cardClass += ' shift-absent-conflict';
-    } else if (!validation.isValid) {
-        cardClass += ' shift-error';
-    } else if (validation.hasWarnings) {
-        cardClass += ' shift-warning';
-    }
-
-    if (endHour < startHour) {
-        cardClass += ' shift-nacht';
-    }
-
-    // Add stacked class if there are multiple shifts
-    if (stackInfo.total > 1) {
-        cardClass += ' shift-stacked';
-    }
-
-    // Availability icon with more info
-    let availabilityIcon = '';
-    if (isAbsent) {
-        const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
-        const label = absenceLabels[availability.type] || 'Afwezig';
-        availabilityIcon = `<span class="shift-availability-indicator unavailable" title="CONFLICT: ${label}">${IconHelper.html(ICONS.warning, 'xs')} ${label}</span>`;
-    }
-
-    // Add count badge for stacked shifts (only on the top shift)
-    let countBadge = '';
-    if (stackInfo.total > 1 && stackInfo.offset === stackInfo.total - 1) {
-        countBadge = `<span class="shift-count-badge">${stackInfo.total}</span>`;
-    }
-
-    // Render activities as visible chips inside the shift block
-    const activities = getActivitiesByEmployee(shift.employeeId, shift.date);
-    const activityTypeLabels = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', andere: 'Andere' };
-    let activitiesHtml = '';
-    if (activities.length > 0) {
-        activitiesHtml = '<div class="shift-activities-chips">';
-        activities.forEach(act => {
-            const label = activityTypeLabels[act.type] || act.type;
-            const timeStr = `${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}`;
-            const desc = act.description ? ` - ${escapeHtml(act.description)}` : '';
-            activitiesHtml += `<div class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(label)}${desc} (${timeStr})">
-                <span class="activity-chip-time">${timeStr}</span> ${escapeHtml(label)}
-            </div>`;
-        });
-        activitiesHtml += '</div>';
-    }
-
-    // Add activity button (only if user can edit)
-    const canEdit = canUserEditShift(shift);
-    const addActivityBtn = canEdit ? `<button class="add-activity-btn" data-user-id="${shift.employeeId}" data-date="${shift.date}" data-shift-start="${shift.startTime}" data-shift-end="${shift.endTime}" title="Activiteit toevoegen">${IconHelper.html('calendar-plus', 'xs')}</button>` : '';
-
-    const employeeName = escapeHtml(employee.name);
-    return `<div class="${cardClass}"
-                 data-shift-id="${shift.id}"
-                 style="top: ${top}px; height: ${height}px; left: ${leftOffset}px; right: ${rightOffset}px; z-index: ${100 + stackInfo.offset};">
-        <div class="shift-block-content">
-            <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
-            <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
-            ${activitiesHtml}
-            ${countBadge}
-            ${addActivityBtn}
-            ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">${IconHelper.html(ICONS.close, 'xs')}</button>` : ''}
-        </div>
-    </div>`;
-}
+// renderShiftBlock removed — was dead code (never called, timeline renders inline in renderTimelineView)
 
 // Keep old function for backwards compatibility if needed elsewhere
 function renderShiftCard(shift) {
@@ -3512,7 +3406,6 @@ function openShiftModal(shift, canEdit) {
     const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
     let activitiesListHtml = '';
     if (shiftActivities.length > 0 || canEdit) {
-        const actTypeLabels = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', andere: 'Andere' };
         activitiesListHtml = '<div class="shift-activities-section">';
         activitiesListHtml += `<div class="shift-activities-header"><strong>Activiteiten</strong>`;
         if (canEdit) {
@@ -3522,7 +3415,7 @@ function openShiftModal(shift, canEdit) {
         if (shiftActivities.length > 0) {
             activitiesListHtml += '<div class="shift-activities-list">';
             shiftActivities.forEach(act => {
-                const label = actTypeLabels[act.type] || act.type;
+                const label = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
                 const desc = act.description ? ` - ${escapeHtml(act.description)}` : '';
                 activitiesListHtml += `<div class="shift-activity-item activity-badge" data-activity-id="${act.id}" style="position:static;display:flex;cursor:pointer;padding:4px 8px;margin-bottom:4px;border-radius:4px;">
                     <span class="activity-type-${escapeHtml(act.type)}" style="display:inline-block;width:4px;border-radius:2px;margin-right:8px;flex-shrink:0;"></span>
@@ -4259,9 +4152,11 @@ function openAddActivityModal(userId, date, shiftStart, shiftEnd) {
     document.getElementById('activity-id').value = '';
     document.getElementById('activity-user-id').value = userId;
     document.getElementById('activity-date').value = date;
+    document.getElementById('activity-shift-start').value = shiftStart || '';
+    document.getElementById('activity-shift-end').value = shiftEnd || '';
     document.getElementById('activity-type').value = '';
-    document.getElementById('activity-start').value = shiftStart || '';
-    document.getElementById('activity-end').value = shiftEnd || '';
+    document.getElementById('activity-start').value = '';
+    document.getElementById('activity-end').value = '';
     document.getElementById('activity-description').value = '';
     document.getElementById('activity-delete-btn').style.display = 'none';
     document.getElementById('activity-modal').classList.remove('hidden');
@@ -4272,10 +4167,16 @@ function openEditActivityModal(activityId) {
     const activity = DataStore.activities.find(a => a.id === activityId);
     if (!activity) return;
 
+    // Find the shift for this activity to get shift hours
+    const shift = DataStore.shifts.find(s =>
+        String(s.employeeId) === String(activity.userId) && s.date === activity.date
+    );
     document.getElementById('activity-modal-title').textContent = 'Activiteit bewerken';
     document.getElementById('activity-id').value = activity.id;
     document.getElementById('activity-user-id').value = activity.userId;
     document.getElementById('activity-date').value = activity.date;
+    document.getElementById('activity-shift-start').value = shift ? shift.startTime : '';
+    document.getElementById('activity-shift-end').value = shift ? shift.endTime : '';
     document.getElementById('activity-type').value = activity.type;
     document.getElementById('activity-start').value = activity.startTime;
     document.getElementById('activity-end').value = activity.endTime;
@@ -4302,6 +4203,22 @@ async function handleActivitySubmit(e) {
     if (!type || !startTime || !endTime) {
         showToast('Vul alle verplichte velden in', 'warning');
         return;
+    }
+
+    if (startTime >= endTime) {
+        showToast('Starttijd moet voor eindtijd liggen', 'warning');
+        return;
+    }
+
+    // Warn if activity falls outside shift hours
+    const shiftStart = document.getElementById('activity-shift-start')?.value;
+    const shiftEnd = document.getElementById('activity-shift-end')?.value;
+    if (shiftStart && shiftEnd) {
+        if (startTime < shiftStart || endTime > shiftEnd) {
+            if (!confirm('Deze activiteit valt (deels) buiten de shift-uren (' + shiftStart.substring(0,5) + '-' + shiftEnd.substring(0,5) + '). Toch opslaan?')) {
+                return;
+            }
+        }
     }
 
     try {
