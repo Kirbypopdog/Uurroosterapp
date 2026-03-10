@@ -1352,22 +1352,29 @@ async function regenerateShiftsForUser(client, userId, { clearBlocks = false, ov
   // E.g. school year starts Sept 1 → ends Aug 31
   // If we're past the school year start date, the end is next year; otherwise this year
   const schoolYearEndMonth = schoolYearStartMonth === 0 ? 11 : schoolYearStartMonth - 1;
-  const schoolYearEndDay = schoolYearStartDay === 1
-    ? new Date(today.getFullYear(), schoolYearEndMonth + 1, 0).getDate() // last day of prev month
-    : schoolYearStartDay - 1;
   let schoolYearEndYear = today.getFullYear();
-  const testEnd = new Date(schoolYearEndYear, schoolYearEndMonth, schoolYearEndDay);
+  // First estimate the year, then calculate the day (for correct leap year handling)
+  const testEndDay = schoolYearStartDay === 1
+    ? new Date(schoolYearEndYear, schoolYearEndMonth + 1, 0).getDate()
+    : schoolYearStartDay - 1;
+  const testEnd = new Date(schoolYearEndYear, schoolYearEndMonth, testEndDay);
   if (testEnd <= today) {
     schoolYearEndYear++;
   }
+  // Recalculate day with correct year (handles Feb 28/29 correctly)
+  const schoolYearEndDay = schoolYearStartDay === 1
+    ? new Date(schoolYearEndYear, schoolYearEndMonth + 1, 0).getDate()
+    : schoolYearStartDay - 1;
   let endDate = new Date(schoolYearEndYear, schoolYearEndMonth, schoolYearEndDay);
 
   // Apply explicit overrides if provided (e.g. from draft apply with specific dates)
   if (overrideStartDate) {
-    startDate = parseLocalDate(overrideStartDate);
+    const parsed = parseLocalDate(overrideStartDate);
+    if (parsed) startDate = parsed;
   }
   if (overrideEndDate) {
-    endDate = parseLocalDate(overrideEndDate);
+    const parsed = parseLocalDate(overrideEndDate);
+    if (parsed) endDate = parsed;
   }
 
   // Only apply schedule_valid_until cap when no explicit endDate was provided
@@ -3205,6 +3212,73 @@ app.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterver
   }
 });
 
+// ===== DEACTIVATE SCHEDULE DRAFT =====
+
+app.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  const { endDate, deleteManual = false } = req.body || {};
+  if (!endDate) return res.status(400).json({ error: 'endDate is vereist' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Load draft
+    const draftResult = await client.query(
+      'SELECT id, name, grid, team_filter FROM schedule_drafts WHERE id = $1 FOR UPDATE',
+      [req.params.id]
+    );
+    if (draftResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Concept niet gevonden' });
+    }
+
+    const draft = draftResult.rows[0];
+    const grid = draft.grid || {};
+
+    // 2. Update draft: set last_applied_until = endDate
+    await client.query(
+      'UPDATE schedule_drafts SET last_applied_until = $1, updated_at = NOW() WHERE id = $2',
+      [endDate, req.params.id]
+    );
+
+    // 3. Collect user IDs from grid
+    const userIds = new Set();
+    for (const [key, weekGrid] of Object.entries(grid)) {
+      if (key.startsWith('_')) continue;
+      if (typeof weekGrid === 'object' && weekGrid !== null) {
+        Object.keys(weekGrid).forEach(id => { const n = parseInt(id); if (!isNaN(n)) userIds.add(n); });
+      }
+    }
+
+    let shiftsDeleted = 0;
+    if (userIds.size > 0) {
+      const userIdArray = Array.from(userIds);
+      // Delete auto-generated shifts after endDate for these users
+      // source='auto' marks auto-generated shifts
+      let deleteQuery;
+      if (deleteManual) {
+        deleteQuery = 'DELETE FROM shifts WHERE user_id = ANY($1) AND date > $2';
+      } else {
+        deleteQuery = "DELETE FROM shifts WHERE user_id = ANY($1) AND date > $2 AND source = 'auto'";
+      }
+      const result = await client.query(deleteQuery, [userIdArray, endDate]);
+      shiftsDeleted = result.rowCount;
+    }
+
+    await client.query('COMMIT');
+    await logAudit(req, 'UPDATE', 'settings', req.params.id, {
+      action: 'deactivate', endDate, shiftsDeleted, draftName: draft.name
+    });
+    res.json({ ok: true, shiftsDeleted });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('POST /schedule-drafts/:id/deactivate error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
 // ===== APPLY SCHEDULE DRAFT (atomic transaction for all employees) =====
 
 app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
@@ -3235,7 +3309,7 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
     const weeksToApply = [];
     if (isMultiWeek) {
       for (const [key, weekGrid] of Object.entries(rawGrid)) {
-        if (key === '_multiWeek') continue;
+        if (key.startsWith('_')) continue; // skip _multiWeek, _pattern, _rotation metadata
         weeksToApply.push({ weekNumber: Number(key), grid: weekGrid });
       }
     } else {
@@ -3270,19 +3344,28 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
     }
 
     // Determine effective date range for shift generation
-    // Only use explicit dates from the request body — never fall back to draft valid_from/valid_until
-    // (draft dates are metadata for scheduling, not for shift generation boundaries)
     const effectiveStartDate = applyStartDate || null;
     const effectiveEndDate = applyEndDate || null;
     const hasDateRange = !!(effectiveStartDate && effectiveEndDate);
 
-    // 2. Read cycle settings
-    const patternResult = await client.query(`SELECT value FROM settings WHERE key = 'schedule_pattern'`);
+    // Validate date range
+    if (hasDateRange && effectiveStartDate >= effectiveEndDate) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Startdatum moet voor einddatum liggen' });
+    }
+
+    // 2. Read cycle settings — prefer draft's embedded pattern over global settings
     let cycleLength = 2;
     let referenceDate = '2025-01-06';
-    if (patternResult.rows.length > 0 && patternResult.rows[0].value) {
-      if (patternResult.rows[0].value.cycleLength) cycleLength = patternResult.rows[0].value.cycleLength;
-      if (patternResult.rows[0].value.referenceDate) referenceDate = patternResult.rows[0].value.referenceDate;
+    if (rawGrid._pattern && rawGrid._pattern.cycleLength) {
+      cycleLength = rawGrid._pattern.cycleLength;
+      referenceDate = rawGrid._pattern.referenceDate || referenceDate;
+    } else {
+      const patternResult = await client.query(`SELECT value FROM settings WHERE key = 'schedule_pattern'`);
+      if (patternResult.rows.length > 0 && patternResult.rows[0].value) {
+        if (patternResult.rows[0].value.cycleLength) cycleLength = patternResult.rows[0].value.cycleLength;
+        if (patternResult.rows[0].value.referenceDate) referenceDate = patternResult.rows[0].value.referenceDate;
+      }
     }
 
     let appliedCount = 0;
@@ -3319,6 +3402,12 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
       const refMonday = getMonday(refDate);
 
       for (const emp of allEmployeesResult.rows) {
+        // Skip employees not in the draft grid — don't touch their shifts or blocks
+        const empInDraft = Object.values(gridByWeek).some(weekGrid =>
+          weekGrid && (weekGrid[String(emp.id)] || weekGrid[emp.id])
+        );
+        if (!empInDraft) continue;
+
         const startStr = formatDateYYYYMMDD(rangeStart);
         const endStr = formatDateYYYYMMDD(rangeEnd);
 
@@ -3405,25 +3494,6 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
           datesWithNewShift.add(dateStr);
         }
 
-        // Create shift_blocks for days where auto-shifts were deleted but NO new shift was created.
-        // This prevents autoApplyBaseSchedules from regenerating the old shifts on page reload.
-        for (let d = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
-             d <= rangeEnd;
-             d.setDate(d.getDate() + 1)) {
-          const dateStr = formatDateYYYYMMDD(d);
-          // Skip days that already have a shift (new or manual), absence, or block
-          if (datesWithNewShift.has(dateStr)) continue;
-          if (occupiedDates.has(dateStr)) continue;
-          if (absenceDates.has(dateStr)) continue;
-          if (blockedDates.has(dateStr)) continue;
-
-          await client.query(
-            `INSERT INTO shift_blocks (user_id, date, reason) VALUES ($1, $2, $3)
-             ON CONFLICT (user_id, date) DO NOTHING`,
-            [emp.id, dateStr, 'draft applied for date range']
-          );
-        }
-
         if (deletedCount > 0 || createdCount > 0) {
           appliedCount++;
           totalCreated += createdCount;
@@ -3476,6 +3546,8 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
           }
         }
 
+        // Skip if base schedule unchanged — intentionally preserves manual shift deletions.
+        // If forced regeneration is needed, user should use "Huidig basisrooster laden" first.
         if (!hasChanges) continue;
 
         const week1Json = JSON.stringify(allWeeks[0] || []);

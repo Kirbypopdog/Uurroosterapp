@@ -654,7 +654,7 @@ function getShiftsByTeam(teamId, startDate = null, endDate = null) {
 // ===== WEEKROOSTER FUNCTIES =====
 
 function getWeekNumber(date) {
-    const pattern = getSchedulePattern();
+    const pattern = getSchedulePattern(date);
     const cycleLength = pattern.cycleLength || 2;
     const referenceDate = parseDateOnly(pattern.referenceDate || DataStore.settings.biWeeklyReferenceDate);
     referenceDate.setHours(0, 0, 0, 0);
@@ -1245,9 +1245,18 @@ function isWeekendOpen(date) {
 
 // ===== FLEXIBEL ROOSTERPATROON FUNCTIES =====
 
-function getSchedulePattern() {
-    if (DataStore.settings.schedulePattern && DataStore.settings.schedulePattern.cycleLength) {
-        return DataStore.settings.schedulePattern;
+function getSchedulePattern(forDate) {
+    const stored = DataStore.settings.schedulePattern;
+    if (stored && stored.cycleLength) {
+        // Date-aware: if effectiveFrom is set and forDate is before it, use previousPattern
+        if (forDate && stored.effectiveFrom && stored.previousPattern) {
+            const checkDate = parseDateOnly(forDate);
+            const effectiveDate = parseDateOnly(stored.effectiveFrom);
+            if (checkDate < effectiveDate) {
+                return stored.previousPattern;
+            }
+        }
+        return stored;
     }
     // Backward compat: construct from biWeeklyReferenceDate
     return {
@@ -1260,21 +1269,21 @@ function getSchedulePattern() {
     };
 }
 
-function getCycleLength() {
-    return getSchedulePattern().cycleLength || 2;
+function getCycleLength(forDate) {
+    return getSchedulePattern(forDate).cycleLength || 2;
 }
 
-function getClosedDaysForWeek(weekNumber) {
-    const pattern = getSchedulePattern();
+function getClosedDaysForWeek(weekNumber, forDate) {
+    const pattern = getSchedulePattern(forDate);
     const weekConfig = pattern.weeks?.[String(weekNumber)];
     return weekConfig?.closedDays || [];
 }
 
-function getWeekLabel(weekNumber) {
-    const pattern = getSchedulePattern();
+function getWeekLabel(weekNumber, forDate) {
+    const pattern = getSchedulePattern(forDate);
     const weekConfig = pattern.weeks?.[String(weekNumber)];
     if (weekConfig?.label) return weekConfig.label;
-    const closedDays = getClosedDaysForWeek(weekNumber);
+    const closedDays = getClosedDaysForWeek(weekNumber, forDate);
     return closedDays.length > 0 ? `${formatClosedDays(closedDays)}` : 'Alle dagen open';
 }
 
@@ -1282,7 +1291,7 @@ function isDayClosed(date) {
     const d = parseDateOnly(date);
     const dayOfWeek = d.getDay();
     const weekNumber = getWeekNumber(date);
-    const closedDays = getClosedDaysForWeek(weekNumber);
+    const closedDays = getClosedDaysForWeek(weekNumber, date);
     return closedDays.includes(dayOfWeek);
 }
 
@@ -1405,18 +1414,31 @@ function getOrCalculateResponsible(weekStartDate) {
     if (manual) return manual;
 
     const rotation = DataStore.settings.responsibleRotation;
-    if (!rotation?.rotationStart || !rotation?.rotationStartEmployee) {
+    if (!rotation) return null;
+
+    // Date-aware: if effectiveFrom is set and target date is before it, use previousRotation
+    let activeRotation = rotation;
+    if (rotation.effectiveFrom && rotation.previousRotation) {
+        const targetDate = new Date(weekStartDate);
+        targetDate.setHours(0, 0, 0, 0);
+        const effectiveDate = parseDateOnly(rotation.effectiveFrom);
+        if (targetDate < effectiveDate) {
+            activeRotation = { ...rotation, ...rotation.previousRotation };
+        }
+    }
+
+    if (!activeRotation?.rotationStart || !activeRotation?.rotationStartEmployee) {
         return null;
     }
 
     const eligible = getEligibleEmployeesForResponsible();
     if (eligible.length === 0) return null;
 
-    const startEmployeeId = String(rotation.rotationStartEmployee);
+    const startEmployeeId = String(activeRotation.rotationStartEmployee);
     const startIndex = eligible.findIndex(e => String(e.id) === startEmployeeId);
     if (startIndex === -1) return eligible[0];
 
-    const startDate = new Date(rotation.rotationStart);
+    const startDate = new Date(activeRotation.rotationStart);
     startDate.setHours(0, 0, 0, 0);
     const targetDate = new Date(weekStartDate);
     targetDate.setHours(0, 0, 0, 0);
@@ -1475,7 +1497,7 @@ function isWeekendOrHolidayWeek(weekStartDate) {
 
     // Check if weekend is open (i.e. Saturday is NOT a closed day)
     const weekNumber = getWeekNumber(monday);
-    const closedDays = getClosedDaysForWeek(weekNumber);
+    const closedDays = getClosedDaysForWeek(weekNumber, monday);
     const isOpenWeekend = !closedDays.includes(6) && !closedDays.includes(0);
 
     let hasHoliday = false;
@@ -1652,6 +1674,13 @@ async function applyScheduleDraft(draftId, { clearBlocks = true, applyStartDate 
     return dataApiFetch(`/schedule-drafts/${draftId}/apply`, {
         method: 'POST',
         body: JSON.stringify({ clearBlocks, applyStartDate, applyEndDate })
+    });
+}
+
+async function deactivateDraftShifts(draftId, { endDate, deleteManual = false }) {
+    return dataApiFetch(`/schedule-drafts/${draftId}/deactivate`, {
+        method: 'POST',
+        body: JSON.stringify({ endDate, deleteManual })
     });
 }
 

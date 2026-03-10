@@ -24,6 +24,8 @@ const AppState = {
     availabilityMobileDayIndex: 0, // Same for availability view
     simulatedRole: null, // For admin testing: simulates different user roles
     // Builder state
+    builderScreen: 'overview',   // 'overview' | 'editor'
+    builderOverviewFilter: 'all', // 'all' | 'active' | 'scheduled' | 'draft'
     builderWeekNumber: 1,        // 1 or 2 (bi-weekly)
     builderTeamFilter: null,
     builderGrid: {},             // { [userId]: { [dayIndex0to6]: { startTime, endTime, team } } }
@@ -32,7 +34,7 @@ const AppState = {
     builderLoadedDraftName: null, // naam van het geladen concept
     builderIsDirty: false,
     builderPatternExpanded: false,
-    builderRotationExpanded: false,
+    builderPattern: null,         // lokaal patroon (null = gebruik globaal)
     showHeatmap: false,
     settingsDirty: false,
     employeeSortMode: 'name',
@@ -2035,9 +2037,7 @@ function updatePeriodDisplay() {
         const options = { day: 'numeric', month: 'long', year: 'numeric' };
         const startStr = AppState.currentWeekStart.toLocaleDateString('nl-BE', options);
         const endStr = weekEnd.toLocaleDateString('nl-BE', options);
-        const schoolWeek = getSchoolWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart));
-        const weekLabel = schoolWeek ? `Week ${schoolWeek}` : `Week ${getISOWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart))}`;
-        DOM.currentPeriod.textContent = `${weekLabel} | ${startStr} - ${endStr}`;
+        DOM.currentPeriod.textContent = `${startStr} - ${endStr}`;
     }
 }
 
@@ -4483,6 +4483,77 @@ function renderProfile() {
                 </div>
             </div>
 
+            ${(() => {
+                const empId = user.id || user.userId || user.employeeId;
+                const emp = DataStore.users.find(u => u.id === empId) || user;
+                const contractHours = emp.contractHours || emp.contract_hours || 0;
+                const resolvedId = emp.id || empId;
+                const weekStart = getEmployeeWeekStart(resolvedId);
+                const weekDates = getWeekDates(weekStart);
+                const hoursWeek = getEmployeeHoursThisWeek(resolvedId, weekDates[0]);
+                const hoursMonth = getEmployeeHoursThisMonth(resolvedId, weekDates[0]);
+
+                if (contractHours > 0) {
+                    const monthContract = contractHours * 4.33;
+                    const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
+                    const monthPct = Math.min((hoursMonth / monthContract) * 100, 100);
+                    const weekClr = hoursWeek > contractHours ? '#ef4444' : hoursWeek > contractHours * 0.9 ? '#f59e0b' : '#10b981';
+                    const monthClr = hoursMonth > monthContract ? '#ef4444' : hoursMonth > monthContract * 0.9 ? '#f59e0b' : '#10b981';
+                    const overtimeWeek = Math.max(0, hoursWeek - contractHours);
+                    const overtimeMonth = Math.max(0, hoursMonth - monthContract);
+                    return `
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <h3><span class="settings-icon">${IconHelper.html(ICONS.clock, 'md')}</span> Uren overzicht</h3>
+                        </div>
+                        <div class="settings-card-body">
+                            <div class="profile-hours-section">
+                                <div class="profile-hours-row">
+                                    <span class="profile-hours-label">Deze week</span>
+                                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u / ${contractHours}u</span>
+                                </div>
+                                <div class="progress-bar" style="margin-bottom:12px">
+                                    <div class="progress-fill" style="width:${weekPct}%;background:${weekClr}"></div>
+                                </div>
+                                <div class="profile-hours-row">
+                                    <span class="profile-hours-label">Deze maand</span>
+                                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u / ${monthContract.toFixed(0)}u</span>
+                                </div>
+                                <div class="progress-bar" style="margin-bottom:4px">
+                                    <div class="progress-fill" style="width:${monthPct}%;background:${monthClr}"></div>
+                                </div>
+                                ${(overtimeWeek > 0 || overtimeMonth > 0) ? `
+                                    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+                                        ${overtimeWeek > 0 ? `<span class="overtime-chip-sm">+${overtimeWeek.toFixed(1)}u overuren week</span>` : ''}
+                                        ${overtimeMonth > 0 ? `<span class="overtime-chip-sm">+${overtimeMonth.toFixed(1)}u overuren maand</span>` : ''}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>`;
+                } else {
+                    return `
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <h3><span class="settings-icon">${IconHelper.html(ICONS.clock, 'md')}</span> Uren overzicht</h3>
+                        </div>
+                        <div class="settings-card-body">
+                            <div class="profile-hours-section">
+                                <div class="profile-hours-row">
+                                    <span class="profile-hours-label">Deze week</span>
+                                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u</span>
+                                </div>
+                                <div class="profile-hours-row">
+                                    <span class="profile-hours-label">Deze maand</span>
+                                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u</span>
+                                </div>
+                                <p class="form-hint" style="margin-top:8px">Geen contracturen ingesteld.</p>
+                            </div>
+                        </div>
+                    </div>`;
+                }
+            })()}
+
             <div class="settings-card" style="grid-column: 1 / -1;">
                 <div class="settings-card-header">
                     <h3><span class="settings-icon">${IconHelper.html(ICONS.search, 'md')}</span> Account overzicht</h3>
@@ -4709,27 +4780,7 @@ function renderEmployeeCard(emp) {
     const employeeName = escapeHtml(emp.name);
     const employeeEmail = escapeHtml(emp.email || '');
     const mainTeamName = escapeHtml(mainTeam.name);
-
-    // Calculate hours
-    const weekStartDate = getEmployeeWeekStart(emp.id);
-    const weekDates = getWeekDates(weekStartDate);
-    const startDate = weekDates[0];
-    const endDate = weekDates[6];
-    const weekNumber = getISOWeekNumber(weekStartDate);
-    const hoursThisWeek = getEmployeeHoursThisWeek(emp.id, startDate);
-    const hoursThisMonth = getEmployeeHoursThisMonth(emp.id, startDate);
     const contractHours = emp.contractHours || 0;
-    const monthContractHours = contractHours * 4.33;
-    const overtimeWeek = contractHours > 0 ? Math.max(0, hoursThisWeek - contractHours) : 0;
-    const overtimeMonth = contractHours > 0 ? Math.max(0, hoursThisMonth - monthContractHours) : 0;
-
-    // Calculate percentages for progress bars
-    const weekPercentage = contractHours > 0 ? Math.min((hoursThisWeek / contractHours) * 100, 100) : 0;
-    const monthPercentage = contractHours > 0 ? Math.min((hoursThisMonth / (contractHours * 4.33)) * 100, 100) : 0;
-
-    // Determine status colors
-    const weekColor = hoursThisWeek > contractHours ? '#ef4444' : hoursThisWeek > contractHours * 0.9 ? '#f59e0b' : '#10b981';
-    const monthColor = hoursThisMonth > (contractHours * 4.33) ? '#ef4444' : hoursThisMonth > (contractHours * 4.33 * 0.9) ? '#f59e0b' : '#10b981';
 
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
@@ -4737,49 +4788,10 @@ function renderEmployeeCard(emp) {
                 <div class="employee-name">${employeeName}</div>
                 <span class="employee-status ${statusClass}">${statusText}</span>
             </div>
-            <div class="employee-info">
-                ${emp.email ? `<div class="employee-info-item">${IconHelper.html(ICONS.email, 'xs')} ${employeeEmail}</div>` : ''}
-                ${emp.contractHours ? `<div class="employee-info-item">${IconHelper.html(ICONS.clock, 'xs')} ${emp.contractHours}u/week contract</div>` : ''}
+            <div class="employee-card-meta">
+                ${emp.email ? `<span class="employee-meta-item">${IconHelper.html(ICONS.email, 'xs')} ${employeeEmail}</span>` : ''}
+                ${contractHours ? `<span class="employee-meta-item">${IconHelper.html(ICONS.clock, 'xs')} ${contractHours}u/week</span>` : ''}
             </div>
-            <div class="employee-teams">
-                <span class="team-badge ${emp.mainTeam}">${mainTeamName}</span>
-            </div>
-            ${contractHours > 0 ? `
-                <div class="employee-hours">
-                    <div class="hours-week-label">
-                        <span class="week-pill">Week ${weekNumber}</span>
-                        <span class="week-range">${formatDate(startDate)} - ${formatDate(endDate)}</span>
-                    </div>
-                    <div class="hours-section">
-                        <div class="hours-label">Deze week: ${hoursThisWeek.toFixed(1)}u / ${contractHours}u</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${weekPercentage}%; background: ${weekColor};"></div>
-                        </div>
-                    </div>
-                    <div class="month-only">
-                        <div class="hours-section">
-                            <div class="hours-label">Deze maand: ${hoursThisMonth.toFixed(1)}u / ${monthContractHours.toFixed(0)}u</div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: ${monthPercentage}%; background: ${monthColor};"></div>
-                            </div>
-                        </div>
-                    </div>
-                    ${(overtimeWeek > 0 || overtimeMonth > 0) ? `
-                        <div class="overtime-summary">
-                            ${overtimeWeek > 0 ? `<span class="overtime-chip">Overuren week: ${overtimeWeek.toFixed(1)}u</span>` : ''}
-                            ${overtimeMonth > 0 ? `<span class="overtime-chip month-only">Overuren maand: ${overtimeMonth.toFixed(1)}u</span>` : ''}
-                        </div>
-                    ` : ''}
-                    <div class="hours-controls">
-                        <div class="hours-week-nav">
-                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="prev" title="Vorige week">${IconHelper.html(ICONS.left, 'xs')}</button>
-                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="today" title="Huidige week">${IconHelper.html('circle-dot', 'xs')}</button>
-                            <button class="week-nav-btn" type="button" data-employee-id="${emp.id}" data-direction="next" title="Volgende week">${IconHelper.html(ICONS.right, 'xs')}</button>
-                        </div>
-                        <button class="hours-toggle-btn" type="button" data-employee-id="${emp.id}">Toon maand</button>
-                    </div>
-                </div>
-            ` : ''}
         </div>
     `;
 }
@@ -4799,7 +4811,7 @@ function openEditEmployeeModal(employeeId) {
     const employee = getEmployee(employeeId);
     if (!employee) return;
     AppState.editingEmployeeId = employeeId;
-    DOM.employeeModalTitle.textContent = `Basisrooster: ${employee.name}`;
+    DOM.employeeModalTitle.textContent = employee.name;
 
     // Hidden fields for form submission (preserve existing values)
     DOM.employeeName.value = employee.name;
@@ -4808,14 +4820,84 @@ function openEditEmployeeModal(employeeId) {
     DOM.employeeContract.value = employee.contractHours || '';
     DOM.employeeActive.value = employee.active !== false ? 'true' : 'false';
 
-    generateWeekScheduleHTML();
-    const cycleLen = getCycleLength();
-    for (let w = 1; w <= cycleLen; w++) {
-        loadWeekScheduleForm(w, getEmployeeWeekSchedule(employee, w));
-    }
-    // Delete button hidden - accounts are managed via Settings > Accounts
+    // Show read-only schedule from active concept instead of editable form
+    generateReadOnlyWeekScheduleHTML(employee);
+
+    // Hide save/cancel/delete — modal is read-only
     DOM.employeeDeleteBtn.style.display = 'none';
+    const modalActions = DOM.employeeModal.querySelector('.modal-actions');
+    if (modalActions) modalActions.style.display = 'none';
+
+    // Add "Bekijk in planning" button
+    const container = document.getElementById('week-schedule-container');
+    if (container) {
+        const viewBtn = document.createElement('button');
+        viewBtn.type = 'button';
+        viewBtn.className = 'btn btn-secondary btn-sm';
+        viewBtn.style.marginTop = '12px';
+        viewBtn.innerHTML = `${IconHelper.html('calendar', 'xs')} Bekijk in weekrooster`;
+        viewBtn.addEventListener('click', () => {
+            closeEmployeeModal();
+            AppState.currentWeekStart = getMondayOfWeek(new Date());
+            switchView('planning');
+        });
+        container.appendChild(viewBtn);
+        IconHelper.init(viewBtn);
+    }
+
     DOM.employeeModal.classList.remove('hidden');
+}
+
+function generateReadOnlyWeekScheduleHTML(employee) {
+    const dayNames = { 1: 'Ma', 2: 'Di', 3: 'Wo', 4: 'Do', 5: 'Vr', 6: 'Za', 0: 'Zo' };
+    const cycleLen = getCycleLength();
+
+    // Hide tabs container if it exists
+    const tabsContainer = document.getElementById('employee-week-tabs');
+    if (tabsContainer) tabsContainer.innerHTML = '';
+
+    const container = document.getElementById('week-schedule-container');
+    if (!container) return;
+
+    let html = '<div class="read-only-schedule">';
+    html += '<p class="form-hint" style="margin:0 0 12px;color:var(--text-secondary)">Het basisrooster wordt beheerd via Rooster Bouwen.</p>';
+
+    for (let w = 1; w <= cycleLen; w++) {
+        const schedule = getEmployeeWeekSchedule(employee, w) || [];
+        const activeDays = schedule.filter(s => s.enabled);
+        const totalHours = activeDays.reduce((sum, s) => {
+            const [sh, sm] = s.startTime.split(':').map(Number);
+            const [eh, em] = s.endTime.split(':').map(Number);
+            return sum + (eh + em/60) - (sh + sm/60);
+        }, 0);
+
+        html += `<div class="ro-week-block">`;
+        html += `<div class="ro-week-header">`;
+        html += `<span class="ro-week-title">Week ${w}</span>`;
+        html += `<span class="ro-week-hours">${totalHours.toFixed(1)}u</span>`;
+        html += `</div>`;
+        html += '<div class="ro-week-grid">';
+        [1, 2, 3, 4, 5, 6, 0].forEach(dayNum => {
+            const entry = schedule.find(s => s.dayOfWeek === dayNum && s.enabled);
+            if (entry) {
+                html += `<div class="ro-day-row">
+                    <span class="ro-day-name">${dayNames[dayNum]}</span>
+                    <span class="ro-day-time">${entry.startTime} – ${entry.endTime}</span>
+                </div>`;
+            } else {
+                html += `<div class="ro-day-row ro-day-off">
+                    <span class="ro-day-name">${dayNames[dayNum]}</span>
+                    <span class="ro-day-time">—</span>
+                </div>`;
+            }
+        });
+        html += '</div></div>';
+    }
+
+    html += '</div>';
+
+    container.innerHTML = html;
+    IconHelper.init(container);
 }
 
 function closeEmployeeModal() {
@@ -4823,15 +4905,13 @@ function closeEmployeeModal() {
     DOM.employeeForm.reset();
     AppState.editingEmployeeId = null;
     DOM.employeeDeleteBtn.style.display = 'none';
+    // Restore modal-actions visibility for next open (add mode needs it)
+    const modalActions = DOM.employeeModal.querySelector('.modal-actions');
+    if (modalActions) modalActions.style.display = '';
 }
 
 async function handleEmployeeSubmit(e) {
     e.preventDefault();
-    const cycleLen = getCycleLength();
-    const weekSchedules = [];
-    for (let w = 1; w <= cycleLen; w++) {
-        weekSchedules.push(getWeekScheduleFromForm(w));
-    }
 
     const employeeData = {
         name: DOM.employeeName.value.trim(),
@@ -4839,28 +4919,17 @@ async function handleEmployeeSubmit(e) {
         mainTeam: DOM.employeeMainTeam.value,
         extraTeams: [],
         contractHours: parseFloat(DOM.employeeContract.value) || 0,
-        active: DOM.employeeActive.value === 'true',
-        weekScheduleWeek1: weekSchedules[0] || [],
-        weekScheduleWeek2: weekSchedules[1] || [],
-        weekSchedules: weekSchedules
+        active: DOM.employeeActive.value === 'true'
     };
-    let targetEmployeeId = AppState.editingEmployeeId;
     showSectionLoading('employees-view', 'Medewerker opslaan...');
     try {
         if (AppState.editingEmployeeId) {
             await updateEmployee(AppState.editingEmployeeId, employeeData);
         } else {
             const newEmp = await addEmployee(employeeData);
-            targetEmployeeId = newEmp?.id;
         }
         closeEmployeeModal();
         renderEmployees();
-
-        // Regenerate auto-shifts via backend (atomic transaction)
-        if (targetEmployeeId) {
-            await applyScheduleViaBackend(targetEmployeeId, { clearBlocks: true });
-        }
-        await Promise.all([refreshShifts(), fetchShiftBlocks()]);
 
         // Refresh planning view if currently visible
         if (AppState.currentView === 'planning') {
@@ -5922,15 +5991,32 @@ function renderBuilder() {
     const container = document.getElementById('builder-content');
     if (!container) return;
 
+    if (AppState.builderScreen === 'editor') {
+        renderBuilderEditor(container);
+    } else {
+        renderBuilderOverview(container);
+    }
+}
+
+function renderBuilderEditor(container) {
     const role = getEffectiveRole();
     const userTeam = AppState.currentUser?.team_id || AppState.currentUser?.mainTeam;
 
-    // Don't auto-lock team filter - roosterverantwoordelijke can build for all teams
-
     let html = '';
+
+    // Topbar with back button + concept name
+    html += `<div class="builder-editor-topbar">
+        <button class="btn btn-secondary btn-sm" id="builder-back-to-overview">
+            <i data-lucide="arrow-left" style="width:16px;height:16px"></i> Terug
+        </button>
+        <span class="builder-editor-title">
+            ${AppState.builderLoadedDraftName ? escapeHtml(AppState.builderLoadedDraftName) : 'Nieuw concept'}
+            ${AppState.builderIsDirty ? ' <span class="builder-dirty-badge">(gewijzigd)</span>' : ''}
+        </span>
+    </div>`;
+
     html += `<div class="builder-settings-panels">`;
     html += renderBuilderPatternPanel();
-    html += renderBuilderRotationPanel();
     html += `</div>`;
     html += renderBuilderControls(role, userTeam);
     html += renderBuilderGrid(role, userTeam);
@@ -5941,15 +6027,248 @@ function renderBuilder() {
     attachBuilderEventListeners(container);
 }
 
+function renderBuilderOverview(container) {
+    const drafts = DataStore.settings.schedule_drafts || [];
+    const newestActiveId = findNewestActiveDraftId(drafts);
+
+    // Classify all drafts by status
+    const classified = drafts.map(d => ({ draft: d, status: getDraftStatus(d, newestActiveId) }));
+
+    // Separate active drafts (always shown prominently at top)
+    const activeDrafts = classified.filter(c => c.status?.cls === 'active');
+    const otherDrafts = classified.filter(c => c.status?.cls !== 'active');
+
+    // Sort others: scheduled first, then rest by date
+    const statusOrder = { scheduled: 0, activatable: 1, applied: 2, expired: 3 };
+    otherDrafts.sort((a, b) => {
+        const oa = statusOrder[a.status?.cls] ?? 2;
+        const ob = statusOrder[b.status?.cls] ?? 2;
+        if (oa !== ob) return oa - ob;
+        return new Date(b.draft.updatedAt || b.draft.createdAt) - new Date(a.draft.updatedAt || a.draft.createdAt);
+    });
+
+    // Apply filter to non-active drafts
+    const filter = AppState.builderOverviewFilter || 'all';
+    const filtered = otherDrafts.filter(c => {
+        if (filter === 'all') return true;
+        if (filter === 'scheduled') return c.status?.cls === 'scheduled';
+        if (filter === 'draft') return !c.status || c.status.cls === 'activatable' || !c.draft.lastAppliedAt;
+        return true;
+    });
+
+    // Check for activatable drafts (notification)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const activatable = drafts.filter(d => {
+        if (d.lastAppliedAt || !d.validFrom) return false;
+        const vf = new Date(d.validFrom);
+        vf.setHours(0, 0, 0, 0);
+        return vf <= today;
+    });
+
+    let notificationHtml = '';
+    if (activatable.length > 0) {
+        notificationHtml = activatable.map(d => `
+            <div class="builder-notification info">
+                <i data-lucide="calendar-check" style="width:16px;height:16px"></i>
+                Concept "${escapeHtml(d.name)}" is nu geldig!
+                <button class="btn btn-secondary btn-sm concept-card-apply" data-draft-id="${escapeHtml(d.id)}" style="margin-left:auto">Nu toepassen</button>
+            </div>
+        `).join('');
+    }
+
+    // Active section (always visible, above grid)
+    let activeSectionHtml = '';
+    if (activeDrafts.length > 0) {
+        activeSectionHtml = `
+            <div class="builder-active-section">
+                <div class="builder-active-label">Actief</div>
+                ${activeDrafts.map(c => renderConceptCard(c.draft, newestActiveId)).join('')}
+            </div>
+        `;
+    }
+
+    // Other cards grid
+    let cardsHtml = filtered.map(c => renderConceptCard(c.draft, newestActiveId)).join('');
+    if (filtered.length === 0 && otherDrafts.length > 0) {
+        cardsHtml = '<p class="builder-no-results">Geen concepten gevonden met dit filter.</p>';
+    } else if (filtered.length === 0 && otherDrafts.length === 0 && activeDrafts.length === 0) {
+        cardsHtml = '<p class="builder-no-results">Nog geen concepten. Maak een nieuw concept aan.</p>';
+    }
+
+    const filterOptions = [
+        { value: 'all', label: 'Alle' },
+        { value: 'scheduled', label: 'Ingepland' },
+        { value: 'draft', label: 'Concepten' }
+    ];
+
+    container.innerHTML = `
+        <div class="builder-overview">
+            ${notificationHtml}
+            <div class="builder-overview-header">
+                <div class="builder-overview-title-row">
+                    <h3>Concepten</h3>
+                    ${getEffectiveRole() === 'admin' ? `<button class="btn btn-secondary btn-sm" id="builder-upload-concept" title="Concept importeren"><i data-lucide="upload" style="width:14px;height:14px"></i> Importeren</button>` : ''}
+                </div>
+                <div class="builder-overview-filter-row">
+                    <select id="builder-overview-filter" class="form-input form-input-sm">
+                        ${filterOptions.map(o => `<option value="${o.value}" ${filter === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+            ${activeSectionHtml}
+            ${otherDrafts.length > 0 || activeDrafts.length > 0 ? '<div class="builder-other-label">Overige concepten</div>' : ''}
+            <div class="builder-concept-grid">
+                <div class="builder-concept-card builder-concept-new" id="builder-new-concept-card">
+                    <i data-lucide="plus" style="width:24px;height:24px"></i>
+                    <span style="font-size:13px">Nieuw concept</span>
+                </div>
+                ${cardsHtml}
+            </div>
+        </div>
+    `;
+    IconHelper.init(container);
+    attachBuilderOverviewListeners(container);
+}
+
+function renderConceptCard(draft, newestActiveId) {
+    const status = getDraftStatus(draft, newestActiveId);
+    const isActive = status?.cls === 'active';
+    const statusCls = status?.cls || 'draft';
+
+    const updatedDate = new Date(draft.updatedAt || draft.createdAt);
+    const dateStr = updatedDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
+    const timeStr = updatedDate.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+    const createdDate = draft.createdAt ? new Date(draft.createdAt) : null;
+    const createdStr = createdDate ? createdDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
+    const teamLabel = draft.teamFilter
+        ? (DataStore.settings.teams?.[draft.teamFilter]?.name || draft.teamFilter)
+        : 'Alle teams';
+
+    const draftGrid = draft.grid || {};
+    let empCount;
+    if (draftGrid._multiWeek) {
+        const weeks = Object.keys(draftGrid).filter(k => !k.startsWith('_'));
+        const allEmpIds = new Set();
+        weeks.forEach(w => Object.keys(draftGrid[w] || {}).forEach(id => allEmpIds.add(id)));
+        empCount = allEmpIds.size;
+    } else {
+        empCount = Object.keys(draftGrid).filter(k => !k.startsWith('_')).length;
+    }
+
+    // Period display
+    let periodHtml = '';
+    if (draft.lastAppliedFrom && draft.lastAppliedUntil) {
+        const from = parseDateOnly(draft.lastAppliedFrom).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+        const until = parseDateOnly(draft.lastAppliedUntil).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
+        periodHtml = `<span class="concept-card-period">${from} – ${until}</span>`;
+    } else if (draft.validFrom) {
+        const vf = parseDateOnly(draft.validFrom).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
+        const vu = draft.validUntil ? parseDateOnly(draft.validUntil).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' }) : '...';
+        periodHtml = `<span class="concept-card-period">Geldig: ${vf} – ${vu}</span>`;
+    }
+
+    // Action buttons — all btn-secondary except delete (btn-danger)
+    const isAdmin = getEffectiveRole() === 'admin';
+    const downloadBtn = isAdmin ? `<button class="btn btn-secondary btn-sm concept-card-download" data-draft-id="${escapeHtml(draft.id)}" title="Download concept"><i data-lucide="download" style="width:14px;height:14px"></i></button>` : '';
+    let actionsHtml = '';
+    if (isActive) {
+        actionsHtml = `
+            <button class="btn btn-secondary btn-sm concept-card-edit" data-draft-id="${escapeHtml(draft.id)}">Bewerken</button>
+            <button class="btn btn-secondary btn-sm concept-card-apply" data-draft-id="${escapeHtml(draft.id)}">Toepassen</button>
+            <button class="btn btn-secondary btn-sm concept-card-rename" data-draft-id="${escapeHtml(draft.id)}">Hernoemen</button>
+            ${downloadBtn}
+            <button class="btn btn-danger btn-sm concept-card-delete" data-draft-id="${escapeHtml(draft.id)}">
+                <i data-lucide="trash-2" style="width:14px;height:14px"></i>
+            </button>
+        `;
+    } else {
+        actionsHtml = `
+            <button class="btn btn-secondary btn-sm concept-card-load" data-draft-id="${escapeHtml(draft.id)}">Laden</button>
+            <button class="btn btn-secondary btn-sm concept-card-apply" data-draft-id="${escapeHtml(draft.id)}">Toepassen</button>
+            <button class="btn btn-secondary btn-sm concept-card-rename" data-draft-id="${escapeHtml(draft.id)}">Hernoemen</button>
+            ${downloadBtn}
+            <button class="btn btn-danger btn-sm concept-card-delete" data-draft-id="${escapeHtml(draft.id)}">
+                <i data-lucide="trash-2" style="width:14px;height:14px"></i>
+            </button>
+        `;
+    }
+
+    return `
+        <div class="builder-concept-card draft-status-${statusCls}" data-draft-id="${escapeHtml(draft.id)}">
+            <div class="concept-card-header">
+                <span class="concept-card-name">${escapeHtml(draft.name)}</span>
+                ${status ? `<span class="concept-card-badge badge-${statusCls}">${status.label}</span>` : '<span class="concept-card-badge badge-draft">Concept</span>'}
+            </div>
+            <div class="concept-card-meta">
+                <span>${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers</span>
+                ${periodHtml}
+                <span>Bewerkt: ${dateStr} om ${timeStr}</span>
+                <span>Door: ${escapeHtml(draft.updatedByName || draft.createdByName || 'Onbekend')}${createdStr && createdStr !== dateStr ? ` &middot; Aangemaakt: ${createdStr}` : ''}</span>
+            </div>
+            <div class="concept-card-actions">
+                ${actionsHtml}
+            </div>
+        </div>
+    `;
+}
+
+// Builder uses local pattern/rotation (not yet saved globally)
+function getBuilderPattern() {
+    return AppState.builderPattern || getSchedulePattern();
+}
+function getBuilderCycleLength() {
+    return getBuilderPattern().cycleLength || 2;
+}
+function getBuilderClosedDays(weekNumber) {
+    const pattern = getBuilderPattern();
+    const weekConfig = pattern.weeks?.[String(weekNumber)];
+    return weekConfig?.closedDays || [];
+}
+function getBuilderWeekLabel(weekNumber) {
+    const pattern = getBuilderPattern();
+    const weekConfig = pattern.weeks?.[String(weekNumber)];
+    if (weekConfig?.label) return weekConfig.label;
+    const closedDays = getBuilderClosedDays(weekNumber);
+    return closedDays.length > 0 ? formatClosedDays(closedDays) : 'Alle dagen open';
+}
+
+// Collect pattern data from the UI inputs (without saving)
+function collectPatternFromUI() {
+    const cycleLengthInput = document.getElementById('schedule-cycle-length');
+    const refDateInput = document.getElementById('schedule-reference-date');
+    const cycleLength = Math.max(1, Math.min(8, parseInt(cycleLengthInput?.value) || 2));
+    const referenceDate = refDateInput?.value;
+    if (!referenceDate) {
+        showToast('Selecteer een referentie datum', 'warning');
+        return null;
+    }
+    const date = parseDateOnly(referenceDate);
+    if (date.getDay() !== 1) {
+        showToast('De referentie datum moet een maandag zijn', 'warning');
+        return null;
+    }
+    const weeks = {};
+    for (let w = 1; w <= cycleLength; w++) {
+        const closedDays = [];
+        document.querySelectorAll(`.pattern-closed-day[data-week="${w}"]`).forEach(cb => {
+            if (cb.checked) closedDays.push(parseInt(cb.dataset.day));
+        });
+        const label = closedDays.length > 0 ? formatClosedDays(closedDays) : 'alle dagen open';
+        weeks[String(w)] = { closedDays, label };
+    }
+    return { cycleLength, referenceDate, weeks };
+}
+
 function renderBuilderPatternPanel() {
-    const pattern = getSchedulePattern();
+    const pattern = getBuilderPattern();
     const cl = pattern.cycleLength || 2;
     const dayLabels = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
 
     // Summary text
     let summaryParts = [`${cl} weken`];
     for (let w = 1; w <= cl; w++) {
-        const closed = getClosedDaysForWeek(w);
+        const closed = getBuilderClosedDays(w);
         const label = closed.length > 0 ? formatClosedDays(closed) : 'alle dagen open';
         summaryParts.push(`W${w}: ${label}`);
     }
@@ -5958,7 +6277,7 @@ function renderBuilderPatternPanel() {
     // Week rows for editing
     let weekRows = '';
     for (let w = 1; w <= cl; w++) {
-        const closed = getClosedDaysForWeek(w);
+        const closed = getBuilderClosedDays(w);
         weekRows += `<div class="form-group schedule-pattern-week">
             <label>Week ${w} - Gesloten dagen:</label>
             <div class="schedule-pattern-days">
@@ -5995,41 +6314,6 @@ function renderBuilderPatternPanel() {
         </div>`;
 }
 
-function renderBuilderRotationPanel() {
-    const rotation = DataStore.settings.responsibleRotation || {};
-    const eligibleTeams = rotation.eligibleTeams || [];
-    const teams = DataStore.settings.teams || {};
-    const teamNames = eligibleTeams.map(t => teams[t]?.name || t).join(', ') || 'geen';
-    const startEmp = rotation.rotationStartEmployee
-        ? getAllEmployees(true).find(e => String(e.id) === String(rotation.rotationStartEmployee))
-        : null;
-    const summary = `Teams: ${teamNames}${startEmp ? ` | Start: ${startEmp.name}` : ''}`;
-
-    const expanded = AppState.builderRotationExpanded;
-    return `
-        <div class="builder-settings-panel${expanded ? ' expanded' : ''}" id="builder-rotation-panel">
-            <div class="builder-settings-header" id="builder-rotation-toggle">
-                <i data-lucide="refresh-cw" style="width:14px;height:14px;flex-shrink:0"></i>
-                <h4>Weekendverantwoordelijke</h4>
-                <span class="builder-settings-summary">${escapeHtml(summary)}</span>
-                <i data-lucide="chevron-down" class="builder-settings-chevron" style="width:14px;height:14px"></i>
-            </div>
-            <div class="builder-settings-body">
-                <div class="eligible-teams-compact" style="margin-top:4px">
-                    ${renderEligibleTeamsCheckboxes()}
-                </div>
-                <div class="rotation-form" style="margin-top:12px">
-                    ${renderRotationSettingsCompact()}
-                </div>
-                <div class="upcoming-section" style="margin-top:16px">
-                    <h4 style="font-size:13px;margin:0 0 8px">Komende open weekenden</h4>
-                    <div class="upcoming-responsibles">
-                        ${renderUpcomingResponsibles()}
-                    </div>
-                </div>
-            </div>
-        </div>`;
-}
 
 function renderBuilderControls(role, userTeam) {
     const wn = AppState.builderWeekNumber;
@@ -6048,10 +6332,10 @@ function renderBuilderControls(role, userTeam) {
             <div class="builder-controls-row">
                 <div class="builder-week-nav">
                     ${(() => {
-                        const cl = getCycleLength();
+                        const cl = getBuilderCycleLength();
                         let btns = '';
                         for (let w = 1; w <= cl; w++) {
-                            const label = getWeekLabel(w);
+                            const label = getBuilderWeekLabel(w);
                             btns += `<button class="btn ${wn === w ? 'btn-primary' : 'btn-secondary'} btn-sm" id="builder-week-${w}">Week ${w} (${escapeHtml(label)})</button>`;
                         }
                         return btns;
@@ -6100,7 +6384,7 @@ function renderBuilderGrid(role, userTeam) {
     html += '<div class="builder-grid">';
 
     // Bepaal gesloten dagen voor huidige builder week
-    const builderClosedDays = getClosedDaysForWeek(AppState.builderWeekNumber);
+    const builderClosedDays = getBuilderClosedDays(AppState.builderWeekNumber);
     // Map dayIndex (0=Ma..6=Zo) naar JS dayOfWeek (0=Zo, 1=Ma..6=Za)
     function dayIndexToJsDow(dayIndex) {
         return dayIndex === 6 ? 0 : dayIndex + 1;
@@ -6188,7 +6472,7 @@ function renderBuilderEmployeeRow(employee) {
     </div>`;
 
     // Gesloten dagen voor huidige builder week
-    const builderClosedDays = getClosedDaysForWeek(AppState.builderWeekNumber);
+    const builderClosedDays = getBuilderClosedDays(AppState.builderWeekNumber);
 
     // 7 day cells (Mon=0 .. Sun=6)
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
@@ -6262,7 +6546,7 @@ function isNightShift(startTime) {
 }
 
 function renderBuilderStaffingSummary(employees) {
-    const builderClosedDays = getClosedDaysForWeek(AppState.builderWeekNumber);
+    const builderClosedDays = getBuilderClosedDays(AppState.builderWeekNumber);
     const minStaffDay = DataStore.settings.rules?.minStaffingDay || 1;
     const minStaffNight = DataStore.settings.rules?.minStaffingNight || 1;
 
@@ -6394,7 +6678,6 @@ function renderBuilderActions() {
             </button>
             ${showSaveAs ? `<button class="btn btn-secondary" id="builder-save-draft-as" ${!hasData ? 'disabled' : ''}>Opslaan als...</button>` : ''}
         </div>
-        ${renderBuilderDrafts()}
     `;
 }
 
@@ -6718,6 +7001,7 @@ function loadBuilderFromBaseSchedules() {
     AppState.builderGridByWeek[weekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
     AppState.builderLoadedDraftId = null;
     AppState.builderLoadedDraftName = null;
+    AppState.builderPattern = null;
     AppState.builderIsDirty = true;
     renderBuilder();
     showToast(`Basisrooster week ${weekNumber} geladen`, 'success');
@@ -6743,31 +7027,41 @@ async function saveBuilderDraft() {
     // If a draft is loaded, UPDATE it directly (no modal needed)
     if (AppState.builderLoadedDraftId) {
         try {
-            await updateScheduleDraft(AppState.builderLoadedDraftId, {
+            const updateData = {
                 grid: JSON.parse(JSON.stringify(multiGrid)),
                 weekNumber: AppState.builderWeekNumber,
                 teamFilter: AppState.builderTeamFilter
-            });
-            // Update local cache
+            };
+            // Include pattern + rotation in grid metadata
+            if (AppState.builderPattern) updateData.grid._pattern = AppState.builderPattern;
+            // Rotation is managed via Settings, not stored in draft
             const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
+            if (cached) cached._previousGrid = JSON.parse(JSON.stringify(cached.grid || {}));
+            await updateScheduleDraft(AppState.builderLoadedDraftId, updateData);
+            // Update local cache
             if (cached) {
-                cached.grid = JSON.parse(JSON.stringify(multiGrid));
+                cached.grid = updateData.grid;
                 cached.weekNumber = AppState.builderWeekNumber;
                 cached.teamFilter = AppState.builderTeamFilter;
                 cached.updatedAt = new Date().toISOString();
+                cached.updatedByName = AppState.currentUser?.name || 'Onbekend';
             }
             AppState.builderIsDirty = false;
+            AppState.builderScreen = 'overview';
             renderBuilder();
             showToast(`Concept "${AppState.builderLoadedDraftName}" bijgewerkt`, 'success');
 
-            // If this draft is currently active, ask if user wants to apply changes
+            // If this draft is currently active AND grid actually changed, ask to re-apply
             const newestActiveId = findNewestActiveDraftId(DataStore.settings.schedule_drafts || []);
-            if (newestActiveId === AppState.builderLoadedDraftId) {
-                const wantsApply = confirm('Dit concept is momenteel actief. Wil je de wijzigingen nu toepassen op het rooster?');
+            const previousGrid = cached ? JSON.stringify(cached._previousGrid) : null;
+            const newGrid = JSON.stringify(updateData.grid);
+            if (newestActiveId === AppState.builderLoadedDraftId && previousGrid !== newGrid) {
+                const wantsApply = await showReapplyAfterEditModal(AppState.builderLoadedDraftName);
                 if (wantsApply) {
                     await applyBuilderDraft(AppState.builderLoadedDraftId);
                 }
             }
+            if (cached) delete cached._previousGrid;
         } catch (err) {
             console.error('Error updating draft:', err);
             showToast('Fout bij bijwerken concept', 'error');
@@ -6779,14 +7073,17 @@ async function saveBuilderDraft() {
     const result = await showDraftSaveModal();
     if (!result) return;
 
+    const draftGrid = JSON.parse(JSON.stringify(multiGrid));
+    if (AppState.builderPattern) draftGrid._pattern = AppState.builderPattern;
+    // Rotation is managed via Settings, not stored in draft
     const draftData = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         name: result.name.trim(),
         teamFilter: AppState.builderTeamFilter,
         weekNumber: AppState.builderWeekNumber,
-        grid: JSON.parse(JSON.stringify(multiGrid)),
-        validFrom: result.validFrom || null,
-        validUntil: result.validUntil || null
+        grid: draftGrid,
+        validFrom: null,
+        validUntil: null
     };
 
     try {
@@ -6815,6 +7112,7 @@ async function saveBuilderDraft() {
     }
 
     AppState.builderIsDirty = false;
+    AppState.builderScreen = 'overview';
     renderBuilder();
     showToast('Concept opgeslagen', 'success');
 }
@@ -6836,14 +7134,17 @@ async function saveBuilderDraftAs() {
     const result = await showDraftSaveModal();
     if (!result) return;
 
+    const draftGrid = JSON.parse(JSON.stringify(multiGrid));
+    if (AppState.builderPattern) draftGrid._pattern = AppState.builderPattern;
+    // Rotation is managed via Settings, not stored in draft
     const draftData = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         name: result.name.trim(),
         teamFilter: AppState.builderTeamFilter,
         weekNumber: AppState.builderWeekNumber,
-        grid: JSON.parse(JSON.stringify(multiGrid)),
-        validFrom: result.validFrom || null,
-        validUntil: result.validUntil || null
+        grid: draftGrid,
+        validFrom: null,
+        validUntil: null
     };
 
     try {
@@ -6871,6 +7172,7 @@ async function saveBuilderDraftAs() {
     }
 
     AppState.builderIsDirty = false;
+    AppState.builderScreen = 'overview';
     renderBuilder();
     showToast(`Nieuw concept "${draftData.name}" aangemaakt`, 'success');
 }
@@ -6890,18 +7192,6 @@ function showDraftSaveModal() {
                         <label>Naam *</label>
                         <input type="text" id="draft-save-name" class="form-input" placeholder="Bijv. Schooljaar 2026-2027">
                     </div>
-                    <div class="form-row" style="gap:12px">
-                        <div class="form-group" style="flex:1">
-                            <label>Geldig vanaf</label>
-                            <input type="date" id="draft-save-valid-from" class="form-input">
-                            <span class="form-hint">Startdatum (optioneel)</span>
-                        </div>
-                        <div class="form-group" style="flex:1">
-                            <label>Geldig tot</label>
-                            <input type="date" id="draft-save-valid-until" class="form-input">
-                            <span class="form-hint">Einddatum (optioneel)</span>
-                        </div>
-                    </div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary btn-sm" id="draft-save-cancel">Annuleren</button>
@@ -6910,7 +7200,7 @@ function showDraftSaveModal() {
             </div>
         `;
         document.body.appendChild(overlay);
-        if (typeof lucide !== 'undefined') lucide.createIcons();
+        IconHelper.init(overlay);
 
         const nameInput = overlay.querySelector('#draft-save-name');
         setTimeout(() => nameInput.focus(), 50);
@@ -6928,11 +7218,14 @@ function showDraftSaveModal() {
                 nameInput.focus();
                 return;
             }
-            cleanup({
-                name,
-                validFrom: overlay.querySelector('#draft-save-valid-from').value || null,
-                validUntil: overlay.querySelector('#draft-save-valid-until').value || null
-            });
+            // Name uniqueness check
+            const drafts = DataStore.settings.schedule_drafts || [];
+            const existing = drafts.find(d => d.name.trim().toLowerCase() === name.toLowerCase());
+            if (existing) {
+                showToast('Er bestaat al een concept met deze naam', 'warning');
+                return;
+            }
+            cleanup({ name });
         });
         nameInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') overlay.querySelector('#draft-save-confirm').click();
@@ -6968,7 +7261,7 @@ function doLoadDraft(draft) {
         // Multi-week draft: load all weeks into cache
         let firstWeek = null;
         for (const [weekNum, weekGrid] of Object.entries(grid)) {
-            if (weekNum === '_multiWeek') continue;
+            if (weekNum.startsWith('_')) continue;
             const wn = Number(weekNum);
             AppState.builderGridByWeek[wn] = JSON.parse(JSON.stringify(weekGrid));
             if (firstWeek === null) firstWeek = wn;
@@ -6984,9 +7277,14 @@ function doLoadDraft(draft) {
         AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(grid));
     }
 
+    // Restore pattern + rotation from draft if saved
+    AppState.builderPattern = grid._pattern || null;
+    AppState.builderRotation = grid._rotation || null;
+
     AppState.builderLoadedDraftId = draft.id;
     AppState.builderLoadedDraftName = draft.name;
     AppState.builderIsDirty = false;
+    AppState.builderScreen = 'editor';
     renderBuilder();
     showToast(`Concept "${draft.name}" geladen`, 'info');
 }
@@ -7021,6 +7319,13 @@ async function renameBuilderDraft(draftId) {
     const newName = await showInputPrompt('Nieuwe naam voor dit concept:', 'Concept hernoemen', draft.name);
     if (!newName) return;
 
+    // Name uniqueness check
+    const existing = drafts.find(d => d.name.trim().toLowerCase() === newName.trim().toLowerCase() && d.id !== draftId);
+    if (existing) {
+        showToast('Er bestaat al een concept met deze naam', 'warning');
+        return;
+    }
+
     try {
         if (DataStore._draftsFromTable) {
             await updateScheduleDraft(draftId, { name: newName });
@@ -7038,6 +7343,80 @@ async function renameBuilderDraft(draftId) {
 
     renderBuilder();
     showToast('Concept hernoemd', 'success');
+}
+
+async function deactivateBuilderDraft(draftId) {
+    const drafts = DataStore.settings.schedule_drafts || [];
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+
+    const todayStr = formatDateYYYYMMDD(new Date());
+
+    const result = await new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal';
+        overlay.innerHTML = `
+            <div class="modal-content" style="max-width:450px">
+                <div class="modal-header">
+                    <h2>Concept deactiveren</h2>
+                    <span class="modal-close" id="deactivate-close"><i data-lucide="x"></i></span>
+                </div>
+                <div class="modal-body">
+                    <p style="margin:0 0 12px"><strong>${escapeHtml(draft.name)}</strong> deactiveren?</p>
+                    <div class="form-group">
+                        <label>Einddatum (shifts na deze datum worden verwijderd)</label>
+                        <input type="date" id="deactivate-end-date" class="form-input" value="${todayStr}">
+                    </div>
+                    <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;cursor:pointer">
+                        <input type="checkbox" id="deactivate-delete-manual">
+                        Verwijder ook handmatig aangemaakte shifts
+                    </label>
+                    <span class="form-hint" style="display:block;margin-top:8px">Auto-gegenereerde shifts na de einddatum worden altijd verwijderd.</span>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary btn-sm" id="deactivate-cancel">Annuleren</button>
+                    <button class="btn btn-warning btn-sm" id="deactivate-confirm">Deactiveren</button>
+                </div>
+            </div>`;
+
+        document.body.appendChild(overlay);
+        IconHelper.init(overlay);
+
+        function cleanup() { overlay.remove(); }
+
+        overlay.querySelector('#deactivate-confirm').addEventListener('click', () => {
+            const endDate = overlay.querySelector('#deactivate-end-date').value;
+            const deleteManual = overlay.querySelector('#deactivate-delete-manual').checked;
+            if (!endDate) { showToast('Kies een einddatum', 'warning'); return; }
+            cleanup();
+            resolve({ endDate, deleteManual });
+        });
+        overlay.querySelector('#deactivate-cancel').addEventListener('click', () => { cleanup(); resolve(null); });
+        overlay.querySelector('#deactivate-close').addEventListener('click', () => { cleanup(); resolve(null); });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
+    });
+
+    if (!result) return;
+
+    try {
+        showSectionLoading('builder-view', 'Deactiveren...');
+        const response = await deactivateDraftShifts(draftId, result);
+
+        // Update local cache
+        const cached = drafts.find(d => d.id === draftId);
+        if (cached) {
+            cached.lastAppliedUntil = result.endDate;
+        }
+
+        await refreshShifts();
+        renderBuilder();
+        showToast(`Concept gedeactiveerd. ${response.shiftsDeleted || 0} shifts verwijderd.`, 'success');
+    } catch (err) {
+        console.error('Error deactivating draft:', err);
+        showToast('Fout bij deactiveren: ' + err.message, 'error');
+    } finally {
+        hideSectionLoading('builder-view');
+    }
 }
 
 async function applyBuilderDraft(draftId) {
@@ -7145,6 +7524,42 @@ async function applyBuilderDraft(draftId) {
         // Auto-update school year start for week numbering
         await saveSchoolYearStart(applyResult.startDate);
 
+        // Apply pattern + rotation from draft globally (date-aware)
+        const draftGrid = draft.grid || {};
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const applyFromDate = parseDateOnly(applyResult.startDate);
+
+        if (draftGrid._pattern) {
+            const currentPattern = getSchedulePattern();
+            let newPatternSetting;
+
+            if (applyFromDate > today) {
+                // Future: save with effectiveFrom, keep current as previousPattern
+                newPatternSetting = {
+                    ...draftGrid._pattern,
+                    effectiveFrom: applyResult.startDate,
+                    previousPattern: {
+                        cycleLength: currentPattern.cycleLength,
+                        referenceDate: currentPattern.referenceDate,
+                        weeks: currentPattern.weeks
+                    }
+                };
+            } else {
+                // Today or past: overwrite immediately, no previousPattern needed
+                newPatternSetting = { ...draftGrid._pattern };
+                delete newPatternSetting.effectiveFrom;
+                delete newPatternSetting.previousPattern;
+            }
+
+            await saveSettings('schedule_pattern', newPatternSetting);
+            DataStore.settings.schedulePattern = newPatternSetting;
+            DataStore.settings.biWeeklyReferenceDate = draftGrid._pattern.referenceDate;
+
+            saveToStorage();
+        }
+        // Rotation is managed via Settings > Planning, not per concept
+
         await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshUsers()]);
         renderBuilder();
     } catch (error) {
@@ -7175,6 +7590,14 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
 
     return new Promise((resolve) => {
         const overlay = document.createElement('div');
+        // Preset date calculations
+        const syStart = getSchoolYearStart();
+        const syStartDate = parseDateOnly(syStart);
+        const septYear = syStartDate.getFullYear();
+        const presetSchoolStart = `${septYear}-09-01`;
+        const presetSchoolEnd = `${septYear + 1}-08-31`;
+        const presetTodayStr = formatDateYYYYMMDD(now);
+
         overlay.className = 'modal';
         overlay.innerHTML = `
             <div class="modal-content" style="max-width:500px">
@@ -7184,6 +7607,11 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                 </div>
                 <div class="modal-body">
                     <p style="margin:0 0 12px"><strong>${escapeHtml(draft.name)}</strong> toepassen als basisrooster ${weekLabel}?</p>
+                    <div class="apply-presets" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetSchoolStart}" data-end="${presetSchoolEnd}">Dit schooljaar (sep – aug)</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetTodayStr}" data-end="${presetSchoolEnd}">Vanaf nu tot aug</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="" data-end="">Aangepaste periode</button>
+                    </div>
                     <div class="form-row" style="gap:12px">
                         <div class="form-group" style="flex:1">
                             <label>Van</label>
@@ -7210,6 +7638,23 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
             overlay.remove();
         }
 
+        // Preset button handlers
+        overlay.querySelectorAll('.apply-preset').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const startInput = overlay.querySelector('#draft-apply-start-date');
+                const endInput = overlay.querySelector('#draft-apply-end-date');
+                if (btn.dataset.start && btn.dataset.end) {
+                    startInput.value = btn.dataset.start;
+                    endInput.value = btn.dataset.end;
+                } else {
+                    // "Aangepaste periode" — clear and focus
+                    startInput.value = '';
+                    endInput.value = '';
+                    startInput.focus();
+                }
+            });
+        });
+
         overlay.querySelector('#draft-apply-confirm').addEventListener('click', () => {
             const startDate = overlay.querySelector('#draft-apply-start-date').value;
             const endDate = overlay.querySelector('#draft-apply-end-date').value;
@@ -7228,6 +7673,37 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
         overlay.querySelector('#draft-apply-cancel').addEventListener('click', () => { cleanup(); resolve(null); });
         overlay.querySelector('#draft-apply-close').addEventListener('click', () => { cleanup(); resolve(null); });
         overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
+    });
+}
+
+function showReapplyAfterEditModal(draftName) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal';
+        overlay.innerHTML = `
+            <div class="modal-content" style="max-width:400px">
+                <div class="modal-header">
+                    <h2>Wijzigingen toepassen?</h2>
+                    <span class="modal-close" id="reapply-close"><i data-lucide="x"></i></span>
+                </div>
+                <div class="modal-body">
+                    <p style="margin:0 0 8px">Het concept <strong>"${escapeHtml(draftName)}"</strong> is momenteel actief.</p>
+                    <p style="margin:0">Wil je de wijzigingen nu toepassen op het rooster?</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary btn-sm" id="reapply-no">Nee, later</button>
+                    <button class="btn btn-primary btn-sm" id="reapply-yes">Ja, toepassen</button>
+                </div>
+            </div>`;
+
+        document.body.appendChild(overlay);
+        IconHelper.init(overlay);
+        function cleanup() { overlay.remove(); }
+
+        overlay.querySelector('#reapply-yes').addEventListener('click', () => { cleanup(); resolve(true); });
+        overlay.querySelector('#reapply-no').addEventListener('click', () => { cleanup(); resolve(false); });
+        overlay.querySelector('#reapply-close').addEventListener('click', () => { cleanup(); resolve(false); });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(false); } });
     });
 }
 
@@ -7266,9 +7742,204 @@ function calcHoursBetweenTwoAssignments(shift1, shift2) {
     return nextStartHour - endHour;
 }
 
+function downloadBuilderDraft(draftId) {
+    const drafts = DataStore.settings.schedule_drafts || [];
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+
+    // Build export object with relevant data
+    const exportData = {
+        name: draft.name,
+        weekNumber: draft.weekNumber,
+        teamFilter: draft.teamFilter,
+        grid: draft.grid,
+        createdAt: draft.createdAt,
+        updatedAt: draft.updatedAt,
+        lastAppliedFrom: draft.lastAppliedFrom,
+        lastAppliedUntil: draft.lastAppliedUntil,
+        exportedAt: new Date().toISOString()
+    };
+
+    // Resolve employee names in grid for readability
+    const gridCopy = JSON.parse(JSON.stringify(draft.grid || {}));
+    const resolveNames = (weekGrid) => {
+        Object.keys(weekGrid).forEach(key => {
+            if (key.startsWith('_')) return;
+            const emp = getEmployee(Number(key));
+            if (emp) weekGrid[key]._employeeName = emp.name;
+        });
+    };
+    if (gridCopy._multiWeek) {
+        Object.keys(gridCopy).filter(k => !k.startsWith('_')).forEach(w => resolveNames(gridCopy[w]));
+    } else {
+        resolveNames(gridCopy);
+    }
+    exportData.grid = gridCopy;
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `concept-${draft.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Concept gedownload', 'success');
+}
+
+function uploadBuilderDraft() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            if (!data.grid || !data.name) {
+                showToast('Ongeldig concept bestand', 'error');
+                return;
+            }
+            // Strip _employeeName fields added during export
+            const cleanGrid = JSON.parse(JSON.stringify(data.grid));
+            const stripNames = (weekGrid) => {
+                Object.keys(weekGrid).forEach(key => {
+                    if (key.startsWith('_')) return;
+                    if (weekGrid[key] && weekGrid[key]._employeeName) delete weekGrid[key]._employeeName;
+                });
+            };
+            if (cleanGrid._multiWeek) {
+                Object.keys(cleanGrid).filter(k => !k.startsWith('_')).forEach(w => stripNames(cleanGrid[w]));
+            } else {
+                stripNames(cleanGrid);
+            }
+
+            // Check name uniqueness, append suffix if needed
+            const drafts = DataStore.settings.schedule_drafts || [];
+            let name = data.name;
+            let counter = 1;
+            while (drafts.some(d => d.name.trim().toLowerCase() === name.trim().toLowerCase())) {
+                counter++;
+                name = `${data.name} (${counter})`;
+            }
+
+            const draftData = {
+                name,
+                weekNumber: data.weekNumber || 1,
+                teamFilter: data.teamFilter || null,
+                grid: cleanGrid
+            };
+
+            if (DataStore._draftsFromTable) {
+                await createScheduleDraft(draftData);
+            } else {
+                draftData.id = 'draft_' + Date.now();
+                draftData.createdAt = new Date().toISOString();
+                draftData.updatedAt = new Date().toISOString();
+                drafts.push(draftData);
+                await saveSettings('schedule_drafts', drafts);
+            }
+            await refreshSettings();
+            renderBuilder();
+            showToast(`Concept "${name}" geïmporteerd`, 'success');
+        } catch (err) {
+            console.error('Upload error:', err);
+            showToast('Fout bij importeren: ongeldig bestand', 'error');
+        }
+    });
+    input.click();
+}
+
 // --- Builder: Event Listeners ---
 
+function attachBuilderOverviewListeners(container) {
+    // Filter dropdown
+    const filterSelect = document.getElementById('builder-overview-filter');
+    if (filterSelect) {
+        filterSelect.addEventListener('change', (e) => {
+            AppState.builderOverviewFilter = e.target.value;
+            renderBuilder();
+        });
+    }
+
+    // Upload concept button
+    const uploadBtn = document.getElementById('builder-upload-concept');
+    if (uploadBtn) {
+        uploadBtn.addEventListener('click', () => uploadBuilderDraft());
+    }
+
+    // New concept card (dashed)
+    const newConceptCard = document.getElementById('builder-new-concept-card');
+    if (newConceptCard) {
+        newConceptCard.addEventListener('click', () => {
+            AppState.builderGrid = {};
+            AppState.builderGridByWeek = {};
+            AppState.builderLoadedDraftId = null;
+            AppState.builderLoadedDraftName = null;
+            AppState.builderPattern = null;
+                    AppState.builderIsDirty = false;
+            AppState.builderWeekNumber = 1;
+            AppState.builderScreen = 'editor';
+            renderBuilder();
+        });
+    }
+
+    // Card action buttons
+    container.querySelectorAll('.concept-card-load, .concept-card-edit').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            AppState.builderScreen = 'editor';
+            loadBuilderDraft(btn.dataset.draftId);
+        });
+    });
+    container.querySelectorAll('.concept-card-apply').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            applyBuilderDraft(btn.dataset.draftId);
+        });
+    });
+    container.querySelectorAll('.concept-card-rename').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            renameBuilderDraft(btn.dataset.draftId);
+        });
+    });
+    container.querySelectorAll('.concept-card-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteBuilderDraft(btn.dataset.draftId);
+        });
+    });
+    container.querySelectorAll('.concept-card-deactivate').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deactivateBuilderDraft(btn.dataset.draftId);
+        });
+    });
+    container.querySelectorAll('.concept-card-download').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            downloadBuilderDraft(btn.dataset.draftId);
+        });
+    });
+}
+
 function attachBuilderEventListeners(container) {
+    // Back to overview button
+    const backBtn = document.getElementById('builder-back-to-overview');
+    if (backBtn) {
+        backBtn.addEventListener('click', async () => {
+            if (AppState.builderIsDirty) {
+                const ok = confirm('Je hebt onopgeslagen wijzigingen. Wil je terug zonder op te slaan?');
+                if (!ok) return;
+            }
+            AppState.builderScreen = 'overview';
+            renderBuilder();
+        });
+    }
+
     // Settings panel toggles
     const patternToggle = document.getElementById('builder-pattern-toggle');
     if (patternToggle) {
@@ -7277,20 +7948,16 @@ function attachBuilderEventListeners(container) {
             document.getElementById('builder-pattern-panel')?.classList.toggle('expanded');
         });
     }
-    const rotationToggle = document.getElementById('builder-rotation-toggle');
-    if (rotationToggle) {
-        rotationToggle.addEventListener('click', () => {
-            AppState.builderRotationExpanded = !AppState.builderRotationExpanded;
-            document.getElementById('builder-rotation-panel')?.classList.toggle('expanded');
-        });
-    }
-
-    // Pattern panel: save + cycle length change
+    // Pattern panel: save locally (not global until draft is applied)
     const savePatternBtn = document.getElementById('save-schedule-pattern-btn');
     if (savePatternBtn) {
-        savePatternBtn.addEventListener('click', async () => {
-            await saveSchedulePattern();
+        savePatternBtn.addEventListener('click', () => {
+            const newPattern = collectPatternFromUI();
+            if (!newPattern) return;
+            AppState.builderPattern = newPattern;
+            AppState.builderIsDirty = true;
             renderBuilder();
+            showToast('Patroon bijgewerkt (wordt opgeslagen bij concept opslaan)', 'info');
         });
     }
     const cycleLengthInput = document.getElementById('schedule-cycle-length');
@@ -7298,14 +7965,13 @@ function attachBuilderEventListeners(container) {
         cycleLengthInput.addEventListener('change', function() {
             const newLength = Math.max(1, Math.min(8, parseInt(this.value) || 2));
             this.value = newLength;
-            // Rebuild week checkboxes inline
             const weeksContainer = document.getElementById('schedule-pattern-weeks');
             if (!weeksContainer) return;
-            const pattern = getSchedulePattern();
+            const pattern = getBuilderPattern();
             const dayLabels = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
             let html = '';
             for (let w = 1; w <= newLength; w++) {
-                const closed = (w <= (pattern.cycleLength || 2)) ? getClosedDaysForWeek(w) : [];
+                const closed = (w <= (pattern.cycleLength || 2)) ? getBuilderClosedDays(w) : [];
                 html += `<div class="form-group schedule-pattern-week">
                     <label>Week ${w} - Gesloten dagen:</label>
                     <div class="schedule-pattern-days">
@@ -7320,8 +7986,8 @@ function attachBuilderEventListeners(container) {
         });
     }
 
-    // Week toggle buttons (dynamic based on cycle length)
-    const cycleLen = getCycleLength();
+    // Week toggle buttons (dynamic based on builder cycle length)
+    const cycleLen = getBuilderCycleLength();
     for (let w = 1; w <= cycleLen; w++) {
         const btn = document.getElementById(`builder-week-${w}`);
         if (btn) btn.addEventListener('click', () => switchBuilderWeek(w));
@@ -7349,7 +8015,8 @@ function attachBuilderEventListeners(container) {
         AppState.builderGridByWeek = {};
         AppState.builderLoadedDraftId = null;
         AppState.builderLoadedDraftName = null;
-        AppState.builderIsDirty = false;
+        AppState.builderPattern = null;
+            AppState.builderIsDirty = false;
         renderBuilder();
         showToast('Grid leeggemaakt', 'info');
     });
@@ -8070,6 +8737,29 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             const result = await replaceEmployee(Number(departingUser.id), Number(newUserId), fromDate);
             modal.remove();
 
+            // Weekendverantwoordelijkheid overerven
+            const rotation = DataStore.settings.responsibleRotation;
+            if (rotation) {
+                let rotationChanged = false;
+                // Als vertrekkende medewerker de startpersoon was → vervanger overneemt
+                if (String(rotation.rotationStartEmployee) === String(departingUser.id)) {
+                    rotation.rotationStartEmployee = String(newUserId);
+                    rotationChanged = true;
+                }
+                // Handmatige toewijzingen overzetten
+                if (rotation.assignments) {
+                    for (const [dateKey, assignedId] of Object.entries(rotation.assignments)) {
+                        if (String(assignedId) === String(departingUser.id)) {
+                            rotation.assignments[dateKey] = String(newUserId);
+                            rotationChanged = true;
+                        }
+                    }
+                }
+                if (rotationChanged) {
+                    await saveResponsibleRotationSettings();
+                }
+            }
+
             let msg = `${departingUser.name} vervangen door ${newUser.name}`;
             if (result.shiftsTransferred > 0) {
                 msg += ` (${result.shiftsTransferred} diensten overgedragen)`;
@@ -8196,7 +8886,40 @@ function renderSettingsPlanning(container) {
                 </div>
             </div>
         </div>
+
+        <!-- Weekendverantwoordelijke -->
+        <div class="settings-card" id="settings-weekend-responsible" style="margin-top: 24px;">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Weekendverantwoordelijke</h3>
+                    <p class="settings-card-subtitle">Automatische rotatie voor open weekenden.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="form-group">
+                    <label>Teams in rotatie:</label>
+                    <div class="eligible-teams-compact">
+                        ${renderEligibleTeamsCheckboxes()}
+                    </div>
+                </div>
+                <div class="rotation-form" style="margin-top:12px">
+                    ${renderRotationSettingsCompact()}
+                </div>
+                <div class="upcoming-section" style="margin-top:20px">
+                    <h4 style="font-size:14px;margin:0 0 10px">Komende open weekenden</h4>
+                    <div class="upcoming-responsibles">
+                        ${renderUpcomingResponsibles()}
+                    </div>
+                </div>
+            </div>
+        </div>
     `;
+
+    // Attach click listeners for weekend picker after DOM is set
+    requestAnimationFrame(() => {
+        const upcomingContainer = container.querySelector('.upcoming-responsibles');
+        if (upcomingContainer) attachUpcomingWeekendListeners(upcomingContainer);
+    });
 }
 
 // ===== SETTINGS TAB: ROOSTER =====
@@ -8242,12 +8965,6 @@ async function saveSchedulePattern() {
         DataStore.settings.schedulePattern = newPattern;
         // Backward compat: sync biWeeklyReferenceDate
         DataStore.settings.biWeeklyReferenceDate = referenceDate;
-
-        // Also sync rotation start date
-        if (!DataStore.settings.responsibleRotation) {
-            DataStore.settings.responsibleRotation = { eligibleTeams: [], assignments: {} };
-        }
-        DataStore.settings.responsibleRotation.rotationStart = referenceDate;
 
         saveToStorage();
         renderPlanning();
@@ -9276,19 +9993,15 @@ function saveHolidayRules() {
 // ===== VERANTWOORDELIJKE SETTINGS FUNCTIES =====
 
 function renderEligibleTeamsCheckboxes() {
-    const eligibleTeams = DataStore.settings.responsibleRotation?.eligibleTeams || ['vlot1', 'vlot2', 'cargo'];
+    const eligibleTeams = DataStore.settings.responsibleRotation?.eligibleTeams || [];
+    const teams = DataStore.settings.teams || {};
     let html = '';
 
-    // Only show Vlot 1, Vlot 2, and Cargo (the teams that can have weekend responsible)
-    const relevantTeams = ['vlot1', 'vlot2', 'cargo'];
-
-    relevantTeams.forEach(teamId => {
-        const team = DataStore.settings.teams[teamId];
-        if (!team) return;
+    Object.entries(teams).forEach(([teamId, team]) => {
         const checked = eligibleTeams.includes(teamId) ? 'checked' : '';
         html += `
         <label class="checkbox-item">
-            <input type="checkbox" id="eligible-team-${teamId}" ${checked} onchange="saveEligibleTeamsQuiet()" />
+            <input type="checkbox" class="eligible-team-cb" data-team-id="${teamId}" ${checked} onchange="saveEligibleTeamsQuiet()" />
             <span class="checkbox-label">
                 <span class="team-color-dot" style="background: ${team.color}"></span>
                 ${escapeHtml(team.name)}
@@ -9306,13 +10019,9 @@ function saveEligibleTeams() {
 
 function saveEligibleTeamsQuiet() {
     const eligibleTeams = [];
-    const relevantTeams = ['vlot1', 'vlot2', 'cargo'];
 
-    relevantTeams.forEach(teamId => {
-        const checkbox = document.getElementById(`eligible-team-${teamId}`);
-        if (checkbox && checkbox.checked) {
-            eligibleTeams.push(teamId);
-        }
+    document.querySelectorAll('.eligible-team-cb').forEach(cb => {
+        if (cb.checked) eligibleTeams.push(cb.dataset.teamId);
     });
 
     if (eligibleTeams.length === 0) {
@@ -9330,6 +10039,7 @@ function saveEligibleTeamsQuiet() {
     if (upcomingContainer) {
         upcomingContainer.innerHTML = renderUpcomingResponsibles();
         IconHelper.init(upcomingContainer);
+        attachUpcomingWeekendListeners(upcomingContainer);
     }
 }
 
@@ -9352,21 +10062,14 @@ function renderRotationSettingsCompact() {
         employeeOptions += `<option value="${emp.id}" ${selected}>${escapeHtml(emp.name)}</option>`;
     });
 
-    // Show current status if set
-    let statusHtml = '';
-    if (currentStart && currentEmployee) {
-        const startPerson = eligible.find(e => String(e.id) === currentEmployee);
-        const startPersonName = escapeHtml(startPerson?.name || 'onbekend');
-        statusHtml = `<div class="rotation-status">
-            Rotatie gestart op ${formatDate(currentStart)} met ${startPersonName}
-        </div>`;
-    }
-
     return `
-    ${statusHtml}
     <div class="form-row compact">
         <div class="form-group">
-            <label for="rotation-start-employee">Eerste:</label>
+            <label for="rotation-start-date">Startdatum:</label>
+            <input type="date" id="rotation-start-date" class="form-input" value="${escapeHtml(currentStart)}" />
+        </div>
+        <div class="form-group">
+            <label for="rotation-start-employee">Begint met:</label>
             <select id="rotation-start-employee" class="form-input">
                 ${employeeOptions}
             </select>
@@ -9376,13 +10079,14 @@ function renderRotationSettingsCompact() {
 }
 
 function saveRotationSettings() {
+    const dateInput = document.getElementById('rotation-start-date');
     const employeeSelect = document.getElementById('rotation-start-employee');
 
-    const startDate = getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate;
-    const employeeId = employeeSelect.value;
+    const startDate = dateInput?.value;
+    const employeeId = employeeSelect?.value;
 
     if (!startDate) {
-        showToast('Stel eerst de Week 1 startdatum in', 'warning');
+        showToast('Kies een startdatum', 'warning');
         return;
     }
 
@@ -9391,17 +10095,15 @@ function saveRotationSettings() {
         return;
     }
 
-    // Check if it's a Monday
     const date = parseDateOnly(startDate);
     if (date.getDay() !== 1) {
-        showToast('Kies een maandag als startdatum', 'warning');
+        showToast('De startdatum moet een maandag zijn', 'warning');
         return;
     }
 
-    // Use parseFloat to preserve full precision of employee ID
     setRotationStart(date, parseFloat(employeeId));
     renderSettings();
-    renderPlanning(); // Update planning page too
+    renderPlanning();
     showToast('Rotatie ingesteld', 'success');
 }
 
@@ -9416,6 +10118,8 @@ function renderUpcomingResponsibles() {
         return '<p class="no-items-text">Stel eerst de rotatie in hierboven</p>';
     }
 
+    const assignments = rotation.assignments || {};
+
     // Toon de komende 8 weekenden
     let html = '<div class="upcoming-list">';
     const today = new Date();
@@ -9427,18 +10131,25 @@ function renderUpcomingResponsibles() {
     while (count < 8) {
         if (isWeekendOrHolidayWeek(checkDate)) {
             const responsible = getOrCalculateResponsible(checkDate);
-            const weekNum = getISOWeekNumber(checkDate);
-            const dateDisplay = checkDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+            const weekendSat = new Date(checkDate);
+            weekendSat.setDate(weekendSat.getDate() + 5);
+            const weekendSun = new Date(checkDate);
+            weekendSun.setDate(weekendSun.getDate() + 6);
+            const dateDisplay = `${weekendSat.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })} – ${weekendSun.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })}`;
+            const mondayKey = formatDateYYYYMMDD(checkDate);
+            const isManual = !!assignments[mondayKey];
 
             if (responsible) {
                 const teamColor = DataStore.settings.teams[responsible.mainTeam]?.color || '#6b7280';
                 const responsibleName = escapeHtml(responsible.name);
+                const manualBadge = isManual ? ' <span class="upcoming-manual-badge">handmatig</span>' : '';
                 html += `
-                <div class="upcoming-item">
-                    <span class="upcoming-date">${weekNum} (${dateDisplay})</span>
+                <div class="upcoming-item upcoming-item-clickable" data-monday="${mondayKey}">
+                    <span class="upcoming-date">${dateDisplay}</span>
                     <span class="upcoming-name" style="border-left: 3px solid ${teamColor}; padding-left: 8px;">
-                        ${responsibleName}
+                        ${responsibleName}${manualBadge}
                     </span>
+                    <span class="upcoming-edit-icon">${IconHelper.html(ICONS.edit, 'xs')}</span>
                 </div>`;
                 count++;
             }
@@ -9451,6 +10162,111 @@ function renderUpcomingResponsibles() {
 
     html += '</div>';
     return html;
+}
+
+function showWeekendResponsiblePicker(mondayKey) {
+    const eligible = getEligibleEmployeesForResponsible();
+    const rotation = DataStore.settings.responsibleRotation || {};
+    const assignments = rotation.assignments || {};
+    const currentAssignment = assignments[mondayKey] ? String(assignments[mondayKey]) : null;
+
+    const monday = parseDateOnly(mondayKey);
+    const sat = new Date(monday);
+    sat.setDate(sat.getDate() + 5);
+    const sun = new Date(monday);
+    sun.setDate(sun.getDate() + 6);
+    const dateLabel = `${sat.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' })} – ${sun.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' })}`;
+
+    // Calculate who rotation would pick automatically
+    const autoResponsible = (() => {
+        const saved = assignments[mondayKey];
+        delete assignments[mondayKey];
+        const result = getOrCalculateResponsible(monday);
+        if (saved !== undefined) assignments[mondayKey] = saved;
+        return result;
+    })();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal';
+    overlay.innerHTML = `
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>Weekendverantwoordelijke</h3>
+                <span class="modal-close" id="weekend-picker-close">&times;</span>
+            </div>
+            <div class="modal-body" style="padding: 16px;">
+                <p style="margin: 0 0 16px; color: var(--text-secondary); font-size: 14px;">${dateLabel}</p>
+                <div class="weekend-picker-options">
+                    <label class="weekend-picker-option ${!currentAssignment ? 'selected' : ''}" data-value="auto">
+                        <input type="radio" name="weekend-responsible" value="auto" ${!currentAssignment ? 'checked' : ''}>
+                        <span class="weekend-picker-label">
+                            Automatisch (rotatie)
+                            ${autoResponsible ? `<span class="weekend-picker-hint">→ ${escapeHtml(autoResponsible.name)}</span>` : ''}
+                        </span>
+                    </label>
+                    ${eligible.map(emp => {
+                        const teamColor = DataStore.settings.teams[emp.mainTeam]?.color || '#6b7280';
+                        const isSelected = currentAssignment === String(emp.id);
+                        return `
+                        <label class="weekend-picker-option ${isSelected ? 'selected' : ''}" data-value="${emp.id}">
+                            <input type="radio" name="weekend-responsible" value="${emp.id}" ${isSelected ? 'checked' : ''}>
+                            <span class="weekend-picker-color" style="background: ${teamColor};"></span>
+                            <span class="weekend-picker-label">${escapeHtml(emp.name)}</span>
+                        </label>`;
+                    }).join('')}
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="weekend-picker-cancel">Annuleren</button>
+                <button class="btn btn-primary" id="weekend-picker-save">Opslaan</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Highlight selected option
+    overlay.querySelectorAll('.weekend-picker-option').forEach(opt => {
+        opt.addEventListener('click', () => {
+            overlay.querySelectorAll('.weekend-picker-option').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+            opt.querySelector('input').checked = true;
+        });
+    });
+
+    overlay.querySelector('#weekend-picker-close').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#weekend-picker-cancel').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.querySelector('#weekend-picker-save').addEventListener('click', async () => {
+        const selected = overlay.querySelector('input[name="weekend-responsible"]:checked')?.value;
+        if (!selected) return;
+
+        if (selected === 'auto') {
+            await removeWeekendResponsible(monday);
+        } else {
+            await setWeekendResponsible(monday, Number(selected));
+        }
+
+        overlay.remove();
+
+        // Refresh the upcoming list
+        const upcomingContainer = document.querySelector('.upcoming-responsibles');
+        if (upcomingContainer) {
+            upcomingContainer.innerHTML = renderUpcomingResponsibles();
+            IconHelper.init(upcomingContainer);
+            attachUpcomingWeekendListeners(upcomingContainer);
+        }
+        showToast('Weekendverantwoordelijke bijgewerkt', 'success');
+    });
+}
+
+function attachUpcomingWeekendListeners(container) {
+    container.querySelectorAll('.upcoming-item-clickable').forEach(item => {
+        item.addEventListener('click', () => {
+            const mondayKey = item.dataset.monday;
+            if (mondayKey) showWeekendResponsiblePicker(mondayKey);
+        });
+    });
 }
 
 function setupSettingsCollapsibles(scope = document) {
