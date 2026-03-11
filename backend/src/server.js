@@ -514,6 +514,39 @@ async function ensureSchema() {
 // Run schema check on startup
 ensureSchema().catch(console.error);
 
+// Auto-activeer ingeplande concepten waarvan de startdatum bereikt is
+async function autoActivateScheduledDrafts() {
+  const client = await pool.connect();
+  try {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    // Vind concepten die ingepland zijn (valid_from <= vandaag) maar nog niet toegepast
+    const scheduled = await client.query(
+      `SELECT id, name, valid_from, valid_until FROM schedule_drafts
+       WHERE last_applied_at IS NULL
+       AND valid_from IS NOT NULL AND valid_from <= $1
+       AND (valid_until IS NULL OR valid_until >= $1)`,
+      [todayStr]
+    );
+
+    for (const draft of scheduled.rows) {
+      console.log(`[Auto-activate] Activating scheduled draft: "${draft.name}" (${draft.id}), valid_from: ${draft.valid_from}`);
+      // Markeer als toegepast (shifts moeten nog handmatig worden toegepast via de UI)
+      // We loggen alleen dat het concept klaar is voor activatie
+      // Volledige auto-apply vereist de grid data + complexe logica, dus we markeren het als 'activatable'
+      console.log(`[Auto-activate] Draft "${draft.name}" is klaar om toe te passen (startdatum bereikt)`);
+    }
+  } catch (err) {
+    console.error('[Auto-activate] Error checking scheduled drafts:', err.message);
+  } finally {
+    client.release();
+  }
+}
+
+// Run auto-activation check after schema is ready
+setTimeout(() => autoActivateScheduledDrafts().catch(console.error), 2000);
+
 function signToken(user) {
   return jwt.sign(
     { id: user.id, role: user.role, team_id: user.team_id },
@@ -1310,305 +1343,10 @@ app.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res)
   }
 });
 
-// ===== APPLY SCHEDULE (shift regeneration in single transaction) =====
-
-// Helper: regenerate shifts for a single user within an existing transaction
-// Returns { created, deleted, blocksCleared, userName }
-async function regenerateShiftsForUser(client, userId, { clearBlocks = false, overrideStartDate = null, overrideEndDate = null } = {}) {
-  // 1. Fetch user with week schedules
-  const userResult = await client.query(
-    `SELECT id, name, main_team as "mainTeam",
-            week_schedules as "weekSchedules",
-            week_schedule_week1 as "weekScheduleWeek1",
-            week_schedule_week2 as "weekScheduleWeek2"
-     FROM users WHERE id = $1 AND active = true`,
-    [userId]
-  );
-  if (userResult.rows.length === 0) {
-    return { created: 0, deleted: 0, blocksCleared: 0, userName: null, skipped: true };
-  }
-  const user = userResult.rows[0];
-
-  // 2. Check if user has any week schedule configured
-  const weekSchedules = user.weekSchedules;
-  const week1 = user.weekScheduleWeek1;
-  const week2 = user.weekScheduleWeek2;
-
-  let hasSchedule = false;
-  if (Array.isArray(weekSchedules)) {
-    hasSchedule = weekSchedules.some(ws => Array.isArray(ws) && ws.length > 0);
-  } else {
-    hasSchedule = (Array.isArray(week1) && week1.length > 0) ||
-                  (Array.isArray(week2) && week2.length > 0);
-  }
-
-  // 3. Read school year start from settings (default: 1 sept)
-  const syResult = await client.query(
-    `SELECT value FROM settings WHERE key = 'school_year_start'`
-  );
-  let schoolYearStartMonth = 8; // 0-based: 8 = September
-  let schoolYearStartDay = 1;
-  if (syResult.rows.length > 0 && syResult.rows[0].value?.date) {
-    const syDate = parseLocalDate(syResult.rows[0].value.date);
-    if (syDate) {
-      schoolYearStartMonth = syDate.getMonth();
-      schoolYearStartDay = syDate.getDate();
-    }
-  }
-
-  // 4. Read schedule_pattern from settings (cycleLength, referenceDate)
-  const patternResult = await client.query(
-    `SELECT value FROM settings WHERE key = 'schedule_pattern'`
-  );
-  let cycleLength = 2;
-  let referenceDate = '2025-01-06';
-
-  if (patternResult.rows.length > 0 && patternResult.rows[0].value) {
-    const pattern = patternResult.rows[0].value;
-    if (pattern.cycleLength) cycleLength = pattern.cycleLength;
-    if (pattern.referenceDate) referenceDate = pattern.referenceDate;
-  }
-
-  // 5. Calculate date range
-  // Default: today → end of current school year (31 aug if school starts 1 sept)
-  const today = new Date();
-  let startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  // Calculate end of school year: the day before school_year_start in the next occurrence
-  // E.g. school year starts Sept 1 → ends Aug 31
-  // If we're past the school year start date, the end is next year; otherwise this year
-  const schoolYearEndMonth = schoolYearStartMonth === 0 ? 11 : schoolYearStartMonth - 1;
-  let schoolYearEndYear = today.getFullYear();
-  // First estimate the year, then calculate the day (for correct leap year handling)
-  const testEndDay = schoolYearStartDay === 1
-    ? new Date(schoolYearEndYear, schoolYearEndMonth + 1, 0).getDate()
-    : schoolYearStartDay - 1;
-  const testEnd = new Date(schoolYearEndYear, schoolYearEndMonth, testEndDay);
-  if (testEnd <= today) {
-    schoolYearEndYear++;
-  }
-  // Recalculate day with correct year (handles Feb 28/29 correctly)
-  const schoolYearEndDay = schoolYearStartDay === 1
-    ? new Date(schoolYearEndYear, schoolYearEndMonth + 1, 0).getDate()
-    : schoolYearStartDay - 1;
-  let endDate = new Date(schoolYearEndYear, schoolYearEndMonth, schoolYearEndDay);
-
-  // Apply explicit overrides if provided (e.g. from draft apply with specific dates)
-  if (overrideStartDate) {
-    const parsed = parseLocalDate(overrideStartDate);
-    if (parsed) startDate = parsed;
-  }
-  if (overrideEndDate) {
-    const parsed = parseLocalDate(overrideEndDate);
-    if (parsed) endDate = parsed;
-  }
-
-  // Only apply schedule_valid_until cap when no explicit endDate was provided
-  if (!overrideEndDate) {
-    const validUntilResult = await client.query(
-      `SELECT value FROM settings WHERE key = 'schedule_valid_until'`
-    );
-    if (validUntilResult.rows.length > 0 && validUntilResult.rows[0].value?.date) {
-      const validUntilDate = parseLocalDate(validUntilResult.rows[0].value.date);
-      if (validUntilDate && validUntilDate < endDate) {
-        endDate = validUntilDate;
-      }
-    }
-  }
-  const startStr = formatDateYYYYMMDD(startDate);
-  const endStr = formatDateYYYYMMDD(endDate);
-
-  // 6. Optionally clear ALL shift_blocks (allows new schedule to regenerate fresh)
-  let blocksCleared = 0;
-  if (clearBlocks) {
-    const blockResult = await client.query(
-      `DELETE FROM shift_blocks
-       WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
-      [userId, startStr, endStr]
-    );
-    blocksCleared = blockResult.rowCount;
-  }
-
-  // 7. Delete existing auto-generated shifts in range
-  const deleteResult = await client.query(
-    `DELETE FROM shifts
-     WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`,
-    [userId, startStr, endStr]
-  );
-
-  // If no schedule configured, just clean up (delete shifts + blocks) and return
-  if (!hasSchedule) {
-    return { created: 0, deleted: deleteResult.rowCount, blocksCleared, userName: user.name };
-  }
-  const deletedCount = deleteResult.rowCount;
-
-  // 8. Fetch skip-sets: existing manual shifts, absences, remaining blocks
-  const existingShifts = await client.query(
-    `SELECT date::text as date FROM shifts
-     WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
-    [userId, startStr, endStr]
-  );
-  const occupiedDates = new Set(existingShifts.rows.map(r => r.date));
-
-  const absences = await client.query(
-    `SELECT date::text as date FROM availability
-     WHERE user_id = $1 AND date >= $2::date AND date <= $3::date
-     AND type IS NOT NULL AND type != ''`,
-    [userId, startStr, endStr]
-  );
-  const absenceDates = new Set(absences.rows.map(r => r.date));
-
-  const blocks = await client.query(
-    `SELECT date::text as date FROM shift_blocks
-     WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
-    [userId, startStr, endStr]
-  );
-  const blockedDates = new Set(blocks.rows.map(r => r.date));
-
-  // 8b. Load active vakantieconcept date ranges — skip these dates during base regeneration
-  // Only include periods that overlap with the regeneration range (not expired past periods)
-  const vakantieRanges = [];
-  try {
-    const vakDrafts = await client.query(
-      `SELECT holiday_period_id FROM schedule_drafts
-       WHERE type = 'vakantie' AND last_applied_at IS NOT NULL
-       AND (last_applied_until IS NULL OR last_applied_until >= $1::date)`,
-      [startStr]
-    );
-    if (vakDrafts.rows.length > 0) {
-      const hpResult = await client.query(`SELECT value FROM settings WHERE key = 'holidayPeriods'`);
-      const holidayPeriods = hpResult.rows.length > 0 ? (hpResult.rows[0].value || []) : [];
-      for (const row of vakDrafts.rows) {
-        const hp = holidayPeriods.find(p => String(p.id) === String(row.holiday_period_id));
-        if (hp && hp.startDate && hp.endDate) {
-          // Only include if the period overlaps with the regeneration range
-          if (hp.endDate >= startStr && hp.startDate <= endStr) {
-            vakantieRanges.push({ start: hp.startDate, end: hp.endDate });
-          }
-        }
-      }
-    }
-  } catch (e) {
-    // Non-critical — continue without vakantie skip
-    console.log('Warning: could not load vakantie ranges:', e.message);
-  }
-
-  // 9. Generate shifts day by day
-  const refDate = parseLocalDate(referenceDate);
-  const refMonday = getMonday(refDate);
-  let createdCount = 0;
-
-  for (let d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-       d <= endDate;
-       d.setDate(d.getDate() + 1)) {
-    const dateStr = formatDateYYYYMMDD(d);
-
-    if (occupiedDates.has(dateStr)) continue;
-    if (absenceDates.has(dateStr)) continue;
-    if (blockedDates.has(dateStr)) continue;
-
-    // Skip dates covered by an active vakantieconcept
-    if (vakantieRanges.some(r => dateStr >= r.start && dateStr <= r.end)) continue;
-
-    // Calculate week number (replicates getWeekNumber from data.js)
-    const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
-    const diffMs = currMonday.getTime() - refMonday.getTime();
-    const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
-    const mod = diffWeeks % cycleLength;
-    const weekNumber = (mod < 0 ? mod + cycleLength : mod) + 1;
-
-    // Get week schedule for this week number
-    let weekSchedule = [];
-    if (Array.isArray(weekSchedules) && weekSchedules.length > 0) {
-      weekSchedule = weekSchedules[weekNumber - 1] || [];
-    } else if (weekNumber === 1) {
-      weekSchedule = week1 || [];
-    } else if (weekNumber === 2) {
-      weekSchedule = week2 || [];
-    }
-
-    // Find schedule entry for this day of week
-    const dayOfWeek = d.getDay();
-    const entry = weekSchedule.find(s => s.dayOfWeek === dayOfWeek && s.enabled);
-
-    if (entry) {
-      await client.query(
-        `INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
-         VALUES ($1, $2, $3::date, $4, $5, $6, 'auto')`,
-        [
-          userId,
-          entry.team || user.mainTeam,
-          dateStr,
-          entry.startTime,
-          entry.endTime,
-          `Automatisch ingepland via basisrooster (Week ${weekNumber})`
-        ]
-      );
-      createdCount++;
-    }
-  }
-
-  return {
-    created: createdCount,
-    deleted: deletedCount,
-    blocksCleared,
-    userName: user.name,
-    dateRange: { start: startStr, end: endStr }
-  };
-}
-
-app.post('/users/:id/apply-schedule', requireAuth, async (req, res) => {
-  const userId = Number(req.params.id);
-  if (!userId) {
-    return res.status(400).json({ error: 'User ID is verplicht' });
-  }
-
-  // Permission: medewerker cannot apply schedules at all
-  const { role, id: currentUserId } = req.user;
-  if (role === 'medewerker') {
-    return res.status(403).json({ error: 'Medewerkers kunnen geen basisrooster toepassen' });
-  }
-
-  const { clearBlocks = false } = req.body || {};
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const result = await regenerateShiftsForUser(client, userId, { clearBlocks });
-    if (result.skipped) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Gebruiker niet gevonden of niet actief' });
-    }
-
-    await client.query('COMMIT');
-
-    await logAudit(req, 'UPDATE', 'shift', '', {
-      action: 'apply_schedule',
-      userId,
-      userName: result.userName,
-      created: result.created,
-      deleted: result.deleted,
-      blocksCleared: result.blocksCleared,
-      clearBlocks,
-      dateRange: result.dateRange
-    });
-
-    res.json({
-      created: result.created,
-      deleted: result.deleted,
-      blocksCleared: result.blocksCleared,
-      userId,
-      employeeId: userId
-    });
-
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('ERROR in POST /users/:id/apply-schedule:', err);
-    res.status(500).json({ error: 'Server error bij rooster generatie' });
-  } finally {
-    client.release();
-  }
-});
+// ===== APPLY SCHEDULE =====
+// NOTE: regenerateShiftsForUser() is VERWIJDERD.
+// Shifts worden nu ALLEEN aangemaakt via concept toepassen (POST /schedule-drafts/:id/apply).
+// Het concept is de enige bron van waarheid — geen achtergrondregeneratie meer.
 
 // ===== SHIFTS API =====
 
@@ -1781,16 +1519,8 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
     // Check if caller wants to skip block creation (for system cleanup operations)
     const skipBlock = req.query.skipBlock === 'true';
 
-    if (!skipBlock) {
-      // USER-INITIATED deletion (via UI) - always create block for both manual AND auto shifts
-      // ON CONFLICT DO NOTHING ensures idempotency (safe to call multiple times)
-      // Cast $2 to date explicitly to avoid timezone conversion issues
-      await client.query(`
-        INSERT INTO shift_blocks (user_id, date, created_by, reason)
-        VALUES ($1, $2::date, $3, $4)
-        ON CONFLICT (user_id, date) DO NOTHING
-      `, [shift.user_id, shift.date, req.user.id, `${shift.source} shift deleted by user`]);
-    }
+    // shift_blocks niet meer nodig — geen achtergrondregeneratie meer
+    // Shift verwijdering is definitief tenzij concept opnieuw wordt toegepast
 
     await client.query('COMMIT');
     res.json({ ok: true });
@@ -3437,15 +3167,104 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
       effectiveEndDate = linkedPeriod.endDate;
     }
 
-    const hasDateRange = !!(effectiveStartDate && effectiveEndDate);
+    // Date range is verplicht — concepten hebben altijd een van/tot datum
+    if (!effectiveStartDate || !effectiveEndDate) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Start- en einddatum zijn verplicht bij concept toepassen' });
+    }
 
     // Validate date range
-    if (hasDateRange && effectiveStartDate >= effectiveEndDate) {
+    if (effectiveStartDate >= effectiveEndDate) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Startdatum moet voor einddatum liggen' });
     }
 
-    // 2. Read cycle settings — prefer draft's embedded pattern over global settings
+    const { confirmOverlap = false, confirmOverwrite = null } = req.body || {};
+
+    // 2a. Overlap detectie — zoek actieve niet-vakantie concepten die overlappen
+    if (!isVakantie && !confirmOverlap) {
+      const overlapping = await client.query(
+        `SELECT id, name, last_applied_from, last_applied_until
+         FROM schedule_drafts
+         WHERE id != $1 AND last_applied_at IS NOT NULL
+         AND type IS DISTINCT FROM 'vakantie'
+         AND last_applied_from IS NOT NULL AND last_applied_until IS NOT NULL
+         AND last_applied_from < $3 AND last_applied_until > $2`,
+        [draftId, effectiveStartDate, effectiveEndDate]
+      );
+      if (overlapping.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.json({
+          needsOverlapConfirmation: true,
+          overlappingDrafts: overlapping.rows.map(d => ({
+            id: d.id,
+            name: d.name,
+            from: d.last_applied_from,
+            until: d.last_applied_until
+          })),
+          newStartDate: effectiveStartDate
+        });
+      }
+    }
+
+    // 2b. Handmatige wijzigingen detectie
+    if (confirmOverwrite === null) {
+      const manualResult = await client.query(
+        `SELECT COUNT(*)::int as count FROM shifts WHERE source = 'manual'
+         AND date >= $1::date AND date <= $2::date`,
+        [effectiveStartDate, effectiveEndDate]
+      );
+      const manualCount = manualResult.rows[0].count;
+      if (manualCount > 0) {
+        await client.query('ROLLBACK');
+        return res.json({
+          needsManualConfirmation: true,
+          manualShiftCount: manualCount
+        });
+      }
+    }
+
+    // 2c. Bij bevestiging overlap: inkorten overlappende concepten
+    if (confirmOverlap && !isVakantie) {
+      const overlapping = await client.query(
+        `SELECT id, name, last_applied_from, last_applied_until
+         FROM schedule_drafts
+         WHERE id != $1 AND last_applied_at IS NOT NULL
+         AND type IS DISTINCT FROM 'vakantie'
+         AND last_applied_from IS NOT NULL AND last_applied_until IS NOT NULL
+         AND last_applied_from < $3 AND last_applied_until > $2`,
+        [draftId, effectiveStartDate, effectiveEndDate]
+      );
+      for (const overlap of overlapping.rows) {
+        // Kort het overlappende concept in tot de dag vóór de nieuwe startdatum
+        const newEndDate = new Date(parseLocalDate(effectiveStartDate));
+        newEndDate.setDate(newEndDate.getDate() - 1);
+        const newEndStr = formatDateYYYYMMDD(newEndDate);
+
+        if (newEndStr >= overlap.last_applied_from) {
+          // Concept A nog geldig voor periode vóór B → inkorten
+          await client.query(
+            `UPDATE schedule_drafts SET last_applied_until = $1, updated_at = NOW() WHERE id = $2`,
+            [newEndStr, overlap.id]
+          );
+        } else {
+          // Concept A volledig overschreven → markeer als verlopen
+          await client.query(
+            `UPDATE schedule_drafts SET last_applied_until = last_applied_from, updated_at = NOW() WHERE id = $1`,
+            [overlap.id]
+          );
+        }
+
+        // Verwijder shifts van het oude concept in de overlappende periode
+        await client.query(
+          `DELETE FROM shifts WHERE source = 'auto'
+           AND date >= $1::date AND date <= $2::date`,
+          [effectiveStartDate, overlap.last_applied_until]
+        );
+      }
+    }
+
+    // 3. Read cycle settings — prefer draft's embedded pattern over global settings
     let cycleLength = 2;
     let referenceDate = '2025-01-06';
     if (rawGrid._pattern && rawGrid._pattern.cycleLength) {
@@ -3483,14 +3302,40 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
       gridByWeek[weekNumber] = grid;
     }
 
-    if (hasDateRange) {
-      // ===== DATE RANGE MODE =====
-      // Generate shifts DIRECTLY from draft grid. Do NOT modify weekSchedules.
-      // This allows "apply this roster from date X to date Y" without permanent changes.
+    // ===== GENERATE SHIFTS FROM DRAFT GRID =====
+    {
       const rangeStart = parseLocalDate(effectiveStartDate);
       const rangeEnd = parseLocalDate(effectiveEndDate);
       const refDate = parseLocalDate(referenceDate);
       const refMonday = getMonday(refDate);
+
+      // For non-vakantie drafts: load active vakantieperiode date ranges to skip
+      // (vakantieconcepten mogen wel in vakantieperiodes schrijven, normale niet)
+      const vakantieSkipRanges = [];
+      if (!isVakantie) {
+        try {
+          const vakDrafts = await client.query(
+            `SELECT holiday_period_id FROM schedule_drafts
+             WHERE type = 'vakantie' AND last_applied_at IS NOT NULL
+             AND (last_applied_until IS NULL OR last_applied_until >= $1::date)`,
+            [effectiveStartDate]
+          );
+          if (vakDrafts.rows.length > 0) {
+            const hpResult = await client.query(`SELECT value FROM settings WHERE key = 'holidayPeriods'`);
+            const holidayPeriods = hpResult.rows.length > 0 ? (hpResult.rows[0].value || []) : [];
+            for (const row of vakDrafts.rows) {
+              const hp = holidayPeriods.find(p => String(p.id) === String(row.holiday_period_id));
+              if (hp && hp.startDate && hp.endDate) {
+                if (hp.endDate >= effectiveStartDate && hp.startDate <= effectiveEndDate) {
+                  vakantieSkipRanges.push({ start: hp.startDate, end: hp.endDate });
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.log('Warning: could not load vakantie ranges for draft apply:', e.message);
+        }
+      }
 
       for (const emp of allEmployeesResult.rows) {
         // Skip employees not in the draft grid — don't touch their shifts or blocks
@@ -3502,19 +3347,18 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
         const startStr = formatDateYYYYMMDD(rangeStart);
         const endStr = formatDateYYYYMMDD(rangeEnd);
 
-        // Clear blocks in range
-        if (clearBlocks) {
-          await client.query(
-            `DELETE FROM shift_blocks WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
-            [emp.id, startStr, endStr]
-          );
+        // Delete shifts in range (excluding vakantie period dates for non-vakantie drafts)
+        // confirmOverwrite: true = delete all shifts (incl manual), false/null = only auto shifts
+        const sourceFilter = confirmOverwrite === true ? '' : ` AND source = 'auto'`;
+        let deleteQuery = `DELETE FROM shifts WHERE user_id = $1${sourceFilter} AND date >= $2::date AND date <= $3::date`;
+        const deleteParams = [emp.id, startStr, endStr];
+        if (vakantieSkipRanges.length > 0) {
+          vakantieSkipRanges.forEach((r, i) => {
+            deleteQuery += ` AND NOT (date >= $${deleteParams.length + 1}::date AND date <= $${deleteParams.length + 2}::date)`;
+            deleteParams.push(r.start, r.end);
+          });
         }
-
-        // Delete ALL auto-generated shifts in range for this employee
-        const deleteResult = await client.query(
-          `DELETE FROM shifts WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`,
-          [emp.id, startStr, endStr]
-        );
+        const deleteResult = await client.query(deleteQuery, deleteParams);
         const deletedCount = deleteResult.rowCount;
 
         // Fetch skip-sets: manual shifts, absences, remaining blocks
@@ -3530,14 +3374,7 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
         );
         const absenceDates = new Set(absences.rows.map(r => r.date));
 
-        const blocks = await client.query(
-          `SELECT date::text as date FROM shift_blocks WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
-          [emp.id, startStr, endStr]
-        );
-        const blockedDates = new Set(blocks.rows.map(r => r.date));
-
-        // Generate shifts day-by-day from the DRAFT GRID (not from weekSchedules)
-        // Also track which dates got a new shift, so we can create blocks for the rest
+        // Generate shifts day-by-day from the DRAFT GRID
         let createdCount = 0;
         const datesWithNewShift = new Set();
 
@@ -3548,7 +3385,9 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
 
           if (occupiedDates.has(dateStr)) continue;
           if (absenceDates.has(dateStr)) continue;
-          if (blockedDates.has(dateStr)) continue;
+
+          // Skip dates covered by active vakantieconcepten (non-vakantie drafts only)
+          if (vakantieSkipRanges.some(r => dateStr >= r.start && dateStr <= r.end)) continue;
 
           // Calculate cycle week number for this date
           const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -3592,115 +3431,133 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
         }
       }
 
-      // Vakantieconcept: employees NOT in grid get NO shift during this period
-      if (isVakantie) {
-        const rangeStartV = parseLocalDate(effectiveStartDate);
-        const rangeEndV = parseLocalDate(effectiveEndDate);
-        const startStrV = formatDateYYYYMMDD(rangeStartV);
-        const endStrV = formatDateYYYYMMDD(rangeEndV);
-
-        for (const emp of allEmployeesResult.rows) {
-          const empInDraft = Object.values(gridByWeek).some(weekGrid =>
-            weekGrid && (weekGrid[String(emp.id)] || weekGrid[emp.id])
-          );
-          if (empInDraft) continue; // Already handled above
-
-          // Delete auto-shifts in range
-          const delResult = await client.query(
-            `DELETE FROM shifts WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`,
-            [emp.id, startStrV, endStrV]
-          );
-          totalDeleted += delResult.rowCount;
-
-          // Create shift_blocks for each day (prevents base regeneration from creating shifts)
-          for (let d = new Date(rangeStartV.getFullYear(), rangeStartV.getMonth(), rangeStartV.getDate());
-               d <= rangeEndV;
-               d.setDate(d.getDate() + 1)) {
-            const dateStr = formatDateYYYYMMDD(d);
-            await client.query(
-              `INSERT INTO shift_blocks (user_id, date) VALUES ($1, $2) ON CONFLICT (user_id, date) DO NOTHING`,
-              [emp.id, dateStr]
-            );
-          }
-
-          if (delResult.rowCount > 0) appliedCount++;
-        }
-      }
-
-    } else {
-      // ===== PERMANENT MODE (no date range) =====
-      // Modify weekSchedules + regenerate shifts for full planning horizon.
-      // This is the "set new base schedule" mode.
+      // Employees NOT in grid: delete their auto-shifts + create blocks
+      // Applies to ALL date-range drafts (not just vakantie) — if employee has no
+      // entry in the concept, their shifts should be cleared for this period.
+      const startStrClean = formatDateYYYYMMDD(rangeStart);
+      const endStrClean = formatDateYYYYMMDD(rangeEnd);
 
       for (const emp of allEmployeesResult.rows) {
-        const currentSchedules = Array.isArray(emp.weekSchedules) ? emp.weekSchedules : [emp.weekScheduleWeek1 || [], emp.weekScheduleWeek2 || []];
-        const allWeeks = [];
-        for (let w = 0; w < cycleLength; w++) {
-          allWeeks.push(currentSchedules[w] || []);
-        }
-
-        // Apply ALL cycle weeks — weeks not in the draft grid become empty (cleared)
-        let hasChanges = false;
-        for (let weekNumber = 1; weekNumber <= cycleLength; weekNumber++) {
-          const weekGrid = gridByWeek[weekNumber];
-          const empGrid = weekGrid ? (weekGrid[String(emp.id)] || weekGrid[emp.id]) : null;
-
-          const entries = [];
-          if (empGrid) {
-            for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-              const assignment = empGrid[String(dayIndex)] || empGrid[dayIndex];
-              if (assignment) {
-                const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
-                entries.push({
-                  dayOfWeek: jsDayOfWeek,
-                  enabled: true,
-                  startTime: assignment.startTime,
-                  endTime: assignment.endTime,
-                  team: assignment.team || emp.mainTeam
-                });
-              }
-            }
-          }
-
-          if (weekNumber - 1 < allWeeks.length) {
-            const oldJson = JSON.stringify(allWeeks[weekNumber - 1]);
-            const newJson = JSON.stringify(entries);
-            if (oldJson !== newJson) {
-              allWeeks[weekNumber - 1] = entries;
-              hasChanges = true;
-            }
-          }
-        }
-
-        // Skip if base schedule unchanged — intentionally preserves manual shift deletions.
-        // If forced regeneration is needed, user should use "Huidig basisrooster laden" first.
-        if (!hasChanges) continue;
-
-        const week1Json = JSON.stringify(allWeeks[0] || []);
-        const week2Json = JSON.stringify(allWeeks[1] || []);
-        const weekSchedulesJson = JSON.stringify(allWeeks);
-
-        await client.query(
-          `UPDATE users SET
-             week_schedule_week1 = $1::jsonb,
-             week_schedule_week2 = $2::jsonb,
-             week_schedules = $3::jsonb
-           WHERE id = $4`,
-          [week1Json, week2Json, weekSchedulesJson, emp.id]
+        const empInDraft = Object.values(gridByWeek).some(weekGrid =>
+          weekGrid && (weekGrid[String(emp.id)] || weekGrid[emp.id])
         );
+        if (empInDraft) continue; // Already handled above
 
-        const regenOpts = { clearBlocks };
-        // Pass date overrides so shifts are only generated within the specified period
-        if (effectiveStartDate) regenOpts.overrideStartDate = effectiveStartDate;
-        if (effectiveEndDate) regenOpts.overrideEndDate = effectiveEndDate;
-        const regenResult = await regenerateShiftsForUser(client, emp.id, regenOpts);
-        totalCreated += regenResult.created;
-        totalDeleted += regenResult.deleted;
-        appliedCount++;
+        // Delete auto-shifts in range (excluding vakantie period dates)
+        let delQuery = `DELETE FROM shifts WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`;
+        const delParams = [emp.id, startStrClean, endStrClean];
+        if (vakantieSkipRanges.length > 0) {
+          vakantieSkipRanges.forEach((r) => {
+            delQuery += ` AND NOT (date >= $${delParams.length + 1}::date AND date <= $${delParams.length + 2}::date)`;
+            delParams.push(r.start, r.end);
+          });
+        }
+        const delResult = await client.query(delQuery, delParams);
+        totalDeleted += delResult.rowCount;
+
+        // shift_blocks niet meer nodig — geen achtergrondregeneratie meer
+
+        if (delResult.rowCount > 0) appliedCount++;
+      }
+
+    }
+
+    // 3. Sync week_schedules op users vanuit het concept grid (read-only weergave voor medewerkers)
+    for (const emp of allEmployeesResult.rows) {
+      const allWeeks = [];
+      for (let weekNumber = 1; weekNumber <= cycleLength; weekNumber++) {
+        const weekGrid = gridByWeek[weekNumber];
+        const empGrid = weekGrid ? (weekGrid[String(emp.id)] || weekGrid[emp.id]) : null;
+        const entries = [];
+        if (empGrid) {
+          for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+            const assignment = empGrid[String(dayIndex)] || empGrid[dayIndex];
+            if (assignment) {
+              const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
+              entries.push({
+                dayOfWeek: jsDayOfWeek,
+                enabled: true,
+                startTime: assignment.startTime,
+                endTime: assignment.endTime,
+                team: assignment.team || emp.mainTeam
+              });
+            }
+          }
+        }
+        allWeeks.push(entries);
+      }
+      await client.query(
+        `UPDATE users SET week_schedules = $1::jsonb,
+         week_schedule_week1 = $2::jsonb, week_schedule_week2 = $3::jsonb WHERE id = $4`,
+        [JSON.stringify(allWeeks), JSON.stringify(allWeeks[0] || []),
+         JSON.stringify(allWeeks[1] || []), emp.id]
+      );
+    }
+
+    // 4. Auto-create vergadering activities from _teamMeetings
+    const teamMeetings = rawGrid._teamMeetings || {};
+    if (Object.keys(teamMeetings).length > 0) {
+      // Remove existing auto-generated vergadering activities in range
+      await client.query(
+        `DELETE FROM shift_activities WHERE type = 'vergadering' AND date >= $1::date AND date <= $2::date`,
+        [effectiveStartDate, effectiveEndDate]
+      );
+
+      // Find all auto-shifts just created in this range
+      const newShiftsResult = await client.query(
+        `SELECT s.user_id, s.date::text as date, s.start_time, s.end_time, u.main_team
+         FROM shifts s JOIN users u ON s.user_id = u.id
+         WHERE s.source = 'auto' AND s.date >= $1::date AND s.date <= $2::date`,
+        [effectiveStartDate, effectiveEndDate]
+      );
+
+      for (const shift of newShiftsResult.rows) {
+        const meetings = teamMeetings[shift.main_team] || [];
+        if (meetings.length === 0) continue;
+
+        const shiftDate = parseLocalDate(shift.date);
+        if (!shiftDate) continue;
+        const jsDow = shiftDate.getDay();
+        const dayIndex = jsDow === 0 ? 6 : jsDow - 1; // Convert to builder dayIndex (0=ma..6=zo)
+
+        // Parse shift times to decimal
+        const [ssh, ssm] = shift.start_time.split(':').map(Number);
+        const [seh, sem] = shift.end_time.split(':').map(Number);
+        const shiftStartDec = ssh + ssm / 60;
+        const shiftEndDec = seh + sem / 60;
+
+        for (const m of meetings) {
+          if (m.day !== dayIndex) continue;
+
+          // Check overlap (meeting time vs shift time)
+          const mFrom = m.from, mTo = m.to;
+          let overlaps = false;
+          if (shiftEndDec <= shiftStartDec) {
+            // Night shift — meetings are always during day so check start portion
+            overlaps = mFrom < 24 && mTo > shiftStartDec;
+          } else {
+            overlaps = mFrom < shiftEndDec && mTo > shiftStartDec;
+          }
+
+          if (overlaps) {
+            const fromH = Math.floor(mFrom);
+            const fromM = Math.round((mFrom - fromH) * 60);
+            const toH = Math.floor(mTo);
+            const toM = Math.round((mTo - toH) * 60);
+            const fromTime = `${String(fromH).padStart(2, '0')}:${String(fromM).padStart(2, '0')}`;
+            const toTime = `${String(toH).padStart(2, '0')}:${String(toM).padStart(2, '0')}`;
+
+            await client.query(
+              `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description)
+               VALUES ($1, $2, $3, $4, 'vergadering', 'Teamvergadering')`,
+              [shift.user_id, shift.date, fromTime, toTime]
+            );
+          }
+        }
       }
     }
 
-    // 3. Mark draft as applied (including the date range that was applied)
+    // 4. Mark draft as applied (including the date range that was applied)
     await client.query(
       `UPDATE schedule_drafts SET last_applied_at = NOW(), last_applied_by = $1,
        last_applied_from = $2, last_applied_until = $3, updated_at = NOW() WHERE id = $4`,

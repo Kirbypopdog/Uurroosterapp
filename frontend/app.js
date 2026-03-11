@@ -35,6 +35,11 @@ const AppState = {
     builderIsDirty: false,
     builderPatternExpanded: false,
     builderPattern: null,         // lokaal patroon (null = gebruik globaal)
+    builderStaffingRules: {},     // huidige week bezettingsregels { [dayIndex]: { [hour]: minCount } }
+    builderStaffingRulesByWeek: {}, // cache per week (zelfde patroon als builderGridByWeek)
+    builderShowStaffingEditor: false, // toggle bezettingsregels editor
+    builderShowMeetingsEditor: false, // toggle teamvergaderingen editor
+    builderMeetings: {},              // per-concept teamvergaderingen { [teamId]: [{ day, from, to }] }
     showHeatmap: false,
     settingsDirty: false,
     employeeSortMode: 'name',
@@ -249,8 +254,8 @@ const PERMISSIONS = {
 };
 
 // ===== ACTIVITY TYPE LABELS =====
-const ACTIVITY_TYPE_LABELS_SHORT = { oudergesprek: 'OG', vorming: 'Vorm', overleg: 'Overl', afspraak: 'Afsp', andere: 'And' };
-const ACTIVITY_TYPE_LABELS_FULL = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', andere: 'Andere' };
+const ACTIVITY_TYPE_LABELS_SHORT = { oudergesprek: 'OG', vorming: 'Vorm', overleg: 'Overl', afspraak: 'Afsp', vergadering: 'Verg', andere: 'And' };
+const ACTIVITY_TYPE_LABELS_FULL = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', vergadering: 'Vergadering', andere: 'Andere' };
 
 // ===== LUCIDE ICON HELPERS =====
 const ICONS = {
@@ -298,7 +303,8 @@ const ICONS = {
     repeat: 'repeat-2',
     undo: 'undo-2',
     redo: 'redo-2',
-    lock: 'lock'
+    lock: 'lock',
+    meeting: 'users-round'
 };
 
 const IconHelper = {
@@ -1215,8 +1221,6 @@ async function handleLogin(e) {
         updateShiftRefreshRange();
         applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
-        // DISABLED: concept-driven architectuur — shifts via Rooster Bouwen > Concept toepassen
-        // await autoApplyBaseSchedules();
         showApp();
     } catch (error) {
         console.error('Login error:', error);
@@ -1270,8 +1274,6 @@ async function checkSession() {
         updateShiftRefreshRange();
         applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
-        // DISABLED: concept-driven architectuur — shifts via Rooster Bouwen > Concept toepassen
-        // await autoApplyBaseSchedules();
         showApp();
     } catch (error) {
         handleLogout();
@@ -1749,12 +1751,22 @@ async function switchView(viewName) {
         AppState.builderPattern = null;
         AppState.builderConceptType = 'basis';
         AppState.builderHolidayPeriodId = null;
+        AppState.builderStaffingRules = {};
+        AppState.builderStaffingRulesByWeek = {};
+        AppState.builderShowStaffingEditor = false;
+        AppState.builderShowMeetingsEditor = false;
+        AppState.builderMeetings = {};
     } else if (AppState.currentView === 'builder' && viewName !== 'builder') {
         // Also reset when leaving builder without unsaved changes
         AppState.builderScreen = 'overview';
         AppState.builderPattern = null;
         AppState.builderConceptType = 'basis';
         AppState.builderHolidayPeriodId = null;
+        AppState.builderStaffingRules = {};
+        AppState.builderStaffingRulesByWeek = {};
+        AppState.builderShowStaffingEditor = false;
+        AppState.builderShowMeetingsEditor = false;
+        AppState.builderMeetings = {};
     }
     // Clear undo history when switching views
     UndoManager.clear();
@@ -1762,6 +1774,9 @@ async function switchView(viewName) {
     // Cleanup drag handlers when switching views
     if (typeof DragHandler !== 'undefined') {
         DragHandler.cleanup();
+    }
+    if (typeof BuilderDragHandler !== 'undefined') {
+        BuilderDragHandler.cleanup();
     }
 
     AppState.currentView = viewName;
@@ -2101,21 +2116,51 @@ function renderPlanning() {
     });
 }
 
+function calcPlanningHourlyHeadcount(date, hour) {
+    const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
+
+    // Previous day (for overnight shifts extending into this day)
+    const prev = new Date(parseDateOnly(date));
+    prev.setDate(prev.getDate() - 1);
+    const prevDate = formatDateYYYYMMDD(prev);
+
+    let count = 0;
+    for (const s of DataStore.shifts) {
+        if (!coverageTeams.includes(s.team)) continue;
+        const [sh, sm] = s.startTime.split(':').map(Number);
+        const [eh, em] = s.endTime.split(':').map(Number);
+        const startDec = sh + sm / 60;
+        const endDec = eh + em / 60;
+        const isNight = endDec <= startDec;
+
+        if (s.date === date) {
+            // Same-day shift or night shift starting today
+            if (isNight) {
+                if (hour >= startDec) count++;
+            } else {
+                if (hour >= startDec && hour < endDec) count++;
+            }
+        } else if (s.date === prevDate && isNight) {
+            // Yesterday's night shift extending into today
+            if (hour < endDec) count++;
+        }
+    }
+    return count;
+}
+
 function renderCoverageHeatmap() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
-    const teams = DataStore.settings.teams || {};
-    const teamOrder = getTeamOrder()
-        .filter(t => AppState.visibleTeams.includes(t) && teams[t]);
-    const minStaffingDay = DataStore.settings.rules?.minStaffingDay || 2;
+    const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
+    const coverageTeamNames = coverageTeams.map(t => (DataStore.settings.teams || {})[t]?.name || t).join(' + ');
 
     let html = '<div class="coverage-heatmap">';
-    html += '<div class="heatmap-title">Team Bezetting</div>';
+    html += `<div class="heatmap-title">Bezetting (${escapeHtml(coverageTeamNames)})</div>`;
     html += '<div class="heatmap-grid">';
 
     // Header row
     html += '<div class="heatmap-row heatmap-header">';
-    html += '<div class="heatmap-team-cell">Team</div>';
+    html += '<div class="heatmap-team-cell"></div>';
     const dayNames = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
     weekDates.forEach(date => {
         const d = parseDateOnly(date);
@@ -2123,39 +2168,43 @@ function renderCoverageHeatmap() {
     });
     html += '</div>';
 
-    // Team rows
-    teamOrder.forEach(teamId => {
-        const team = teams[teamId];
-        html += '<div class="heatmap-row">';
-        html += `<div class="heatmap-team-cell"><span class="heatmap-team-dot" style="background:${escapeHtml(team.color)}"></span>${escapeHtml(team.name)}</div>`;
+    // Single combined row
+    html += '<div class="heatmap-row">';
+    html += '<div class="heatmap-team-cell">Totaal</div>';
 
-        weekDates.forEach(date => {
-            const count = DataStore.shifts.filter(s => s.team === teamId && s.date === date).length;
-            const d = parseDateOnly(date);
-            const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-            const closed = isWeekend && typeof isWeekendOpen === 'function' && !isWeekendOpen(date);
+    weekDates.forEach(date => {
+        const d = parseDateOnly(date);
+        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+        const closed = isWeekend && typeof isWeekendOpen === 'function' && !isWeekendOpen(date);
 
-            let colorClass = 'heatmap-red';
-            if (closed) colorClass = 'heatmap-closed';
-            else if (count >= minStaffingDay + 1) colorClass = 'heatmap-green';
-            else if (count >= minStaffingDay) colorClass = 'heatmap-yellow';
-            else if (count > 0) colorClass = 'heatmap-orange';
+        html += `<div class="coverage-heatmap-cell${closed ? ' closed' : ''}" data-date="${date}"
+            onclick="showHeatmapDetail(null, '${date}')">`;
 
-            html += `<div class="heatmap-cell ${colorClass}" data-date="${date}" data-team="${teamId}"
-                onclick="showHeatmapDetail('${teamId}', '${date}')" title="${count} dienst${count !== 1 ? 'en' : ''}">
-                ${closed ? '-' : count}
-            </div>`;
-        });
+        if (!closed) {
+            for (let h = 7; h < 24; h += 0.5) {
+                const actual = calcPlanningHourlyHeadcount(date, h);
+                let segClass = 'heatmap-seg';
+                if (actual >= 2) segClass += ' seg-ok';
+                else if (actual > 0) segClass += ' seg-warn';
+                else segClass += ' seg-danger';
+
+                const leftPct = ((h - 7) / 17) * 100;
+                const widthPct = (0.5 / 17) * 100;
+                const timeLabel = formatStaffingHour(h);
+                html += `<span class="${segClass}" style="left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%"
+                    data-tooltip="${timeLabel} — ${actual} medewerkers" data-tooltip-pos="top"></span>`;
+            }
+        }
 
         html += '</div>';
     });
 
     html += '</div>';
+    html += '</div>';
     html += `<div class="heatmap-legend">
-        <span class="heatmap-legend-item"><span class="heatmap-swatch heatmap-red"></span>Geen</span>
-        <span class="heatmap-legend-item"><span class="heatmap-swatch heatmap-orange"></span>Onder min.</span>
-        <span class="heatmap-legend-item"><span class="heatmap-swatch heatmap-yellow"></span>Minimum</span>
-        <span class="heatmap-legend-item"><span class="heatmap-swatch heatmap-green"></span>Boven min.</span>
+        <span class="heatmap-legend-item"><span class="heatmap-swatch seg-danger-swatch"></span>Onderbezet</span>
+        <span class="heatmap-legend-item"><span class="heatmap-swatch seg-warn-swatch"></span>Krap</span>
+        <span class="heatmap-legend-item"><span class="heatmap-swatch seg-ok-swatch"></span>Op sterkte</span>
         <span class="heatmap-legend-item"><span class="heatmap-swatch heatmap-closed"></span>Gesloten</span>
     </div>`;
     html += '</div>';
@@ -2164,16 +2213,18 @@ function renderCoverageHeatmap() {
 }
 
 function showHeatmapDetail(teamId, date) {
-    const team = (DataStore.settings.teams || {})[teamId];
-    const shifts = DataStore.shifts.filter(s => s.team === teamId && s.date === date);
+    const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
+    const teamsToShow = teamId ? [teamId] : coverageTeams;
+    const shifts = DataStore.shifts.filter(s => teamsToShow.includes(s.team) && s.date === date);
 
-    let msg = `${team?.name || teamId} - ${formatDate(date)}\n`;
+    let msg = `Bezetting - ${formatDate(date)}\n`;
     if (shifts.length === 0) {
         msg += 'Geen diensten ingepland.';
     } else {
         shifts.forEach(s => {
             const emp = getEmployee(s.employeeId);
-            msg += `${emp?.name || 'Onbekend'}: ${s.startTime} - ${s.endTime}\n`;
+            const teamName = (DataStore.settings.teams || {})[s.team]?.name || s.team;
+            msg += `${emp?.name || 'Onbekend'} (${teamName}): ${s.startTime} - ${s.endTime}\n`;
         });
     }
     showToast(msg.trim(), 'info', 5000);
@@ -4996,44 +5047,6 @@ async function handleEmployeeDelete() {
 
 // ===== BASISROOSTER FUNCTIES =====
 
-// LEGACY: Niet meer aangeroepen — shifts worden nu gegenereerd via concept-apply flow
-async function autoApplyBaseSchedules({ clearBlocks = false } = {}) {
-    // Skip if already generated in this session
-    if (AppState.schedulesGenerated) {
-        console.log('[Auto Schedule] Already generated this session, skipping');
-        return { created: 0, removed: 0 };
-    }
-
-    console.log('[Auto Schedule] Starting server-side schedule application...');
-
-    const employees = getAllEmployees(true);
-    const employeesWithSchedule = employees.filter(emp => hasAnyWeekSchedule(emp));
-    console.log(`[Auto Schedule] Found ${employees.length} active employees, ${employeesWithSchedule.length} with base schedules configured`);
-
-    let totalCreated = 0;
-    let totalDeleted = 0;
-
-    for (const emp of employeesWithSchedule) {
-        try {
-            const result = await applyScheduleViaBackend(emp.id, { clearBlocks });
-            totalCreated += result.created || 0;
-            totalDeleted += result.deleted || 0;
-        } catch (err) {
-            console.error(`[Auto Schedule] Failed for ${emp.name}:`, err);
-        }
-    }
-
-    console.log(`[Auto Schedule] Created ${totalCreated} shifts (replaced ${totalDeleted} auto shifts)`);
-
-    // Refresh shifts and blocks after batch operation
-    await Promise.all([refreshShifts(), fetchShiftBlocks()]);
-
-    // Mark as generated
-    AppState.schedulesGenerated = true;
-
-    return { created: totalCreated, removed: totalDeleted };
-}
-
 function generateWeekScheduleHTML() {
     // Generate dynamic week tabs
     const tabsContainer = document.getElementById('employee-week-tabs');
@@ -6440,34 +6453,6 @@ function renderBuilderGrid(role, userTeam) {
         return dayIndex === 6 ? 0 : dayIndex + 1;
     }
 
-    // Calculate weekend responsible for open weekends (not for vakantie concepts — those use vakantie verantwoordelijke)
-    let weekendResponsibleName = '';
-    const isVakantieBuilder = AppState.builderConceptType === 'vakantie';
-    const weekendOpen = !builderClosedDays.includes(6) || !builderClosedDays.includes(0); // Za=6 or Zo=0
-    if (!isVakantieBuilder && weekendOpen && typeof getOrCalculateResponsible === 'function') {
-        // Use builder pattern's reference date (set on apply) + current week to find responsible
-        const pattern = getBuilderPattern();
-        const refDateStr = pattern.referenceDate || getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '';
-        if (refDateStr) {
-            const refDate = parseDateOnly(refDateStr);
-            const cycleLength = pattern.cycleLength || 1;
-            // Find next future occurrence of this cycle week from today
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const todayMonday = getMonday(today);
-            // Calculate which cycle week "today" falls in
-            const diffWeeks = Math.floor((todayMonday - refDate) / (7 * 86400000));
-            const currentCycleWeek = ((diffWeeks % cycleLength) + cycleLength) % cycleLength; // 0-based
-            const targetCycleWeek = AppState.builderWeekNumber - 1; // 0-based
-            // Offset from today's monday to the nearest occurrence of this cycle week
-            const weekDiff = ((targetCycleWeek - currentCycleWeek) % cycleLength + cycleLength) % cycleLength;
-            const sampleMonday = new Date(todayMonday);
-            sampleMonday.setDate(sampleMonday.getDate() + weekDiff * 7);
-            const resp = getOrCalculateResponsible(sampleMonday);
-            if (resp) weekendResponsibleName = resp.name;
-        }
-    }
-
     // Header
     html += '<div class="builder-grid-header">';
     html += '<div class="builder-name-header">Medewerker</div>';
@@ -6480,9 +6465,7 @@ function renderBuilderGrid(role, userTeam) {
         if (isClosed) headerClass += ' closed';
         const label = isClosed ? `${name}` : name;
         const lockIcon = isClosed ? ` <span class="day-lock-icon">${IconHelper.html(ICONS.lock, 'xs')}</span>` : '';
-        const respBadge = (isWeekend && !isClosed && weekendResponsibleName)
-            ? `<span class="builder-weekend-responsible">${escapeHtml(weekendResponsibleName)}</span>` : '';
-        html += `<div class="${headerClass}" data-jsdow="${jsDow}" title="Klik om ${isClosed ? 'te openen' : 'te sluiten'}"><span class="day-name">${label}${lockIcon}</span>${respBadge}</div>`;
+        html += `<div class="${headerClass}" data-jsdow="${jsDow}" title="Klik om ${isClosed ? 'te openen' : 'te sluiten'}"><span class="day-name">${label}${lockIcon}</span></div>`;
     });
     html += '<div class="builder-hours-header">Uren</div>';
     html += '</div>';
@@ -6514,14 +6497,46 @@ function renderBuilderGrid(role, userTeam) {
 
     html += '</div>';
 
-    // Staffing summary
-    html += renderBuilderStaffingSummary(employees);
+    // Staffing heatmap (per-hour bezetting)
+    html += renderBuilderStaffingHeatmap();
+
+    // Bezettingsregels editor (inklapbaar)
+    html += renderBuilderStaffingEditor();
+
+    // Teamvergaderingen editor (inklapbaar)
+    html += renderBuilderMeetingsEditor();
 
     // 11-hour rule warnings across consecutive days
     html += renderBuilder11HourWarnings(employees);
 
     html += '</div>';
     return html;
+}
+
+// Get meetings for an employee on a specific day (only mainTeam — extraTeams zijn bijspring-teams, geen vaste vergaderingen)
+function getEmployeeMeetings(employee, dayIndex) {
+    const meetings = AppState.builderMeetings || {};
+    const teams = DataStore.settings.teams || {};
+    const mainTeam = employee.mainTeam;
+    if (!mainTeam) return [];
+    const result = [];
+    for (const m of (meetings[mainTeam] || [])) {
+        if (m.day === dayIndex) {
+            result.push({ ...m, teamName: teams[mainTeam]?.name || mainTeam });
+        }
+    }
+    return result;
+}
+
+// Check if a specific employee is in a meeting at a given hour on a given day (mainTeam only)
+function isInMeeting(userId, hour, dayIndex) {
+    const meetings = AppState.builderMeetings || {};
+    const user = DataStore.users.find(u => u.id == userId);
+    if (!user || !user.mainTeam) return false;
+    for (const m of (meetings[user.mainTeam] || [])) {
+        if (m.day === dayIndex && hour >= m.from && hour < m.to) return true;
+    }
+    return false;
 }
 
 function renderBuilderEmployeeRow(employee) {
@@ -6581,14 +6596,37 @@ function renderBuilderEmployeeRow(employee) {
             totalHours += shiftHours;
             const templateName = getTemplateNameForTimes(assignment.startTime, assignment.endTime);
             const teamColor = assignment.team ? `team-${assignment.team}` : '';
+            const pos = calcTimePosition(assignment.startTime, assignment.endTime);
 
-            html += `<div class="builder-shift ${teamColor}">
-                <span class="builder-shift-label">${escapeHtml(templateName)}</span>
-                <span class="builder-shift-time">${assignment.startTime}-${assignment.endTime}</span>
+            let widthStyle;
+            if (pos.isOvernight && dayIndex < 6 && pos.overnightDay2Pct > 0) {
+                // Span into next day column: day1% + grid gap (2px) + day2%
+                widthStyle = `calc(${pos.widthPct.toFixed(1)}% + 2px + ${pos.overnightDay2Pct.toFixed(1)}%)`;
+            } else {
+                widthStyle = `${pos.widthPct.toFixed(1)}%`;
+            }
+
+            html += `<div class="builder-timeline-block ${teamColor}${pos.isOvernight ? ' nacht' : ''}"
+                style="left:${pos.leftPct.toFixed(1)}%;width:${widthStyle}"
+                data-start="${assignment.startTime}" data-end="${assignment.endTime}">
+                <span class="btb-label">${escapeHtml(templateName)}</span>
+                <span class="btb-time">${assignment.startTime}-${assignment.endTime}</span>
             </div>`;
+
         } else {
             html += '<span class="cell-empty">+</span>';
         }
+
+        // Meeting overlays for this employee on this day (always shown, with or without shift)
+        const empMeetings = getEmployeeMeetings(employee, dayIndex);
+        empMeetings.forEach(m => {
+            const fromStr = formatStaffingHour(m.from);
+            const toStr = formatStaffingHour(m.to);
+            const mPos = calcTimePosition(fromStr, toStr);
+            html += `<div class="builder-meeting-overlay" style="left:${mPos.leftPct.toFixed(1)}%;width:${mPos.widthPct.toFixed(1)}%" data-tooltip="Vergadering ${escapeHtml(m.teamName || '')}" data-tooltip-pos="top">
+                <span class="meeting-label">${IconHelper.html(ICONS.meeting, 'xs')}</span>
+            </div>`;
+        });
 
         html += '</div>';
     }
@@ -6610,60 +6648,312 @@ function isNightShift(startTime) {
     return hour >= 20 || hour < 6;
 }
 
-function renderBuilderStaffingSummary(employees) {
+// Shared helper: calculate proportional position for a time block within 7:00-24:00 range
+function calcTimePosition(startTime, endTime) {
+    const START_HOUR = 7, TOTAL_HOURS = 17; // 7:00-24:00
+    const [sh, sm] = startTime.split(':').map(Number);
+    const [eh, em] = endTime.split(':').map(Number);
+    const startDec = sh + sm / 60;
+    const endDec = eh + em / 60;
+    const isOvernight = endDec <= startDec;
+
+    const leftPct = Math.max(0, ((startDec - START_HOUR) / TOTAL_HOURS) * 100);
+
+    if (isOvernight) {
+        // Nachtdienst: van start tot 24:00 op startdag
+        const day1Pct = Math.max(2, ((24 - startDec) / TOTAL_HOURS) * 100);
+        // Volgende dag: van 7:00 (of 0:00) tot eindtijd
+        const day2Pct = endDec > START_HOUR ? ((endDec - START_HOUR) / TOTAL_HOURS) * 100 : 0;
+        return { leftPct, widthPct: day1Pct, isOvernight: true, overnightDay2Pct: day2Pct };
+    }
+    const widthPct = Math.max(2, ((endDec - Math.max(startDec, START_HOUR)) / TOTAL_HOURS) * 100);
+    return { leftPct, widthPct, isOvernight: false, overnightDay2Pct: 0 };
+}
+
+// Calculate how many employees are working at a given hour on a given day
+function calcBuilderHourlyHeadcount(hour, dayIndex) {
+    const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
+    let count = 0;
+    for (const [userId, days] of Object.entries(AppState.builderGrid)) {
+        // Only count employees whose main_team is in coverageTeams
+        const emp = getEmployee(userId);
+        if (emp && !coverageTeams.includes(emp.mainTeam || emp.main_team)) continue;
+
+        let isWorking = false;
+
+        // Check shift on THIS day
+        const assignment = days[dayIndex];
+        if (assignment) {
+            const [sh, sm] = assignment.startTime.split(':').map(Number);
+            const [eh, em] = assignment.endTime.split(':').map(Number);
+            const startDec = sh + sm / 60;
+            const endDec = eh + em / 60;
+            if (endDec > startDec) {
+                if (hour >= startDec && hour < endDec) isWorking = true;
+            } else {
+                if (hour >= startDec) isWorking = true;
+            }
+        }
+
+        // Check if PREVIOUS day has overnight shift that extends into this day
+        if (!isWorking) {
+            const prevDay = dayIndex > 0 ? dayIndex - 1 : 6;
+            const prevAssignment = days[prevDay];
+            if (prevAssignment) {
+                const [psh, psm] = prevAssignment.startTime.split(':').map(Number);
+                const [peh, pem] = prevAssignment.endTime.split(':').map(Number);
+                const prevStartDec = psh + psm / 60;
+                const prevEndDec = peh + pem / 60;
+                if (prevEndDec <= prevStartDec && prevEndDec > 0) {
+                    if (hour < prevEndDec) isWorking = true;
+                }
+            }
+        }
+
+        // Count if working AND not in a meeting
+        if (isWorking && !isInMeeting(userId, hour, dayIndex)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+function renderBuilderStaffingHeatmap() {
     const builderClosedDays = getBuilderClosedDays(AppState.builderWeekNumber);
-    const minStaffDay = DataStore.settings.rules?.minStaffingDay || 1;
-    const minStaffNight = DataStore.settings.rules?.minStaffingNight || 1;
 
-    // Day row
-    let dayHtml = '<div class="builder-staffing-row">';
-    dayHtml += '<div class="builder-staffing-label">Dag</div>';
-
-    // Night row
-    let nightHtml = '<div class="builder-staffing-row">';
-    nightHtml += '<div class="builder-staffing-label">Nacht</div>';
+    let html = '<div class="builder-heatmap-row">';
+    html += '<div class="builder-heatmap-label">Bezetting</div>';
 
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
         const jsDow = dayIndex === 6 ? 0 : dayIndex + 1;
 
         if (builderClosedDays.includes(jsDow)) {
-            dayHtml += '<div class="builder-staffing-cell closed"></div>';
-            nightHtml += '<div class="builder-staffing-cell closed"></div>';
+            html += '<div class="builder-heatmap-cell closed"></div>';
             continue;
         }
 
-        let dayCount = 0;
-        let nightCount = 0;
-        employees.forEach(emp => {
-            const empGrid = AppState.builderGrid[emp.id] || {};
-            const shift = empGrid[dayIndex];
-            if (shift) {
-                if (isNightShift(shift.startTime)) {
-                    nightCount++;
-                } else {
-                    dayCount++;
-                }
+        html += '<div class="builder-heatmap-cell">';
+
+        for (let h = 7; h < 24; h += 0.5) {
+            const actual = calcBuilderHourlyHeadcount(h, dayIndex);
+            const required = getStaffingRequirement(dayIndex, h);
+
+            let segClass = 'heatmap-seg';
+            if (required < 0) {
+                segClass += ' seg-none';
+            } else if (required === 0 || actual >= required) {
+                segClass += ' seg-ok';
+            } else if (actual > 0) {
+                segClass += ' seg-warn';
+            } else {
+                segClass += ' seg-danger';
             }
-        });
 
-        const dayClass = dayCount >= minStaffDay ? 'staffing-ok' : 'staffing-low';
-        const nightClass = nightCount >= minStaffNight ? 'staffing-ok' : (nightCount === 0 ? '' : 'staffing-low');
+            const leftPct = ((h - 7) / 17) * 100;
+            const widthPct = (0.5 / 17) * 100;
+            const timeLabel = formatStaffingHour(h);
+            html += `<span class="${segClass}" style="left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%"
+                data-tooltip="${timeLabel} — ${actual}${required >= 0 ? '/' + required : ''} mdw${required >= 0 ? ' (min ' + required + ')' : ''}" data-tooltip-pos="top"></span>`;
+        }
 
-        dayHtml += `<div class="builder-staffing-cell ${dayClass}">
-            <span class="staffing-count">${dayCount}</span>
-            <span class="staffing-min">min: ${minStaffDay}</span>
-        </div>`;
-
-        nightHtml += `<div class="builder-staffing-cell ${nightClass}">
-            <span class="staffing-count">${nightCount}</span>
-            <span class="staffing-min">min: ${minStaffNight}</span>
-        </div>`;
+        html += '</div>';
     }
 
-    dayHtml += '<div class="builder-staffing-cell"></div></div>';
-    nightHtml += '<div class="builder-staffing-cell"></div></div>';
+    html += '<div class="builder-heatmap-end"></div>';
+    html += '</div>';
+    return html;
+}
 
-    return dayHtml + nightHtml;
+// Get the minimum required staffing for a specific hour on a day (from range-based rules)
+// Returns -1 if no rules cover this hour (= no requirement), 0+ if a rule exists
+function getStaffingRequirement(dayIndex, hour) {
+    const rules = AppState.builderStaffingRules;
+    const dayRules = rules[dayIndex];
+    if (!dayRules || !Array.isArray(dayRules) || dayRules.length === 0) return -1;
+    let maxMin = -1;
+    for (const rule of dayRules) {
+        if (hour >= rule.from && hour < rule.to) {
+            maxMin = Math.max(maxMin, rule.min || 0);
+        }
+    }
+    return maxMin;
+}
+
+// Convert old per-hour format to new range-based format
+function migrateStaffingRules(rules) {
+    if (!rules || typeof rules !== 'object') return {};
+    const migrated = {};
+    for (const [dayKey, dayData] of Object.entries(rules)) {
+        if (Array.isArray(dayData)) {
+            migrated[dayKey] = dayData; // Already new format
+            continue;
+        }
+        // Old format: { hour: minCount } → group consecutive hours with same min into ranges
+        const hours = Object.keys(dayData).map(Number).sort((a, b) => a - b);
+        if (hours.length === 0) continue;
+        const ranges = [];
+        let rangeStart = hours[0], rangeMin = dayData[hours[0]], prevHour = hours[0];
+        for (let i = 1; i < hours.length; i++) {
+            const h = hours[i];
+            if (h === prevHour + 1 && dayData[h] === rangeMin) {
+                prevHour = h;
+            } else {
+                ranges.push({ from: rangeStart, to: prevHour + 1, min: rangeMin });
+                rangeStart = h;
+                rangeMin = dayData[h];
+                prevHour = h;
+            }
+        }
+        ranges.push({ from: rangeStart, to: prevHour + 1, min: rangeMin });
+        migrated[dayKey] = ranges;
+    }
+    return migrated;
+}
+
+// Format decimal hour to HH:MM string (e.g. 7.5 → "7:30", 14 → "14:00")
+function formatStaffingHour(dec) {
+    const h = Math.floor(dec);
+    const m = Math.round((dec - h) * 60);
+    return `${h}:${String(m).padStart(2, '0')}`;
+}
+
+// Parse HH:MM or H string to decimal, snapped to half hours (e.g. "7:30" → 7.5, "7:20" → 7.5, "14" → 14)
+function parseStaffingHour(str) {
+    str = str.trim();
+    let h = 0, m = 0;
+    if (str.includes(':')) {
+        [h, m] = str.split(':').map(Number);
+        h = h || 0;
+        m = m || 0;
+    } else {
+        h = parseFloat(str) || 0;
+        m = 0;
+    }
+    // Snap minutes to nearest 0 or 30
+    m = m < 15 ? 0 : (m < 45 ? 30 : 60);
+    if (m === 60) { h++; m = 0; }
+    return h + m / 60;
+}
+
+// Generate <select> options for half-hour time slots (7:00 - 24:00)
+function timeSelectOptions(selectedDec, startHour = 7, endHour = 24) {
+    let html = '';
+    for (let h = startHour; h <= endHour; h += 0.5) {
+        const label = h === 24 ? '24:00' : formatStaffingHour(h);
+        html += `<option value="${h}" ${h === selectedDec ? 'selected' : ''}>${label}</option>`;
+    }
+    return html;
+}
+
+function renderBuilderStaffingEditor() {
+    const isOpen = AppState.builderShowStaffingEditor;
+    const arrow = isOpen ? '▲' : '▼';
+    let html = `<div class="builder-staffing-editor-wrapper">
+        <button class="btn btn-secondary btn-sm" id="builder-staffing-toggle" style="margin:8px 0 4px">
+            ${IconHelper.html(ICONS.settings, 'xs')} Bezettingsregels ${arrow}
+        </button>`;
+
+    if (isOpen) {
+        const builderClosedDays = getBuilderClosedDays(AppState.builderWeekNumber);
+        const dayLabels = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+        const rules = AppState.builderStaffingRules;
+
+        html += '<div class="builder-staffing-editor">';
+        html += '<div class="staffing-columns">';
+
+        for (let d = 0; d < 7; d++) {
+            const jsDow = d === 6 ? 0 : d + 1;
+            const closed = builderClosedDays.includes(jsDow);
+
+            html += `<div class="staffing-col${closed ? ' closed' : ''}">`;
+            html += `<div class="staffing-col-header">${dayLabels[d]}</div>`;
+
+            if (!closed) {
+                const dayRules = Array.isArray(rules[d]) ? rules[d] : [];
+
+                dayRules.forEach((rule, idx) => {
+                    html += `<div class="staffing-rule-card" data-day="${d}" data-idx="${idx}">
+                        <div class="staffing-rule-times">
+                            <select class="staffing-from" data-day="${d}" data-idx="${idx}">${timeSelectOptions(rule.from)}</select>
+                            <span>tot</span>
+                            <select class="staffing-to" data-day="${d}" data-idx="${idx}">${timeSelectOptions(rule.to)}</select>
+                        </div>
+                        <div class="staffing-rule-min">
+                            <span>min</span>
+                            <input type="number" class="form-input staffing-min-input" data-day="${d}" data-idx="${idx}" value="${rule.min != null ? rule.min : 1}" min="0" max="10">
+                        </div>
+                        <button class="staffing-rule-remove" data-day="${d}" data-idx="${idx}" title="Verwijder">×</button>
+                    </div>`;
+                });
+
+                html += `<button class="btn btn-xs btn-secondary staffing-rule-add" data-day="${d}">+</button>`;
+            }
+
+            html += '</div>';
+        }
+
+        html += '</div>'; // staffing-columns
+
+        html += `<div class="staffing-editor-actions">
+            <button class="btn btn-secondary btn-xs" id="staffing-copy-all-weeks">Kopieer naar alle weken</button>
+            <button class="btn btn-secondary btn-xs" id="staffing-clear-all">Wis alles</button>
+        </div>`;
+        html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
+}
+
+function renderBuilderMeetingsEditor() {
+    const isOpen = AppState.builderShowMeetingsEditor;
+    const arrow = isOpen ? '▲' : '▼';
+    let html = `<div class="builder-meetings-editor-wrapper">
+        <button class="btn btn-secondary btn-sm" id="builder-meetings-toggle" style="margin:4px 0 4px">
+            ${IconHelper.html(ICONS.employees, 'xs')} Teamvergaderingen ${arrow}
+        </button>`;
+
+    if (isOpen) {
+        const teams = DataStore.settings.teams || {};
+        const meetings = AppState.builderMeetings || {};
+        const dayLabels = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+
+        html += '<div class="builder-meetings-editor">';
+        html += '<div class="meetings-columns">';
+
+        for (const [teamId, teamCfg] of Object.entries(teams)) {
+            const teamMeetings = meetings[teamId] || [];
+            html += `<div class="meetings-col">`;
+            html += `<div class="meetings-col-header" style="background:${teamCfg.color || '#666'};color:#fff">${escapeHtml(teamCfg.name)}</div>`;
+
+            teamMeetings.forEach((m, idx) => {
+                const fromDisplay = formatStaffingHour(m.from || 9);
+                const toDisplay = formatStaffingHour(m.to || 11);
+                html += `<div class="meeting-rule-card">
+                    <div class="meeting-rule-row">
+                        <select class="meeting-day" data-team="${teamId}" data-idx="${idx}">
+                            ${dayLabels.map((d, di) => `<option value="${di}" ${di === m.day ? 'selected' : ''}>${d}</option>`).join('')}
+                        </select>
+                        <button class="meeting-rule-remove" data-team="${teamId}" data-idx="${idx}" title="Verwijder">&times;</button>
+                    </div>
+                    <div class="meeting-rule-row">
+                        <select class="meeting-from" data-team="${teamId}" data-idx="${idx}">${timeSelectOptions(m.from || 9)}</select>
+                        <span class="meeting-sep">–</span>
+                        <select class="meeting-to" data-team="${teamId}" data-idx="${idx}">${timeSelectOptions(m.to || 11)}</select>
+                    </div>
+                </div>`;
+            });
+
+            html += `<button class="meeting-rule-add btn btn-xs" data-team="${teamId}">+ Vergadering</button>`;
+            html += `</div>`;
+        }
+
+        html += '</div>'; // meetings-columns
+        html += '</div>'; // builder-meetings-editor
+    }
+
+    html += '</div>';
+    return html;
 }
 
 function renderBuilder11HourWarnings(employees) {
@@ -7101,8 +7391,17 @@ async function saveBuilderDraft() {
                 type: AppState.builderConceptType || 'basis',
                 holidayPeriodId: AppState.builderHolidayPeriodId || null
             };
-            // Include pattern + rotation in grid metadata
+            // Include pattern + rotation + staffing rules in grid metadata
             if (AppState.builderPattern) updateData.grid._pattern = AppState.builderPattern;
+            // Sync staffing rules cache and save
+            AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules));
+            if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
+                updateData.grid._staffingRules = AppState.builderStaffingRulesByWeek;
+            }
+            // Save team meetings in draft
+            if (Object.keys(AppState.builderMeetings || {}).length > 0) {
+                updateData.grid._teamMeetings = AppState.builderMeetings;
+            }
             // Rotation is managed via Settings, not stored in draft
             const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
             if (cached) cached._previousGrid = JSON.parse(JSON.stringify(cached.grid || {}));
@@ -7144,6 +7443,14 @@ async function saveBuilderDraft() {
 
     const draftGrid = JSON.parse(JSON.stringify(multiGrid));
     if (AppState.builderPattern) draftGrid._pattern = AppState.builderPattern;
+    // Sync staffing rules and save with new draft
+    AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules));
+    if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
+        draftGrid._staffingRules = AppState.builderStaffingRulesByWeek;
+    }
+    if (Object.keys(AppState.builderMeetings || {}).length > 0) {
+        draftGrid._teamMeetings = AppState.builderMeetings;
+    }
     // Rotation is managed via Settings, not stored in draft
     const draftData = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -7207,6 +7514,14 @@ async function saveBuilderDraftAs() {
 
     const draftGrid = JSON.parse(JSON.stringify(multiGrid));
     if (AppState.builderPattern) draftGrid._pattern = AppState.builderPattern;
+    // Sync staffing rules and save with draft-as copy
+    AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules));
+    if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
+        draftGrid._staffingRules = AppState.builderStaffingRulesByWeek;
+    }
+    if (Object.keys(AppState.builderMeetings || {}).length > 0) {
+        draftGrid._teamMeetings = AppState.builderMeetings;
+    }
     // Rotation is managed via Settings, not stored in draft
     const draftData = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -7341,6 +7656,11 @@ function showNewConceptTypeModal() {
         // Initialize new concept
         AppState.builderGrid = {};
         AppState.builderGridByWeek = {};
+        AppState.builderStaffingRules = {};
+        AppState.builderStaffingRulesByWeek = {};
+        AppState.builderShowStaffingEditor = false;
+        AppState.builderShowMeetingsEditor = false;
+        AppState.builderMeetings = {};
         AppState.builderLoadedDraftId = null;
         AppState.builderLoadedDraftName = conceptName;
 
@@ -7476,9 +7796,23 @@ function doLoadDraft(draft) {
         AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(grid));
     }
 
-    // Restore pattern + rotation from draft if saved
+    // Restore pattern + rotation + staffing rules from draft if saved
     AppState.builderPattern = grid._pattern || null;
     AppState.builderRotation = grid._rotation || null;
+    const rawStaffing = grid._staffingRules ? JSON.parse(JSON.stringify(grid._staffingRules)) : {};
+    // Migrate old per-hour format to range-based format
+    for (const weekKey of Object.keys(rawStaffing)) {
+        rawStaffing[weekKey] = migrateStaffingRules(rawStaffing[weekKey]);
+    }
+    AppState.builderStaffingRulesByWeek = rawStaffing;
+    AppState.builderStaffingRules = AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber]
+        ? JSON.parse(JSON.stringify(AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber]))
+        : {};
+    AppState.builderShowStaffingEditor = false;
+
+    // Restore team meetings from draft
+    AppState.builderMeetings = grid._teamMeetings ? JSON.parse(JSON.stringify(grid._teamMeetings)) : {};
+    AppState.builderShowMeetingsEditor = false;
 
     AppState.builderLoadedDraftId = draft.id;
     AppState.builderLoadedDraftName = draft.name;
@@ -7794,12 +8128,48 @@ async function applyBuilderDraft(draftId) {
 
     showSectionLoading('planning-view', 'Concept toepassen...');
     try {
-        // Single atomic backend call: saves schedules + regenerates shifts + marks draft
-        const result = await applyScheduleDraft(draftId, {
+        // Single atomic backend call: generates shifts from concept grid + marks draft
+        let result = await applyScheduleDraft(draftId, {
             clearBlocks: true,
             applyStartDate: applyResult.startDate,
             applyEndDate: applyResult.endDate
         });
+
+        // Overlap detectie — ander actief concept overlapt
+        if (result.needsOverlapConfirmation) {
+            hideSectionLoading('planning-view');
+            const overlaps = result.overlappingDrafts;
+            const overlapNames = overlaps.map(d => `"${d.name}" (${d.from} → ${d.until})`).join('\n• ');
+            const confirmed = await showConfirm(
+                `De volgende actieve concepten overlappen met deze periode:\n\n• ${overlapNames}\n\nDeze concepten worden ingekort tot ${result.newStartDate}. Doorgaan?`,
+                'Concepten overlappen'
+            );
+            if (!confirmed) return;
+            showSectionLoading('planning-view', 'Concept toepassen...');
+            result = await applyScheduleDraft(draftId, {
+                clearBlocks: true,
+                applyStartDate: applyResult.startDate,
+                applyEndDate: applyResult.endDate,
+                confirmOverlap: true
+            });
+        }
+
+        // Handmatige wijzigingen detectie
+        if (result.needsManualConfirmation) {
+            hideSectionLoading('planning-view');
+            const overwrite = await showConfirm(
+                `Er zijn ${result.manualShiftCount} handmatig gewijzigde diensten in deze periode.\n\nWil je deze overschrijven?\n\n• OK = handmatige wijzigingen worden overschreven\n• Annuleren = handmatige wijzigingen worden behouden`,
+                'Diensten overschrijven?'
+            );
+            showSectionLoading('planning-view', 'Concept toepassen...');
+            result = await applyScheduleDraft(draftId, {
+                clearBlocks: true,
+                applyStartDate: applyResult.startDate,
+                applyEndDate: applyResult.endDate,
+                confirmOverlap: true,
+                confirmOverwrite: overwrite
+            });
+        }
 
         if (result.scheduled) {
             // Future draft — saved as scheduled, not applied yet
@@ -8294,6 +8664,132 @@ function attachBuilderEventListeners(container) {
         });
     }
 
+    // Staffing editor toggle
+    const staffingToggle = document.getElementById('builder-staffing-toggle');
+    if (staffingToggle) {
+        staffingToggle.addEventListener('click', () => {
+            AppState.builderShowStaffingEditor = !AppState.builderShowStaffingEditor;
+            renderBuilder();
+        });
+    }
+
+    // Staffing editor: add rule per day column
+    container.querySelectorAll('.staffing-rule-add').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const day = parseInt(btn.dataset.day);
+            if (!AppState.builderStaffingRules[day]) AppState.builderStaffingRules[day] = [];
+            if (!Array.isArray(AppState.builderStaffingRules[day])) AppState.builderStaffingRules[day] = [];
+            AppState.builderStaffingRules[day].push({ from: 7, to: 17, min: 1 });
+            AppState.builderIsDirty = true;
+            renderBuilder();
+        });
+    });
+
+    // Staffing editor: remove rule
+    container.querySelectorAll('.staffing-rule-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const day = parseInt(btn.dataset.day);
+            const idx = parseInt(btn.dataset.idx);
+            if (Array.isArray(AppState.builderStaffingRules[day])) {
+                AppState.builderStaffingRules[day].splice(idx, 1);
+                if (AppState.builderStaffingRules[day].length === 0) delete AppState.builderStaffingRules[day];
+            }
+            AppState.builderIsDirty = true;
+            renderBuilder();
+        });
+    });
+
+    // Staffing editor: change from/to/min → re-render heatmap
+    container.querySelectorAll('.staffing-from, .staffing-to, .staffing-min-input').forEach(input => {
+        input.addEventListener('change', (e) => {
+            const day = parseInt(e.target.dataset.day);
+            const idx = parseInt(e.target.dataset.idx);
+            if (!Array.isArray(AppState.builderStaffingRules[day])) return;
+            const rule = AppState.builderStaffingRules[day][idx];
+            if (!rule) return;
+            if (e.target.classList.contains('staffing-from')) rule.from = parseFloat(e.target.value);
+            else if (e.target.classList.contains('staffing-to')) rule.to = parseFloat(e.target.value);
+            else rule.min = Math.max(0, parseInt(e.target.value) || 0);
+            AppState.builderIsDirty = true;
+            renderBuilder();
+        });
+    });
+
+    // Staffing editor: copy to all weeks
+    const copyAllBtn = document.getElementById('staffing-copy-all-weeks');
+    if (copyAllBtn) {
+        copyAllBtn.addEventListener('click', () => {
+            const cl = getBuilderCycleLength();
+            const current = JSON.parse(JSON.stringify(AppState.builderStaffingRules));
+            for (let w = 1; w <= cl; w++) {
+                AppState.builderStaffingRulesByWeek[w] = JSON.parse(JSON.stringify(current));
+            }
+            AppState.builderIsDirty = true;
+            showToast(`Bezettingsregels gekopieerd naar alle ${cl} weken`, 'success');
+        });
+    }
+
+    // Staffing editor: clear all
+    const clearAllBtn = document.getElementById('staffing-clear-all');
+    if (clearAllBtn) {
+        clearAllBtn.addEventListener('click', () => {
+            AppState.builderStaffingRules = {};
+            AppState.builderIsDirty = true;
+            renderBuilder();
+        });
+    }
+
+    // Meetings editor toggle
+    const meetingsToggle = document.getElementById('builder-meetings-toggle');
+    if (meetingsToggle) {
+        meetingsToggle.addEventListener('click', () => {
+            AppState.builderShowMeetingsEditor = !AppState.builderShowMeetingsEditor;
+            renderBuilder();
+        });
+    }
+
+    // Meetings editor: add meeting per team
+    container.querySelectorAll('.meeting-rule-add').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const teamId = btn.dataset.team;
+            if (!AppState.builderMeetings) AppState.builderMeetings = {};
+            if (!AppState.builderMeetings[teamId]) AppState.builderMeetings[teamId] = [];
+            AppState.builderMeetings[teamId].push({ day: 0, from: 9, to: 11 });
+            AppState.builderIsDirty = true;
+            renderBuilder();
+        });
+    });
+
+    // Meetings editor: remove meeting
+    container.querySelectorAll('.meeting-rule-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const teamId = btn.dataset.team;
+            const idx = parseInt(btn.dataset.idx);
+            if (AppState.builderMeetings?.[teamId]) {
+                AppState.builderMeetings[teamId].splice(idx, 1);
+                if (AppState.builderMeetings[teamId].length === 0) delete AppState.builderMeetings[teamId];
+                AppState.builderIsDirty = true;
+                renderBuilder();
+            }
+        });
+    });
+
+    // Meetings editor: change day/from/to
+    container.querySelectorAll('.meeting-day, .meeting-from, .meeting-to').forEach(input => {
+        input.addEventListener('change', (e) => {
+            const teamId = e.target.dataset.team;
+            const idx = parseInt(e.target.dataset.idx);
+            const meetings = AppState.builderMeetings;
+            if (!meetings?.[teamId]?.[idx]) return;
+            const m = meetings[teamId][idx];
+            if (e.target.classList.contains('meeting-day')) m.day = parseInt(e.target.value);
+            else if (e.target.classList.contains('meeting-from')) m.from = parseFloat(e.target.value);
+            else if (e.target.classList.contains('meeting-to')) m.to = parseFloat(e.target.value);
+            AppState.builderIsDirty = true;
+            renderBuilder();
+        });
+    });
+
     // Team filter
     const teamSelect = document.getElementById('builder-team-select');
     if (teamSelect) {
@@ -8301,6 +8797,9 @@ function attachBuilderEventListeners(container) {
             AppState.builderTeamFilter = e.target.value || null;
             AppState.builderGrid = {};
             AppState.builderGridByWeek = {};
+            AppState.builderStaffingRules = {};
+            AppState.builderStaffingRulesByWeek = {};
+            AppState.builderMeetings = {};
             AppState.builderIsDirty = false;
             renderBuilder();
         });
@@ -8314,6 +8813,9 @@ function attachBuilderEventListeners(container) {
     if (loadBlank) loadBlank.addEventListener('click', () => {
         AppState.builderGrid = {};
         AppState.builderGridByWeek = {};
+        AppState.builderStaffingRules = {};
+        AppState.builderStaffingRulesByWeek = {};
+        AppState.builderMeetings = {};
         AppState.builderLoadedDraftId = null;
         AppState.builderLoadedDraftName = null;
         // Reset naar 1 week, alle dagen open
@@ -8329,14 +8831,10 @@ function attachBuilderEventListeners(container) {
         showToast('Grid leeggemaakt', 'info');
     });
 
-    // Cell clicks (skip closed cells)
-    container.querySelectorAll('.builder-cell:not(.closed)').forEach(cell => {
-        cell.addEventListener('click', () => {
-            const empId = Number(cell.dataset.employeeId);
-            const dayIndex = Number(cell.dataset.day);
-            openBuilderShiftModal(empId, dayIndex);
-        });
-    });
+    // Builder drag & drop (handles click, transfer, resize)
+    if (typeof BuilderDragHandler !== 'undefined') {
+        BuilderDragHandler.init();
+    }
 
     // Save draft button
     const saveDraftBtn = document.getElementById('builder-save-draft');
@@ -8376,8 +8874,9 @@ function attachBuilderEventListeners(container) {
 function switchBuilderWeek(weekNumber) {
     if (weekNumber === AppState.builderWeekNumber) return;
 
-    // Save current week's grid to cache
+    // Save current week's grid + staffing rules to cache
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+    AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules));
 
     // Switch to new week
     AppState.builderWeekNumber = weekNumber;
@@ -8388,6 +8887,9 @@ function switchBuilderWeek(weekNumber) {
     } else {
         AppState.builderGrid = {};
     }
+    AppState.builderStaffingRules = AppState.builderStaffingRulesByWeek[weekNumber]
+        ? JSON.parse(JSON.stringify(AppState.builderStaffingRulesByWeek[weekNumber]))
+        : {};
 
     renderBuilder();
 }
@@ -9142,19 +9644,36 @@ function renderSettingsPlanning(container) {
                     </div>
                     <span class="form-hint">Wettelijk minimum is 11 uur</span>
                 </div>
+                <hr style="margin: 16px 0; border-color: var(--border-color);">
                 <div class="form-group">
-                    <label for="rule-min-staff-day">Minimum bezetting overdag (per team):</label>
+                    <label>Bezettingsteams:</label>
+                    <p class="form-hint" style="margin-bottom: 8px;">Welke teams tellen mee in de bezetting? (planning + roosterbouwer)</p>
+                    <div id="coverage-teams-checkboxes">${renderCoverageTeamsCheckboxes()}</div>
+                </div>
+                <hr style="margin: 16px 0; border-color: var(--border-color);">
+                <div class="form-group">
+                    <label for="rule-max-consecutive">Max opeenvolgende werkdagen:</label>
                     <div class="input-with-unit">
-                        <input type="number" id="rule-min-staff-day" class="form-input" value="${rules.minStaffingDay}" min="0" max="10" />
-                        <span class="unit">personen</span>
+                        <input type="number" id="rule-max-consecutive" class="form-input" value="${rules.maxConsecutiveDays || 6}" min="1" max="14" />
+                        <span class="unit">dagen</span>
                     </div>
+                    <span class="form-hint">Validatie wordt later toegevoegd</span>
                 </div>
                 <div class="form-group">
-                    <label for="rule-min-staff-night">Minimum bezetting nacht (totaal):</label>
+                    <label for="rule-rest-after-night">Verplichte rust na nachtdienst:</label>
+                    <select id="rule-rest-after-night" class="form-input">
+                        <option value="true" ${rules.mandatoryRestAfterNight !== false ? 'selected' : ''}>Ja</option>
+                        <option value="false" ${rules.mandatoryRestAfterNight === false ? 'selected' : ''}>Nee</option>
+                    </select>
+                    <span class="form-hint">Validatie wordt later toegevoegd</span>
+                </div>
+                <div class="form-group">
+                    <label for="rule-free-weekends">Min vrije weekenden per maand:</label>
                     <div class="input-with-unit">
-                        <input type="number" id="rule-min-staff-night" class="form-input" value="${rules.minStaffingNight}" min="0" max="10" />
-                        <span class="unit">personen</span>
+                        <input type="number" id="rule-free-weekends" class="form-input" value="${rules.minFreeWeekendsPerMonth || 1}" min="0" max="4" />
+                        <span class="unit">weekenden</span>
                     </div>
+                    <span class="form-hint">Validatie wordt later toegevoegd</span>
                 </div>
                 <button class="btn btn-primary" onclick="saveRules()">Regels opslaan</button>
             </div>
@@ -9176,23 +9695,7 @@ function renderSettingsPlanning(container) {
                     <p>Tijdens schoolvakanties: <strong>Vlot 1 en Vlot 2 worden samengevoegd</strong> tot 1 leefgroep. Begeleiders van beide teams werken samen.</p>
                 </div>
 
-                <div class="holiday-rules-section">
-                    <h4>Vakantie bezetting</h4>
-                    <p class="form-help-text">Minimum aantal begeleiders (Vlot 1 + Vlot 2 samen) tijdens vakantie:</p>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="holiday-min-staff-day">Min. bezetting dag:</label>
-                            <input type="number" id="holiday-min-staff-day" class="form-input" value="${DataStore.settings.holidayRules?.minStaffingDay || 2}" min="0" max="10" />
-                        </div>
-                        <div class="form-group">
-                            <label for="holiday-min-staff-night">Min. bezetting nacht:</label>
-                            <input type="number" id="holiday-min-staff-night" class="form-input" value="${DataStore.settings.holidayRules?.minStaffingNight || 1}" min="0" max="10" />
-                        </div>
-                    </div>
-                    <button class="btn btn-primary btn-sm" onclick="saveHolidayRules()">Regels opslaan</button>
-                </div>
-
-                <div class="holiday-periods-section" style="margin-top: 20px;">
+                <div class="holiday-periods-section">
                     <h4>Vakantieperiodes</h4>
                     <div class="holiday-periods-list" id="holiday-periods-list">
                         ${renderHolidayPeriods()}
@@ -9956,12 +10459,14 @@ async function updateTeamColor(teamId, color) {
 
 function saveRules() {
     const minHours = parseInt(document.getElementById('rule-min-hours').value) || 11;
-    const minStaffDay = parseInt(document.getElementById('rule-min-staff-day').value) || 1;
-    const minStaffNight = parseInt(document.getElementById('rule-min-staff-night').value) || 1;
+    const maxConsecutive = parseInt(document.getElementById('rule-max-consecutive')?.value) || 6;
+    const restAfterNight = document.getElementById('rule-rest-after-night')?.value !== 'false';
+    const freeWeekends = parseInt(document.getElementById('rule-free-weekends')?.value) || 1;
 
     DataStore.settings.rules.minHoursBetweenShifts = minHours;
-    DataStore.settings.rules.minStaffingDay = minStaffDay;
-    DataStore.settings.rules.minStaffingNight = minStaffNight;
+    DataStore.settings.rules.maxConsecutiveDays = maxConsecutive;
+    DataStore.settings.rules.mandatoryRestAfterNight = restAfterNight;
+    DataStore.settings.rules.minFreeWeekendsPerMonth = freeWeekends;
 
     saveToStorage();
     markSettingsSaved();
@@ -10346,17 +10851,43 @@ async function deleteHolidayPeriod(id) {
     }
 }
 
-function saveHolidayRules() {
-    const minStaffDay = parseInt(document.getElementById('holiday-min-staff-day').value) || 2;
-    const minStaffNight = parseInt(document.getElementById('holiday-min-staff-night').value) || 1;
+function renderCoverageTeamsCheckboxes() {
+    const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
+    const teams = DataStore.settings.teams || {};
+    let html = '';
 
-    updateHolidayRules({
-        minStaffingDay: minStaffDay,
-        minStaffingNight: minStaffNight
+    Object.entries(teams).forEach(([teamId, team]) => {
+        const checked = coverageTeams.includes(teamId) ? 'checked' : '';
+        html += `
+        <label class="checkbox-item">
+            <input type="checkbox" class="coverage-team-cb" data-team-id="${teamId}" ${checked} onchange="saveCoverageTeams()" />
+            <span class="checkbox-label">
+                <span class="team-color-dot" style="background: ${team.color}"></span>
+                ${escapeHtml(team.name)}
+            </span>
+        </label>`;
     });
 
-    markSettingsSaved();
-    showToast('Vakantie instellingen opgeslagen', 'success');
+    return html;
+}
+
+async function saveCoverageTeams() {
+    const coverageTeams = [];
+    document.querySelectorAll('.coverage-team-cb').forEach(cb => {
+        if (cb.checked) coverageTeams.push(cb.dataset.teamId);
+    });
+    if (coverageTeams.length === 0) return;
+
+    DataStore.settings.coverageTeams = coverageTeams;
+    saveToStorage();
+    try {
+        await saveSettings('coverageTeams', coverageTeams);
+    } catch (e) {
+        console.error('Error saving coverageTeams:', e);
+    }
+    if (typeof renderCoverageHeatmap === 'function' && AppState.showHeatmap) {
+        renderPlanning();
+    }
 }
 
 // ===== VERANTWOORDELIJKE SETTINGS FUNCTIES =====
@@ -11213,7 +11744,10 @@ function sanitizeSettings(rawSettings) {
     const rules = {
         minHoursBetweenShifts: Number(normalized.rules?.minHoursBetweenShifts) || defaults.rules?.minHoursBetweenShifts || 11,
         minStaffingDay: Number(normalized.rules?.minStaffingDay) || defaults.rules?.minStaffingDay || 1,
-        minStaffingNight: Number(normalized.rules?.minStaffingNight) || defaults.rules?.minStaffingNight || 1
+        minStaffingNight: Number(normalized.rules?.minStaffingNight) || defaults.rules?.minStaffingNight || 1,
+        maxConsecutiveDays: Number(normalized.rules?.maxConsecutiveDays) || defaults.rules?.maxConsecutiveDays || 6,
+        mandatoryRestAfterNight: normalized.rules?.mandatoryRestAfterNight !== false,
+        minFreeWeekendsPerMonth: Number(normalized.rules?.minFreeWeekendsPerMonth) || defaults.rules?.minFreeWeekendsPerMonth || 1
     };
 
     const holidayRules = {

@@ -392,28 +392,6 @@ const DragHandler = {
                 source: 'manual' // Mark as manual so it persists
             });
 
-            // Create shift block for original employee to prevent auto-regeneration
-            try {
-                const token = sessionStorage.getItem('hetvlot_token');
-                await fetch(`${window.API_BASE}/shift-blocks`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify({
-                        user_id: originalEmployeeId,
-                        date: originalDate2,
-                        reason: 'Shift transferred via drag & drop'
-                    })
-                });
-                console.log(`[DragHandler] Created shift block for original employee ${originalEmployeeId} on ${originalDate2}`);
-                await fetchShiftBlocks(); // Sync blocks cache with server
-            } catch (blockError) {
-                console.warn('[DragHandler] Could not create shift block:', blockError);
-                // Continue anyway - shift was already transferred
-            }
-
             // Record undo action for drag transfer (using captured shiftId)
             if (typeof UndoManager !== 'undefined') {
                 UndoManager.push({
@@ -804,5 +782,420 @@ const DragHandler = {
         }
 
         return (endMinutes - startMinutes) / 60; // Return hours
+    }
+};
+
+// ===== BUILDER DRAG & DROP HANDLER =====
+// Operates on AppState.builderGrid (local state), no API calls needed
+
+const BuilderDragHandler = {
+    state: {
+        isDragging: false,
+        dragType: null, // 'transfer' | 'resize-start' | 'resize-end' | null
+        employeeId: null,
+        dayIndex: null,
+        startX: 0,
+        startY: 0,
+        currentX: 0,
+        currentY: 0,
+        startTime: 0,
+        originalAssignment: null,
+        targetElement: null,
+        ghostElement: null,
+        originalStyles: undefined
+    },
+
+    constants: {
+        CLICK_THRESHOLD_MS: 200,
+        DRAG_THRESHOLD_PX: 5,
+        RESIZE_HANDLE_WIDTH: 12,
+        TIME_SNAP_MINUTES: 15,
+        START_HOUR: 7,
+        END_HOUR: 24,
+        TOTAL_HOURS: 17
+    },
+
+    init() {
+        this.cleanup();
+        const grid = document.querySelector('.builder-grid');
+        if (!grid) return;
+
+        this._boundMouseDown = this.handleMouseDown.bind(this);
+        this._boundMouseMove = this.handleMouseMove.bind(this);
+        this._boundMouseUp = this.handleMouseUp.bind(this);
+        this._boundKeyDown = this.handleKeyDown.bind(this);
+
+        grid.addEventListener('mousedown', this._boundMouseDown);
+        document.addEventListener('mousemove', this._boundMouseMove);
+        document.addEventListener('mouseup', this._boundMouseUp);
+        document.addEventListener('keydown', this._boundKeyDown);
+
+        this.state.grid = grid;
+        this.state.initialized = true;
+    },
+
+    cleanup() {
+        if (!this.state.initialized) return;
+        const grid = this.state.grid;
+        if (grid && this._boundMouseDown) grid.removeEventListener('mousedown', this._boundMouseDown);
+        if (this._boundMouseMove) document.removeEventListener('mousemove', this._boundMouseMove);
+        if (this._boundMouseUp) document.removeEventListener('mouseup', this._boundMouseUp);
+        if (this._boundKeyDown) document.removeEventListener('keydown', this._boundKeyDown);
+        this.state.initialized = false;
+        this.state.grid = null;
+    },
+
+    handleMouseDown(e) {
+        if (window.matchMedia('(max-width: 767px)').matches) return;
+
+        const block = e.target.closest('.builder-timeline-block');
+        const cell = e.target.closest('.builder-cell');
+
+        if (block && cell && !cell.classList.contains('closed')) {
+            const empId = Number(cell.dataset.employeeId);
+            const dayIndex = Number(cell.dataset.day);
+
+            // Determine drag type based on click position within block
+            const rect = block.getBoundingClientRect();
+            const offsetX = e.clientX - rect.left;
+            const width = rect.width;
+
+            let dragType = 'transfer';
+            if (offsetX < this.constants.RESIZE_HANDLE_WIDTH) {
+                dragType = 'resize-start';
+            } else if (offsetX > width - this.constants.RESIZE_HANDLE_WIDTH) {
+                dragType = 'resize-end';
+            }
+
+            const empGrid = AppState.builderGrid[empId] || {};
+            const assignment = empGrid[dayIndex];
+            if (!assignment) return;
+
+            this.state.startX = e.clientX;
+            this.state.startY = e.clientY;
+            this.state.currentX = e.clientX;
+            this.state.currentY = e.clientY;
+            this.state.startTime = Date.now();
+            this.state.employeeId = empId;
+            this.state.dayIndex = dayIndex;
+            this.state.dragType = dragType;
+            this.state.targetElement = block;
+            this.state.originalAssignment = { ...assignment };
+            e.preventDefault();
+        } else if (cell && !cell.classList.contains('closed') && !block) {
+            // Click on empty cell
+            this.state.startX = e.clientX;
+            this.state.startY = e.clientY;
+            this.state.currentX = e.clientX;
+            this.state.currentY = e.clientY;
+            this.state.startTime = Date.now();
+            this.state.dragType = 'click-empty';
+            this.state.targetElement = cell;
+        }
+    },
+
+    handleMouseMove(e) {
+        if (!this.state.startTime || !this.state.targetElement) return;
+
+        this.state.currentX = e.clientX;
+        this.state.currentY = e.clientY;
+
+        const distance = Math.sqrt(
+            Math.pow(this.state.currentX - this.state.startX, 2) +
+            Math.pow(this.state.currentY - this.state.startY, 2)
+        );
+
+        if (!this.state.isDragging && distance > this.constants.DRAG_THRESHOLD_PX) {
+            if (this.state.dragType === 'transfer') {
+                this.startTransferDrag();
+            } else if (this.state.dragType === 'resize-start' || this.state.dragType === 'resize-end') {
+                this.startResizeDrag();
+            }
+        }
+
+        if (this.state.isDragging) {
+            if (this.state.dragType === 'transfer') {
+                this.updateTransferDrag(e);
+            } else if (this.state.dragType === 'resize-start' || this.state.dragType === 'resize-end') {
+                this.updateResizeDrag(e);
+            }
+        }
+    },
+
+    handleMouseUp(e) {
+        if (!this.state.startTime) return;
+
+        if (this.isClick()) {
+            if (this.state.dragType === 'click-empty') {
+                const cell = this.state.targetElement;
+                const empId = Number(cell.dataset.employeeId);
+                const dayIndex = Number(cell.dataset.day);
+                this.reset();
+                openBuilderShiftModal(empId, dayIndex);
+            } else if (this.state.employeeId != null) {
+                const empId = this.state.employeeId;
+                const dayIndex = this.state.dayIndex;
+                this.reset();
+                openBuilderShiftModal(empId, dayIndex);
+            } else {
+                this.reset();
+            }
+        } else if (this.state.isDragging) {
+            if (this.state.dragType === 'transfer') {
+                this.completeTransferDrag(e);
+            } else if (this.state.dragType === 'resize-start' || this.state.dragType === 'resize-end') {
+                this.completeResizeDrag(e);
+            } else {
+                this.reset();
+            }
+        } else {
+            this.reset();
+        }
+    },
+
+    handleKeyDown(e) {
+        if (e.key === 'Escape' && this.state.isDragging) {
+            this.cancelDrag();
+        }
+    },
+
+    isClick() {
+        const timeDiff = Date.now() - this.state.startTime;
+        const distance = Math.sqrt(
+            Math.pow(this.state.currentX - this.state.startX, 2) +
+            Math.pow(this.state.currentY - this.state.startY, 2)
+        );
+        return timeDiff < this.constants.CLICK_THRESHOLD_MS &&
+               distance < this.constants.DRAG_THRESHOLD_PX;
+    },
+
+    // --- Transfer drag ---
+    startTransferDrag() {
+        this.state.isDragging = true;
+
+        const rect = this.state.targetElement.getBoundingClientRect();
+        this.state.originalStyles = this.state.targetElement.style.cssText;
+
+        this.state.targetElement.style.cssText = '';
+        this.state.targetElement.style.transition = 'none';
+        this.state.targetElement.style.position = 'fixed';
+        this.state.targetElement.style.left = `${rect.left}px`;
+        this.state.targetElement.style.top = `${rect.top}px`;
+        this.state.targetElement.style.width = `${rect.width}px`;
+        this.state.targetElement.style.height = `${rect.height}px`;
+        this.state.targetElement.style.zIndex = '10000';
+        this.state.targetElement.classList.add('is-dragging');
+        document.body.style.cursor = 'grabbing';
+
+        // Ghost placeholder
+        const ghost = this.state.targetElement.cloneNode(true);
+        ghost.classList.add('drag-ghost');
+        ghost.classList.remove('is-dragging');
+        ghost.style.cssText = this.state.originalStyles;
+        ghost.style.pointerEvents = 'none';
+        ghost.style.opacity = '0.3';
+        this.state.ghostElement = ghost;
+        this.state.targetElement.parentElement.appendChild(ghost);
+    },
+
+    updateTransferDrag(e) {
+        if (this.state.targetElement) {
+            this.state.targetElement.style.left = `${e.clientX - 30}px`;
+            this.state.targetElement.style.top = `${e.clientY - 15}px`;
+        }
+
+        // Highlight drop targets
+        const cell = this.getCellFromPoint(e.clientX, e.clientY);
+        document.querySelectorAll('.builder-cell.drop-target-valid, .builder-cell.drop-target-invalid').forEach(c => {
+            c.classList.remove('drop-target-valid', 'drop-target-invalid');
+        });
+        if (cell && !cell.classList.contains('closed')) {
+            cell.classList.add('drop-target-valid');
+        }
+    },
+
+    completeTransferDrag(e) {
+        const cell = this.getCellFromPoint(e.clientX, e.clientY);
+        const origEmpId = this.state.employeeId;
+        const origDay = this.state.dayIndex;
+        const assignment = { ...this.state.originalAssignment };
+
+        this.reset();
+
+        if (!cell || cell.classList.contains('closed')) {
+            showToast('Ongeldige locatie', 'warning');
+            renderBuilder();
+            return;
+        }
+
+        const targetEmpId = Number(cell.dataset.employeeId);
+        const targetDay = Number(cell.dataset.day);
+
+        // Same position = no-op
+        if (targetEmpId === origEmpId && targetDay === origDay) {
+            renderBuilder();
+            return;
+        }
+
+        // Remove from original position
+        if (AppState.builderGrid[origEmpId]) {
+            delete AppState.builderGrid[origEmpId][origDay];
+        }
+
+        // Place at new position (overwrite if occupied)
+        if (!AppState.builderGrid[targetEmpId]) AppState.builderGrid[targetEmpId] = {};
+        AppState.builderGrid[targetEmpId][targetDay] = assignment;
+
+        AppState.builderIsDirty = true;
+        renderBuilder();
+        showToast('Dienst verplaatst', 'success');
+    },
+
+    // --- Resize drag ---
+    startResizeDrag() {
+        this.state.isDragging = true;
+        if (this.state.targetElement && this.state.originalStyles === undefined) {
+            this.state.originalStyles = this.state.targetElement.style.cssText;
+        }
+        document.body.style.cursor = 'ew-resize';
+        this.state.targetElement.classList.add('is-resizing');
+    },
+
+    updateResizeDrag(e) {
+        const cell = this.state.targetElement.closest('.builder-cell');
+        if (!cell) return;
+        const rect = cell.getBoundingClientRect();
+        const newTime = this.getTimeFromX(e.clientX, rect);
+        if (!newTime) return;
+
+        const orig = this.state.originalAssignment;
+        let newStart = orig.startTime;
+        let newEnd = orig.endTime;
+
+        if (this.state.dragType === 'resize-start') {
+            newStart = newTime;
+        } else {
+            newEnd = newTime;
+        }
+
+        // Min 1 hour
+        if (this.calculateDuration(newStart, newEnd) < 1) return;
+
+        // Update visual
+        const pos = calcTimePosition(newStart, newEnd);
+        this.state.targetElement.style.left = `${pos.leftPct.toFixed(1)}%`;
+        this.state.targetElement.style.width = `${pos.widthPct.toFixed(1)}%`;
+
+        const timeLabel = this.state.targetElement.querySelector('.btb-time');
+        if (timeLabel) timeLabel.textContent = `${newStart}-${newEnd}`;
+    },
+
+    completeResizeDrag(e) {
+        const cell = this.state.targetElement ? this.state.targetElement.closest('.builder-cell') : null;
+        const empId = this.state.employeeId;
+        const dayIndex = this.state.dayIndex;
+        const orig = { ...this.state.originalAssignment };
+        const dragType = this.state.dragType;
+
+        this.reset();
+
+        if (!cell) return;
+        const rect = cell.getBoundingClientRect();
+        const newTime = this.getTimeFromX(e.clientX, rect);
+        if (!newTime) { renderBuilder(); return; }
+
+        let newStart = orig.startTime;
+        let newEnd = orig.endTime;
+        if (dragType === 'resize-start') newStart = newTime;
+        else newEnd = newTime;
+
+        if (this.calculateDuration(newStart, newEnd) < 1) {
+            showToast('Een dienst moet minimaal 1 uur duren', 'warning');
+            renderBuilder();
+            return;
+        }
+
+        // Update builderGrid
+        if (!AppState.builderGrid[empId]) AppState.builderGrid[empId] = {};
+        AppState.builderGrid[empId][dayIndex] = {
+            ...orig,
+            startTime: newStart,
+            endTime: newEnd
+        };
+
+        AppState.builderIsDirty = true;
+        renderBuilder();
+        showToast(`Dienst aangepast: ${newStart}-${newEnd}`, 'success');
+    },
+
+    cancelDrag() {
+        if (this.state.targetElement) {
+            this.state.targetElement.classList.remove('is-dragging', 'is-resizing');
+        }
+        if (this.state.ghostElement) this.state.ghostElement.remove();
+        document.querySelectorAll('.builder-cell.drop-target-valid, .builder-cell.drop-target-invalid').forEach(c => {
+            c.classList.remove('drop-target-valid', 'drop-target-invalid');
+        });
+        document.body.style.cursor = '';
+        this.reset();
+        renderBuilder();
+    },
+
+    reset() {
+        if (this.state.ghostElement) this.state.ghostElement.remove();
+        if (this.state.targetElement) {
+            this.state.targetElement.classList.remove('is-dragging', 'is-resizing');
+            if (this.state.originalStyles !== undefined) {
+                this.state.targetElement.style.cssText = this.state.originalStyles;
+            }
+        }
+        document.querySelectorAll('.builder-cell.drop-target-valid, .builder-cell.drop-target-invalid').forEach(c => {
+            c.classList.remove('drop-target-valid', 'drop-target-invalid');
+        });
+        document.body.style.cursor = '';
+
+        this.state.isDragging = false;
+        this.state.dragType = null;
+        this.state.employeeId = null;
+        this.state.dayIndex = null;
+        this.state.startX = 0;
+        this.state.startY = 0;
+        this.state.currentX = 0;
+        this.state.currentY = 0;
+        this.state.startTime = 0;
+        this.state.originalAssignment = null;
+        this.state.ghostElement = null;
+        this.state.targetElement = null;
+        this.state.originalStyles = undefined;
+    },
+
+    // --- Helpers ---
+    getCellFromPoint(x, y) {
+        const elements = document.elementsFromPoint(x, y);
+        return elements.find(el => el.classList.contains('builder-cell'));
+    },
+
+    getTimeFromX(clientX, cellRect) {
+        const offsetX = Math.max(0, clientX - cellRect.left);
+        const percent = Math.min(1, offsetX / cellRect.width);
+        let hours = this.constants.START_HOUR + (percent * this.constants.TOTAL_HOURS);
+
+        const totalMinutes = hours * 60;
+        const snappedMinutes = Math.round(totalMinutes / this.constants.TIME_SNAP_MINUTES) * this.constants.TIME_SNAP_MINUTES;
+        hours = snappedMinutes / 60;
+        hours = Math.max(this.constants.START_HOUR, Math.min(this.constants.END_HOUR, hours));
+
+        const wholeHours = Math.floor(hours);
+        const minutes = Math.round((hours % 1) * 60);
+        return `${String(wholeHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    },
+
+    calculateDuration(startTime, endTime) {
+        const [sh, sm] = startTime.split(':').map(Number);
+        const [eh, em] = endTime.split(':').map(Number);
+        let startMin = sh * 60 + sm;
+        let endMin = eh * 60 + em;
+        if (endMin < startMin) endMin += 24 * 60;
+        return (endMin - startMin) / 60;
     }
 };

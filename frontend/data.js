@@ -67,6 +67,11 @@ function normalizeSettings(settings) {
         };
     }
 
+    // Team meetings normalisatie
+    if (!merged.teamMeetings || typeof merged.teamMeetings !== 'object') {
+        merged.teamMeetings = defaults.teamMeetings || {};
+    }
+
     // Schedule pattern normalisatie
     if (!merged.schedulePattern || typeof merged.schedulePattern !== 'object') {
         merged.schedulePattern = defaults.schedulePattern || {
@@ -218,7 +223,8 @@ async function loadDataFromAPI() {
             schedule_drafts: apiSettings.schedule_drafts || DataStore.settings.schedule_drafts || [],
             schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern,
             emailNotifications: apiSettings.email_notifications || DataStore.settings.emailNotifications,
-            schoolYearStart: apiSettings.school_year_start || DataStore.settings.schoolYearStart
+            schoolYearStart: apiSettings.school_year_start || DataStore.settings.schoolYearStart,
+            teamMeetings: apiSettings.team_meetings || DataStore.settings.teamMeetings
         });
 
         // Use schedule_drafts from dedicated table if available (overrides settings fallback)
@@ -595,8 +601,6 @@ async function removeShiftsInDateRange(startDate, endDate) {
     }
 }
 
-// @deprecated — Gebruik applyScheduleViaBackend() voor atomische shift regeneratie via backend.
-// Deze functie wordt niet meer actief aangeroepen maar blijft beschikbaar als fallback.
 async function removeAutoShiftsInDateRange(startDate, endDate) {
     try {
         // Get auto shifts in range
@@ -682,7 +686,6 @@ function getISOWeekNumber(date) {
     return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
-// @deprecated — Gebruik applyScheduleViaBackend() voor atomische shift regeneratie via backend.
 async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
     const employee = getEmployee(employeeId);
     if (!employee) {
@@ -746,7 +749,6 @@ async function applyWeekScheduleForEmployee(employeeId, startDate, endDate) {
     return createdShifts;
 }
 
-// @deprecated — Gebruik applyScheduleViaBackend() voor atomische shift regeneratie via backend.
 async function applyWeekScheduleForAllEmployees(startDate, endDate) {
     const employees = getAllEmployees(true);
     let totalShifts = 0;
@@ -757,21 +759,6 @@ async function applyWeekScheduleForAllEmployees(startDate, endDate) {
     }
 
     return totalShifts;
-}
-
-// Apply schedule via backend (atomic, single transaction)
-async function applyScheduleViaBackend(userId, { clearBlocks = false } = {}) {
-    try {
-        const result = await dataApiFetch(`/users/${userId}/apply-schedule`, {
-            method: 'POST',
-            body: JSON.stringify({ clearBlocks })
-        });
-        console.log(`[Backend Schedule] User ${userId}: created ${result.created}, deleted ${result.deleted}, blocks cleared ${result.blocksCleared || 0}`);
-        return result;
-    } catch (error) {
-        console.error(`[Backend Schedule] Error for user ${userId}:`, error);
-        throw error;
-    }
 }
 
 // ===== AFWEZIGHEID FUNCTIES =====
@@ -1698,10 +1685,10 @@ async function deleteScheduleDraft(id) {
     });
 }
 
-async function applyScheduleDraft(draftId, { clearBlocks = true, applyStartDate = null, applyEndDate = null } = {}) {
+async function applyScheduleDraft(draftId, { clearBlocks = true, applyStartDate = null, applyEndDate = null, confirmOverlap = false, confirmOverwrite = null } = {}) {
     return dataApiFetch(`/schedule-drafts/${draftId}/apply`, {
         method: 'POST',
-        body: JSON.stringify({ clearBlocks, applyStartDate, applyEndDate })
+        body: JSON.stringify({ clearBlocks, applyStartDate, applyEndDate, confirmOverlap, confirmOverwrite })
     });
 }
 

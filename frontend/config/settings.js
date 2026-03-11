@@ -59,6 +59,9 @@ window.DEFAULT_SETTINGS = {
         minStaffingDay: 2,   // Minimum bezetting overdag tijdens vakantie (Vlot 1+2 samen)
         minStaffingNight: 1  // Minimum bezetting nacht tijdens vakantie
     },
+    // Teamvergaderingen: per team een lijst van vaste vergadermomenten
+    // day: 0=Ma..6=Zo, from/to: decimale uren (9.5 = 9:30)
+    teamMeetings: {},
     // Weekend/vakantie verantwoordelijke rotatie
     responsibleRotation: {
         // Teams die in aanmerking komen
