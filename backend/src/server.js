@@ -473,6 +473,14 @@ async function ensureSchema() {
       console.log(`  schedule_drafts applied date columns: ${e.message}`);
     }
 
+    // Phase 5: Add updated_by tracking to schedule_drafts
+    try {
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS updated_by INTEGER`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS updated_by_name TEXT`);
+    } catch (e) {
+      console.log(`  schedule_drafts updated_by columns: ${e.message}`);
+    }
+
     // Phase 4: school_year_start setting (default: 1 sept current school year)
     try {
       const syResult = await client.query(`SELECT 1 FROM settings WHERE key = 'school_year_start'`);
@@ -1252,11 +1260,18 @@ app.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res)
       [oldUserId]
     );
 
-    // 4. Regenerate shifts for new user (only if no shift transfer)
-    let regenerateResult = null;
-    if (!transferShiftsFrom) {
-      regenerateResult = await regenerateShiftsForUser(client, newUserId, { clearBlocks: true });
-    }
+    // 4. Update schedule_drafts: replace old user ID with new in grid
+    const oldIdStr = String(oldUserId);
+    const newIdStr = String(newUserId);
+    const draftsUpdateResult = await client.query(
+      `UPDATE schedule_drafts
+       SET grid = replace(grid::text, $1, $2)::jsonb, updated_at = NOW()
+       WHERE grid::text LIKE $3`,
+      ['"' + oldIdStr + '"', '"' + newIdStr + '"', '%"' + oldIdStr + '"%']
+    );
+    const draftsUpdated = draftsUpdateResult.rowCount;
+
+    // 5. No auto-regeneration — user should re-apply active concept via Rooster Bouwen
 
     await client.query('COMMIT');
 
@@ -1264,9 +1279,9 @@ app.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res)
       oldUser: { id: oldUserId, name: oldUser.name },
       newUser: { id: newUserId, name: newUser.name },
       shiftsTransferred,
+      draftsUpdated,
       transferFrom: transferShiftsFrom || null,
-      scheduleCopied: true,
-      regenerated: regenerateResult ? regenerateResult.created : 0
+      scheduleCopied: true
     });
 
     res.json({
@@ -1274,7 +1289,9 @@ app.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res)
       oldUser: { id: oldUserId, name: oldUser.name },
       newUser: { id: newUserId, name: newUser.name },
       shiftsTransferred,
-      shiftsGenerated: regenerateResult ? regenerateResult.created : 0
+      draftsUpdated,
+      shiftsGenerated: 0,
+      hint: transferShiftsFrom ? null : 'apply_concept'
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -3122,6 +3139,7 @@ app.get('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoor
              last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
              last_applied_from::text as "lastAppliedFrom", last_applied_until::text as "lastAppliedUntil",
              valid_from::text as "validFrom", valid_until::text as "validUntil",
+             updated_by_name as "updatedByName",
              created_at as "createdAt", updated_at as "updatedAt"
       FROM schedule_drafts
       ORDER BY updated_at DESC
@@ -3165,6 +3183,10 @@ app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverant
     const params = [];
     let paramIndex = 1;
 
+    // Always track who updated
+    setClauses.push(`updated_by = $${paramIndex++}`); params.push(req.user.id);
+    setClauses.push(`updated_by_name = $${paramIndex++}`); params.push(req.user.name);
+
     if (name !== undefined) { setClauses.push(`name = $${paramIndex++}`); params.push(name); }
     if (weekNumber !== undefined) { setClauses.push(`week_number = $${paramIndex++}`); params.push(weekNumber); }
     if (teamFilter !== undefined) { setClauses.push(`team_filter = $${paramIndex++}`); params.push(teamFilter); }
@@ -3179,7 +3201,7 @@ app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverant
     const result = await pool.query(
       `UPDATE schedule_drafts SET ${setClauses.join(', ')} WHERE id = $${paramIndex}
        RETURNING id, name, week_number as "weekNumber", team_filter as "teamFilter",
-                 grid, created_by_name as "createdByName",
+                 grid, created_by_name as "createdByName", updated_by_name as "updatedByName",
                  last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
                  valid_from::text as "validFrom", valid_until::text as "validUntil",
                  created_at as "createdAt", updated_at as "updatedAt"`,

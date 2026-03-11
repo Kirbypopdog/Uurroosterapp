@@ -1214,8 +1214,8 @@ async function handleLogin(e) {
         updateShiftRefreshRange();
         applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
-        // Auto-apply base schedules after data loads
-        await autoApplyBaseSchedules();
+        // DISABLED: concept-driven architectuur — shifts via Rooster Bouwen > Concept toepassen
+        // await autoApplyBaseSchedules();
         showApp();
     } catch (error) {
         console.error('Login error:', error);
@@ -1269,8 +1269,8 @@ async function checkSession() {
         updateShiftRefreshRange();
         applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
-        // Auto-apply base schedules after data loads
-        await autoApplyBaseSchedules();
+        // DISABLED: concept-driven architectuur — shifts via Rooster Bouwen > Concept toepassen
+        // await autoApplyBaseSchedules();
         showApp();
     } catch (error) {
         handleLogout();
@@ -4926,7 +4926,8 @@ async function handleEmployeeSubmit(e) {
         if (AppState.editingEmployeeId) {
             await updateEmployee(AppState.editingEmployeeId, employeeData);
         } else {
-            const newEmp = await addEmployee(employeeData);
+            await addEmployee(employeeData);
+            showToast('Medewerker aangemaakt. Stel het basisrooster in via Rooster Bouwen.', 'success');
         }
         closeEmployeeModal();
         renderEmployees();
@@ -4969,6 +4970,7 @@ async function handleEmployeeDelete() {
 
 // ===== BASISROOSTER FUNCTIES =====
 
+// LEGACY: Niet meer aangeroepen — shifts worden nu gegenereerd via concept-apply flow
 async function autoApplyBaseSchedules({ clearBlocks = false } = {}) {
     // Skip if already generated in this session
     if (AppState.schedulesGenerated) {
@@ -8698,9 +8700,10 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             const futureShifts = DataStore.shifts.filter(s =>
                 String(s.employeeId) === String(departingUser.id) && s.date >= fromDate
             );
-            summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${fromDate})</li>`;
+            summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${fromDate})`;
+            summaryHtml += `<br><small style="color:var(--text-secondary)">Telling op basis van geladen planning — werkelijk aantal kan hoger zijn</small></li>`;
         } else {
-            summaryHtml += `<li>Nieuwe diensten worden automatisch gegenereerd op basis van het basisrooster</li>`;
+            summaryHtml += `<li>Geen diensten overgedragen — pas het actief concept opnieuw toe via Rooster Bouwen</li>`;
         }
 
         summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
@@ -8763,10 +8766,15 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             let msg = `${departingUser.name} vervangen door ${newUser.name}`;
             if (result.shiftsTransferred > 0) {
                 msg += ` (${result.shiftsTransferred} diensten overgedragen)`;
-            } else if (result.shiftsGenerated > 0) {
-                msg += ` (${result.shiftsGenerated} diensten gegenereerd)`;
+            }
+            if (result.draftsUpdated > 0) {
+                msg += ` (${result.draftsUpdated} concept${result.draftsUpdated > 1 ? 'en' : ''} bijgewerkt)`;
             }
             showToast(msg, 'success');
+
+            if (result.hint === 'apply_concept') {
+                showToast(`${newUser.name} heeft nog geen diensten. Pas het actief concept opnieuw toe via Rooster Bouwen.`, 'info', 6000);
+            }
 
             if (onComplete) onComplete();
         } catch (error) {
