@@ -481,6 +481,14 @@ async function ensureSchema() {
       console.log(`  schedule_drafts updated_by columns: ${e.message}`);
     }
 
+    // Phase 5b: Vakantieconcepten — type + holiday_period_id op schedule_drafts
+    try {
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'basis'`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS holiday_period_id TEXT`);
+    } catch (e) {
+      console.log(`  schedule_drafts vakantie columns: ${e.message}`);
+    }
+
     // Phase 4: school_year_start setting (default: 1 sept current school year)
     try {
       const syResult = await client.query(`SELECT 1 FROM settings WHERE key = 'school_year_start'`);
@@ -1456,6 +1464,27 @@ async function regenerateShiftsForUser(client, userId, { clearBlocks = false, ov
   );
   const blockedDates = new Set(blocks.rows.map(r => r.date));
 
+  // 8b. Load active vakantieconcept date ranges — skip these dates during base regeneration
+  const vakantieRanges = [];
+  try {
+    const vakDrafts = await client.query(
+      `SELECT holiday_period_id FROM schedule_drafts WHERE type = 'vakantie' AND last_applied_at IS NOT NULL`
+    );
+    if (vakDrafts.rows.length > 0) {
+      const hpResult = await client.query(`SELECT value FROM settings WHERE key = 'holidayPeriods'`);
+      const holidayPeriods = hpResult.rows.length > 0 ? (hpResult.rows[0].value || []) : [];
+      for (const row of vakDrafts.rows) {
+        const hp = holidayPeriods.find(p => String(p.id) === String(row.holiday_period_id));
+        if (hp && hp.startDate && hp.endDate) {
+          vakantieRanges.push({ start: hp.startDate, end: hp.endDate });
+        }
+      }
+    }
+  } catch (e) {
+    // Non-critical — continue without vakantie skip
+    console.log('Warning: could not load vakantie ranges:', e.message);
+  }
+
   // 9. Generate shifts day by day
   const refDate = parseLocalDate(referenceDate);
   const refMonday = getMonday(refDate);
@@ -1469,6 +1498,9 @@ async function regenerateShiftsForUser(client, userId, { clearBlocks = false, ov
     if (occupiedDates.has(dateStr)) continue;
     if (absenceDates.has(dateStr)) continue;
     if (blockedDates.has(dateStr)) continue;
+
+    // Skip dates covered by an active vakantieconcept
+    if (vakantieRanges.some(r => dateStr >= r.start && dateStr <= r.end)) continue;
 
     // Calculate week number (replicates getWeekNumber from data.js)
     const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -3140,6 +3172,7 @@ app.get('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoor
              last_applied_from::text as "lastAppliedFrom", last_applied_until::text as "lastAppliedUntil",
              valid_from::text as "validFrom", valid_until::text as "validUntil",
              updated_by_name as "updatedByName",
+             type, holiday_period_id as "holidayPeriodId",
              created_at as "createdAt", updated_at as "updatedAt"
       FROM schedule_drafts
       ORDER BY updated_at DESC
@@ -3152,21 +3185,28 @@ app.get('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoor
 });
 
 app.post('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
-  const { id, name, weekNumber, teamFilter, grid, validFrom, validUntil } = req.body;
+  const { id, name, weekNumber, teamFilter, grid, validFrom, validUntil, type, holidayPeriodId } = req.body;
   const draftId = id || `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const draftType = type || 'basis';
+
+  // Validatie: vakantieconcept vereist holidayPeriodId
+  if (draftType === 'vakantie' && !holidayPeriodId) {
+    return res.status(400).json({ error: 'Vakantieconcept vereist een gekoppelde vakantieperiode' });
+  }
 
   try {
     const result = await pool.query(
-      `INSERT INTO schedule_drafts (id, name, week_number, team_filter, grid, created_by, created_by_name, valid_from, valid_until, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+      `INSERT INTO schedule_drafts (id, name, week_number, team_filter, grid, created_by, created_by_name, valid_from, valid_until, type, holiday_period_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
        RETURNING id, name, week_number as "weekNumber", team_filter as "teamFilter",
                  grid, created_by_name as "createdByName",
                  last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
                  valid_from::text as "validFrom", valid_until::text as "validUntil",
+                 type, holiday_period_id as "holidayPeriodId",
                  created_at as "createdAt", updated_at as "updatedAt"`,
-      [draftId, name || 'Naamloos', weekNumber || 1, teamFilter || null, JSON.stringify(grid || {}), req.user.id, req.user.name, validFrom || null, validUntil || null]
+      [draftId, name || 'Naamloos', weekNumber || 1, teamFilter || null, JSON.stringify(grid || {}), req.user.id, req.user.name, validFrom || null, validUntil || null, draftType, holidayPeriodId || null]
     );
-    await logAudit(req, 'CREATE', 'settings', draftId, { type: 'schedule_draft', name });
+    await logAudit(req, 'CREATE', 'settings', draftId, { type: 'schedule_draft', draftType, name });
     res.json({ draft: result.rows[0] });
   } catch (err) {
     console.error('Error creating schedule draft:', err);
@@ -3176,7 +3216,7 @@ app.post('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoo
 
 app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
-  const { name, weekNumber, teamFilter, grid, lastAppliedAt, lastAppliedBy, validFrom, validUntil } = req.body;
+  const { name, weekNumber, teamFilter, grid, lastAppliedAt, lastAppliedBy, validFrom, validUntil, type, holidayPeriodId } = req.body;
 
   try {
     const setClauses = ['updated_at = NOW()'];
@@ -3195,6 +3235,8 @@ app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverant
     if (lastAppliedBy !== undefined) { setClauses.push(`last_applied_by = $${paramIndex++}`); params.push(lastAppliedBy); }
     if (validFrom !== undefined) { setClauses.push(`valid_from = $${paramIndex++}`); params.push(validFrom || null); }
     if (validUntil !== undefined) { setClauses.push(`valid_until = $${paramIndex++}`); params.push(validUntil || null); }
+    if (type !== undefined) { setClauses.push(`type = $${paramIndex++}`); params.push(type); }
+    if (holidayPeriodId !== undefined) { setClauses.push(`holiday_period_id = $${paramIndex++}`); params.push(holidayPeriodId || null); }
 
     params.push(id);
 
@@ -3204,6 +3246,7 @@ app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverant
                  grid, created_by_name as "createdByName", updated_by_name as "updatedByName",
                  last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
                  valid_from::text as "validFrom", valid_until::text as "validUntil",
+                 type, holiday_period_id as "holidayPeriodId",
                  created_at as "createdAt", updated_at as "updatedAt"`,
       params
     );
@@ -3313,7 +3356,7 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
 
     // 1. Load draft with FOR UPDATE lock
     const draftResult = await client.query(
-      `SELECT id, name, week_number, team_filter, grid, created_by, valid_from, valid_until
+      `SELECT id, name, week_number, team_filter, grid, created_by, valid_from, valid_until, type, holiday_period_id
        FROM schedule_drafts WHERE id = $1 FOR UPDATE`,
       [draftId]
     );
@@ -3366,8 +3409,27 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
     }
 
     // Determine effective date range for shift generation
-    const effectiveStartDate = applyStartDate || null;
-    const effectiveEndDate = applyEndDate || null;
+    let effectiveStartDate = applyStartDate || null;
+    let effectiveEndDate = applyEndDate || null;
+    const isVakantie = draft.type === 'vakantie';
+
+    // Vakantieconcept: force date-range mode from holiday period dates
+    if (isVakantie) {
+      if (!draft.holiday_period_id) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Vakantieconcept heeft geen gekoppelde vakantieperiode' });
+      }
+      const hpResult = await client.query(`SELECT value FROM settings WHERE key = 'holidayPeriods'`);
+      const holidayPeriods = hpResult.rows.length > 0 ? (hpResult.rows[0].value || []) : [];
+      const linkedPeriod = holidayPeriods.find(p => String(p.id) === String(draft.holiday_period_id));
+      if (!linkedPeriod) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Gekoppelde vakantieperiode niet gevonden' });
+      }
+      effectiveStartDate = linkedPeriod.startDate;
+      effectiveEndDate = linkedPeriod.endDate;
+    }
+
     const hasDateRange = !!(effectiveStartDate && effectiveEndDate);
 
     // Validate date range
@@ -3520,6 +3582,41 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
           appliedCount++;
           totalCreated += createdCount;
           totalDeleted += deletedCount;
+        }
+      }
+
+      // Vakantieconcept: employees NOT in grid get NO shift during this period
+      if (isVakantie) {
+        const rangeStartV = parseLocalDate(effectiveStartDate);
+        const rangeEndV = parseLocalDate(effectiveEndDate);
+        const startStrV = formatDateYYYYMMDD(rangeStartV);
+        const endStrV = formatDateYYYYMMDD(rangeEndV);
+
+        for (const emp of allEmployeesResult.rows) {
+          const empInDraft = Object.values(gridByWeek).some(weekGrid =>
+            weekGrid && (weekGrid[String(emp.id)] || weekGrid[emp.id])
+          );
+          if (empInDraft) continue; // Already handled above
+
+          // Delete auto-shifts in range
+          const delResult = await client.query(
+            `DELETE FROM shifts WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`,
+            [emp.id, startStrV, endStrV]
+          );
+          totalDeleted += delResult.rowCount;
+
+          // Create shift_blocks for each day (prevents base regeneration from creating shifts)
+          for (let d = new Date(rangeStartV.getFullYear(), rangeStartV.getMonth(), rangeStartV.getDate());
+               d <= rangeEndV;
+               d.setDate(d.getDate() + 1)) {
+            const dateStr = formatDateYYYYMMDD(d);
+            await client.query(
+              `INSERT INTO shift_blocks (user_id, date) VALUES ($1, $2) ON CONFLICT (user_id, date) DO NOTHING`,
+              [emp.id, dateStr]
+            );
+          }
+
+          if (delResult.rowCount > 0) appliedCount++;
         }
       }
 

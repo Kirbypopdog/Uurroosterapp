@@ -1413,6 +1413,31 @@ function getOrCalculateResponsible(weekStartDate) {
     const manual = getWeekendResponsible(weekStartDate);
     if (manual) return manual;
 
+    // Vakantie verantwoordelijke override: check elke dag in de week
+    for (let i = 0; i < 7; i++) {
+        const day = new Date(parseDateOnly(weekStartDate));
+        day.setDate(day.getDate() + i);
+        const hp = getHolidayPeriod(day);
+        if (hp) {
+            // Per-week responsible (weeklyResponsibles) takes priority over legacy single responsibleId
+            if (hp.weeklyResponsibles) {
+                const periodStart = parseDateOnly(hp.startDate);
+                const periodMonday = getMondayOfWeek(periodStart);
+                const thisMonday = getMondayOfWeek(day);
+                const weekNum = Math.floor((thisMonday - periodMonday) / (7 * 86400000)) + 1;
+                const respId = hp.weeklyResponsibles[String(weekNum)];
+                if (respId) {
+                    const emp = getEmployee(respId);
+                    if (emp) return emp;
+                }
+            } else if (hp.responsibleId) {
+                // Legacy: single responsible for entire period
+                const emp = getEmployee(hp.responsibleId);
+                if (emp) return emp;
+            }
+        }
+    }
+
     const rotation = DataStore.settings.responsibleRotation;
     if (!rotation) return null;
 
@@ -1449,7 +1474,16 @@ function getOrCalculateResponsible(weekStartDate) {
     const current = new Date(startDate);
 
     while (current.getTime() < targetDate.getTime()) {
-        if (isWeekendOrHolidayWeek(current)) {
+        // Skip vakantieweken in rotatie count — alleen open weekenden buiten vakantie tellen mee
+        const inVakantie = (function() {
+            for (let i = 0; i < 7; i++) {
+                const day = new Date(current);
+                day.setDate(current.getDate() + i);
+                if (getHolidayPeriod(day)) return true;
+            }
+            return false;
+        })();
+        if (!inVakantie && isWeekendOrHolidayWeek(current)) {
             count++;
         }
         current.setDate(current.getDate() + 7);

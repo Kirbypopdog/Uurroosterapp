@@ -4857,6 +4857,38 @@ body[data-view-mode="day"] .timeline-header {
     color: var(--text-tertiary);
 }
 
+.holiday-weeks-responsible {
+    margin-top: 4px;
+}
+
+.holiday-weeks-list {
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+    padding: 8px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.holiday-weeks-list.open {
+    display: flex;
+}
+
+.holiday-week-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.holiday-week-label {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
 .no-items-text {
     color: var(--text-secondary);
     font-size: 13px;
@@ -7899,6 +7931,27 @@ body[data-view-mode="day"] .timeline-header {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
+}
+.builder-week-btn {
+    position: relative;
+}
+.builder-week-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    font-size: 14px;
+    line-height: 1;
+    border-radius: 50%;
+    margin-left: 4px;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+}
+.builder-week-remove:hover {
+    opacity: 1;
+    background: rgba(0,0,0,0.15);
 }
 
 .builder-week-display {
@@ -7949,6 +8002,59 @@ body[data-view-mode="day"] .timeline-header {
     margin-bottom: 16px;
 }
 
+.builder-vakantie-bar {
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+    border: 1px solid #f59e0b;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    color: #92400e;
+    font-size: 14px;
+}
+
+/* Concept type selection modal */
+.concept-type-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.concept-type-option {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    border: 2px solid var(--border-color);
+    transition: all 0.15s;
+}
+.concept-type-option:hover {
+    border-color: var(--primary-color);
+    background: rgba(59, 130, 246, 0.04);
+}
+.concept-type-option.selected {
+    border-color: var(--primary-color);
+    background: rgba(59, 130, 246, 0.08);
+}
+.concept-type-option input[type="radio"] { display: none; }
+.concept-type-icon {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: var(--bg-color);
+}
+.concept-type-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.concept-type-info strong { font-size: 14px; }
+.concept-type-info span { font-size: 12px; color: var(--text-secondary); }
+
 .builder-grid {
     min-width: 800px;
 }
@@ -7989,6 +8095,35 @@ body[data-view-mode="day"] .timeline-header {
 .builder-day-header.closed {
     background: #fee2e2;
     opacity: 0.7;
+}
+.builder-day-toggle {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+.builder-day-toggle:hover {
+    filter: brightness(0.95);
+}
+.day-lock-icon {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 2px;
+    opacity: 0.7;
+}
+
+.builder-day-hint {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    padding: 2px 12px 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0.7;
+}
+
+.builder-vakantie-responsible {
+    display: flex;
+    align-items: center;
 }
 
 .builder-day-header .closed-label {
@@ -8838,13 +8973,17 @@ body[data-view-mode="day"] .timeline-header {
     font-size: 1.05rem;
     line-height: 1.3;
 }
+.concept-card-badges {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
 .concept-card-badge {
     padding: 2px 10px;
     border-radius: 12px;
     font-size: 0.72rem;
     font-weight: 600;
     white-space: nowrap;
-    flex-shrink: 0;
 }
 .badge-active {
     background: #065f46;
@@ -8870,6 +9009,10 @@ body[data-view-mode="day"] .timeline-header {
     background: #f3f4f6;
     color: #6b7280;
 }
+.badge-vakantie {
+    background: #f59e0b;
+    color: #fff;
+}
 .concept-card-meta {
     display: flex;
     flex-direction: column;
@@ -8892,6 +9035,64 @@ body[data-view-mode="day"] .timeline-header {
 .concept-card-actions .btn {
     font-size: 0.8rem;
     padding: 4px 10px;
+}
+.concept-card-menu {
+    position: relative;
+    margin-left: auto;
+}
+.concept-card-menu-trigger {
+    background: none;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    color: var(--text-secondary);
+    transition: background 0.15s;
+}
+.concept-card-menu-trigger:hover {
+    background: var(--bg-secondary, #f3f4f6);
+}
+.concept-card-menu-dropdown {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    z-index: 50;
+    min-width: 160px;
+    padding: 4px 0;
+}
+.concept-card-menu.open .concept-card-menu-dropdown {
+    display: block;
+}
+.concept-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+.concept-menu-item:hover {
+    background: var(--bg-secondary, #f3f4f6);
+}
+.concept-menu-item.danger {
+    color: var(--danger-color, #dc2626);
+}
+.concept-card-menu-dropdown hr {
+    margin: 4px 0;
+    border: none;
+    border-top: 1px solid var(--border-color, #e5e7eb);
 }
 
 /* Editor topbar */

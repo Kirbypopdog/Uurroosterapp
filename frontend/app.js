@@ -297,7 +297,8 @@ const ICONS = {
     takeover: 'hand',
     repeat: 'repeat-2',
     undo: 'undo-2',
-    redo: 'redo-2'
+    redo: 'redo-2',
+    lock: 'lock'
 };
 
 const IconHelper = {
@@ -1692,6 +1693,9 @@ function renderHomeWeekendInfo() {
             const dateStr = weekend.date.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
             const respName = weekend.responsible ? escapeHtml(weekend.responsible.name) : '<em>Niet toegewezen</em>';
             const isThisWeek = weekend.weekMonday.getTime() === thisMonday.getTime();
+            const weekHoliday = typeof getHolidayPeriod === 'function' ? getHolidayPeriod(weekend.date) : null;
+            const isVakantieResp = weekHoliday && weekHoliday.responsibleId && weekend.responsible;
+            const vakantieBadge = isVakantieResp ? '<span style="font-size: 0.7rem; background: #f59e0b; color: white; padding: 1px 5px; border-radius: 3px; margin-left: 4px;">vakantie</span>' : '';
 
             bodyHtml += `
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-color); ${!isThisWeek ? 'opacity: 0.7;' : ''}">
@@ -1699,7 +1703,7 @@ function renderHomeWeekendInfo() {
                         <span style="font-weight: ${isThisWeek ? '600' : '400'};">Weekend ${dateStr}</span>
                         ${isThisWeek ? '<span style="font-size: 0.75rem; background: var(--primary-color); color: white; padding: 1px 6px; border-radius: 4px; margin-left: 6px;">Deze week</span>' : ''}
                     </div>
-                    <span style="font-size: 0.9rem; color: var(--text-secondary);">${respName}</span>
+                    <span style="font-size: 0.9rem; color: var(--text-secondary);">${respName}${vakantieBadge}</span>
                 </div>
             `;
         });
@@ -1729,6 +1733,22 @@ async function switchView(viewName) {
         );
         if (!proceed) return;
         AppState.settingsDirty = false;
+    }
+    // Warn about unsaved builder changes
+    if (AppState.builderIsDirty && AppState.currentView === 'builder' && viewName !== 'builder') {
+        const proceed = await showConfirm(
+            'Je hebt onopgeslagen wijzigingen in de roosterbouwer. Wil je doorgaan zonder op te slaan?',
+            'Onopgeslagen wijzigingen'
+        );
+        if (!proceed) return;
+        // Reset builder state so returning shows overview
+        AppState.builderScreen = 'overview';
+        AppState.builderIsDirty = false;
+        AppState.builderLoadedDraftId = null;
+        AppState.builderLoadedDraftName = null;
+    } else if (AppState.currentView === 'builder' && viewName !== 'builder') {
+        // Also reset when leaving builder without unsaved changes
+        AppState.builderScreen = 'overview';
     }
     // Clear undo history when switching views
     UndoManager.clear();
@@ -6017,9 +6037,6 @@ function renderBuilderEditor(container) {
         </span>
     </div>`;
 
-    html += `<div class="builder-settings-panels">`;
-    html += renderBuilderPatternPanel();
-    html += `</div>`;
     html += renderBuilderControls(role, userTeam);
     html += renderBuilderGrid(role, userTeam);
     html += renderBuilderActions();
@@ -6054,6 +6071,7 @@ function renderBuilderOverview(container) {
     const filtered = otherDrafts.filter(c => {
         if (filter === 'all') return true;
         if (filter === 'scheduled') return c.status?.cls === 'scheduled';
+        if (filter === 'vakantie') return c.draft.type === 'vakantie';
         if (filter === 'draft') return !c.status || c.status.cls === 'activatable' || !c.draft.lastAppliedAt;
         return true;
     });
@@ -6101,6 +6119,7 @@ function renderBuilderOverview(container) {
     const filterOptions = [
         { value: 'all', label: 'Alle' },
         { value: 'scheduled', label: 'Ingepland' },
+        { value: 'vakantie', label: 'Vakantie' },
         { value: 'draft', label: 'Concepten' }
     ];
 
@@ -6137,6 +6156,8 @@ function renderConceptCard(draft, newestActiveId) {
     const status = getDraftStatus(draft, newestActiveId);
     const isActive = status?.cls === 'active';
     const statusCls = status?.cls || 'draft';
+    const isVakantie = draft.type === 'vakantie';
+    const holidayPeriod = isVakantie ? (DataStore.settings.holidayPeriods || []).find(p => String(p.id) === String(draft.holidayPeriodId)) : null;
 
     const updatedDate = new Date(draft.updatedAt || draft.createdAt);
     const dateStr = updatedDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -6170,46 +6191,43 @@ function renderConceptCard(draft, newestActiveId) {
         periodHtml = `<span class="concept-card-period">Geldig: ${vf} – ${vu}</span>`;
     }
 
-    // Action buttons — all btn-secondary except delete (btn-danger)
+    // Kebab menu (all actions)
     const isAdmin = getEffectiveRole() === 'admin';
-    const downloadBtn = isAdmin ? `<button class="btn btn-secondary btn-sm concept-card-download" data-draft-id="${escapeHtml(draft.id)}" title="Download concept"><i data-lucide="download" style="width:14px;height:14px"></i></button>` : '';
-    let actionsHtml = '';
-    if (isActive) {
-        actionsHtml = `
-            <button class="btn btn-secondary btn-sm concept-card-edit" data-draft-id="${escapeHtml(draft.id)}">Bewerken</button>
-            <button class="btn btn-secondary btn-sm concept-card-apply" data-draft-id="${escapeHtml(draft.id)}">Toepassen</button>
-            <button class="btn btn-secondary btn-sm concept-card-rename" data-draft-id="${escapeHtml(draft.id)}">Hernoemen</button>
-            ${downloadBtn}
-            <button class="btn btn-danger btn-sm concept-card-delete" data-draft-id="${escapeHtml(draft.id)}">
-                <i data-lucide="trash-2" style="width:14px;height:14px"></i>
-            </button>
-        `;
-    } else {
-        actionsHtml = `
-            <button class="btn btn-secondary btn-sm concept-card-load" data-draft-id="${escapeHtml(draft.id)}">Laden</button>
-            <button class="btn btn-secondary btn-sm concept-card-apply" data-draft-id="${escapeHtml(draft.id)}">Toepassen</button>
-            <button class="btn btn-secondary btn-sm concept-card-rename" data-draft-id="${escapeHtml(draft.id)}">Hernoemen</button>
-            ${downloadBtn}
-            <button class="btn btn-danger btn-sm concept-card-delete" data-draft-id="${escapeHtml(draft.id)}">
-                <i data-lucide="trash-2" style="width:14px;height:14px"></i>
-            </button>
-        `;
-    }
+    const hasBeenApplied = !!draft.lastAppliedAt;
+    const dId = escapeHtml(draft.id);
+
+    let menuItems = '';
+    menuItems += isActive
+        ? `<button class="concept-menu-item concept-card-edit" data-draft-id="${dId}">${IconHelper.html(ICONS.edit, 'xs')} Bewerken</button>`
+        : `<button class="concept-menu-item concept-card-load" data-draft-id="${dId}">${IconHelper.html(ICONS.edit, 'xs')} Laden</button>`;
+    menuItems += `<button class="concept-menu-item concept-card-apply" data-draft-id="${dId}">${IconHelper.html(ICONS.check, 'xs')} Toepassen</button>`;
+    if (hasBeenApplied) menuItems += `<button class="concept-menu-item concept-card-deactivate" data-draft-id="${dId}">${IconHelper.html(ICONS.close, 'xs')} Uitplannen</button>`;
+    menuItems += `<button class="concept-menu-item concept-card-rename" data-draft-id="${dId}">${IconHelper.html(ICONS.edit, 'xs')} Hernoemen</button>`;
+    if (isAdmin) menuItems += `<button class="concept-menu-item concept-card-download" data-draft-id="${dId}">${IconHelper.html('download', 'xs')} Download</button>`;
+    menuItems += `<hr><button class="concept-menu-item danger concept-card-delete" data-draft-id="${dId}">${IconHelper.html(ICONS.delete, 'xs')} Verwijderen</button>`;
 
     return `
         <div class="builder-concept-card draft-status-${statusCls}" data-draft-id="${escapeHtml(draft.id)}">
             <div class="concept-card-header">
                 <span class="concept-card-name">${escapeHtml(draft.name)}</span>
+                <div class="concept-card-menu">
+                    <button class="concept-card-menu-trigger" data-draft-id="${dId}">
+                        <i data-lucide="more-vertical" style="width:16px;height:16px"></i>
+                    </button>
+                    <div class="concept-card-menu-dropdown">
+                        ${menuItems}
+                    </div>
+                </div>
+            </div>
+            <div class="concept-card-badges">
+                ${isVakantie ? `<span class="concept-card-badge badge-vakantie">Vakantie</span>` : ''}
                 ${status ? `<span class="concept-card-badge badge-${statusCls}">${status.label}</span>` : '<span class="concept-card-badge badge-draft">Concept</span>'}
             </div>
             <div class="concept-card-meta">
-                <span>${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers</span>
+                <span>${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers${isVakantie && holidayPeriod ? ` &middot; ${escapeHtml(holidayPeriod.name)}` : ''}</span>
                 ${periodHtml}
                 <span>Bewerkt: ${dateStr} om ${timeStr}</span>
                 <span>Door: ${escapeHtml(draft.updatedByName || draft.createdByName || 'Onbekend')}${createdStr && createdStr !== dateStr ? ` &middot; Aangemaakt: ${createdStr}` : ''}</span>
-            </div>
-            <div class="concept-card-actions">
-                ${actionsHtml}
             </div>
         </div>
     `;
@@ -6236,84 +6254,70 @@ function getBuilderWeekLabel(weekNumber) {
 }
 
 // Collect pattern data from the UI inputs (without saving)
-function collectPatternFromUI() {
-    const cycleLengthInput = document.getElementById('schedule-cycle-length');
-    const refDateInput = document.getElementById('schedule-reference-date');
-    const cycleLength = Math.max(1, Math.min(8, parseInt(cycleLengthInput?.value) || 2));
-    const referenceDate = refDateInput?.value;
-    if (!referenceDate) {
-        showToast('Selecteer een referentie datum', 'warning');
-        return null;
+function ensureBuilderPattern() {
+    if (!AppState.builderPattern) {
+        AppState.builderPattern = JSON.parse(JSON.stringify(getSchedulePattern()));
     }
-    const date = parseDateOnly(referenceDate);
-    if (date.getDay() !== 1) {
-        showToast('De referentie datum moet een maandag zijn', 'warning');
-        return null;
-    }
-    const weeks = {};
-    for (let w = 1; w <= cycleLength; w++) {
-        const closedDays = [];
-        document.querySelectorAll(`.pattern-closed-day[data-week="${w}"]`).forEach(cb => {
-            if (cb.checked) closedDays.push(parseInt(cb.dataset.day));
-        });
-        const label = closedDays.length > 0 ? formatClosedDays(closedDays) : 'alle dagen open';
-        weeks[String(w)] = { closedDays, label };
-    }
-    return { cycleLength, referenceDate, weeks };
+    if (!AppState.builderPattern.weeks) AppState.builderPattern.weeks = {};
+    return AppState.builderPattern;
 }
 
-function renderBuilderPatternPanel() {
-    const pattern = getBuilderPattern();
-    const cl = pattern.cycleLength || 2;
-    const dayLabels = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
+function addBuilderWeek() {
+    const pattern = ensureBuilderPattern();
+    const newLength = (pattern.cycleLength || 1) + 1;
+    if (newLength > 8) return;
+    pattern.cycleLength = newLength;
+    pattern.weeks[String(newLength)] = { closedDays: [], label: 'alle dagen open' };
+    AppState.builderIsDirty = true;
+    // Switch to new week
+    AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+    AppState.builderWeekNumber = newLength;
+    AppState.builderGrid = AppState.builderGridByWeek[newLength] || {};
+    renderBuilder();
+}
 
-    // Summary text
-    let summaryParts = [`${cl} weken`];
+function removeBuilderWeek(weekNum) {
+    const pattern = ensureBuilderPattern();
+    const cl = pattern.cycleLength || 1;
+    if (cl <= 1) return;
+    // Save current week first
+    AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+    // Shift down weeks above the removed one
+    const newWeeks = {};
+    const newGridByWeek = {};
+    let newIdx = 1;
     for (let w = 1; w <= cl; w++) {
-        const closed = getBuilderClosedDays(w);
-        const label = closed.length > 0 ? formatClosedDays(closed) : 'alle dagen open';
-        summaryParts.push(`W${w}: ${label}`);
+        if (w === weekNum) continue;
+        newWeeks[String(newIdx)] = pattern.weeks[String(w)] || { closedDays: [], label: 'alle dagen open' };
+        newGridByWeek[newIdx] = AppState.builderGridByWeek[w] || {};
+        newIdx++;
     }
-    const summary = summaryParts.join(' | ');
-
-    // Week rows for editing
-    let weekRows = '';
-    for (let w = 1; w <= cl; w++) {
-        const closed = getBuilderClosedDays(w);
-        weekRows += `<div class="form-group schedule-pattern-week">
-            <label>Week ${w} - Gesloten dagen:</label>
-            <div class="schedule-pattern-days">
-                ${[1,2,3,4,5,6,0].map(d => `<label class="schedule-day-checkbox">
-                    <input type="checkbox" class="pattern-closed-day" data-week="${w}" data-day="${d}" ${closed.includes(d) ? 'checked' : ''}>
-                    <span>${dayLabels[d]}</span>
-                </label>`).join('')}
-            </div>
-        </div>`;
+    pattern.weeks = newWeeks;
+    pattern.cycleLength = cl - 1;
+    AppState.builderGridByWeek = newGridByWeek;
+    // Adjust current week number
+    if (AppState.builderWeekNumber > pattern.cycleLength) {
+        AppState.builderWeekNumber = pattern.cycleLength;
     }
+    AppState.builderGrid = AppState.builderGridByWeek[AppState.builderWeekNumber] || {};
+    AppState.builderIsDirty = true;
+    renderBuilder();
+}
 
-    const expanded = AppState.builderPatternExpanded;
-    return `
-        <div class="builder-settings-panel${expanded ? ' expanded' : ''}" id="builder-pattern-panel">
-            <div class="builder-settings-header" id="builder-pattern-toggle">
-                <i data-lucide="settings" style="width:14px;height:14px;flex-shrink:0"></i>
-                <h4>Roosterpatroon</h4>
-                <span class="builder-settings-summary">${escapeHtml(summary)}</span>
-                <i data-lucide="chevron-down" class="builder-settings-chevron" style="width:14px;height:14px"></i>
-            </div>
-            <div class="builder-settings-body">
-                <div class="form-group">
-                    <label for="schedule-cycle-length">Cycluslengte (weken):</label>
-                    <input type="number" id="schedule-cycle-length" class="form-input" min="1" max="8" value="${cl}" style="width: 80px;" />
-                </div>
-                <div id="schedule-pattern-weeks">${weekRows}</div>
-                <div class="form-group">
-                    <label for="schedule-reference-date">Referentie maandag (Week 1 start):</label>
-                    <input type="date" id="schedule-reference-date" class="form-input" value="${pattern.referenceDate || DataStore.settings.biWeeklyReferenceDate || ''}" />
-                    <span class="form-hint">Selecteer altijd een maandag</span>
-                </div>
-                <button class="btn btn-primary btn-sm" id="save-schedule-pattern-btn">Patroon opslaan</button>
-            </div>
-        </div>`;
+function toggleBuilderClosedDay(jsDow) {
+    const wn = AppState.builderWeekNumber;
+    const pattern = ensureBuilderPattern();
+    const weekConfig = pattern.weeks[String(wn)] || { closedDays: [], label: '' };
+    const idx = weekConfig.closedDays.indexOf(jsDow);
+    if (idx >= 0) {
+        weekConfig.closedDays.splice(idx, 1);
+    } else {
+        weekConfig.closedDays.push(jsDow);
+    }
+    weekConfig.label = weekConfig.closedDays.length > 0 ? formatClosedDays(weekConfig.closedDays) : 'alle dagen open';
+    pattern.weeks[String(wn)] = weekConfig;
+    AppState.builderIsDirty = true;
+    renderBuilder();
 }
 
 
@@ -6335,10 +6339,17 @@ function renderBuilderControls(role, userTeam) {
                 <div class="builder-week-nav">
                     ${(() => {
                         const cl = getBuilderCycleLength();
+                        const isVakantie = AppState.builderConceptType === 'vakantie';
                         let btns = '';
                         for (let w = 1; w <= cl; w++) {
                             const label = getBuilderWeekLabel(w);
-                            btns += `<button class="btn ${wn === w ? 'btn-primary' : 'btn-secondary'} btn-sm" id="builder-week-${w}">Week ${w} (${escapeHtml(label)})</button>`;
+                            btns += `<button class="btn ${wn === w ? 'btn-primary' : 'btn-secondary'} btn-sm builder-week-btn" id="builder-week-${w}">
+                                Week ${w} (${escapeHtml(label)})
+                                ${!isVakantie && cl > 1 ? `<span class="builder-week-remove" data-week="${w}" title="Week verwijderen">&times;</span>` : ''}
+                            </button>`;
+                        }
+                        if (!isVakantie && cl < 8) {
+                            btns += `<button class="btn btn-secondary btn-sm" id="builder-add-week" title="Week toevoegen">+ Week</button>`;
                         }
                         return btns;
                     })()}
@@ -6383,6 +6394,37 @@ function renderBuilderGrid(role, userTeam) {
     const teams = DataStore.settings.teams || {};
 
     let html = '<div class="builder-grid-wrapper">';
+
+    // Vakantieconcept info bar
+    if (AppState.builderConceptType === 'vakantie') {
+        const hp = (DataStore.settings.holidayPeriods || []).find(p => String(p.id) === String(AppState.builderHolidayPeriodId));
+        const hpName = hp ? escapeHtml(hp.name) : 'Onbekende periode';
+        const hpDates = hp ? `${parseDateOnly(hp.startDate).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })} – ${parseDateOnly(hp.endDate).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })}` : '';
+        // Vakantie verantwoordelijke picker (per week)
+        const activeEmps = getAllEmployees(true).sort((a, b) => a.name.localeCompare(b.name));
+        const wn = AppState.builderWeekNumber;
+        const weeklyResps = hp ? (hp.weeklyResponsibles || {}) : {};
+        const currentRespId = String(weeklyResps[String(wn)] || '');
+        const respOptions = activeEmps.map(e =>
+            `<option value="${e.id}" ${String(e.id) === currentRespId ? 'selected' : ''}>${escapeHtml(e.name)}</option>`
+        ).join('');
+        html += `<div class="builder-vakantie-bar">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                <div>
+                    <strong>Vakantieconcept voor ${hpName}</strong>${hpDates ? ` <span>(${hpDates})</span>` : ''}
+                    <div style="font-size:12px;margin-top:4px;opacity:0.85">Medewerkers die niet in dit rooster staan krijgen geen shift tijdens deze vakantie.</div>
+                </div>
+                <div class="builder-vakantie-responsible">
+                    <label style="font-size:0.8rem;font-weight:600;margin-right:6px">Verantw. week ${wn}:</label>
+                    <select class="form-input form-input-sm" id="builder-vakantie-responsible" data-week="${wn}" style="max-width:180px;font-size:0.8rem">
+                        <option value="">Geen</option>
+                        ${respOptions}
+                    </select>
+                </div>
+            </div>
+        </div>`;
+    }
+
     html += '<div class="builder-grid">';
 
     // Bepaal gesloten dagen voor huidige builder week
@@ -6392,38 +6434,53 @@ function renderBuilderGrid(role, userTeam) {
         return dayIndex === 6 ? 0 : dayIndex + 1;
     }
 
-    // Calculate weekend responsible for open weekends
+    // Calculate weekend responsible for open weekends (not for vakantie concepts — those use vakantie verantwoordelijke)
     let weekendResponsibleName = '';
+    const isVakantieBuilder = AppState.builderConceptType === 'vakantie';
     const weekendOpen = !builderClosedDays.includes(6) || !builderClosedDays.includes(0); // Za=6 or Zo=0
-    if (weekendOpen && typeof getOrCalculateResponsible === 'function') {
-        // Use reference date + current builder week to find a representative weekend
-        const pattern = getSchedulePattern();
-        const refDate = parseDateOnly(pattern.referenceDate || DataStore.settings.biWeeklyReferenceDate || '2025-01-06');
-        // Find next occurrence of this cycle week from reference
-        const weekOffset = (AppState.builderWeekNumber - 1);
-        const sampleMonday = new Date(refDate);
-        sampleMonday.setDate(sampleMonday.getDate() + weekOffset * 7);
-        const resp = getOrCalculateResponsible(sampleMonday);
-        if (resp) weekendResponsibleName = resp.name;
+    if (!isVakantieBuilder && weekendOpen && typeof getOrCalculateResponsible === 'function') {
+        // Use builder pattern's reference date (set on apply) + current week to find responsible
+        const pattern = getBuilderPattern();
+        const refDateStr = pattern.referenceDate || getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '';
+        if (refDateStr) {
+            const refDate = parseDateOnly(refDateStr);
+            const cycleLength = pattern.cycleLength || 1;
+            // Find next future occurrence of this cycle week from today
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayMonday = getMonday(today);
+            // Calculate which cycle week "today" falls in
+            const diffWeeks = Math.floor((todayMonday - refDate) / (7 * 86400000));
+            const currentCycleWeek = ((diffWeeks % cycleLength) + cycleLength) % cycleLength; // 0-based
+            const targetCycleWeek = AppState.builderWeekNumber - 1; // 0-based
+            // Offset from today's monday to the nearest occurrence of this cycle week
+            const weekDiff = ((targetCycleWeek - currentCycleWeek) % cycleLength + cycleLength) % cycleLength;
+            const sampleMonday = new Date(todayMonday);
+            sampleMonday.setDate(sampleMonday.getDate() + weekDiff * 7);
+            const resp = getOrCalculateResponsible(sampleMonday);
+            if (resp) weekendResponsibleName = resp.name;
+        }
     }
 
     // Header
     html += '<div class="builder-grid-header">';
     html += '<div class="builder-name-header">Medewerker</div>';
     dayNames.forEach((name, i) => {
-        let headerClass = 'builder-day-header';
+        let headerClass = 'builder-day-header builder-day-toggle';
         const jsDow = dayIndexToJsDow(i);
         const isWeekend = i >= 5;
         const isClosed = builderClosedDays.includes(jsDow);
         if (isWeekend) headerClass += ' weekend';
         if (isClosed) headerClass += ' closed';
-        const label = isClosed ? `${name} (Gesloten)` : name;
+        const label = isClosed ? `${name}` : name;
+        const lockIcon = isClosed ? ` <span class="day-lock-icon">${IconHelper.html(ICONS.lock, 'xs')}</span>` : '';
         const respBadge = (isWeekend && !isClosed && weekendResponsibleName)
             ? `<span class="builder-weekend-responsible">${escapeHtml(weekendResponsibleName)}</span>` : '';
-        html += `<div class="${headerClass}"><span class="day-name">${label}</span>${respBadge}</div>`;
+        html += `<div class="${headerClass}" data-jsdow="${jsDow}" title="Klik om ${isClosed ? 'te openen' : 'te sluiten'}"><span class="day-name">${label}${lockIcon}</span>${respBadge}</div>`;
     });
     html += '<div class="builder-hours-header">Uren</div>';
     html += '</div>';
+    html += `<div class="builder-day-hint">${IconHelper.html(ICONS.tip, 'xs')} Klik op een dag om te sluiten/openen</div>`;
 
     // Employee rows grouped by team
     const renderedTeams = AppState.builderTeamFilter ? [AppState.builderTeamFilter] : teamOrder;
@@ -7004,6 +7061,8 @@ function loadBuilderFromBaseSchedules() {
     AppState.builderLoadedDraftId = null;
     AppState.builderLoadedDraftName = null;
     AppState.builderPattern = null;
+    AppState.builderConceptType = 'basis';
+    AppState.builderHolidayPeriodId = null;
     AppState.builderIsDirty = true;
     renderBuilder();
     showToast(`Basisrooster week ${weekNumber} geladen`, 'success');
@@ -7032,7 +7091,9 @@ async function saveBuilderDraft() {
             const updateData = {
                 grid: JSON.parse(JSON.stringify(multiGrid)),
                 weekNumber: AppState.builderWeekNumber,
-                teamFilter: AppState.builderTeamFilter
+                teamFilter: AppState.builderTeamFilter,
+                type: AppState.builderConceptType || 'basis',
+                holidayPeriodId: AppState.builderHolidayPeriodId || null
             };
             // Include pattern + rotation in grid metadata
             if (AppState.builderPattern) updateData.grid._pattern = AppState.builderPattern;
@@ -7085,7 +7146,9 @@ async function saveBuilderDraft() {
         weekNumber: AppState.builderWeekNumber,
         grid: draftGrid,
         validFrom: null,
-        validUntil: null
+        validUntil: null,
+        type: AppState.builderConceptType || 'basis',
+        holidayPeriodId: AppState.builderHolidayPeriodId || null
     };
 
     try {
@@ -7146,7 +7209,9 @@ async function saveBuilderDraftAs() {
         weekNumber: AppState.builderWeekNumber,
         grid: draftGrid,
         validFrom: null,
-        validUntil: null
+        validUntil: null,
+        type: AppState.builderConceptType || 'basis',
+        holidayPeriodId: AppState.builderHolidayPeriodId || null
     };
 
     try {
@@ -7177,6 +7242,132 @@ async function saveBuilderDraftAs() {
     AppState.builderScreen = 'overview';
     renderBuilder();
     showToast(`Nieuw concept "${draftData.name}" aangemaakt`, 'success');
+}
+
+function showNewConceptTypeModal() {
+    // All holiday periods are available (meerdere concepten per periode toegestaan)
+    const availablePeriods = (DataStore.settings.holidayPeriods || []);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal';
+    overlay.innerHTML = `
+        <div class="modal-content" style="max-width:440px">
+            <div class="modal-header">
+                <h2>Nieuw concept</h2>
+                <span class="modal-close">&times;</span>
+            </div>
+            <div class="modal-body" style="padding:20px">
+                <p style="margin:0 0 16px;color:var(--text-secondary);font-size:14px">Kies het type concept dat je wilt aanmaken.</p>
+                <div class="concept-type-options">
+                    <label class="concept-type-option selected" data-value="basis">
+                        <input type="radio" name="concept-type" value="basis" checked>
+                        <div class="concept-type-icon">${IconHelper.html(ICONS.calendar, 'md')}</div>
+                        <div class="concept-type-info">
+                            <strong>Basisrooster</strong>
+                            <span>Het standaard weekrooster voor het hele jaar</span>
+                        </div>
+                    </label>
+                    <label class="concept-type-option" data-value="vakantie">
+                        <input type="radio" name="concept-type" value="vakantie">
+                        <div class="concept-type-icon" style="color:#f59e0b">${IconHelper.html(ICONS.holiday || ICONS.calendar, 'md')}</div>
+                        <div class="concept-type-info">
+                            <strong>Vakantieconcept</strong>
+                            <span>Een apart rooster voor een vakantieperiode</span>
+                        </div>
+                    </label>
+                </div>
+                <div id="vakantie-period-select" style="display:none;margin-top:16px">
+                    <label class="form-label">Gekoppelde vakantieperiode:</label>
+                    ${availablePeriods.length > 0 ? `
+                        <select id="vakantie-period-id" class="form-input">
+                            <option value="">Selecteer een periode...</option>
+                            ${availablePeriods.map(p => {
+                                const from = parseDateOnly(p.startDate).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+                                const until = parseDateOnly(p.endDate).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
+                                return `<option value="${p.id}">${escapeHtml(p.name)} (${from} – ${until})</option>`;
+                            }).join('')}
+                        </select>
+                    ` : '<p class="no-items-text">Geen beschikbare vakantieperiodes. Voeg eerst een vakantieperiode toe in Instellingen > Planning.</p>'}
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="concept-type-cancel">Annuleren</button>
+                <button class="btn btn-primary" id="concept-type-confirm">Aanmaken</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    IconHelper.init(overlay);
+
+    // Toggle highlight + vakantie period select
+    overlay.querySelectorAll('.concept-type-option').forEach(opt => {
+        opt.addEventListener('click', () => {
+            overlay.querySelectorAll('.concept-type-option').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+            opt.querySelector('input').checked = true;
+            const periodSelect = overlay.querySelector('#vakantie-period-select');
+            periodSelect.style.display = opt.dataset.value === 'vakantie' ? 'block' : 'none';
+        });
+    });
+
+    overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#concept-type-cancel').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.querySelector('#concept-type-confirm').addEventListener('click', () => {
+        const type = overlay.querySelector('input[name="concept-type"]:checked')?.value || 'basis';
+        let holidayPeriodId = null;
+        let conceptName = null;
+
+        if (type === 'vakantie') {
+            const selectEl = overlay.querySelector('#vakantie-period-id');
+            if (!selectEl || !selectEl.value) {
+                showToast('Selecteer een vakantieperiode', 'warning');
+                return;
+            }
+            holidayPeriodId = selectEl.value;
+            const period = availablePeriods.find(p => String(p.id) === String(holidayPeriodId));
+            conceptName = period ? period.name : 'Vakantieconcept';
+        }
+
+        overlay.remove();
+
+        // Initialize new concept
+        AppState.builderGrid = {};
+        AppState.builderGridByWeek = {};
+        AppState.builderLoadedDraftId = null;
+        AppState.builderLoadedDraftName = conceptName;
+
+        // Determine cycle length: for vakantie concepts, calculate from period dates
+        let initCycleLength = 1;
+        if (type === 'vakantie' && holidayPeriodId) {
+            const period = (DataStore.settings.holidayPeriods || []).find(p => String(p.id) === String(holidayPeriodId));
+            if (period) {
+                const pStart = parseDateOnly(period.startDate);
+                const pEnd = parseDateOnly(period.endDate);
+                const pMonday = getMondayOfWeek(pStart);
+                const pEndMonday = getMondayOfWeek(pEnd);
+                initCycleLength = Math.floor((pEndMonday - pMonday) / (7 * 86400000)) + 1;
+            }
+        }
+
+        // Build weeks pattern (all days open)
+        const weeksInit = {};
+        for (let w = 1; w <= initCycleLength; w++) {
+            weeksInit[String(w)] = { closedDays: [], label: 'alle dagen open' };
+        }
+        AppState.builderPattern = {
+            cycleLength: initCycleLength,
+            referenceDate: getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '',
+            weeks: weeksInit
+        };
+        AppState.builderIsDirty = false;
+        AppState.builderWeekNumber = 1;
+        AppState.builderConceptType = type;
+        AppState.builderHolidayPeriodId = holidayPeriodId;
+        AppState.builderScreen = 'editor';
+        renderBuilder();
+    });
 }
 
 function showDraftSaveModal() {
@@ -7285,6 +7476,8 @@ function doLoadDraft(draft) {
 
     AppState.builderLoadedDraftId = draft.id;
     AppState.builderLoadedDraftName = draft.name;
+    AppState.builderConceptType = draft.type || 'basis';
+    AppState.builderHolidayPeriodId = draft.holidayPeriodId || null;
     AppState.builderIsDirty = false;
     AppState.builderScreen = 'editor';
     renderBuilder();
@@ -7352,8 +7545,49 @@ async function deactivateBuilderDraft(draftId) {
     const draft = drafts.find(d => d.id === draftId);
     if (!draft) return;
 
-    const todayStr = formatDateYYYYMMDD(new Date());
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = formatDateYYYYMMDD(today);
 
+    // Check if concept is scheduled (future, not yet started)
+    const isScheduled = draft.lastAppliedFrom && parseDateOnly(draft.lastAppliedFrom) > today;
+
+    if (isScheduled) {
+        // Ingepland concept: simpele reset, geen shifts verwijderen
+        const proceed = await showConfirm(
+            `"${draft.name}" is ingepland maar nog niet gestart. Wil je de planning ongedaan maken?\n\nHet concept wordt teruggezet naar een gewoon concept zonder datum.`,
+            'Concept uitplannen'
+        );
+        if (!proceed) return;
+
+        try {
+            showSectionLoading('builder-view', 'Uitplannen...');
+            await updateScheduleDraft(draftId, {
+                lastAppliedAt: null,
+                lastAppliedBy: null,
+                lastAppliedFrom: null,
+                lastAppliedUntil: null
+            });
+            // Update local cache
+            const cached = drafts.find(d => d.id === draftId);
+            if (cached) {
+                cached.lastAppliedAt = null;
+                cached.lastAppliedBy = null;
+                cached.lastAppliedFrom = null;
+                cached.lastAppliedUntil = null;
+            }
+            renderBuilder();
+            showToast('Concept uitgeplanend', 'success');
+        } catch (err) {
+            console.error('Error unscheduling draft:', err);
+            showToast('Fout bij uitplannen: ' + err.message, 'error');
+        } finally {
+            hideSectionLoading('builder-view');
+        }
+        return;
+    }
+
+    // Actief/verlopen concept: deactiveer met einddatum
     const result = await new Promise((resolve) => {
         const overlay = document.createElement('div');
         overlay.className = 'modal';
@@ -7426,6 +7660,63 @@ async function applyBuilderDraft(draftId) {
     const draft = drafts.find(d => d.id === draftId);
     if (!draft) return;
 
+    const isVakantie = draft.type === 'vakantie';
+
+    // Vakantieconcept: simplified apply flow
+    if (isVakantie) {
+        const hp = (DataStore.settings.holidayPeriods || []).find(p => String(p.id) === String(draft.holidayPeriodId));
+        if (!hp) {
+            showToast('Gekoppelde vakantieperiode niet gevonden', 'error');
+            return;
+        }
+        const fromStr = parseDateOnly(hp.startDate).toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+        const untilStr = parseDateOnly(hp.endDate).toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+
+        const draftGrid = draft.grid || {};
+        const empIds = new Set();
+        if (draftGrid._multiWeek) {
+            for (const [k, wg] of Object.entries(draftGrid)) {
+                if (!k.startsWith('_')) Object.keys(wg).forEach(id => empIds.add(id));
+            }
+        } else {
+            Object.keys(draftGrid).filter(k => !k.startsWith('_')).forEach(id => empIds.add(id));
+        }
+
+        const confirmed = await showConfirm(
+            `Vakantieconcept "${draft.name}" toepassen?\n\n` +
+            `Periode: ${fromStr} – ${untilStr}\n` +
+            `${empIds.size} medewerkers krijgen een vakantie-shift.\n` +
+            `Overige medewerkers krijgen GEEN shift tijdens deze periode.`,
+            'Vakantieconcept toepassen'
+        );
+        if (!confirmed) return;
+
+        showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
+        try {
+            const result = await applyScheduleDraft(draftId, { clearBlocks: true });
+
+            showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt)`, 'success');
+
+            const draftToMark = drafts.find(d => d.id === draftId);
+            if (draftToMark) {
+                draftToMark.lastAppliedAt = new Date().toISOString();
+                draftToMark.lastAppliedBy = AppState.currentUser?.name || 'Onbekend';
+                draftToMark.lastAppliedFrom = hp.startDate;
+                draftToMark.lastAppliedUntil = hp.endDate;
+            }
+
+            await Promise.all([refreshShifts(), fetchShiftBlocks()]);
+            renderBuilder();
+        } catch (error) {
+            console.error('Error applying vakantie draft:', error);
+            showToast('Fout bij toepassen vakantieconcept: ' + error.message, 'error');
+        } finally {
+            hideSectionLoading('planning-view');
+        }
+        return;
+    }
+
+    // ===== Basisrooster apply flow =====
     const draftGrid = draft.grid || {};
     const isMultiWeek = !!draftGrid._multiWeek;
 
@@ -7527,38 +7818,43 @@ async function applyBuilderDraft(draftId) {
         await saveSchoolYearStart(applyResult.startDate);
 
         // Apply pattern + rotation from draft globally (date-aware)
-        const draftGrid = draft.grid || {};
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const applyFromDate = parseDateOnly(applyResult.startDate);
+        {
+            const applyGrid = draft.grid || {};
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const applyFromDate = parseDateOnly(applyResult.startDate);
 
-        if (draftGrid._pattern) {
-            const currentPattern = getSchedulePattern();
-            let newPatternSetting;
+            if (applyGrid._pattern) {
+                const currentPattern = getSchedulePattern();
+                // Auto-set referentiedatum op maandag van apply-from datum
+                const applyMonday = getMonday(applyFromDate);
+                const autoRefDate = formatDateYYYYMMDD(applyMonday);
 
-            if (applyFromDate > today) {
-                // Future: save with effectiveFrom, keep current as previousPattern
-                newPatternSetting = {
-                    ...draftGrid._pattern,
-                    effectiveFrom: applyResult.startDate,
-                    previousPattern: {
-                        cycleLength: currentPattern.cycleLength,
-                        referenceDate: currentPattern.referenceDate,
-                        weeks: currentPattern.weeks
-                    }
-                };
-            } else {
-                // Today or past: overwrite immediately, no previousPattern needed
-                newPatternSetting = { ...draftGrid._pattern };
-                delete newPatternSetting.effectiveFrom;
-                delete newPatternSetting.previousPattern;
+                let newPatternSetting;
+
+                if (applyFromDate > today) {
+                    newPatternSetting = {
+                        ...applyGrid._pattern,
+                        referenceDate: autoRefDate,
+                        effectiveFrom: applyResult.startDate,
+                        previousPattern: {
+                            cycleLength: currentPattern.cycleLength,
+                            referenceDate: currentPattern.referenceDate,
+                            weeks: currentPattern.weeks
+                        }
+                    };
+                } else {
+                    newPatternSetting = { ...applyGrid._pattern, referenceDate: autoRefDate };
+                    delete newPatternSetting.effectiveFrom;
+                    delete newPatternSetting.previousPattern;
+                }
+
+                await saveSettings('schedule_pattern', newPatternSetting);
+                DataStore.settings.schedulePattern = newPatternSetting;
+                DataStore.settings.biWeeklyReferenceDate = applyGrid._pattern.referenceDate;
+
+                saveToStorage();
             }
-
-            await saveSettings('schedule_pattern', newPatternSetting);
-            DataStore.settings.schedulePattern = newPatternSetting;
-            DataStore.settings.biWeeklyReferenceDate = draftGrid._pattern.referenceDate;
-
-            saveToStorage();
         }
         // Rotation is managed via Settings > Planning, not per concept
 
@@ -7872,19 +8168,11 @@ function attachBuilderOverviewListeners(container) {
         uploadBtn.addEventListener('click', () => uploadBuilderDraft());
     }
 
-    // New concept card (dashed)
+    // New concept card (dashed) — show type selection modal
     const newConceptCard = document.getElementById('builder-new-concept-card');
     if (newConceptCard) {
         newConceptCard.addEventListener('click', () => {
-            AppState.builderGrid = {};
-            AppState.builderGridByWeek = {};
-            AppState.builderLoadedDraftId = null;
-            AppState.builderLoadedDraftName = null;
-            AppState.builderPattern = null;
-                    AppState.builderIsDirty = false;
-            AppState.builderWeekNumber = 1;
-            AppState.builderScreen = 'editor';
-            renderBuilder();
+            showNewConceptTypeModal();
         });
     }
 
@@ -7926,6 +8214,27 @@ function attachBuilderOverviewListeners(container) {
             downloadBuilderDraft(btn.dataset.draftId);
         });
     });
+
+    // Kebab menu toggle
+    container.querySelectorAll('.concept-card-menu-trigger').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const menu = btn.closest('.concept-card-menu');
+            const wasOpen = menu.classList.contains('open');
+            // Sluit alle open menus
+            document.querySelectorAll('.concept-card-menu.open').forEach(m => m.classList.remove('open'));
+            if (!wasOpen) {
+                menu.classList.add('open');
+                // Sluit bij volgende klik ergens
+                setTimeout(() => {
+                    document.addEventListener('click', function closeMenu() {
+                        menu.classList.remove('open');
+                        document.removeEventListener('click', closeMenu);
+                    }, { once: true });
+                }, 0);
+            }
+        });
+    });
 }
 
 function attachBuilderEventListeners(container) {
@@ -7942,57 +8251,41 @@ function attachBuilderEventListeners(container) {
         });
     }
 
-    // Settings panel toggles
-    const patternToggle = document.getElementById('builder-pattern-toggle');
-    if (patternToggle) {
-        patternToggle.addEventListener('click', () => {
-            AppState.builderPatternExpanded = !AppState.builderPatternExpanded;
-            document.getElementById('builder-pattern-panel')?.classList.toggle('expanded');
-        });
-    }
-    // Pattern panel: save locally (not global until draft is applied)
-    const savePatternBtn = document.getElementById('save-schedule-pattern-btn');
-    if (savePatternBtn) {
-        savePatternBtn.addEventListener('click', () => {
-            const newPattern = collectPatternFromUI();
-            if (!newPattern) return;
-            AppState.builderPattern = newPattern;
-            AppState.builderIsDirty = true;
-            renderBuilder();
-            showToast('Patroon bijgewerkt (wordt opgeslagen bij concept opslaan)', 'info');
-        });
-    }
-    const cycleLengthInput = document.getElementById('schedule-cycle-length');
-    if (cycleLengthInput) {
-        cycleLengthInput.addEventListener('change', function() {
-            const newLength = Math.max(1, Math.min(8, parseInt(this.value) || 2));
-            this.value = newLength;
-            const weeksContainer = document.getElementById('schedule-pattern-weeks');
-            if (!weeksContainer) return;
-            const pattern = getBuilderPattern();
-            const dayLabels = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
-            let html = '';
-            for (let w = 1; w <= newLength; w++) {
-                const closed = (w <= (pattern.cycleLength || 2)) ? getBuilderClosedDays(w) : [];
-                html += `<div class="form-group schedule-pattern-week">
-                    <label>Week ${w} - Gesloten dagen:</label>
-                    <div class="schedule-pattern-days">
-                        ${[1,2,3,4,5,6,0].map(d => `<label class="schedule-day-checkbox">
-                            <input type="checkbox" class="pattern-closed-day" data-week="${w}" data-day="${d}" ${closed.includes(d) ? 'checked' : ''}>
-                            <span>${dayLabels[d]}</span>
-                        </label>`).join('')}
-                    </div>
-                </div>`;
-            }
-            weeksContainer.innerHTML = html;
-        });
-    }
-
     // Week toggle buttons (dynamic based on builder cycle length)
     const cycleLen = getBuilderCycleLength();
     for (let w = 1; w <= cycleLen; w++) {
         const btn = document.getElementById(`builder-week-${w}`);
-        if (btn) btn.addEventListener('click', () => switchBuilderWeek(w));
+        if (btn) btn.addEventListener('click', (e) => {
+            // Check if × button was clicked
+            if (e.target.classList.contains('builder-week-remove')) {
+                e.stopPropagation();
+                removeBuilderWeek(parseInt(e.target.dataset.week));
+                return;
+            }
+            switchBuilderWeek(w);
+        });
+    }
+    // Add week button
+    const addWeekBtn = document.getElementById('builder-add-week');
+    if (addWeekBtn) addWeekBtn.addEventListener('click', addBuilderWeek);
+
+    // Day header toggle (open/closed)
+    container.querySelectorAll('.builder-day-toggle').forEach(header => {
+        header.addEventListener('click', () => {
+            const jsDow = parseInt(header.dataset.jsdow);
+            if (!isNaN(jsDow)) toggleBuilderClosedDay(jsDow);
+        });
+    });
+
+    // Vakantie verantwoordelijke picker (per week)
+    const vakantieRespSelect = document.getElementById('builder-vakantie-responsible');
+    if (vakantieRespSelect) {
+        vakantieRespSelect.addEventListener('change', async (e) => {
+            const periodId = AppState.builderHolidayPeriodId;
+            if (!periodId) return;
+            const weekNum = parseInt(e.target.dataset.week) || AppState.builderWeekNumber;
+            await setHolidayWeekResponsible(periodId, weekNum, e.target.value);
+        });
     }
 
     // Team filter
@@ -8017,7 +8310,14 @@ function attachBuilderEventListeners(container) {
         AppState.builderGridByWeek = {};
         AppState.builderLoadedDraftId = null;
         AppState.builderLoadedDraftName = null;
-        AppState.builderPattern = null;
+        // Reset naar 1 week, alle dagen open
+        AppState.builderPattern = {
+            cycleLength: 1,
+            referenceDate: getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '',
+            weeks: { '1': { closedDays: [], label: 'alle dagen open' } }
+        };
+        AppState.builderConceptType = 'basis';
+        AppState.builderHolidayPeriodId = null;
             AppState.builderIsDirty = false;
         renderBuilder();
         showToast('Grid leeggemaakt', 'info');
@@ -9855,13 +10155,18 @@ function renderHolidayPeriods() {
         if (isPast) statusClass = 'past';
         else if (isActive) statusClass = 'active';
 
+        // Calculate weeks in this period
+        const periodMonday = getMondayOfWeek(start);
+        const periodEndMonday = getMondayOfWeek(end);
+        const totalWeeks = Math.floor((periodEndMonday - periodMonday) / (7 * 86400000)) + 1;
+
         return `
         <div class="holiday-period-item ${statusClass}">
             <div class="holiday-period-info">
                 <span class="holiday-period-name">${escapeHtml(period.name)}</span>
                 <span class="holiday-period-dates">
                     ${formatDateShort(period.startDate)} - ${formatDateShort(period.endDate)}
-                    <span class="holiday-period-days">(${days} dagen)</span>
+                    <span class="holiday-period-days">(${days} dagen, ${totalWeeks} ${totalWeeks === 1 ? 'week' : 'weken'})</span>
                 </span>
             </div>
             <button class="btn-icon-only danger" onclick="deleteHolidayPeriod(${period.id})" title="Verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
@@ -9872,6 +10177,29 @@ function renderHolidayPeriods() {
 function formatDateShort(date) {
     const d = parseDateOnly(date);
     return d.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+async function setHolidayResponsible(periodId, employeeId) {
+    const periods = DataStore.settings.holidayPeriods || [];
+    const period = periods.find(p => p.id === periodId || String(p.id) === String(periodId));
+    if (!period) return;
+    period.responsibleId = employeeId || null;
+    await saveSettings('holidayPeriods', periods);
+    showToast('Verantwoordelijke ingesteld', 'success');
+}
+
+async function setHolidayWeekResponsible(periodId, weekNum, employeeId) {
+    const periods = DataStore.settings.holidayPeriods || [];
+    const period = periods.find(p => p.id === periodId || String(p.id) === String(periodId));
+    if (!period) return;
+    if (!period.weeklyResponsibles) period.weeklyResponsibles = {};
+    if (employeeId) {
+        period.weeklyResponsibles[String(weekNum)] = employeeId;
+    } else {
+        delete period.weeklyResponsibles[String(weekNum)];
+    }
+    await saveSettings('holidayPeriods', periods);
+    showToast(`Verantwoordelijke week ${weekNum} ingesteld`, 'success');
 }
 
 function openAddHolidayModal() {
@@ -9979,7 +10307,34 @@ function saveHolidayPeriod() {
 }
 
 async function deleteHolidayPeriod(id) {
-    if (await showConfirm('Weet je zeker dat je deze vakantieperiode wilt verwijderen?')) {
+    const linkedDrafts = (DataStore.settings.schedule_drafts || []).filter(d => d.type === 'vakantie' && String(d.holidayPeriodId) === String(id));
+    const activeDrafts = linkedDrafts.filter(d => d.lastAppliedAt);
+    const savedDrafts = linkedDrafts.filter(d => !d.lastAppliedAt);
+
+    let msg = 'Weet je zeker dat je deze vakantieperiode wilt verwijderen?';
+    if (linkedDrafts.length > 0) {
+        const names = linkedDrafts.map(d => `"${d.name}"`).join(', ');
+        msg += `\n\n${linkedDrafts.length} gekoppeld(e) concept(en): ${names}`;
+        if (activeDrafts.length > 0) {
+            msg += `\n\nLet op: ${activeDrafts.length} concept(en) ${activeDrafts.length === 1 ? 'is' : 'zijn'} toegepast. Bestaande shifts blijven staan maar het concept wordt ontkoppeld.`;
+        }
+        msg += '\n\nAlle gekoppelde concepten worden verwijderd.';
+    }
+    if (await showConfirm(msg)) {
+        // Verwijder alle gekoppelde concepten
+        if (DataStore._draftsFromTable) {
+            for (const draft of linkedDrafts) {
+                try {
+                    await deleteScheduleDraft(draft.id);
+                } catch (e) {
+                    console.error('Error deleting linked vakantie draft:', e);
+                }
+            }
+        }
+        // Verwijder ook uit lokale cache
+        DataStore.settings.schedule_drafts = (DataStore.settings.schedule_drafts || []).filter(
+            d => !(d.type === 'vakantie' && String(d.holidayPeriodId) === String(id))
+        );
         removeHolidayPeriod(id);
         renderSettings();
     }
@@ -10150,12 +10505,15 @@ function renderUpcomingResponsibles() {
             if (responsible) {
                 const teamColor = DataStore.settings.teams[responsible.mainTeam]?.color || '#6b7280';
                 const responsibleName = escapeHtml(responsible.name);
-                const manualBadge = isManual ? ' <span class="upcoming-manual-badge">handmatig</span>' : '';
+                const weekHoliday = typeof getHolidayPeriod === 'function' ? getHolidayPeriod(weekendSat) : null;
+                const isVakantieResp = weekHoliday && weekHoliday.responsibleId;
+                const badge = isVakantieResp ? ' <span class="upcoming-manual-badge" style="background:#f59e0b;color:#fff;">vakantie</span>'
+                    : isManual ? ' <span class="upcoming-manual-badge">handmatig</span>' : '';
                 html += `
                 <div class="upcoming-item upcoming-item-clickable" data-monday="${mondayKey}">
                     <span class="upcoming-date">${dateDisplay}</span>
                     <span class="upcoming-name" style="border-left: 3px solid ${teamColor}; padding-left: 8px;">
-                        ${responsibleName}${manualBadge}
+                        ${responsibleName}${badge}
                     </span>
                     <span class="upcoming-edit-icon">${IconHelper.html(ICONS.edit, 'xs')}</span>
                 </div>`;
