@@ -1746,9 +1746,15 @@ async function switchView(viewName) {
         AppState.builderIsDirty = false;
         AppState.builderLoadedDraftId = null;
         AppState.builderLoadedDraftName = null;
+        AppState.builderPattern = null;
+        AppState.builderConceptType = 'basis';
+        AppState.builderHolidayPeriodId = null;
     } else if (AppState.currentView === 'builder' && viewName !== 'builder') {
         // Also reset when leaving builder without unsaved changes
         AppState.builderScreen = 'overview';
+        AppState.builderPattern = null;
+        AppState.builderConceptType = 'basis';
+        AppState.builderHolidayPeriodId = null;
     }
     // Clear undo history when switching views
     UndoManager.clear();

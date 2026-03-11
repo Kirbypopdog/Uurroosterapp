@@ -1465,10 +1465,14 @@ async function regenerateShiftsForUser(client, userId, { clearBlocks = false, ov
   const blockedDates = new Set(blocks.rows.map(r => r.date));
 
   // 8b. Load active vakantieconcept date ranges — skip these dates during base regeneration
+  // Only include periods that overlap with the regeneration range (not expired past periods)
   const vakantieRanges = [];
   try {
     const vakDrafts = await client.query(
-      `SELECT holiday_period_id FROM schedule_drafts WHERE type = 'vakantie' AND last_applied_at IS NOT NULL`
+      `SELECT holiday_period_id FROM schedule_drafts
+       WHERE type = 'vakantie' AND last_applied_at IS NOT NULL
+       AND (last_applied_until IS NULL OR last_applied_until >= $1::date)`,
+      [startStr]
     );
     if (vakDrafts.rows.length > 0) {
       const hpResult = await client.query(`SELECT value FROM settings WHERE key = 'holidayPeriods'`);
@@ -1476,7 +1480,10 @@ async function regenerateShiftsForUser(client, userId, { clearBlocks = false, ov
       for (const row of vakDrafts.rows) {
         const hp = holidayPeriods.find(p => String(p.id) === String(row.holiday_period_id));
         if (hp && hp.startDate && hp.endDate) {
-          vakantieRanges.push({ start: hp.startDate, end: hp.endDate });
+          // Only include if the period overlaps with the regeneration range
+          if (hp.endDate >= startStr && hp.startDate <= endStr) {
+            vakantieRanges.push({ start: hp.startDate, end: hp.endDate });
+          }
         }
       }
     }
