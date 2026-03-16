@@ -8158,8 +8158,8 @@ async function applyBuilderDraft(draftId) {
         if (result.needsManualConfirmation) {
             hideSectionLoading('planning-view');
             const overwrite = await showConfirm(
-                `Er zijn ${result.manualShiftCount} handmatig gewijzigde diensten in deze periode.\n\nWil je deze overschrijven?\n\n• OK = handmatige wijzigingen worden overschreven\n• Annuleren = handmatige wijzigingen worden behouden`,
-                'Diensten overschrijven?'
+                `Er zijn ${result.manualShiftCount} diensten die handmatig zijn aangepast (bijv. geruild, tijden gewijzigd of handmatig toegevoegd).\n\nWat wil je doen?\n\n• OK — Alles overschrijven met het concept (handmatige aanpassingen gaan verloren)\n• Annuleren — Alleen automatische diensten vervangen, handmatige aanpassingen behouden`,
+                'Handmatige diensten gevonden'
             );
             showSectionLoading('planning-view', 'Concept toepassen...');
             result = await applyScheduleDraft(draftId, {

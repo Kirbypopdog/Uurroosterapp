@@ -514,39 +514,6 @@ async function ensureSchema() {
 // Run schema check on startup
 ensureSchema().catch(console.error);
 
-// Auto-activeer ingeplande concepten waarvan de startdatum bereikt is
-async function autoActivateScheduledDrafts() {
-  const client = await pool.connect();
-  try {
-    const today = new Date();
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-    // Vind concepten die ingepland zijn (valid_from <= vandaag) maar nog niet toegepast
-    const scheduled = await client.query(
-      `SELECT id, name, valid_from, valid_until FROM schedule_drafts
-       WHERE last_applied_at IS NULL
-       AND valid_from IS NOT NULL AND valid_from <= $1
-       AND (valid_until IS NULL OR valid_until >= $1)`,
-      [todayStr]
-    );
-
-    for (const draft of scheduled.rows) {
-      console.log(`[Auto-activate] Activating scheduled draft: "${draft.name}" (${draft.id}), valid_from: ${draft.valid_from}`);
-      // Markeer als toegepast (shifts moeten nog handmatig worden toegepast via de UI)
-      // We loggen alleen dat het concept klaar is voor activatie
-      // Volledige auto-apply vereist de grid data + complexe logica, dus we markeren het als 'activatable'
-      console.log(`[Auto-activate] Draft "${draft.name}" is klaar om toe te passen (startdatum bereikt)`);
-    }
-  } catch (err) {
-    console.error('[Auto-activate] Error checking scheduled drafts:', err.message);
-  } finally {
-    client.release();
-  }
-}
-
-// Run auto-activation check after schema is ready
-setTimeout(() => autoActivateScheduledDrafts().catch(console.error), 2000);
-
 function signToken(user) {
   return jwt.sign(
     { id: user.id, role: user.role, team_id: user.team_id },
