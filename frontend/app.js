@@ -10590,11 +10590,11 @@ function renderSettingsBeheer(container) {
                     <div class="audit-filter-row">
                         <div class="form-group">
                             <label>Van</label>
-                            <input type="date" id="audit-start-date" class="form-input">
+                            <input type="date" id="audit-start-date" class="form-input" value="${getDefaultAuditStartDate()}">
                         </div>
                         <div class="form-group">
                             <label>Tot</label>
-                            <input type="date" id="audit-end-date" class="form-input">
+                            <input type="date" id="audit-end-date" class="form-input" value="${formatDateYYYYMMDD(new Date())}">
                         </div>
                         <div class="form-group">
                             <label>Actie</label>
@@ -10628,6 +10628,11 @@ function renderSettingsBeheer(container) {
                             <button class="btn btn-secondary" onclick="exportAuditLog()">Exporteer CSV</button>
                         </div>
                     </div>
+                    <label class="toggle-switch-label mt-sm">
+                        <input type="checkbox" id="audit-show-system" class="toggle-switch-input" onchange="loadAuditLog(1)">
+                        <span class="toggle-switch-slider"></span>
+                        <span class="toggle-switch-text">Toon systeem-acties</span>
+                    </label>
                 </div>
                 <div id="audit-log-results"></div>
                 <div id="audit-log-pagination" class="audit-pagination"></div>
@@ -10674,6 +10679,29 @@ const AUDIT_RESOURCE_LABELS = {
     settings: 'Instelling'
 };
 
+const AUDIT_SYSTEM_ACTIONS = new Set(['MIGRATE', 'IMPORT']);
+
+function getDefaultAuditStartDate() {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return formatDateYYYYMMDD(d);
+}
+
+function getDateGroup(dateStr) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const d = new Date(dateStr);
+    d.setHours(0, 0, 0, 0);
+    if (d.getTime() === today.getTime()) return 'Vandaag';
+    if (d.getTime() === yesterday.getTime()) return 'Gisteren';
+    if (d >= weekAgo) return 'Deze week';
+    return 'Ouder';
+}
+
 async function loadAuditLog(page) {
     const resultsEl = document.getElementById('audit-log-results');
     const paginationEl = document.getElementById('audit-log-pagination');
@@ -10692,7 +10720,13 @@ async function loadAuditLog(page) {
 
     try {
         const data = await fetchAuditLog(filters);
-        const logs = data.logs || [];
+        let logs = data.logs || [];
+
+        // Filter system actions unless toggle is on
+        const showSystem = document.getElementById('audit-show-system')?.checked;
+        if (!showSystem) {
+            logs = logs.filter(log => !AUDIT_SYSTEM_ACTIONS.has(log.action));
+        }
 
         if (logs.length === 0) {
             resultsEl.innerHTML = '<div class="info-box neutral"><p>Geen resultaten gevonden.</p></div>';
@@ -10700,49 +10734,66 @@ async function loadAuditLog(page) {
             return;
         }
 
-        let html = '<table class="audit-log-table"><thead><tr>';
-        html += '<th>Tijdstip</th><th>Gebruiker</th><th>Actie</th><th>Type</th><th>Details</th>';
-        html += '</tr></thead><tbody>';
-
+        // Group logs by date category
+        const groups = {};
+        const groupOrder = ['Vandaag', 'Gisteren', 'Deze week', 'Ouder'];
         logs.forEach(log => {
-            const time = new Date(log.created_at);
-            const timeStr = time.toLocaleDateString('nl-BE', { day: '2-digit', month: '2-digit', year: '2-digit' })
-                + ' ' + time.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
-
-            const actionLabel = AUDIT_ACTION_LABELS[log.action] || log.action;
-            const resourceLabel = AUDIT_RESOURCE_LABELS[log.resource_type] || log.resource_type;
-            const actionClass = log.action.toLowerCase();
-
-            let detailStr = '';
-            if (log.details && typeof log.details === 'object') {
-                if (log.details.before && log.details.after) {
-                    detailStr = formatAuditDiff(log.details.before, log.details.after);
-                } else if (log.details.shift) {
-                    const s = log.details.shift;
-                    detailStr = `${s.date || ''} ${s.startTime || s.start_time || ''}-${s.endTime || s.end_time || ''}`;
-                } else if (log.details.availability) {
-                    const a = log.details.availability;
-                    detailStr = `${a.date || ''} ${a.type || ''}`;
-                } else if (log.details.key) {
-                    detailStr = log.details.key;
-                } else if (log.details.user) {
-                    detailStr = log.details.user.name || log.details.user.email || '';
-                } else {
-                    const keys = Object.keys(log.details);
-                    if (keys.length > 0) detailStr = keys.join(', ');
-                }
-            }
-
-            html += `<tr>
-                <td class="audit-time">${escapeHtml(timeStr)}</td>
-                <td>${escapeHtml(log.actor_name)}</td>
-                <td><span class="audit-action-badge audit-${actionClass}">${escapeHtml(actionLabel)}</span></td>
-                <td>${escapeHtml(resourceLabel)}</td>
-                <td class="audit-details">${escapeHtml(detailStr)}</td>
-            </tr>`;
+            const group = getDateGroup(log.created_at);
+            if (!groups[group]) groups[group] = [];
+            groups[group].push(log);
         });
 
-        html += '</tbody></table>';
+        let html = '';
+        groupOrder.forEach(groupName => {
+            const groupLogs = groups[groupName];
+            if (!groupLogs || groupLogs.length === 0) return;
+
+            html += `<div class="audit-date-group">
+                <h4 class="audit-date-group-title">${groupName} <span class="text-muted fw-500">(${groupLogs.length})</span></h4>
+                <table class="audit-log-table"><thead><tr>
+                    <th>Tijdstip</th><th>Gebruiker</th><th>Actie</th><th>Type</th><th>Details</th>
+                </tr></thead><tbody>`;
+
+            groupLogs.forEach(log => {
+                const time = new Date(log.created_at);
+                const timeStr = time.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+
+                const actionLabel = AUDIT_ACTION_LABELS[log.action] || log.action;
+                const resourceLabel = AUDIT_RESOURCE_LABELS[log.resource_type] || log.resource_type;
+                const actionClass = log.action.toLowerCase();
+
+                let detailStr = '';
+                if (log.details && typeof log.details === 'object') {
+                    if (log.details.before && log.details.after) {
+                        detailStr = formatAuditDiff(log.details.before, log.details.after);
+                    } else if (log.details.shift) {
+                        const s = log.details.shift;
+                        detailStr = `${s.date || ''} ${s.startTime || s.start_time || ''}-${s.endTime || s.end_time || ''}`;
+                    } else if (log.details.availability) {
+                        const a = log.details.availability;
+                        detailStr = `${a.date || ''} ${a.type || ''}`;
+                    } else if (log.details.key) {
+                        detailStr = log.details.key;
+                    } else if (log.details.user) {
+                        detailStr = log.details.user.name || log.details.user.email || '';
+                    } else {
+                        const keys = Object.keys(log.details);
+                        if (keys.length > 0) detailStr = keys.join(', ');
+                    }
+                }
+
+                html += `<tr>
+                    <td class="audit-time">${escapeHtml(timeStr)}</td>
+                    <td>${escapeHtml(log.actor_name)}</td>
+                    <td><span class="audit-action-badge audit-${actionClass}">${escapeHtml(actionLabel)}</span></td>
+                    <td>${escapeHtml(resourceLabel)}</td>
+                    <td class="audit-details">${escapeHtml(detailStr)}</td>
+                </tr>`;
+            });
+
+            html += '</tbody></table></div>';
+        });
+
         resultsEl.innerHTML = html;
         IconHelper.init(resultsEl);
 

@@ -10422,6 +10422,15 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .audit-page-info { font-size: 13px; color: var(--text-secondary); }
 
+.audit-date-group { margin-bottom: var(--space-lg); }
+.audit-date-group-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: var(--space-xs) 0;
+    margin-bottom: var(--space-xs);
+    border-bottom: 1px solid var(--border-color);
+}
 /* Reduced motion - respect user preferences */
 @media (prefers-reduced-motion: reduce) {
     *,
