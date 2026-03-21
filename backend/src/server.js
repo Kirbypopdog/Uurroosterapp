@@ -1241,6 +1241,11 @@ app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (re
       [passwordHash, userId]
     );
     await logAudit(req, 'UPDATE', 'user', userId, { action: 'password_reset' });
+    // Send password reset email (fire-and-forget)
+    const userResult = await pool.query('SELECT name, email FROM users WHERE id = $1', [userId]);
+    if (userResult.rows[0]) {
+      emailService.notifyPasswordReset(userResult.rows[0], DEFAULT_RESET_PASSWORD);
+    }
     res.json({ ok: true, newPassword: DEFAULT_RESET_PASSWORD });
   } catch (err) {
     console.error(err);

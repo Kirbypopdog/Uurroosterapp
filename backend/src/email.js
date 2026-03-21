@@ -270,6 +270,24 @@ async function notifyWelcome(newUser, password) {
   sendEmailAsync(newUser.email, 'Welkom bij Het Vlot Roosterplanning', html);
 }
 
+/**
+ * 11. Wachtwoord reset email
+ */
+async function notifyPasswordReset(user, newPassword) {
+  if (!await isTypeEnabled('welcome')) return;
+  const html = baseTemplate('Wachtwoord gereset', `
+    <h2>Wachtwoord gereset</h2>
+    <p>Hallo ${user.name},</p>
+    <p>Je wachtwoord is gereset door een administrator.</p>
+    <div class="detail-box">
+      <p class="detail-label">Nieuw wachtwoord</p>
+      <p><strong>${newPassword}</strong></p>
+    </div>
+    <p>Wijzig je wachtwoord na je eerste login via je profiel.</p>
+  `);
+  sendEmailAsync(user.email, 'Wachtwoord gereset — Het Vlot Rooster', html);
+}
+
 module.exports = {
   sendEmail,
   sendEmailAsync,
@@ -280,5 +298,6 @@ module.exports = {
   notifySwapRejected,
   notifyTakeoverAccepted,
   notifyRequestCancelled,
-  notifyWelcome
+  notifyWelcome,
+  notifyPasswordReset
 };

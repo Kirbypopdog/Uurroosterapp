@@ -563,6 +563,50 @@ textarea {
 .home-card:hover {
     box-shadow: var(--shadow-lg);
     transform: translateY(-2px);
+}
+
+/* Onboarding checklist */
+.onboarding-checklist {
+    border-left: 4px solid var(--primary-color);
+    padding: 20px 24px;
+}
+.onboarding-checklist:hover { transform: none; }
+.onboarding-progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.progress-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--border-color);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    background: var(--primary-color);
+    border-radius: 3px;
+    transition: width 0.3s;
+}
+.onboarding-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.onboarding-steps li {
+    padding: 5px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+.onboarding-steps li.done { color: var(--text-secondary); }
+.onboarding-steps li.done a { text-decoration: line-through; color: var(--text-secondary); }
+.onboarding-steps a { color: var(--text-color); text-decoration: none; }
+.onboarding-steps a:hover { color: var(--primary-color); }
+.step-check { width: 20px; text-align: center; font-size: 14px;
     border-color: rgba(var(--primary-rgb), 0.2);
 }
 

@@ -1414,6 +1414,7 @@ function renderHome() {
 
     let html = '';
     html += renderHomeWelcome(user, role);
+    if (role === 'admin') html += renderHomeOnboarding();
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
     html += renderHomeQuickActions(role);
@@ -1446,6 +1447,52 @@ function renderHome() {
         item.style.cursor = 'pointer';
         item.addEventListener('click', () => switchView('swaps'));
     });
+}
+
+function getOnboardingStatus() {
+    const teams = DataStore.settings.teams || {};
+    const templates = DataStore.settings.shiftTemplates || {};
+    const users = DataStore.users || [];
+    const holidays = DataStore.settings.holidayPeriods || [];
+    const rules = DataStore.settings.rules || {};
+
+    return [
+        { id: 'teams', label: 'Teams aanmaken', done: Object.keys(teams).length > 0, view: 'settings', tab: 'teams' },
+        { id: 'templates', label: 'Dienst templates instellen', done: Object.keys(templates).length > 0, view: 'settings', tab: 'teams' },
+        { id: 'users', label: 'Medewerkers toevoegen', done: users.filter(u => u.role === 'medewerker').length > 0, view: 'settings', tab: 'accounts' },
+        { id: 'rules', label: 'Planningsregels controleren', done: rules.minHoursBetweenShifts != null, view: 'settings', tab: 'planning' },
+        { id: 'holidays', label: 'Vakantieperiodes invoeren', done: holidays.length > 0, view: 'settings', tab: 'planning' },
+        { id: 'schedule', label: 'Basisrooster maken', done: DataStore.shifts.length > 0, view: 'builder' },
+        { id: 'email', label: 'Email notificaties configureren', done: DataStore.settings.emailNotifications?.globalEnabled === true, view: 'settings', tab: 'communicatie' }
+    ];
+}
+
+function renderHomeOnboarding() {
+    if (sessionStorage.getItem('hideOnboardingChecklist')) return '';
+
+    const steps = getOnboardingStatus();
+    const doneCount = steps.filter(s => s.done).length;
+    if (doneCount === steps.length) return ''; // All done
+
+    const pct = Math.round((doneCount / steps.length) * 100);
+
+    return `
+    <div class="home-card onboarding-checklist" style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <h3 style="margin: 0; font-size: 16px;">App instellen</h3>
+            <button class="btn btn-sm btn-ghost" onclick="sessionStorage.setItem('hideOnboardingChecklist','1');this.closest('.onboarding-checklist').remove()" title="Verbergen">✕</button>
+        </div>
+        <div class="onboarding-progress">
+            <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+            <span style="font-size: 13px; color: var(--text-secondary); white-space: nowrap;">${doneCount}/${steps.length}</span>
+        </div>
+        <ul class="onboarding-steps">
+            ${steps.map(s => `<li class="${s.done ? 'done' : ''}">
+                <span class="step-check">${s.done ? '✓' : '○'}</span>
+                <a href="#" onclick="event.preventDefault();${s.tab ? `AppState.settingsActiveTab='${s.tab}';` : ''}switchView('${s.view}');">${s.label}</a>
+            </li>`).join('')}
+        </ul>
+    </div>`;
 }
 
 function renderHomeWelcome(user, role) {
@@ -9874,12 +9921,6 @@ function renderSettingsPlanning(container) {
                 </div>
                 <hr style="margin: 16px 0; border-color: var(--border-color);">
                 <div class="form-group">
-                    <label>Bezettingsteams:</label>
-                    <p class="form-hint" style="margin-bottom: 8px;">Welke teams tellen mee in de bezetting? (planning + roosterbouwer)</p>
-                    <div id="coverage-teams-checkboxes">${renderCoverageTeamsCheckboxes()}</div>
-                </div>
-                <hr style="margin: 16px 0; border-color: var(--border-color);">
-                <div class="form-group">
                     <label for="rule-max-consecutive">Max opeenvolgende werkdagen:</label>
                     <div class="input-with-unit">
                         <input type="number" id="rule-max-consecutive" class="form-input" value="${rules.maxConsecutiveDays || 6}" min="1" max="14" />
@@ -9932,39 +9973,7 @@ function renderSettingsPlanning(container) {
             </div>
         </div>
 
-        <!-- Weekendverantwoordelijke -->
-        <div class="settings-card" id="settings-weekend-responsible" style="margin-top: 24px;">
-            <div class="settings-card-header">
-                <div class="settings-card-title">
-                    <h3>Weekendverantwoordelijke</h3>
-                    <p class="settings-card-subtitle">Automatische rotatie voor open weekenden.</p>
-                </div>
-            </div>
-            <div class="settings-card-body">
-                <div class="form-group">
-                    <label>Teams in rotatie:</label>
-                    <div class="eligible-teams-compact">
-                        ${renderEligibleTeamsCheckboxes()}
-                    </div>
-                </div>
-                <div class="rotation-form" style="margin-top:12px">
-                    ${renderRotationSettingsCompact()}
-                </div>
-                <div class="upcoming-section" style="margin-top:20px">
-                    <h4 style="font-size:14px;margin:0 0 10px">Komende open weekenden</h4>
-                    <div class="upcoming-responsibles">
-                        ${renderUpcomingResponsibles()}
-                    </div>
-                </div>
-            </div>
-        </div>
     `;
-
-    // Attach click listeners for weekend picker after DOM is set
-    requestAnimationFrame(() => {
-        const upcomingContainer = container.querySelector('.upcoming-responsibles');
-        if (upcomingContainer) attachUpcomingWeekendListeners(upcomingContainer);
-    });
 }
 
 // ===== SETTINGS TAB: ROOSTER =====
@@ -10041,6 +10050,19 @@ function renderSettingsTeams(container) {
             </div>
         </div>
 
+        <!-- Bezettingsteams -->
+        <div class="settings-card" style="margin-top: 24px;">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Bezettingsteams</h3>
+                    <p class="settings-card-subtitle">Welke teams tellen mee in de bezetting? (planning + roosterbouwer)</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div id="coverage-teams-checkboxes">${renderCoverageTeamsCheckboxes()}</div>
+            </div>
+        </div>
+
         <!-- Dienst templates -->
         <div class="settings-card" id="settings-templates" style="margin-top: 24px;">
             <div class="settings-card-header">
@@ -10058,10 +10080,43 @@ function renderSettingsTeams(container) {
                 </div>
             </div>
         </div>
+
+        <!-- Weekendverantwoordelijke -->
+        <div class="settings-card" id="settings-weekend-responsible" style="margin-top: 24px;">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Weekendverantwoordelijke</h3>
+                    <p class="settings-card-subtitle">Automatische rotatie voor open weekenden.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="form-group">
+                    <label>Teams in rotatie:</label>
+                    <div class="eligible-teams-compact">
+                        ${renderEligibleTeamsCheckboxes()}
+                    </div>
+                </div>
+                <div class="rotation-form" style="margin-top:12px">
+                    ${renderRotationSettingsCompact()}
+                </div>
+                <div class="upcoming-section" style="margin-top:20px">
+                    <h4 style="font-size:14px;margin:0 0 10px">Komende open weekenden</h4>
+                    <div class="upcoming-responsibles">
+                        ${renderUpcomingResponsibles()}
+                    </div>
+                </div>
+            </div>
+        </div>
     `;
 
     // Event listener for add team button
     document.getElementById('btn-add-team')?.addEventListener('click', openAddTeamModal);
+
+    // Attach click listeners for weekend picker after DOM is set
+    requestAnimationFrame(() => {
+        const upcomingContainer = container.querySelector('.upcoming-responsibles');
+        if (upcomingContainer) attachUpcomingWeekendListeners(upcomingContainer);
+    });
 }
 
 async function editTeam(teamId) {
@@ -10468,6 +10523,7 @@ function renderSettingsBeheer(container) {
                         </div>
                         <div class="form-group" style="align-self: flex-end;">
                             <button class="btn btn-primary" onclick="loadAuditLog(1)">Zoeken</button>
+                            <button class="btn btn-secondary" onclick="exportAuditLog()">Exporteer CSV</button>
                         </div>
                     </div>
                 </div>
@@ -10618,6 +10674,68 @@ function formatAuditDiff(before, after) {
     return changes.slice(0, 3).join(', ');
 }
 
+function formatAuditDetailsForCSV(details) {
+    if (!details || typeof details !== 'object') return '';
+    if (details.before && details.after) {
+        return formatAuditDiff(details.before, details.after);
+    } else if (details.shift) {
+        const s = details.shift;
+        return `${s.date || ''} ${s.startTime || s.start_time || ''}-${s.endTime || s.end_time || ''} ${s.team || ''}`.trim();
+    } else if (details.availability) {
+        const a = details.availability;
+        return `${a.date || ''} ${a.type || ''}`.trim();
+    } else if (details.key) {
+        return details.key;
+    } else if (details.user) {
+        return details.user.name || details.user.email || '';
+    }
+    const keys = Object.keys(details);
+    return keys.length > 0 ? keys.join(', ') : '';
+}
+
+async function exportAuditLog() {
+    showToast('Audit log exporteren...', 'info');
+    try {
+        const filters = {
+            page: 1,
+            limit: 10000,
+            action: document.getElementById('audit-action-filter')?.value || '',
+            resourceType: document.getElementById('audit-resource-filter')?.value || '',
+            startDate: document.getElementById('audit-start-date')?.value || '',
+            endDate: document.getElementById('audit-end-date')?.value || ''
+        };
+        const data = await fetchAuditLog(filters);
+        const logs = data.logs || [];
+        if (logs.length === 0) {
+            showToast('Geen resultaten om te exporteren', 'warning');
+            return;
+        }
+        const rows = [['Tijdstip', 'Gebruiker', 'Actie', 'Type', 'Details']];
+        logs.forEach(log => {
+            rows.push([
+                new Date(log.created_at).toLocaleString('nl-BE'),
+                log.actor_name || '',
+                AUDIT_ACTION_LABELS[log.action] || log.action,
+                AUDIT_RESOURCE_LABELS[log.resource_type] || log.resource_type,
+                formatAuditDetailsForCSV(log.details)
+            ]);
+        });
+        const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `audit-log-${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(`${logs.length} regels geexporteerd`, 'success');
+    } catch (err) {
+        showToast('Export mislukt: ' + (err.message || 'Onbekende fout'), 'error');
+    }
+}
+
 async function ensureTeamsLoaded() {
     // Try loading from API, merge with settings teams
     try {
@@ -10743,7 +10861,7 @@ async function updateTeamColor(teamId, color) {
     }
 }
 
-function saveRules() {
+async function saveRules() {
     const minHours = parseInt(document.getElementById('rule-min-hours').value) || 11;
     const maxConsecutive = parseInt(document.getElementById('rule-max-consecutive')?.value) || 6;
     const restAfterNight = document.getElementById('rule-rest-after-night')?.value !== 'false';
@@ -10755,8 +10873,14 @@ function saveRules() {
     DataStore.settings.rules.minFreeWeekendsPerMonth = freeWeekends;
 
     saveToStorage();
-    markSettingsSaved();
-    showToast('Planning regels zijn opgeslagen', 'success');
+    try {
+        await saveSettings('rules', DataStore.settings.rules);
+        markSettingsSaved();
+        showToast('Planning regels zijn opgeslagen', 'success');
+    } catch (err) {
+        console.error('Error saving rules to backend:', err);
+        showToast('Regels lokaal opgeslagen, maar sync naar server mislukt', 'warning');
+    }
 }
 
 async function handleSaveSchoolYear() {
