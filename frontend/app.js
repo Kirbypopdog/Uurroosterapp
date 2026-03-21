@@ -1569,9 +1569,9 @@ function renderHomeOnboarding() {
 async function dismissOnboardingChecklist(btn) {
     btn.closest('.onboarding-checklist').remove();
     try {
-        await fetch(`${API}/me/onboarding-flags`, {
+        await fetch(`${window.API_BASE}/me/onboarding-flags`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionStorage.getItem('token')}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionStorage.getItem('hetvlot_token')}` },
             body: JSON.stringify({ checklist_dismissed: true })
         });
         if (AppState.currentUser) AppState.currentUser.onboardingFlags = { ...AppState.currentUser.onboardingFlags, checklist_dismissed: true };
@@ -2164,10 +2164,14 @@ function changeAvailabilityMobileDay(direction) {
 
     if (AppState.availabilityMobileDayIndex < 0) {
         AppState.availabilityMobileDayIndex = 6;
-        AppState.currentWeekStart.setDate(AppState.currentWeekStart.getDate() - 7);
+        const prev = new Date(AppState.currentWeekStart);
+        prev.setDate(prev.getDate() - 7);
+        AppState.currentWeekStart = prev;
     } else if (AppState.availabilityMobileDayIndex > 6) {
         AppState.availabilityMobileDayIndex = 0;
-        AppState.currentWeekStart.setDate(AppState.currentWeekStart.getDate() + 7);
+        const next = new Date(AppState.currentWeekStart);
+        next.setDate(next.getDate() + 7);
+        AppState.currentWeekStart = next;
     }
 
     renderAvailability();
@@ -3578,7 +3582,7 @@ function renderShiftCard(shift) {
         <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
         <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
         <div class="shift-card-footer">
-            <span class="shift-team-badge team-${shift.team}">${escapeHtml(DataStore.settings.teams[shift.team].name)}</span>
+            <span class="shift-team-badge team-${shift.team}">${escapeHtml(DataStore.settings.teams?.[shift.team]?.name || shift.team || 'Onbekend')}</span>
             ${activityBadge}
             ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">${IconHelper.html(ICONS.close, 'xs')}</button>` : ''}
         </div>
@@ -4384,7 +4388,7 @@ async function handleShiftSubmit(e) {
     }
 
     const shiftData = {
-        employeeId: parseFloat(DOM.shiftEmployee.value),
+        employeeId: parseInt(DOM.shiftEmployee.value, 10),
         team: DOM.shiftTeam.value,
         date: DOM.shiftDate.value,
         startTime: DOM.shiftStart.value,
@@ -4686,7 +4690,7 @@ function renderEmployees() {
     IconHelper.init(DOM.employeesList);
     // Add click handler for employee cards based on permissions
     document.querySelectorAll('.employee-card').forEach(card => {
-        const employeeId = parseFloat(card.dataset.employeeId);
+        const employeeId = parseInt(card.dataset.employeeId, 10);
         const employee = employees.find(e => e.id === employeeId);
         if (employee && canManageEmployee(employee)) {
             card.style.cursor = 'pointer';
@@ -5137,10 +5141,10 @@ function setupProfileWeekScheduleListeners() {
 function renderEmployeeCard(emp) {
     const statusClass = emp.active ? 'active' : 'inactive';
     const statusText = emp.active ? 'Actief' : 'Inactief';
-    const mainTeam = DataStore.settings.teams[emp.mainTeam];
+    const mainTeam = DataStore.settings.teams?.[emp.mainTeam];
     const employeeName = escapeHtml(emp.name);
     const employeeEmail = escapeHtml(emp.email || '');
-    const mainTeamName = escapeHtml(mainTeam.name);
+    const mainTeamName = escapeHtml(mainTeam?.name || emp.mainTeam || 'Onbekend');
     const contractHours = emp.contractHours || 0;
 
     const teamName = (DataStore.settings.teams || {})[emp.mainTeam]?.name || emp.mainTeam || '';
@@ -9348,9 +9352,9 @@ async function switchSettingsTab(tabName) {
 
     // Track onboarding: mark planning tab as visited
     if (tabName === 'planning' && AppState.currentUser && !AppState.currentUser.onboardingFlags?.planning_visited) {
-        fetch(`${API}/me/onboarding-flags`, {
+        fetch(`${window.API_BASE}/me/onboarding-flags`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionStorage.getItem('token')}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionStorage.getItem('hetvlot_token')}` },
             body: JSON.stringify({ planning_visited: true })
         }).catch(e => console.error('Failed to save onboarding flag:', e));
         if (!AppState.currentUser.onboardingFlags) AppState.currentUser.onboardingFlags = {};
@@ -11122,6 +11126,7 @@ async function deleteTemplate(templateId) {
     if (await showConfirm(`Weet je zeker dat je de template "${template.name}" wilt verwijderen?`)) {
         delete DataStore.settings.shiftTemplates[templateId];
         saveToStorage();
+        try { await saveSettings('shiftTemplates', DataStore.settings.shiftTemplates); } catch (e) { console.error('Error saving templates:', e); }
         renderSettings();
     }
 }
@@ -11251,6 +11256,7 @@ function saveTemplate(originalId) {
 
     DataStore.settings.shiftTemplates[id] = { name, start, end, icon };
     saveToStorage();
+    try { saveSettings('shiftTemplates', DataStore.settings.shiftTemplates); } catch (e) { console.error('Error saving templates:', e); }
     closeTemplateModal();
     renderSettings();
 }
@@ -11329,7 +11335,7 @@ async function setHolidayWeekResponsible(periodId, weekNum, employeeId) {
 function openAddHolidayModal() {
     const modalHtml = `
     <div class="modal" id="holiday-modal" onclick="closeHolidayModal()">
-        <div class="modal-content" onclick="event.stopPropagation()" class="modal-content--sm">
+        <div class="modal-content modal-content--sm" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <h2>Vakantieperiode toevoegen</h2>
                 <button class="modal-close" onclick="closeHolidayModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
@@ -11487,6 +11493,7 @@ async function saveTeamToggles() {
     }
     DataStore.settings.responsibleRotation.eligibleTeams = eligibleTeams;
 
+    try { await saveSettings('responsibleRotation', DataStore.settings.responsibleRotation); } catch (e) { console.error('Error saving responsibleRotation:', e); }
     saveToStorage();
 
     showToast('Teaminstellingen opgeslagen', 'success');
@@ -11569,7 +11576,7 @@ function saveRotationSettings() {
         return;
     }
 
-    setRotationStart(date, parseFloat(employeeId));
+    setRotationStart(date, parseInt(employeeId, 10));
     renderSettings();
     renderPlanning();
     showToast('Rotatie ingesteld', 'success');

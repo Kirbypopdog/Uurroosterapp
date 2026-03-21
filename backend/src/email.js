@@ -112,6 +112,16 @@ function sendEmailAsync(to, subject, html) {
 
 // ===== HELPERS =====
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function formatDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -125,7 +135,7 @@ function shiftDetailBox(shift) {
   return `<div class="detail-box">
     <p class="detail-label">Dienst</p>
     <p><strong>${formatDate(shift.date)}</strong></p>
-    <p>${formatTime(shift.start_time)} – ${formatTime(shift.end_time)}${shift.team ? ` &middot; ${shift.team}` : ''}</p>
+    <p>${formatTime(shift.start_time)} – ${formatTime(shift.end_time)}${shift.team ? ` &middot; ${escapeHtml(shift.team)}` : ''}</p>
   </div>`;
 }
 
@@ -138,14 +148,14 @@ async function notifySwapRequest(targetUser, requester, requesterShift, targetSh
   if (!await isTypeEnabled('swap_request')) return;
   if (!targetUser.email_notifications_enabled) return;
   const html = baseTemplate('Nieuw ruilverzoek', `
-    <h2>Ruilverzoek van ${requester.name}</h2>
-    <p>${requester.name} wil graag van dienst ruilen met jou.</p>
+    <h2>Ruilverzoek van ${escapeHtml(requester.name)}</h2>
+    <p>${escapeHtml(requester.name)} wil graag van dienst ruilen met jou.</p>
     <p class="detail-label" style="margin-top:16px">Hun dienst (die jij zou krijgen)</p>
     ${shiftDetailBox(requesterShift)}
     <p class="detail-label">Jouw dienst (die zij zouden krijgen)</p>
     ${shiftDetailBox(targetShift)}
   `);
-  sendEmailAsync(targetUser.email, `Ruilverzoek van ${requester.name}`, html);
+  sendEmailAsync(targetUser.email, `Ruilverzoek van ${escapeHtml(requester.name)}`, html);
 }
 
 /**
@@ -155,7 +165,7 @@ async function notifyTakeoverAvailable(teamMembers, requester, shift) {
   if (!await isTypeEnabled('takeover_available')) return;
   const html = baseTemplate('Dienst beschikbaar', `
     <h2>Dienst beschikbaar voor overname</h2>
-    <p>${requester.name} heeft een dienst beschikbaar gesteld voor overname.</p>
+    <p>${escapeHtml(requester.name)} heeft een dienst beschikbaar gesteld voor overname.</p>
     ${shiftDetailBox(shift)}
     <p>Heb je interesse? Bekijk het verzoek in de app.</p>
   `);
@@ -175,7 +185,7 @@ async function notifySickLeave(managers, employee, startDate, endDate, shiftCoun
     ? formatDate(startDate)
     : `${formatDate(startDate)} t/m ${formatDate(endDate)}`;
   const html = baseTemplate('Ziekmelding', `
-    <h2>Ziekmelding: ${employee.name}</h2>
+    <h2>Ziekmelding: ${escapeHtml(employee.name)}</h2>
     <div class="detail-box">
       <p class="detail-label">Periode</p>
       <p><strong>${dateRange}</strong></p>
@@ -185,7 +195,7 @@ async function notifySickLeave(managers, employee, startDate, endDate, shiftCoun
   `);
   for (const mgr of managers) {
     if (!mgr.email_notifications_enabled) continue;
-    sendEmailAsync(mgr.email, `Ziekmelding: ${employee.name}`, html);
+    sendEmailAsync(mgr.email, `Ziekmelding: ${escapeHtml(employee.name)}`, html);
   }
 }
 
@@ -196,7 +206,7 @@ async function notifySwapApproved(recipients, approverName, requesterShift, targ
   if (!await isTypeEnabled('swap_approved')) return;
   const html = baseTemplate('Ruil goedgekeurd', `
     <h2>Ruilverzoek goedgekeurd</h2>
-    <p>${approverName} heeft het ruilverzoek goedgekeurd. De diensten zijn gewisseld.</p>
+    <p>${escapeHtml(approverName)} heeft het ruilverzoek goedgekeurd. De diensten zijn gewisseld.</p>
     ${requesterShift ? `<p class="detail-label" style="margin-top:16px">Dienst 1</p>${shiftDetailBox(requesterShift)}` : ''}
     ${targetShift ? `<p class="detail-label">Dienst 2</p>${shiftDetailBox(targetShift)}` : ''}
   `);
@@ -213,8 +223,8 @@ async function notifySwapRejected(recipients, rejectorName, reason) {
   if (!await isTypeEnabled('swap_rejected')) return;
   const html = baseTemplate('Ruil afgewezen', `
     <h2>Ruilverzoek afgewezen</h2>
-    <p>${rejectorName} heeft het ruilverzoek afgewezen.</p>
-    ${reason ? `<div class="detail-box"><p class="detail-label">Reden</p><p>${reason}</p></div>` : ''}
+    <p>${escapeHtml(rejectorName)} heeft het ruilverzoek afgewezen.</p>
+    ${reason ? `<div class="detail-box"><p class="detail-label">Reden</p><p>${escapeHtml(reason)}</p></div>` : ''}
   `);
   for (const user of recipients) {
     if (!user.email_notifications_enabled) continue;
@@ -230,10 +240,10 @@ async function notifyTakeoverAccepted(originalOwner, acceptor, shift) {
   if (!originalOwner.email_notifications_enabled) return;
   const html = baseTemplate('Dienst overgenomen', `
     <h2>Je dienst is overgenomen</h2>
-    <p>${acceptor.name} heeft je dienst overgenomen.</p>
+    <p>${escapeHtml(acceptor.name)} heeft je dienst overgenomen.</p>
     ${shiftDetailBox(shift)}
   `);
-  sendEmailAsync(originalOwner.email, `Dienst overgenomen door ${acceptor.name}`, html);
+  sendEmailAsync(originalOwner.email, `Dienst overgenomen door ${escapeHtml(acceptor.name)}`, html);
 }
 
 /**
@@ -243,7 +253,7 @@ async function notifyRequestCancelled(recipients, cancellerName, shift) {
   if (!await isTypeEnabled('request_cancelled')) return;
   const html = baseTemplate('Verzoek geannuleerd', `
     <h2>Verzoek geannuleerd</h2>
-    <p>${cancellerName} heeft het ruilverzoek geannuleerd.</p>
+    <p>${escapeHtml(cancellerName)} heeft het ruilverzoek geannuleerd.</p>
     ${shift ? shiftDetailBox(shift) : ''}
   `);
   for (const user of recipients) {
@@ -258,7 +268,7 @@ async function notifyRequestCancelled(recipients, cancellerName, shift) {
 async function notifyWelcome(newUser, password) {
   if (!await isTypeEnabled('welcome')) return;
   const html = baseTemplate('Welkom bij Het Vlot', `
-    <h2>Welkom, ${newUser.name}!</h2>
+    <h2>Welkom, ${escapeHtml(newUser.name)}!</h2>
     <p>Er is een account voor je aangemaakt bij Het Vlot Roosterplanning.</p>
     <div class="detail-box">
       <p class="detail-label">Inloggegevens</p>
@@ -277,7 +287,7 @@ async function notifyPasswordReset(user, newPassword) {
   if (!await isTypeEnabled('welcome')) return;
   const html = baseTemplate('Wachtwoord gereset', `
     <h2>Wachtwoord gereset</h2>
-    <p>Hallo ${user.name},</p>
+    <p>Hallo ${escapeHtml(user.name)},</p>
     <p>Je wachtwoord is gereset door een administrator.</p>
     <div class="detail-box">
       <p class="detail-label">Nieuw wachtwoord</p>

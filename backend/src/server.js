@@ -83,6 +83,7 @@ function parseLocalDate(value) {
 async function ensureSchema() {
   const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     // Check if new columns exist in users table
     const colCheck = await client.query(`
       SELECT column_name FROM information_schema.columns
@@ -543,7 +544,9 @@ async function ensureSchema() {
     } catch (e) {
       console.log(`  school_year_start setting: ${e.message}`);
     }
+    await client.query('COMMIT');
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Schema check error:', err.message);
   } finally {
     client.release();
@@ -572,6 +575,11 @@ async function requireAuth(req, res, next) {
     // Normalize legacy role names from old JWTs (7-day transition period)
     if (req.user.role === 'hoofdverantwoordelijke' || req.user.role === 'teamverantwoordelijke') {
       req.user.role = 'roosterverantwoordelijke';
+    }
+    // Check if user is still active in the database
+    const activeCheck = await pool.query('SELECT active FROM users WHERE id = $1', [req.user.id]);
+    if (!activeCheck.rows.length || activeCheck.rows[0].active === false) {
+      return res.status(401).json({ error: 'Account is gedeactiveerd' });
     }
     return next();
   } catch (err) {
@@ -1140,7 +1148,7 @@ app.put('/users/:id', requireAuth, async (req, res) => {
   // medewerker can only edit themselves
   const { role, team_id } = req.user;
 
-  if (role === 'medewerker' && userId !== req.user.id) {
+  if (role === 'medewerker' && Number(userId) !== req.user.id) {
     return res.status(403).json({ error: 'Je kunt alleen je eigen profiel bewerken' });
   }
 
@@ -1529,7 +1537,7 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
     res.json({ shift: result.rows[0] });
   } catch (err) {
     console.error('PUT /shifts/:id error:', err);
-    res.status(500).json({ error: 'Server error', detail: err.message });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -1829,7 +1837,7 @@ app.post('/availability', requireAuth, async (req, res) => {
 
   // Permission check for availability (skip team check if main_team column doesn't exist)
   const { role, team_id } = req.user;
-  if (role === 'medewerker' && userId !== req.user.id) {
+  if (role === 'medewerker' && Number(userId) !== req.user.id) {
     return res.status(403).json({ error: 'Je kunt alleen je eigen beschikbaarheid registreren' });
   }
 
@@ -1887,7 +1895,7 @@ app.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
 
   // Permission check (same logic as POST /availability)
   const { role, team_id } = req.user;
-  if (role === 'medewerker' && userId !== req.user.id) {
+  if (role === 'medewerker' && Number(userId) !== req.user.id) {
     return res.status(403).json({ error: 'Je kunt alleen je eigen beschikbaarheid registreren' });
   }
 
@@ -2033,7 +2041,7 @@ app.get('/shift-blocks', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/shift-blocks', requireAuth, async (req, res) => {
+app.post('/shift-blocks', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const { user_id, date, reason } = req.body;
 
@@ -2319,6 +2327,12 @@ app.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     if (swap.target_user_id !== currentUserId) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Alleen de doelpersoon kan dit ruilverzoek accepteren' });
+    }
+
+    // Verify shift ownership hasn't changed since swap was created
+    if (swap.requester_current_user !== swap.requester_user_id || swap.target_current_user !== swap.target_user_id) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Een van de diensten is inmiddels hertoegewezen. Dit ruilverzoek is niet meer geldig.' });
     }
 
     // Verify shifts not in past
@@ -2611,10 +2625,10 @@ app.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => 
       return res.status(400).json({ error: 'Shift ligt in het verleden' });
     }
 
-    // Assign shift to acceptor AND update team to acceptor's team
+    // Assign shift to acceptor, keep original team (don't change team on takeover)
     await client.query(
-      `UPDATE shifts SET user_id = $1, team = $2, source = 'manual' WHERE id = $3`,
-      [currentUserId, acceptorTeam, request.requester_shift_id]
+      `UPDATE shifts SET user_id = $1, source = 'manual' WHERE id = $2`,
+      [currentUserId, request.requester_shift_id]
     );
 
     // Update request status
@@ -4020,7 +4034,7 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Migration error:', err);
-    res.status(500).json({ error: 'Migration failed: ' + err.message, details: err.stack });
+    res.status(500).json({ error: 'Migration failed' });
   } finally {
     client.release();
   }

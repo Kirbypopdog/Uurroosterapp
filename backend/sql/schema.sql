@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
   week_schedule_week2 JSONB DEFAULT '[]',
   week_schedules JSONB DEFAULT NULL,
   email_notifications_enabled BOOLEAN DEFAULT true,
+  onboarding_flags JSONB DEFAULT '{}',
   created_at TIMESTAMP DEFAULT NOW()
 );
 
