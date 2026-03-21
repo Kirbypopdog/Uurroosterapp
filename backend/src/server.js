@@ -28,6 +28,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // Security headers
 app.use(helmet());
+app.set('trust proxy', 1);
 
 // CORS: restrict to frontend origin in production, open in development
 const corsOptions = process.env.NODE_ENV === 'production'
