@@ -1241,7 +1241,7 @@ app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (re
       [passwordHash, userId]
     );
     await logAudit(req, 'UPDATE', 'user', userId, { action: 'password_reset' });
-    res.json({ ok: true });
+    res.json({ ok: true, newPassword: DEFAULT_RESET_PASSWORD });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });

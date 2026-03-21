@@ -922,7 +922,7 @@ function init() {
         console.log('Session checked');
     } catch (error) {
         console.error('Error during initialization:', error);
-        showToast('Er is een fout opgetreden bij het starten van de applicatie. Check de console (F12) voor details.', 'error');
+        showToast('Er is een fout opgetreden bij het starten van de applicatie. Probeer de pagina te herladen.', 'error');
     }
 }
 
@@ -2538,7 +2538,7 @@ function renderCalendar() {
         }
     } catch (error) {
         console.error('Error rendering calendar:', error);
-        DOM.rosterCalendar.innerHTML = '<div class="no-shifts-message">Planner kon niet geladen worden. Check de console (F12).</div>';
+        DOM.rosterCalendar.innerHTML = '<div class="no-shifts-message">Planner kon niet geladen worden. Probeer de pagina te herladen.</div>';
     }
 }
 
@@ -4394,7 +4394,7 @@ async function handleActivitySubmit(e) {
     const shiftEnd = document.getElementById('activity-shift-end')?.value;
     if (shiftStart && shiftEnd) {
         if (startTime < shiftStart || endTime > shiftEnd) {
-            if (!confirm('Deze activiteit valt (deels) buiten de shift-uren (' + shiftStart.substring(0,5) + '-' + shiftEnd.substring(0,5) + '). Toch opslaan?')) {
+            if (!await showConfirm('Deze activiteit valt (deels) buiten de shift-uren (' + shiftStart.substring(0,5) + '-' + shiftEnd.substring(0,5) + '). Toch opslaan?')) {
                 return;
             }
         }
@@ -4417,7 +4417,7 @@ async function handleActivitySubmit(e) {
 async function handleActivityDelete() {
     const id = document.getElementById('activity-id').value;
     if (!id) return;
-    if (!confirm('Activiteit verwijderen?')) return;
+    if (!await showConfirm('Activiteit verwijderen?')) return;
 
     try {
         await deleteActivity(parseInt(id, 10));
@@ -8787,7 +8787,7 @@ function attachBuilderEventListeners(container) {
     if (backBtn) {
         backBtn.addEventListener('click', async () => {
             if (AppState.builderIsDirty) {
-                const ok = confirm('Je hebt onopgeslagen wijzigingen. Wil je terug zonder op te slaan?');
+                const ok = await showConfirm('Je hebt onopgeslagen wijzigingen. Wil je terug zonder op te slaan?');
                 if (!ok) return;
             }
             AppState.builderScreen = 'overview';
@@ -9548,7 +9548,8 @@ function showEditAccountModal(user, teams, onSave) {
             const result = await apiFetch(`/admin/users/${user.id}/reset-password`, {
                 method: 'POST'
             });
-            showToast('Wachtwoord is gereset naar het standaard wachtwoord', 'success');
+            const newPw = result.newPassword || '(standaard)';
+            showToast(`Wachtwoord gereset naar: ${newPw}`, 'success', 8000);
         } catch (error) {
             showToast(`Reset mislukt: ${error.message}`, 'error');
         }
@@ -9825,7 +9826,7 @@ function renderSettingsPlanning(container) {
                         <input type="number" id="rule-max-consecutive" class="form-input" value="${rules.maxConsecutiveDays || 6}" min="1" max="14" />
                         <span class="unit">dagen</span>
                     </div>
-                    <span class="form-hint">Validatie wordt later toegevoegd</span>
+                    <span class="form-hint">Waarde wordt opgeslagen bij instellingen</span>
                 </div>
                 <div class="form-group">
                     <label for="rule-rest-after-night">Verplichte rust na nachtdienst:</label>
@@ -9833,7 +9834,7 @@ function renderSettingsPlanning(container) {
                         <option value="true" ${rules.mandatoryRestAfterNight !== false ? 'selected' : ''}>Ja</option>
                         <option value="false" ${rules.mandatoryRestAfterNight === false ? 'selected' : ''}>Nee</option>
                     </select>
-                    <span class="form-hint">Validatie wordt later toegevoegd</span>
+                    <span class="form-hint">Waarde wordt opgeslagen bij instellingen</span>
                 </div>
                 <div class="form-group">
                     <label for="rule-free-weekends">Min vrije weekenden per maand:</label>
@@ -9841,7 +9842,7 @@ function renderSettingsPlanning(container) {
                         <input type="number" id="rule-free-weekends" class="form-input" value="${rules.minFreeWeekendsPerMonth || 1}" min="0" max="4" />
                         <span class="unit">weekenden</span>
                     </div>
-                    <span class="form-hint">Validatie wordt later toegevoegd</span>
+                    <span class="form-hint">Waarde wordt opgeslagen bij instellingen</span>
                 </div>
                 <button class="btn btn-primary" onclick="saveRules()">Regels opslaan</button>
             </div>
@@ -10152,7 +10153,7 @@ function renderSettingsEmail(container) {
     ];
 
     const typeToggles = emailTypes.map(t => `
-        <div class="email-setting-row" id="email-type-row-${t.key}">
+        <div class="email-setting-row ${!emailSettings.globalEnabled ? 'email-disabled' : ''}" id="email-type-row-${t.key}">
             <div class="email-setting-info">
                 <span class="email-setting-label">${t.label}</span>
                 <span class="email-setting-desc">${t.desc}</span>
@@ -10273,9 +10274,9 @@ function renderSettingsSystem(container) {
                     <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeer</button>
                     <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importData(event)">
                 </div>
-                ${isAdmin ? `
+                ${isAdmin && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:') ? `
                 <div class="migration-zone" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-color);">
-                    <h4>Database migratie</h4>
+                    <h4>Database migratie (dev)</h4>
                     <p>Voer database migraties uit om data te repareren (bijv. weekroosters fixen).</p>
                     <button class="btn btn-secondary" onclick="runMigration()">Database migreren</button>
                     <button class="btn btn-secondary" onclick="seedTeams()" style="margin-left: 8px;">Teams aanmaken</button>
@@ -10352,6 +10353,10 @@ function renderSettingsAudit(container) {
                                 <option value="DELETE">Verwijderd</option>
                                 <option value="APPROVE">Goedgekeurd</option>
                                 <option value="REJECT">Afgewezen</option>
+                                <option value="CANCEL">Geannuleerd</option>
+                                <option value="REPLACE">Vervangen</option>
+                                <option value="IMPORT">Geïmporteerd</option>
+                                <option value="MIGRATE">Gemigreerd</option>
                                 <option value="LOGIN">Login</option>
                             </select>
                         </div>
@@ -12110,7 +12115,7 @@ async function importData(event) {
 
             if (result.results.errors && result.results.errors.length > 0) {
                 console.error('Import fouten:', result.results.errors);
-                showToast(`${result.results.errors.length} fouten opgetreden. Zie console (F12).`, 'warning');
+                showToast(`${result.results.errors.length} fouten opgetreden bij import. Niet alle items konden worden verwerkt.`, 'warning');
             }
 
             // Reload page to show new data
@@ -12139,5 +12144,10 @@ window.handleRemoveAbsence = handleRemoveAbsence;
 
 document.addEventListener('DOMContentLoaded', () => {
     init();
+    // Aria-labels op icon-only knoppen (accessibility)
+    document.querySelectorAll('.modal-close:not([aria-label])').forEach(el => {
+        el.setAttribute('aria-label', 'Sluiten');
+        el.setAttribute('role', 'button');
+    });
     console.log('Het Vlot Roosterplanning is gestart!');
 });

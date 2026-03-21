@@ -1,7 +1,9 @@
 /* ===== CSS VARIABLES ===== */
 :root {
-    --primary-color: #34c896;
-    --primary-hover: #2bb384;
+    --primary-color: #4a7c6f;
+    --primary-hover: #3d6a5e;
+    --primary-dark: #2d5249;
+    --accent-blue: #1e40af;
     --secondary-color: #64748b;
     --success-color: #10b981;
     --warning-color: #f59e0b;
@@ -512,7 +514,7 @@ textarea {
 }
 
 .home-welcome {
-    background: linear-gradient(135deg, var(--primary-color) 0%, #1e40af 100%);
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark, #2d5249) 100%);
     color: white;
     padding: 28px 24px;
     border-radius: var(--radius-lg);
@@ -1245,7 +1247,7 @@ body[data-view-mode="day"] .timeline-header {
 
 .validation-summary-item.validation-error {
     background: #eff6ff;
-    color: #1e40af;
+    color: var(--accent-blue);
     cursor: pointer;
 }
 
@@ -1356,7 +1358,7 @@ body[data-view-mode="day"] .timeline-header {
 
 .alert-info {
     background: #dbeafe;
-    color: #1e40af;
+    color: var(--accent-blue);
     border-left: 4px solid var(--primary-color);
 }
 
@@ -1384,7 +1386,7 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .calendar-header.time-col {
-    background: #1e40af;
+    background: var(--accent-blue);
 }
 
 .calendar-day-header {
@@ -1490,7 +1492,7 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .calendar-time-gutter {
-    background: #1e40af;
+    background: var(--accent-blue);
     padding: 16px 8px;
     text-align: center;
     font-weight: 600;
@@ -1810,7 +1812,7 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .employee-grid-name-header {
-    background: #1e40af;
+    background: var(--accent-blue);
     padding: 16px 12px;
     font-weight: 600;
     font-size: 13px;
@@ -1897,7 +1899,7 @@ body[data-view-mode="day"] .timeline-header {
 
 .team-badge-mini.vlot1 {
     background: #dbeafe;
-    color: #1e40af;
+    color: var(--accent-blue);
 }
 
 .team-badge-mini.vlot2 {
@@ -2339,7 +2341,7 @@ body[data-view-mode="day"] .timeline-header {
 .timeline-header {
     display: grid;
     grid-template-columns: 140px repeat(7, minmax(0, 1fr));
-    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    background: linear-gradient(135deg, var(--accent-blue) 0%, #1e3a8a 100%);
     color: white;
     position: sticky;
     top: 0;
@@ -2620,7 +2622,7 @@ body[data-view-mode="day"] .timeline-header {
 
 .timeline-employee-cell .emp-team.team-vlot1 {
     background: #dbeafe;
-    color: #1e40af;
+    color: var(--accent-blue);
 }
 
 .timeline-employee-cell .emp-team.team-vlot2 {
@@ -2929,7 +2931,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 /* Month header - sticky date headers */
 .month-header {
     display: flex;
-    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    background: linear-gradient(135deg, var(--accent-blue) 0%, #1e3a8a 100%);
     color: white;
     position: sticky;
     top: 0;
@@ -2948,7 +2950,7 @@ body[data-view-mode="day"] .timeline-day-cell {
     border-right: 2px solid rgba(255,255,255,0.2);
     position: sticky;
     left: 0;
-    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+    background: linear-gradient(135deg, var(--accent-blue) 0%, #1e3a8a 100%);
     z-index: 21;
 }
 
@@ -3592,7 +3594,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .team-badge.vlot1 {
     background: #dbeafe;
-    color: #1e40af;
+    color: var(--accent-blue);
 }
 
 .team-badge.vlot2 {
@@ -4381,7 +4383,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 .info-box.info {
     background: #eff6ff;
     border: 1px solid #bfdbfe;
-    color: #1e40af;
+    color: var(--accent-blue);
 }
 
 .info-box.neutral {
@@ -5380,7 +5382,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .availability-team-header.vlot1 {
     background: linear-gradient(90deg, #dbeafe 0%, #eff6ff 100%);
-    color: #1e40af;
+    color: var(--accent-blue);
 }
 
 .availability-team-header.vlot2 {
@@ -5580,7 +5582,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .date-range-info .info-badge {
     background: #dbeafe;
-    color: #1e40af;
+    color: var(--accent-blue);
     padding: 6px 14px;
     border-radius: 20px;
     font-size: 13px;
@@ -6752,7 +6754,8 @@ body[data-view-mode="day"] .timeline-day-cell {
     }
 
     #team-toggles, #employee-team-toggles {
-        overflow-x: hidden !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
         max-width: 100% !important;
     }
 
@@ -7696,7 +7699,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .timeline-block.is-resizing .block-time {
     font-weight: 600;
-    color: #1e40af;
+    color: var(--accent-blue);
 }
 
 /* Valid drop target highlighting */
@@ -8017,7 +8020,7 @@ body[data-view-mode="day"] .timeline-day-cell {
     border-radius: 6px;
     font-size: 13px;
     font-weight: 500;
-    color: #1e40af;
+    color: var(--accent-blue);
     margin-left: auto;
 }
 
@@ -8095,7 +8098,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 .concept-type-info span { font-size: 12px; color: var(--text-secondary); }
 
 .builder-grid {
-    min-width: 800px;
+    min-width: 0;
+    overflow-x: auto;
 }
 
 .builder-grid-header {
@@ -8874,7 +8878,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .builder-draft-card:hover {
-    border-color: var(--primary-color, #34c896);
+    border-color: var(--primary-color, #4a7c6f);
     box-shadow: 0 2px 8px rgba(52, 200, 150, 0.12);
     transform: translateY(-1px);
 }
@@ -9230,7 +9234,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .draft-badge-activatable {
     background: #dbeafe;
-    color: #1e40af;
+    color: var(--accent-blue);
 }
 .draft-active {
     border-color: #065f46 !important;
@@ -9255,7 +9259,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 .builder-notification.info {
     background: #eff6ff;
     border: 1px solid #bfdbfe;
-    color: #1e40af;
+    color: var(--accent-blue);
 }
 
 /* ===== CONCEPT CARDS OVERVIEW ===== */
@@ -9397,7 +9401,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .badge-scheduled {
     background: #dbeafe;
-    color: #1e40af;
+    color: var(--accent-blue);
 }
 .badge-expired {
     background: #f3f4f6;
@@ -9821,7 +9825,7 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-size: 11px; font-weight: 600; text-transform: uppercase;
 }
 .audit-create { background: #d1fae5; color: #065f46; }
-.audit-update { background: #dbeafe; color: #1e40af; }
+.audit-update { background: #dbeafe; color: var(--accent-blue); }
 .audit-delete { background: #fee2e2; color: #991b1b; }
 .audit-approve { background: #d1fae5; color: #065f46; }
 .audit-reject { background: #fee2e2; color: #991b1b; }
@@ -9974,6 +9978,10 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .email-setting-global {
     padding: 16px 0;
+}
+.email-setting-row.email-disabled {
+    opacity: 0.45;
+    pointer-events: none;
 }
 .email-setting-info {
     display: flex;

@@ -100,9 +100,9 @@
 
             <div class="planning-controls">
                 <div class="date-navigation">
-                    <button id="prev-week" class="btn"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
+                    <button id="prev-week" class="btn" aria-label="Vorige week"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
                     <button id="today-btn" class="btn">Vandaag</button>
-                    <button id="next-week" class="btn"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+                    <button id="next-week" class="btn" aria-label="Volgende week"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
                 </div>
                 <div id="current-period" class="period-display"></div>
                 <div class="view-toggle-controls">
@@ -121,13 +121,13 @@
 
             <!-- Mobile day navigation (alleen zichtbaar op mobiel) -->
             <div id="mobile-day-nav" class="mobile-day-nav">
-                <button id="mobile-prev-day" class="btn btn-sm"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
+                <button id="mobile-prev-day" class="btn btn-sm" aria-label="Vorige dag"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
                 <div id="mobile-day-display" class="mobile-day-display">
                     <span class="mobile-day-name">Ma</span>
                     <span class="mobile-day-date">1 jan</span>
                     <input type="date" id="mobile-date-picker" class="mobile-date-picker">
                 </div>
-                <button id="mobile-next-day" class="btn btn-sm"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+                <button id="mobile-next-day" class="btn btn-sm" aria-label="Volgende dag"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
             </div>
 
             <div id="roster-calendar" class="calendar-container"></div>
