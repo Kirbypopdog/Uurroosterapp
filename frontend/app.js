@@ -10802,7 +10802,7 @@ function renderTeamsConfig() {
             <div class="team-color-dot" style="background: ${team.color}"></div>
             <div class="team-info">
                 <span class="team-name">${teamName}</span>
-                <div class="team-toggles">
+                <div class="settings-team-toggles">
                     <label class="team-toggle-label" title="Telt mee in bezettingsberekening">
                         <input type="checkbox" class="coverage-team-cb" data-team-id="${teamId}" ${inCoverage ? 'checked' : ''} onchange="saveTeamToggles()" />
                         <span>Bezetting</span>
