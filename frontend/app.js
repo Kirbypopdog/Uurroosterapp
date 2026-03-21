@@ -5863,7 +5863,7 @@ async function renderSwaps() {
         console.error('Error rendering swaps:', error);
         swapsList.innerHTML = `<div style="padding: 40px; text-align: center; color: #e11d48;">
             <h3>${IconHelper.html(ICONS.error, 'md')} Fout bij laden ruilverzoeken</h3>
-            <p>${escapeHtmlgetUserFriendlyError(error)}</p>
+            <p>${escapeHtml(getUserFriendlyError(error))}</p>
         </div>`;
         IconHelper.init(swapsList);
     }

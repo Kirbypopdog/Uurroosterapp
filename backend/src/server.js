@@ -30,9 +30,10 @@ if (process.env.NODE_ENV === 'production') {
 app.use(helmet());
 
 // CORS: restrict to frontend origin in production
-const corsOptions = process.env.FRONTEND_URL
-  ? { origin: process.env.FRONTEND_URL, credentials: true }
-  : {};
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || 'https://uurrooster-frontend.onrender.com',
+  credentials: true
+};
 app.use(cors(corsOptions));
 app.use(express.json());
 
