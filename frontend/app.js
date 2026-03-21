@@ -42,6 +42,7 @@ const AppState = {
     builderMeetings: {},              // per-concept teamvergaderingen { [teamId]: [{ day, from, to }] }
     showHeatmap: false,
     filterOnlyWithShifts: false,
+    planningControlsCollapsed: false,
     settingsDirty: false,
     swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
 };
@@ -1154,6 +1155,21 @@ function setupEventListeners() {
         }
     });
 
+    // Planning controls collapse toggle
+    const planningControlsToggle = document.getElementById('planning-controls-toggle');
+    if (planningControlsToggle) {
+        planningControlsToggle.addEventListener('click', () => {
+            AppState.planningControlsCollapsed = !AppState.planningControlsCollapsed;
+            planningControlsToggle.classList.toggle('active', AppState.planningControlsCollapsed);
+            const wrapper = document.getElementById('planning-controls-wrapper');
+            const heatmap = document.getElementById('coverage-heatmap-container');
+            const alerts = document.getElementById('validation-alerts');
+            if (wrapper) wrapper.style.display = AppState.planningControlsCollapsed ? 'none' : '';
+            if (heatmap) heatmap.style.display = AppState.planningControlsCollapsed ? 'none' : '';
+            if (alerts) alerts.style.display = AppState.planningControlsCollapsed ? 'none' : '';
+        });
+    }
+
     // Heatmap toggle
     const heatmapToggle = document.getElementById('heatmap-toggle-btn');
     if (heatmapToggle) {
@@ -1611,7 +1627,7 @@ function renderHomeShifts(user) {
 
     let shiftsHtml = '';
     if (myShifts.length === 0) {
-        shiftsHtml = '<div class="home-card-empty">Geen diensten gepland voor de komende 7 dagen</div>';
+        shiftsHtml = '<div class="home-card-empty"><i data-lucide="calendar-x" class="empty-state-icon"></i>Geen diensten gepland voor de komende 7 dagen</div>';
     } else {
         shiftsHtml = '<div class="home-card-body">';
         myShifts.forEach(shift => {
@@ -1689,7 +1705,7 @@ function renderHomeRequests(user, role) {
 
     let requestsHtml = '';
     if (pendingRequests.length === 0) {
-        requestsHtml = '<div class="home-card-empty">Geen openstaande verzoeken</div>';
+        requestsHtml = '<div class="home-card-empty"><i data-lucide="inbox" class="empty-state-icon"></i>Geen openstaande verzoeken</div>';
     } else {
         requestsHtml = '<div class="home-card-body">';
         pendingRequests.slice(0, 5).forEach(req => {
@@ -2790,7 +2806,7 @@ function renderTimelineView() {
     html += '<div class="timeline-body">';
 
     if (employees.length === 0) {
-        html += '<div class="empty-state"><p>Geen shifts gepland voor deze periode.</p><small>Pas een concept toe of voeg shifts handmatig toe.</small></div>';
+        html += '<div class="empty-state"><i data-lucide="calendar-x" class="empty-state-icon"></i><p>Geen shifts gepland voor deze periode.</p><small>Pas een concept toe of voeg shifts handmatig toe.</small></div>';
     } else {
         // Render each team group
         teamOrder.forEach(teamKey => {
@@ -3269,7 +3285,7 @@ function renderMonthView() {
     html += '<div class="month-body">';
 
     if (employees.length === 0) {
-        html += '<div class="empty-state"><p>Geen shifts gepland voor deze periode.</p><small>Pas een concept toe of voeg shifts handmatig toe.</small></div>';
+        html += '<div class="empty-state"><i data-lucide="calendar-x" class="empty-state-icon"></i><p>Geen shifts gepland voor deze periode.</p><small>Pas een concept toe of voeg shifts handmatig toe.</small></div>';
     } else {
         teamOrder.forEach(teamKey => {
             const teamEmployees = employeesByTeam[teamKey];
@@ -5913,6 +5929,7 @@ async function renderSwaps() {
 
             if (pendingRequests.length === 0) {
                 html += `<div class="swap-empty-state">
+                    <i data-lucide="arrow-left-right" class="empty-state-icon"></i>
                     <p>Geen openstaande ruilverzoeken</p>
                 </div>`;
             } else {
@@ -5930,6 +5947,7 @@ async function renderSwaps() {
 
         if (myRequests.length === 0) {
             html += `<div class="swap-empty-state">
+                <i data-lucide="arrow-left-right" class="empty-state-icon"></i>
                 <p>Je hebt nog geen ruilverzoeken ingediend</p>
                 <button class="btn btn-primary mt-md" onclick="switchView('planning')">Bekijk mijn shifts in de planning</button>
             </div>`;
@@ -5974,6 +5992,7 @@ async function renderSwaps() {
 
             if (historyRequests.length === 0) {
                 html += `<div class="swap-empty-state">
+                    <i data-lucide="archive" class="empty-state-icon"></i>
                     <p>Geen verwerkte verzoeken</p>
                 </div>`;
             } else {
@@ -6423,9 +6442,9 @@ function renderBuilderOverview(container) {
     // Other cards grid
     let cardsHtml = filtered.map(c => renderConceptCard(c.draft, newestActiveId)).join('');
     if (filtered.length === 0 && otherDrafts.length > 0) {
-        cardsHtml = '<p class="builder-no-results">Geen concepten gevonden met dit filter.</p>';
+        cardsHtml = '<div class="builder-no-results"><i data-lucide="search-x" class="empty-state-icon"></i><p>Geen concepten gevonden met dit filter.</p></div>';
     } else if (filtered.length === 0 && otherDrafts.length === 0 && activeDrafts.length === 0) {
-        cardsHtml = '<p class="builder-no-results">Nog geen concepten. Maak een nieuw concept aan.</p>';
+        cardsHtml = '<div class="builder-no-results"><i data-lucide="file-plus" class="empty-state-icon"></i><p>Nog geen concepten. Maak een nieuw concept aan.</p></div>';
     }
 
     const filterOptions = [
@@ -6699,7 +6718,7 @@ function renderBuilderGrid(role, userTeam) {
     employees = employees.sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
 
     if (employees.length === 0) {
-        return '<div class="builder-empty">Geen medewerkers gevonden voor het geselecteerde team</div>';
+        return '<div class="builder-empty"><i data-lucide="users" class="empty-state-icon"></i>Geen medewerkers gevonden voor het geselecteerde team</div>';
     }
 
     const teamOrder = getTeamOrder();
@@ -10639,7 +10658,7 @@ function renderSettingsBeheer(container) {
                     <h3>Gevarenzone</h3>
                     <p class="settings-card-subtitle">Onomkeerbare acties.</p>
                 </div>
-                <span class="collapse-indicator">&#9660;</span>
+                <i data-lucide="chevron-down" class="lucide-sm collapse-indicator"></i>
             </div>
             <div class="settings-card-body">
                 <div class="info-box" style="background: rgba(239, 68, 68, 0.06); border-color: rgba(239, 68, 68, 0.2);">

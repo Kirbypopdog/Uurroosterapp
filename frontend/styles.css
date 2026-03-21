@@ -302,15 +302,28 @@
 /* Empty state */
 .empty-state {
     text-align: center;
-    padding: var(--space-xl);
+    padding: 48px 32px;
     color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+.empty-state p {
+    font-size: 15px;
+    margin: 0;
+}
+.empty-state small {
+    font-size: 13px;
+    opacity: 0.7;
 }
 .empty-state-icon {
-    width: 48px;
-    height: 48px;
-    margin: 0 auto var(--space-md);
-    opacity: 0.5;
+    width: 40px;
+    height: 40px;
+    margin-bottom: var(--space-sm);
+    opacity: 0.4;
     color: var(--text-secondary);
+    display: block;
 }
 
 /* ===== CUSTOM TOOLTIPS (JavaScript-based) ===== */
@@ -515,6 +528,15 @@ textarea {
     background: var(--primary-hover);
     transform: translateY(-1px);
     box-shadow: 0 4px 6px -1px rgba(var(--primary-rgb), 0.3);
+}
+
+.btn-primary-lg {
+    padding: 10px 20px;
+    font-size: 15px;
+    font-weight: 600;
+    gap: 6px;
+    display: inline-flex;
+    align-items: center;
 }
 
 .btn-secondary {
@@ -1030,6 +1052,17 @@ textarea:focus-visible {
     text-align: center;
     padding: 24px 16px;
     font-size: 0.9rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.home-card-empty .empty-state-icon {
+    width: 32px;
+    height: 32px;
+    opacity: 0.35;
+    color: var(--text-secondary);
 }
 
 /* Shifts list */
@@ -3350,22 +3383,6 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-size: 14px;
 }
 
-.empty-state {
-    padding: 60px 40px;
-    text-align: center;
-    color: var(--text-secondary);
-}
-
-.empty-state p {
-    font-size: 15px;
-    margin: 0 0 8px 0;
-}
-
-.empty-state small {
-    font-size: 13px;
-    opacity: 0.7;
-}
-
 /* ===== MONTH VIEW ===== */
 .month-view-wrapper {
     background: var(--surface-color);
@@ -3953,12 +3970,23 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .employee-status {
-    padding: 2px 8px;
+    padding: 2px 8px 2px 6px;
     border-radius: 10px;
     font-size: 11px;
     font-weight: 500;
     flex-shrink: 0;
     margin-left: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.employee-status::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
 }
 
 .employee-status.active {
@@ -3966,9 +3994,17 @@ body[data-view-mode="day"] .timeline-day-cell {
     color: #065f46;
 }
 
+.employee-status.active::before {
+    background: var(--color-success);
+}
+
 .employee-status.inactive {
-    background: var(--color-danger-bg);
-    color: #991b1b;
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+.employee-status.inactive::before {
+    background: #94a3b8;
 }
 
 .employee-card-meta {
@@ -4448,8 +4484,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .settings-card.collapsed .settings-card-body { display: none; }
+.collapse-indicator { transition: transform 0.2s; color: var(--text-secondary); width: 16px; height: 16px; flex-shrink: 0; }
 .settings-card.collapsed .collapse-indicator { transform: rotate(-90deg); }
-.collapse-indicator { transition: transform 0.2s; font-size: 12px; color: var(--text-secondary); }
 
 .settings-card-title {
     display: flex;
@@ -8075,11 +8111,22 @@ body[data-view-mode="day"] .timeline-day-cell {
 .swap-empty-state {
     text-align: center;
     padding: 3rem 1rem;
-    color: #64748b;
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.swap-empty-state .empty-state-icon {
+    width: 36px;
+    height: 36px;
+    opacity: 0.35;
+    color: var(--text-secondary);
 }
 
 .swap-empty-state p {
-    margin: 0.5rem 0;
+    margin: 0;
     font-size: 1rem;
 }
 
@@ -9530,6 +9577,10 @@ body[data-view-mode="day"] .timeline-day-cell {
     text-align: center;
     color: var(--text-secondary);
     font-size: 15px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
 }
 
 /* Delete template button */
@@ -9827,6 +9878,19 @@ body[data-view-mode="day"] .timeline-day-cell {
     color: var(--text-secondary);
     font-size: 0.9rem;
     padding: 20px 0;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.builder-no-results .empty-state-icon,
+.builder-empty .empty-state-icon {
+    width: 36px;
+    height: 36px;
+    opacity: 0.35;
+    color: var(--text-secondary);
 }
 .builder-concept-grid {
     display: grid;
