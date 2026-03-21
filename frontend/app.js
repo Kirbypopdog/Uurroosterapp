@@ -5849,21 +5849,8 @@ async function renderSwaps() {
             return;
         }
 
-        // Separate requests by category
+        // Categorize requests
         const targetPendingRequests = swapRequests.filter(sr => canTargetRespondToSwap(sr));
-        const pendingRequests = swapRequests.filter(sr => (sr.status === 'pending' || sr.status === 'pending_lead') && canApproveSwap(sr));
-        // Mijn verzoeken: only show requests where I am the REQUESTER (not target), exclude expired
-        const myRequests = swapRequests.filter(sr =>
-            sr.requester_user_id === currentUser.id && sr.status !== 'expired'
-        );
-        const historyRequests = swapRequests.filter(sr =>
-            sr.status !== 'pending' && sr.status !== 'pending_lead' && sr.status !== 'expired' && canApproveSwap(sr)
-        ).slice(0, 10); // Show last 10
-        // Expired requests: own requests that have expired
-        const expiredRequests = swapRequests.filter(sr =>
-            sr.status === 'expired' && sr.requester_user_id === currentUser.id
-        ).slice(0, 10);
-        // Open takeover requests: available to everyone except the requester
         const openTakeoverRequests = swapRequests.filter(sr =>
             sr.request_type === 'takeover' &&
             sr.status === 'pending' &&
@@ -5871,7 +5858,26 @@ async function renderSwaps() {
             AppState.swapTeamFilter.includes(sr.requester_shift_team)
         ).sort((a, b) => (a.requester_shift_date || '').localeCompare(b.requester_shift_date || '', 'nl-BE'));
 
-        // Team filter toggles (dynamisch uit settings)
+        // Group by type (excluding action-required and expired)
+        const actionRequired = [...targetPendingRequests, ...openTakeoverRequests];
+        const swapTypeRequests = swapRequests.filter(sr =>
+            sr.request_type === 'swap' && sr.status !== 'expired' &&
+            (sr.requester_user_id === currentUser.id || canApproveSwap(sr))
+        );
+        const takeoverTypeRequests = swapRequests.filter(sr =>
+            sr.request_type === 'takeover' && sr.status !== 'expired' &&
+            sr.requester_user_id === currentUser.id
+        );
+        const expiredRequests = swapRequests.filter(sr =>
+            sr.status === 'expired' && sr.requester_user_id === currentUser.id
+        ).slice(0, 10);
+
+        // Collapse state (persist in AppState)
+        if (!AppState.swapCollapseState) {
+            AppState.swapCollapseState = { ruil: false, overname: false, verlopen: true };
+        }
+
+        // Team filter toggles
         const teamSettings = DataStore.settings.teams || {};
         let html = '<div class="swaps-team-filter"><div class="team-toggles" id="swaps-team-toggles">';
         getTeamOrder().forEach(team => {
@@ -5882,96 +5888,93 @@ async function renderSwaps() {
 
         html += '<div class="swaps-container">';
 
-        // Section 1: Voor mij (target approval)
-        if (targetPendingRequests.length > 0) {
-            html += `<div class="swap-section swap-section-target">
-                <h3>
-                    Voor mij
-                    <span class="swap-section-count">${targetPendingRequests.length}</span>
-                </h3>
-                <p class="text-sm text-muted mb-md">
-                    Deze collega's willen graag met jou ruilen
-                </p>`;
+        // === Section: Actie vereist ===
+        if (actionRequired.length > 0) {
+            html += `<div class="swap-group swap-group-action">
+                <div class="swap-group-header swap-group-action-header">
+                    <h3>
+                        ${IconHelper.html('bell', 'sm')}
+                        Actie vereist
+                        <span class="swap-section-count">${actionRequired.length}</span>
+                    </h3>
+                </div>
+                <div class="swap-group-body">`;
 
             targetPendingRequests.forEach(sr => {
                 html += renderSwapRequestCard(sr, 'target');
             });
-
-            html += `</div>`;
-        }
-
-        // Section 1.5: Beschikbare shifts (open takeover requests)
-        if (openTakeoverRequests.length > 0) {
-            html += `<div class="swap-section swap-section-available">
-                <h3>
-                    Beschikbare shifts
-                    <span class="swap-section-count">${openTakeoverRequests.length}</span>
-                </h3>
-                <p class="text-sm text-muted mb-md">
-                    Collega's zoeken iemand om hun shift over te nemen
-                </p>`;
-
             openTakeoverRequests.forEach(sr => {
                 html += renderTakeoverRequestCard(sr);
             });
 
-            html += `</div>`;
+            html += `</div></div>`;
         }
 
-        // Section 2: Pending requests (for lead approvers only - hidden for now)
-        if (false && canApproveSwap({ requester_shift_team: 'any', target_shift_team: 'any' })) {
-            html += `<div class="swap-section">
+        // === Section: Ruilverzoeken (swap type) ===
+        const ruilCollapsed = AppState.swapCollapseState.ruil;
+        html += `<div class="swap-group ${ruilCollapsed ? 'collapsed' : ''}" data-group="ruil">
+            <div class="swap-group-header" data-toggle-group="ruil">
                 <h3>
-                    Te beoordelen
-                    ${pendingRequests.length > 0 ? `<span class="swap-section-count">${pendingRequests.length}</span>` : ''}
-                </h3>`;
+                    ${IconHelper.html('arrow-left-right', 'sm')}
+                    Ruilverzoeken
+                    ${swapTypeRequests.length > 0 ? `<span class="swap-section-count">${swapTypeRequests.length}</span>` : ''}
+                    <i data-lucide="chevron-down" class="swap-group-chevron"></i>
+                </h3>
+            </div>
+            <div class="swap-group-body">`;
 
-            if (pendingRequests.length === 0) {
-                html += `<div class="swap-empty-state">
-                    <i data-lucide="arrow-left-right" class="empty-state-icon"></i>
-                    <p>Geen openstaande ruilverzoeken</p>
-                </div>`;
-            } else {
-                pendingRequests.forEach(sr => {
-                    html += renderSwapRequestCard(sr, 'approve');
-                });
-            }
-
-            html += `</div>`;
-        }
-
-        // Section 3: My requests (for everyone)
-        html += `<div class="swap-section">
-            <h3>Mijn verzoeken</h3>`;
-
-        if (myRequests.length === 0) {
+        if (swapTypeRequests.length === 0) {
             html += `<div class="swap-empty-state">
                 <i data-lucide="arrow-left-right" class="empty-state-icon"></i>
-                <p>Je hebt nog geen ruilverzoeken ingediend</p>
+                <p>Geen ruilverzoeken</p>
+            </div>`;
+        } else {
+            swapTypeRequests.forEach(sr => {
+                const mode = sr.requester_user_id === currentUser.id ? 'view' : 'approve';
+                html += renderSwapRequestCard(sr, mode);
+            });
+        }
+        html += `</div></div>`;
+
+        // === Section: Overnames / Afstaan (takeover type) ===
+        const overnameCollapsed = AppState.swapCollapseState.overname;
+        html += `<div class="swap-group ${overnameCollapsed ? 'collapsed' : ''}" data-group="overname">
+            <div class="swap-group-header" data-toggle-group="overname">
+                <h3>
+                    ${IconHelper.html('hand', 'sm')}
+                    Overnames / Afstaan
+                    ${takeoverTypeRequests.length > 0 ? `<span class="swap-section-count">${takeoverTypeRequests.length}</span>` : ''}
+                    <i data-lucide="chevron-down" class="swap-group-chevron"></i>
+                </h3>
+            </div>
+            <div class="swap-group-body">`;
+
+        if (takeoverTypeRequests.length === 0) {
+            html += `<div class="swap-empty-state">
+                <i data-lucide="hand" class="empty-state-icon"></i>
+                <p>Geen overnameverzoeken</p>
                 <button class="btn btn-primary mt-md" onclick="switchView('planning')">Bekijk mijn shifts in de planning</button>
             </div>`;
         } else {
-            myRequests.forEach(sr => {
-                // Render based on request type
-                if (sr.request_type === 'takeover') {
-                    html += renderTakeoverRequestCard(sr, 'view');
-                } else {
-                    html += renderSwapRequestCard(sr, 'view');
-                }
+            takeoverTypeRequests.forEach(sr => {
+                html += renderTakeoverRequestCard(sr, 'view');
             });
         }
+        html += `</div></div>`;
 
-        html += `</div>`;
-
-        // Section 3.5: Expired requests (collapsible)
+        // === Section: Verlopen (collapsed by default) ===
         if (expiredRequests.length > 0) {
-            html += `<div class="swap-section swap-section-expired">
-                <h3 class="cursor-pointer opacity-60" onclick="this.parentElement.classList.toggle('expanded')">
-                    Verlopen
-                    <span class="swap-section-count" style="background: #94a3b8;">${expiredRequests.length}</span>
-                    <span style="font-size: 0.8rem; font-weight: 400; margin-left: 0.5rem;">klik om te tonen</span>
-                </h3>
-                <div class="expired-requests-list">`;
+            const verlopenCollapsed = AppState.swapCollapseState.verlopen;
+            html += `<div class="swap-group swap-group-expired ${verlopenCollapsed ? 'collapsed' : ''}" data-group="verlopen">
+                <div class="swap-group-header" data-toggle-group="verlopen">
+                    <h3>
+                        ${IconHelper.html('clock', 'sm')}
+                        Verlopen
+                        <span class="swap-section-count swap-count-muted">${expiredRequests.length}</span>
+                        <i data-lucide="chevron-down" class="swap-group-chevron"></i>
+                    </h3>
+                </div>
+                <div class="swap-group-body">`;
 
             expiredRequests.forEach(sr => {
                 if (sr.request_type === 'takeover') {
@@ -5982,25 +5985,6 @@ async function renderSwaps() {
             });
 
             html += `</div></div>`;
-        }
-
-        // Section 4: History (for lead approvers only - hidden for now)
-        if (false && canApproveSwap({ requester_shift_team: 'any', target_shift_team: 'any' })) {
-            html += `<div class="swap-section">
-                <h3>Geschiedenis (laatste 10)</h3>`;
-
-            if (historyRequests.length === 0) {
-                html += `<div class="swap-empty-state">
-                    <i data-lucide="archive" class="empty-state-icon"></i>
-                    <p>Geen verwerkte verzoeken</p>
-                </div>`;
-            } else {
-                historyRequests.forEach(sr => {
-                    html += renderSwapRequestCard(sr, 'history');
-                });
-            }
-
-            html += `</div>`;
         }
 
         html += '</div>';
@@ -6018,6 +6002,17 @@ async function renderSwaps() {
                     AppState.swapTeamFilter.push(team);
                 }
                 renderSwaps();
+            });
+        });
+
+        // Attach collapse/expand toggle listeners
+        swapsList.querySelectorAll('[data-toggle-group]').forEach(header => {
+            header.addEventListener('click', () => {
+                const group = header.dataset.toggleGroup;
+                const section = header.closest('.swap-group');
+                section.classList.toggle('collapsed');
+                AppState.swapCollapseState[group] = section.classList.contains('collapsed');
+                IconHelper.init(section);
             });
         });
 

@@ -8090,18 +8090,65 @@ body[data-view-mode="day"] .timeline-day-cell {
     box-shadow: var(--shadow-sm);
 }
 
-.swap-section {
-    margin-bottom: 2rem;
+/* Swap groups (collapsible type sections) */
+.swap-group {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-md);
+    overflow: hidden;
 }
 
-.swap-section h3 {
-    margin: 0 0 1rem 0;
-    font-size: 1.25rem;
+.swap-group-header {
+    display: flex;
+    align-items: center;
+    padding: var(--space-md);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease;
+}
+.swap-group-header:hover { background: #f8fafc; }
+
+.swap-group-header h3 {
+    margin: 0;
+    font-size: var(--text-md);
     color: #1e293b;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-sm);
+    flex: 1;
 }
+
+.swap-group-chevron {
+    width: 18px;
+    height: 18px;
+    margin-left: auto;
+    color: var(--text-secondary);
+    transition: transform 0.2s ease;
+}
+.swap-group.collapsed .swap-group-chevron { transform: rotate(-90deg); }
+
+.swap-group-body {
+    padding: 0 var(--space-md) var(--space-md);
+}
+.swap-group-body .swap-request-card:last-child,
+.swap-group-body .takeover-card:last-child { margin-bottom: 0; }
+.swap-group.collapsed .swap-group-body { display: none; }
+
+/* Action-required group highlight */
+.swap-group-action {
+    border-color: rgba(var(--primary-rgb), 0.3);
+    background: rgba(var(--primary-rgb), 0.02);
+}
+.swap-group-action-header { cursor: default; }
+.swap-group-action-header:hover { background: transparent; }
+
+/* Expired group */
+.swap-group-expired { opacity: 0.7; }
+.swap-group-expired .swap-request-card,
+.swap-group-expired .takeover-card { opacity: 0.7; }
+
+.swap-count-muted { background: #94a3b8; }
 
 .swap-section-count {
     display: inline-flex;
@@ -8115,6 +8162,20 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-size: 0.85rem;
     font-weight: 600;
     padding: 0 0.5rem;
+}
+
+/* Legacy swap-section (kept for backward compat) */
+.swap-section {
+    margin-bottom: 2rem;
+}
+
+.swap-section h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1.25rem;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 .swap-empty-state {
@@ -8176,14 +8237,6 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .swap-section-available .swap-section-count {
     background: #10b981;
-}
-
-.swap-section-expired .expired-requests-list {
-    display: none;
-}
-
-.swap-section-expired.expanded .expired-requests-list {
-    display: block;
 }
 
 .swap-section-expired .swap-request-card,
