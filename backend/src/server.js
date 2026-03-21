@@ -29,11 +29,10 @@ if (process.env.NODE_ENV === 'production') {
 // Security headers
 app.use(helmet());
 
-// CORS: restrict to frontend origin in production
-const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'https://uurrooster-frontend.onrender.com',
-  credentials: true
-};
+// CORS: restrict to frontend origin in production, open in development
+const corsOptions = process.env.NODE_ENV === 'production'
+  ? { origin: process.env.FRONTEND_URL || 'https://uurrooster-frontend.onrender.com', credentials: true }
+  : {};
 app.use(cors(corsOptions));
 app.use(express.json());
 
