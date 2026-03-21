@@ -4737,169 +4737,155 @@ function renderProfile() {
     const role = roleLabels[user.role] || user.role || 'Onbekend';
     const roleClass = roleLabels[user.role] ? user.role : 'medewerker';
     const teamId = user.team_id || user.mainTeam;
-    const teamName = teamId && DataStore.settings.teams?.[teamId]
-        ? DataStore.settings.teams[teamId].name
-        : 'Niet gekoppeld';
+    const teamSettings = DataStore.settings.teams?.[teamId];
+    const teamName = teamSettings ? teamSettings.name : 'Niet gekoppeld';
+    const teamColor = teamSettings?.color || 'var(--primary-color)';
     const accessMap = {
         admin: 'Alle paginas + instellingen + accountbeheer',
         roosterverantwoordelijke: 'Alle paginas + instellingen (zonder accountbeheer)',
         medewerker: 'Eigen rooster bekijken, verlof en ruilen'
     };
     const accessSummary = accessMap[user.role] || 'Planning + profiel';
+    const initials = getInitials(user.name || '');
+
+    // Hours calculation
+    const empId = user.id || user.userId || user.employeeId;
+    const emp = DataStore.users.find(u => u.id === empId) || user;
+    const contractHours = emp.contractHours || emp.contract_hours || 0;
+    const resolvedId = emp.id || empId;
+    const weekStart = getEmployeeWeekStart(resolvedId);
+    const weekDates = getWeekDates(weekStart);
+    const hoursWeek = getEmployeeHoursThisWeek(resolvedId, weekDates[0]);
+    const hoursMonth = getEmployeeHoursThisMonth(resolvedId, weekDates[0]);
+
+    // Build hours card content
+    let hoursCardContent = '';
+    if (contractHours > 0) {
+        const monthContract = contractHours * 4.33;
+        const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
+        const monthPct = Math.min((hoursMonth / monthContract) * 100, 100);
+        const weekClr = hoursWeek > contractHours ? '#ef4444' : hoursWeek > contractHours * 0.9 ? '#f59e0b' : '#10b981';
+        const monthClr = hoursMonth > monthContract ? '#ef4444' : hoursMonth > monthContract * 0.9 ? '#f59e0b' : '#10b981';
+        const overtimeWeek = Math.max(0, hoursWeek - contractHours);
+        const overtimeMonth = Math.max(0, hoursMonth - monthContract);
+        hoursCardContent = `
+            <div class="profile-hours-section">
+                <div class="profile-hours-row">
+                    <span class="profile-hours-label">Deze week</span>
+                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u / ${contractHours}u</span>
+                </div>
+                <div class="progress-bar mb-sm">
+                    <div class="progress-fill" style="width:${weekPct}%;background:${weekClr}"></div>
+                </div>
+                <div class="profile-hours-row">
+                    <span class="profile-hours-label">Deze maand</span>
+                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u / ${monthContract.toFixed(0)}u</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width:${monthPct}%;background:${monthClr}"></div>
+                </div>
+                ${(overtimeWeek > 0 || overtimeMonth > 0) ? `
+                    <div class="d-flex gap-sm mt-sm" style="flex-wrap:wrap">
+                        ${overtimeWeek > 0 ? `<span class="overtime-chip-sm">+${overtimeWeek.toFixed(1)}u overuren week</span>` : ''}
+                        ${overtimeMonth > 0 ? `<span class="overtime-chip-sm">+${overtimeMonth.toFixed(1)}u overuren maand</span>` : ''}
+                    </div>
+                ` : ''}
+            </div>`;
+    } else {
+        hoursCardContent = `
+            <div class="profile-hours-section">
+                <div class="profile-hours-row">
+                    <span class="profile-hours-label">Deze week</span>
+                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u</span>
+                </div>
+                <div class="profile-hours-row">
+                    <span class="profile-hours-label">Deze maand</span>
+                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u</span>
+                </div>
+                <p class="form-hint mt-sm">Geen contracturen ingesteld.</p>
+            </div>`;
+    }
+
+    // Week schedule tabs
+    const weekTabs = (() => {
+        const cl = getCycleLength();
+        let tabs = '';
+        for (let w = 1; w <= cl; w++) {
+            tabs += `<button type="button" class="profile-week-btn ${w === 1 ? 'active' : ''}" data-week="${w}">Week ${w}</button>`;
+        }
+        return tabs;
+    })();
 
     DOM.profileContent.innerHTML = `
-        <div class="profile-grid">
-            <div class="settings-card">
-                <div class="settings-card-header">
-                    <h3><span class="settings-icon">${IconHelper.html(ICONS.profile, 'md')}</span> Mijn profiel</h3>
+        <!-- Hero header -->
+        <div class="profile-hero">
+            <div class="profile-hero-avatar" style="background:${teamColor}">${escapeHtml(initials)}</div>
+            <div class="profile-hero-info">
+                <h2 class="profile-hero-name">${escapeHtml(user.name)}</h2>
+                <div class="profile-hero-meta">
+                    <span class="profile-hero-role role-${roleClass}">${escapeHtml(role)}</span>
+                    <span class="profile-hero-team">${escapeHtml(teamName)}</span>
                 </div>
-                <div class="settings-card-body">
-                    <form id="profile-form">
-                        <div class="form-group">
-                            <label for="profile-name">Naam</label>
-                            <input type="text" id="profile-name" value="${escapeHtml(user.name)}" required />
-                        </div>
-                        <div class="form-group">
-                            <label for="profile-email">E-mailadres</label>
-                            <input type="email" id="profile-email" value="${escapeHtml(user.email)}" required />
-                            <span class="form-hint">Dit e-mailadres gebruik je om in te loggen.</span>
-                        </div>
-                        <div class="form-group">
-                            <label for="profile-password">Nieuw wachtwoord</label>
-                            <input type="password" id="profile-password" placeholder="Laat leeg om niet te wijzigen" />
-                            <span class="form-hint">Minstens 8 tekens als je wijzigt.</span>
-                        </div>
-                        <div class="form-group">
-                            <label for="profile-password-repeat">Herhaal nieuw wachtwoord</label>
-                            <input type="password" id="profile-password-repeat" placeholder="Herhaal het nieuwe wachtwoord" />
-                        </div>
-                        <div id="profile-message" class="form-message info" aria-live="polite">
-                            Werk je gegevens bij en druk op Opslaan.
-                        </div>
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-primary">Opslaan</button>
-                        </div>
-                    </form>
-                </div>
+                <div class="profile-hero-email">${escapeHtml(user.email)}</div>
             </div>
+            <div class="profile-hero-actions">
+                <button class="btn btn-secondary btn-sm" id="profile-edit-btn">
+                    ${IconHelper.html(ICONS.edit, 'xs')} Bewerken
+                </button>
+            </div>
+        </div>
 
+        <!-- Cards grid -->
+        <div class="profile-cards-grid">
             <div class="settings-card">
                 <div class="settings-card-header">
                     <h3><span class="settings-icon">${IconHelper.html(ICONS.calendar, 'md')}</span> Vast werkrooster</h3>
                 </div>
                 <div class="settings-card-body">
                     <div class="profile-week-toggle" id="profile-week-tabs">
-                        ${(() => {
-                            const cl = getCycleLength();
-                            let tabs = '';
-                            for (let w = 1; w <= cl; w++) {
-                                tabs += `<button type="button" class="profile-week-btn ${w === 1 ? 'active' : ''}" data-week="${w}">Week ${w}</button>`;
-                            }
-                            return tabs;
-                        })()}
+                        ${weekTabs}
                     </div>
                     <div id="profile-week-schedule-container" class="week-schedule-container"></div>
                 </div>
             </div>
 
-            ${(() => {
-                const empId = user.id || user.userId || user.employeeId;
-                const emp = DataStore.users.find(u => u.id === empId) || user;
-                const contractHours = emp.contractHours || emp.contract_hours || 0;
-                const resolvedId = emp.id || empId;
-                const weekStart = getEmployeeWeekStart(resolvedId);
-                const weekDates = getWeekDates(weekStart);
-                const hoursWeek = getEmployeeHoursThisWeek(resolvedId, weekDates[0]);
-                const hoursMonth = getEmployeeHoursThisMonth(resolvedId, weekDates[0]);
-
-                if (contractHours > 0) {
-                    const monthContract = contractHours * 4.33;
-                    const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
-                    const monthPct = Math.min((hoursMonth / monthContract) * 100, 100);
-                    const weekClr = hoursWeek > contractHours ? '#ef4444' : hoursWeek > contractHours * 0.9 ? '#f59e0b' : '#10b981';
-                    const monthClr = hoursMonth > monthContract ? '#ef4444' : hoursMonth > monthContract * 0.9 ? '#f59e0b' : '#10b981';
-                    const overtimeWeek = Math.max(0, hoursWeek - contractHours);
-                    const overtimeMonth = Math.max(0, hoursMonth - monthContract);
-                    return `
-                    <div class="settings-card">
-                        <div class="settings-card-header">
-                            <h3><span class="settings-icon">${IconHelper.html(ICONS.clock, 'md')}</span> Uren overzicht</h3>
-                        </div>
-                        <div class="settings-card-body">
-                            <div class="profile-hours-section">
-                                <div class="profile-hours-row">
-                                    <span class="profile-hours-label">Deze week</span>
-                                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u / ${contractHours}u</span>
-                                </div>
-                                <div class="progress-bar" style="margin-bottom:12px">
-                                    <div class="progress-fill" style="width:${weekPct}%;background:${weekClr}"></div>
-                                </div>
-                                <div class="profile-hours-row">
-                                    <span class="profile-hours-label">Deze maand</span>
-                                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u / ${monthContract.toFixed(0)}u</span>
-                                </div>
-                                <div class="progress-bar" style="margin-bottom:4px">
-                                    <div class="progress-fill" style="width:${monthPct}%;background:${monthClr}"></div>
-                                </div>
-                                ${(overtimeWeek > 0 || overtimeMonth > 0) ? `
-                                    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-                                        ${overtimeWeek > 0 ? `<span class="overtime-chip-sm">+${overtimeWeek.toFixed(1)}u overuren week</span>` : ''}
-                                        ${overtimeMonth > 0 ? `<span class="overtime-chip-sm">+${overtimeMonth.toFixed(1)}u overuren maand</span>` : ''}
-                                    </div>
-                                ` : ''}
-                            </div>
-                        </div>
-                    </div>`;
-                } else {
-                    return `
-                    <div class="settings-card">
-                        <div class="settings-card-header">
-                            <h3><span class="settings-icon">${IconHelper.html(ICONS.clock, 'md')}</span> Uren overzicht</h3>
-                        </div>
-                        <div class="settings-card-body">
-                            <div class="profile-hours-section">
-                                <div class="profile-hours-row">
-                                    <span class="profile-hours-label">Deze week</span>
-                                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u</span>
-                                </div>
-                                <div class="profile-hours-row">
-                                    <span class="profile-hours-label">Deze maand</span>
-                                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u</span>
-                                </div>
-                                <p class="form-hint" style="margin-top:8px">Geen contracturen ingesteld.</p>
-                            </div>
-                        </div>
-                    </div>`;
-                }
-            })()}
-
-            <div class="settings-card col-span-full">
+            <div class="settings-card">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">${IconHelper.html(ICONS.search, 'md')}</span> Account overzicht</h3>
+                    <h3><span class="settings-icon">${IconHelper.html(ICONS.clock, 'md')}</span> Uren overzicht</h3>
                 </div>
                 <div class="settings-card-body">
-                    <div class="profile-meta profile-meta-inline">
-                        <div class="profile-meta-row">
-                            <span class="profile-meta-label">Rol</span>
-                            <span class="profile-meta-value role-${roleClass}">${escapeHtml(role)}</span>
-                        </div>
-                        <div class="profile-meta-row">
-                            <span class="profile-meta-label">Hoofdteam</span>
-                            <span class="profile-meta-value">${escapeHtml(teamName)}</span>
-                        </div>
-                        <div class="profile-meta-row">
-                            <span class="profile-meta-label">Toegang</span>
-                            <span class="profile-meta-value">${escapeHtml(accessSummary)}</span>
-                        </div>
-                        <div class="profile-meta-row">
-                            <span class="profile-meta-label">Email notificaties</span>
-                            <span class="profile-meta-value">
-                                <label class="toggle-switch" title="Ontvang email meldingen bij ruilverzoeken, overnames en ziekmeldingen">
-                                    <input type="checkbox" id="email-notifications-toggle" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </span>
-                        </div>
+                    ${hoursCardContent}
+                </div>
+            </div>
+        </div>
+
+        <!-- Account overzicht (full width) -->
+        <div class="settings-card">
+            <div class="settings-card-header">
+                <h3><span class="settings-icon">${IconHelper.html(ICONS.info, 'md')}</span> Account overzicht</h3>
+            </div>
+            <div class="settings-card-body">
+                <div class="profile-meta profile-meta-inline">
+                    <div class="profile-meta-row">
+                        <span class="profile-meta-label">Rol</span>
+                        <span class="profile-meta-value role-${roleClass}">${escapeHtml(role)}</span>
+                    </div>
+                    <div class="profile-meta-row">
+                        <span class="profile-meta-label">Hoofdteam</span>
+                        <span class="profile-meta-value">${escapeHtml(teamName)}</span>
+                    </div>
+                    <div class="profile-meta-row">
+                        <span class="profile-meta-label">Toegang</span>
+                        <span class="profile-meta-value">${escapeHtml(accessSummary)}</span>
+                    </div>
+                    <div class="profile-meta-row">
+                        <span class="profile-meta-label">Email notificaties</span>
+                        <span class="profile-meta-value">
+                            <label class="toggle-switch" title="Ontvang email meldingen bij ruilverzoeken, overnames en ziekmeldingen">
+                                <input type="checkbox" id="email-notifications-toggle" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -4912,14 +4898,8 @@ function renderProfile() {
     loadProfileWeekSchedule();
     setupProfileWeekScheduleListeners();
 
-    const form = document.getElementById('profile-form');
-    const message = document.getElementById('profile-message');
-    const submitBtn = form.querySelector('button[type="submit"]');
-
-    const setMessage = (text, type = 'info') => {
-        message.textContent = text;
-        message.className = `form-message ${type}`;
-    };
+    // Edit button opens modal
+    document.getElementById('profile-edit-btn')?.addEventListener('click', openProfileEditModal);
 
     // Email notifications toggle
     const emailToggle = document.getElementById('email-notifications-toggle');
@@ -4939,7 +4919,82 @@ function renderProfile() {
             }
         });
     }
+}
 
+function openProfileEditModal() {
+    const user = AppState.currentUser;
+    if (!user) return;
+
+    const modalHtml = `
+        <div class="modal-header">
+            <h3>Profiel bewerken</h3>
+            <button class="modal-close" aria-label="Sluiten">&times;</button>
+        </div>
+        <form id="profile-edit-form">
+            <div class="form-group">
+                <label for="profile-name">Naam</label>
+                <input type="text" id="profile-name" class="form-input" value="${escapeHtml(user.name)}" required />
+            </div>
+            <div class="form-group">
+                <label for="profile-email">E-mailadres</label>
+                <input type="email" id="profile-email" class="form-input" value="${escapeHtml(user.email)}" required />
+                <span class="form-hint">Dit e-mailadres gebruik je om in te loggen.</span>
+            </div>
+            <div class="form-group">
+                <label for="profile-password">Nieuw wachtwoord</label>
+                <input type="password" id="profile-password" class="form-input" placeholder="Laat leeg om niet te wijzigen" />
+                <span class="form-hint">Minstens 8 tekens als je wijzigt.</span>
+            </div>
+            <div class="form-group">
+                <label for="profile-password-repeat">Herhaal nieuw wachtwoord</label>
+                <input type="password" id="profile-password-repeat" class="form-input" placeholder="Herhaal het nieuwe wachtwoord" />
+            </div>
+            <div id="profile-message" class="form-message info" aria-live="polite">
+                Wijzig je gegevens en klik op Opslaan.
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary profile-edit-cancel">Annuleren</button>
+                <button type="submit" class="btn btn-primary">Opslaan</button>
+            </div>
+        </form>
+    `;
+
+    // Create modal
+    const overlay = document.createElement('div');
+    overlay.className = 'modal';
+    overlay.id = 'profile-edit-modal';
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    content.innerHTML = modalHtml;
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
+    overlay.classList.add('active');
+    IconHelper.init(content);
+
+    const form = document.getElementById('profile-edit-form');
+    const message = document.getElementById('profile-message');
+    const closeModal = () => {
+        overlay.classList.remove('active');
+        setTimeout(() => overlay.remove(), 200);
+    };
+
+    const setMessage = (text, type = 'info') => {
+        message.textContent = text;
+        message.className = `form-message ${type}`;
+    };
+
+    // Close handlers
+    overlay.querySelector('.modal-close').addEventListener('click', closeModal);
+    overlay.querySelector('.profile-edit-cancel').addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+    document.addEventListener('keydown', function escHandler(e) {
+        if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', escHandler); }
+    });
+
+    // Focus first field
+    document.getElementById('profile-name')?.focus();
+
+    // Form submit
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
         const name = document.getElementById('profile-name').value.trim();
@@ -4947,32 +5002,18 @@ function renderProfile() {
         const password = document.getElementById('profile-password').value;
         const passwordRepeat = document.getElementById('profile-password-repeat').value;
 
-        if (!name) {
-            setMessage('Vul een naam in.', 'error');
-            return;
-        }
+        if (!name) { setMessage('Vul een naam in.', 'error'); return; }
         const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-        if (!emailRegex.test(email)) {
-            setMessage('Vul een geldig e-mailadres in.', 'error');
-            return;
-        }
-        if (password && password.length < 8) {
-            setMessage('Je nieuwe wachtwoord moet minstens 8 tekens zijn.', 'error');
-            return;
-        }
-        if (password !== passwordRepeat) {
-            setMessage('De wachtwoorden komen niet overeen.', 'error');
-            return;
-        }
+        if (!emailRegex.test(email)) { setMessage('Vul een geldig e-mailadres in.', 'error'); return; }
+        if (password && password.length < 8) { setMessage('Je nieuwe wachtwoord moet minstens 8 tekens zijn.', 'error'); return; }
+        if (password !== passwordRepeat) { setMessage('De wachtwoorden komen niet overeen.', 'error'); return; }
 
         const hasChanges = name !== user.name
             || email.toLowerCase() !== String(user.email || '').toLowerCase()
             || Boolean(password);
-        if (!hasChanges) {
-            setMessage('Geen wijzigingen om op te slaan.', 'info');
-            return;
-        }
+        if (!hasChanges) { setMessage('Geen wijzigingen om op te slaan.', 'info'); return; }
 
+        const submitBtn = form.querySelector('button[type="submit"]');
         try {
             submitBtn.disabled = true;
             submitBtn.textContent = 'Opslaan...';
@@ -4984,9 +5025,10 @@ function renderProfile() {
             });
             AppState.currentUser = data.user;
             sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
-            document.getElementById('profile-password').value = '';
-            document.getElementById('profile-password-repeat').value = '';
-            setMessage('Profiel opgeslagen.', 'success');
+            populateUserMenu();
+            showToast('Profiel opgeslagen', 'success');
+            closeModal();
+            renderProfile();
         } catch (error) {
             setMessage(`Opslaan mislukt: ${error.message}`, 'error');
         } finally {
