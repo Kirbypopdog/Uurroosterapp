@@ -1,159 +1,216 @@
-# Het Vlot Roosterplanning - Feature Roadmap
+# Het Vlot Roosterplanning — Features v1.0
 
-## ✅ Completed Features
+## Rooster & Planning
 
-### Authentication & Security
-- [x] Login bug fix: Wrong password no longer bypasses authentication
-- [x] Session cleanup on failed login
-- [x] Guard flags to prevent race conditions
-- [x] Database migration: Merged employees table into users table
+### Weekoverzicht (Planning tab)
+- Timeline-weergave per medewerker met uurblokken
+- Week navigatie met datum header
+- Filter op team (multi-select)
+- Zoeken op medewerker naam
+- Scroll positie behouden bij wijzigingen
+- Mobiele dagweergave met swipe navigatie
 
-### Alerts & Notifications ✅ COMPLETED (2025-02-08)
-- [x] Ziekte alert: "Bel de personeelsdienst om je ziekte door te geven"
-- [x] Verlof/Overuren alert: "Vergeet niet dit ook in Eureka aan te passen"
-- [x] Fixed: UI now updates immediately after save/delete (async/await fixes)
+### Rooster Bouwen (Builder)
+- Visuele grid: medewerkers x dagen
+- Klik op cel om dienst toe te wijzen (template of handmatig)
+- Drag & drop shifts in het grid
+- Bezettings-heatmap per uur/dag (kleurgecodeerd)
+- 11-uur regel waarschuwingen in het grid
+- Teamvergaderingen markeren per dag
+- Contracturen weergave per medewerker
+- Multi-week support (week 1/2/3...)
 
-### Shift Blocks ✅ COMPLETED (2026-02-09)
-- [x] Prevent auto-schedule from regenerating deleted shifts
-- [x] Shift blocks table with user_id + date unique constraint
-- [x] Manual override: creating manual shift removes block
-- [x] System cleanup: skipBlock parameter for bulk operations
+### Concepten (Schedule Drafts)
+- Rooster opslaan als concept
+- Concept opslaan / opslaan als nieuw
+- Concept toepassen op datumbereik (van/tot)
+- Overlap detectie met bestaande concepten
+- Handmatige shifts behouden of overschrijven
+- Status tracking: Actief / Ingepland / Verlopen / Overschreven
+- Concept exporteren als JSON
 
-### UI/UX Improvements ✅ COMPLETED (2026-02-09)
-- [x] Renamed "Verlof" tab to "Verlof en ziekte"
-- [x] Removed confusing placeholder text from takeover modal
-- [x] Fixed nacht shift overflow on Sunday (truncate at midnight)
-- [x] Combined "Ruilen" and "Iemand zoeken" into "Shift afstaan" with choice modal
-- [x] Scroll position preservation: Planner no longer jumps to top after drag & drop or changes
+### Schooljaar & Vakantie
+- Automatische weeknummering sept-aug (week 1-52/53)
+- Vakantieperiodes definieerbaar met naam en datums
+- Vakantie-specifieke bezettingsnormen (Vlot 1+2 samengevoegd)
+- Vakantie-concepten apart van reguliere concepten
+- Quick-select knoppen voor Belgische schoolvakanties
 
-### Team Validation ✅ COMPLETED (2026-02-09)
-- [x] Validate team assignments with warnings (flexible approach)
-- [x] Check against mainTeam and extraTeams
-- [x] Clear messaging when employee works for wrong team
-- [x] Allow manual override with admin/roosterverantwoordelijke approval
+### Shift Templates
+- 4 standaard templates: Vroeg, Laat, Nacht, Lang
+- Aanpasbare start/eindtijden
+- Icoon selectie per template (sunrise, sun, sunset, moon)
+- Templates toevoegen/bewerken/verwijderen
 
-### Settings Persistence ✅ COMPLETED (2026-02-09)
-- [x] Planning horizon persists across page refreshes
-- [x] Team colors save/load from backend database
-- [x] Settings table migration for persistent storage
-- [x] Team colors apply throughout entire app (incl. timeline blocks)
+### Drag & Drop (Planningsweergave)
+- Shifts slepen tussen medewerkers
+- Visuele feedback tijdens slepen
+- Validatie bij drop (11-uur, overlap, team)
+- Shift block aangemaakt bij verwijdering
 
-### Diensten Ruil Systeem ✅ COMPLETED
-- [x] Medewerkers kunnen shifts ruilen (swap requests)
-- [x] Medewerkers kunnen shifts beschikbaar stellen (takeover requests)
-- [x] Approval workflow voor team leads
-- [x] Status tracking (pending, approved, rejected, cancelled)
-- [x] Auto-create takeover requests bij ziekte/verlof
+---
 
-### Code Cleanup
-- [x] Removed email mapping fallback code (post-migration)
-- [x] Simplified shift endpoints (50-70% less code)
-- [x] Simplified availability endpoints
+## Medewerkers & Teams
 
-## 📋 Planned Features
+### Teams
+- 5 teams: Vlot 1, Vlot 2, Cargo, Overkoepelend, Jobstudenten
+- Configureerbare teamkleuren (doorwerking in hele app)
+- Flexibel roosterpatroon per team (bi-weekly, etc.)
+- Gesloten dagen per week instelbaar
 
-### High Priority
-- [ ] **Home/Landing Page**
-  - Welcome screen voor nieuwe gebruikers
-  - Quick actions dashboard
-  - Recent activity overview
+### Medewerkers
+- Profiel met naam, email, rol, team, contracturen
+- Hoofd-team + extra teams
+- Vast werkrooster (basisrooster) per week
+- Actief/inactief status
+- Medewerker vervangen: kopieer basisrooster + optioneel shifts/blocks/activities
 
-- [ ] **Overuren Logica**
-  - Automatisch bijhouden van overuren
-  - Berekening: uren > contract uren = overuren
-  - Saldo weergave per medewerker
-  - Export mogelijkheden
+### Rollen & Permissies
+| Rol | Planning | Medewerkers | Settings | Accounts |
+|-----|----------|-------------|----------|----------|
+| Admin | Alles | Alles | Alles | Alles |
+| Roosterverantwoordelijke | Alles | Alles | Alles | Geen |
+| Medewerker | Eigen bekijken | Eigen profiel | Geen | Geen |
 
-- [ ] **Conflict Resolution UI**
-  - Wanneer validation faalt, toon oplossingen (niet alleen errors)
-  - Suggesties voor conflict oplossing
-  - "Fix automatically" opties waar mogelijk
+---
 
-### Low Priority (Nice to Have)
-- [ ] **Auto-Extend Planning Horizon**
-  - Automatisch shifts genereren wanneer gebruiker navigeert buiten horizon
-  - "Genereer shifts voor deze week" knop
-  - Infinite scroll / on-demand loading
-  - Voorkomt dat medewerkers verdwijnen na X weken
+## Afwezigheid
 
-- [x] **Drag & Drop Shifts** ✅ COMPLETED
-  - [x] Shifts verplaatsen met drag & drop
-  - [x] Visuele feedback tijdens slepen
-  - [x] Validation tijdens drop
-  - [x] Resize shift duration
-  - [x] Click empty cell to create shift
-  - **Toekomstige uitbreidingen (Future Enhancements):**
-    - [ ] Multi-select: Meerdere shifts tegelijk selecteren en verplaatsen
-    - [ ] Drag to delete: Shift naar prullenbak zone slepen om te verwijderen
-    - [ ] Copy shift: Ctrl+drag om shift te dupliceren
-    - [ ] Drag to different date: Shift naar andere datum slepen (niet alleen andere medewerker)
-    - [ ] Touch gestures: Swipe bewegingen op mobiel voor shift transfer
-    - [ ] Keyboard shortcuts: Pijltjestoetsen om geselecteerde shift te verplaatsen
-    - [ ] Batch operations: Meerdere shifts selecteren, actie toepassen op allen
+### Types
+- Verlof
+- Ziekte
+- Overuren
+- Opleiding
 
-- [ ] **Team Coverage Heatmap**
-  - Visuele weergave van team bezetting
-  - Kleur-gecodeerd (te weinig/genoeg/te veel personeel)
-  - Per dag/shift type overzicht
-  - Waarschuwingen bij onder-bezetting
+### Functies
+- Per dag registreren met reden
+- Bulk ziekmelding (datumbereik) met auto-takeover verzoeken
+- Alert bij ziekte: "Bel de personeelsdienst"
+- Alert bij verlof/overuren: "Vergeet niet Eureka aan te passen"
+- Conflict waarschuwing bij shift op afwezige dag
 
-- [ ] **Undo/Redo**
-  - Action history stack
-  - Ctrl+Z / Ctrl+Y ondersteuning
-  - Beperkt tot X laatste acties
-  - Werkt voor shifts, availability, accounts
+---
 
-- [ ] **Audit Log**
-  - Track who changed what and when
-  - Zichtbaar voor roosterverantwoordelijke/admin
-  - Filterbaar per medewerker/datum/actie type
-  - Export naar CSV
+## Ruilen & Overname
 
-- [ ] **Auto-Scheduling Suggestions**
-  - AI-gestuurde shift suggesties
-  - Gebaseerd op beschikbaarheid + voorkeuren
-  - Rekening houdend met contracturen
-  - "Apply suggestion" functie
+### Ruilverzoeken (Swap)
+- Medewerker selecteert eigen shift + collega's shift
+- Doelpersoon accepteert of weigert
+- Bij acceptatie: shifts worden atomisch gewisseld
+- Ownership verificatie: shifts mogen niet hertoegewezen zijn
 
-## 🚀 Implementation Strategy
+### Overnameverzoeken (Takeover)
+- Shift beschikbaar stellen voor teamgenoten
+- Elk teamlid kan accepteren
+- Originele eigenaar wordt genotificeerd
+- Shift behoudt origineel team
 
-**Aanpak: One Feature at a Time**
-- Plan elke feature grondig voordat implementatie
-- Volledige testing voordat verder gaan
-- Incrementele releases
-- User feedback verzamelen na elke release
+### Workflow
+- Status: pending → approved / rejected / cancelled / expired
+- FOR UPDATE locks tegen race conditions
+- Auto-expire bij verlopen shiftdatum
+- Annuleren door aanvrager mogelijk
 
-**Prioriteit Categorieën:**
-1. **Alerts** ✅ - Voltooid
-2. **Shift Blocks** ✅ - Voltooid
-3. **Diensten Ruil Systeem** ✅ - Voltooid
-4. **Team Validation** ✅ - Voltooid
-5. **Settings Persistence** ✅ - Voltooid
-6. **Drag & Drop** ✅ - Voltooid
-7. **Overuren Logica** 📋 - Volgende
-8. **UX Improvements** 📋 - Undo/redo, etc.
+---
 
-## 📝 Notes
+## Bezetting & Validatie
 
-- Alle features worden één voor één geïmplementeerd
-- Testing is verplicht voordat feature als "done" gemarkeerd wordt
-- Code reviews gebeuren via commits
-- Breaking changes worden duidelijk gecommuniceerd
+### Heatmap
+- Bezetting per uur per dag (kleurgecodeerd: rood/geel/groen)
+- Configureerbaar welke teams meetellen
+- Toggle aan/uit in planningsweergave
 
-## ❌ Cancelled Features
+### Validatieregels
+- **11-uur regel**: minimum rust tussen diensten
+- **Shift overlap**: geen dubbele shifts voor 1 persoon
+- **Max opeenvolgende dagen**: standaard 6 (instelbaar)
+- **Minimum bezetting**: dag en nacht apart (instelbaar)
+- **Cross-team waarschuwing**: shift buiten hoofd/extra team
+- **Nachtdienst logica**: correcte datum bij middernacht-overgang
 
-### Maand View ❌ CANCELLED
-- Geprobeerd maar werkte niet goed voor de use case
-- Week view blijft de primaire planning interface
+---
 
-## 🔄 Feature Status Legend
+## Activiteiten
 
-- ✅ **Completed**: Geïmplementeerd, getest, en gepusht
-- 🚧 **In Progress**: Momenteel in ontwikkeling
-- 📋 **Planned**: Nog niet gestart
-- ⏸️ **On Hold**: Tijdelijk uitgesteld
-- ❌ **Cancelled**: Niet meer relevant
+- Activiteiten binnen shifts: oudergesprek, vorming, overleg, afspraak, andere
+- CRUD via dedicated endpoints
+- Gekleurde chips op timeline blokken
+- Start/eindtijd per activiteit
 
-## 📅 Last Updated
+---
 
-2026-02-19 - Drag & drop completed, project cleanup & deployment setup (CLAUDE.md, render.yaml, DEPLOY.md)
+## Admin & Instellingen
+
+### Audit Log
+- Volledige history: wie heeft wat wanneer gewijzigd
+- Filter op actie type, resource type, persoon
+- Datum groepering met standaard 7 dagen
+- Systeem-acties filter
+- Export mogelijkheid
+
+### Undo/Redo
+- Ctrl+Z / Ctrl+Y voor shift operaties
+- Max 50 acties in history stack
+- Toolbar knoppen
+
+### Data Management
+- JSON export van alle data
+- JSON import (via app of CLI)
+- Backup/restore functionaliteit
+
+### Email Notificaties (Resend)
+- 9 trigger points: swap aangemaakt, takeover beschikbaar, ziekmelding, goedgekeurd, afgewezen, overname geaccepteerd, geannuleerd, welkom, wachtwoord reset
+- Fire-and-forget (niet-blokkerend)
+- Opt-out per gebruiker
+- Graceful degradatie zonder API key
+- HTML templates met escaping
+
+### Overige Settings
+- Planning horizon (weken vooruit)
+- Team kleuren
+- Bezettingsteams selectie
+- Weekend/vakantie verantwoordelijke rotatie
+- Vakantieperiodes
+- Onboarding checklist voor nieuwe gebruikers
+
+---
+
+## Technische Kenmerken
+
+### Security (v1.0)
+- JWT auth met active-user check bij elk request
+- Type-safe permission checks (Number() vergelijking)
+- Parameterized SQL queries (geen string concatenation)
+- HTML escaping in email templates
+- Role-based access op alle endpoints
+- Rate limiting (login + globaal)
+- CORS restrictie in productie
+- Geen error detail/stack trace leaks
+
+### Performance
+- DataStore als centrale cache met granulaire refreshes
+- Loading overlay per view
+- Date-filtered shift queries met merge-strategie
+- Database indexes op veelgebruikte kolommen
+
+### Architectuur
+- Vanilla JS frontend — geen framework, geen build stap
+- Single server.js met alle endpoints
+- Auto-migratie via ensureSchema() bij elke startup
+- Transacties voor kritieke multi-step operaties
+- Atomic draft-apply met overlap detectie
+
+---
+
+## Versie Historie
+
+### v1.0 — 2026-03-21 (huidige release)
+- Volledige roosterplanning applicatie
+- 208 commits, 10 database tabellen
+- Deep-dive security audit: 25 fixes doorgevoerd
+- Productie deployment op Render
+
+### Ontwikkeling
+- Gestart: januari 2025
+- Ontwikkeld met AI-assistentie (Claude Code)
+- 6 feature fases: Quick wins → Activiteiten → Vervang medewerker → Schooljaar/Drafts → Vakantie → Regels/Builder UI
