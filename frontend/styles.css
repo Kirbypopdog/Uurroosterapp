@@ -4651,6 +4651,44 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-size: 14px;
 }
 
+.team-toggles {
+    display: flex;
+    gap: 12px;
+    margin-top: 4px;
+}
+
+.team-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.team-toggle-label input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--primary-color);
+}
+
+.team-legend {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: var(--bg-color);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.team-legend-item {
+    white-space: nowrap;
+}
+
 .team-id {
     display: block;
     font-size: 11px;

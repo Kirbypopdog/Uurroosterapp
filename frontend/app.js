@@ -10037,29 +10037,20 @@ function renderSettingsTeams(container) {
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Teams</h3>
-                    <p class="settings-card-subtitle">Beheer teamnamen en kleuren.</p>
+                    <p class="settings-card-subtitle">Naam, kleur en opties per team.</p>
                 </div>
                 <div class="settings-card-actions">
                     <button class="btn btn-sm btn-secondary" id="btn-add-team">+ Nieuw</button>
                 </div>
             </div>
             <div class="settings-card-body">
+                <div class="team-legend">
+                    <span class="team-legend-item">Bezetting = telt mee in bezettingsberekening</span>
+                    <span class="team-legend-item">Weekend = draait mee in weekendverantwoordelijke rotatie</span>
+                </div>
                 <div class="teams-list" id="teams-config">
                     ${renderTeamsConfig()}
                 </div>
-            </div>
-        </div>
-
-        <!-- Bezettingsteams -->
-        <div class="settings-card" style="margin-top: 24px;">
-            <div class="settings-card-header">
-                <div class="settings-card-title">
-                    <h3>Bezettingsteams</h3>
-                    <p class="settings-card-subtitle">Welke teams tellen mee in de bezetting? (planning + roosterbouwer)</p>
-                </div>
-            </div>
-            <div class="settings-card-body">
-                <div id="coverage-teams-checkboxes">${renderCoverageTeamsCheckboxes()}</div>
             </div>
         </div>
 
@@ -10081,22 +10072,16 @@ function renderSettingsTeams(container) {
             </div>
         </div>
 
-        <!-- Weekendverantwoordelijke -->
+        <!-- Weekendverantwoordelijke rotatie -->
         <div class="settings-card" id="settings-weekend-responsible" style="margin-top: 24px;">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Weekendverantwoordelijke</h3>
-                    <p class="settings-card-subtitle">Automatische rotatie voor open weekenden.</p>
+                    <p class="settings-card-subtitle">Rotatie-instellingen en planning.</p>
                 </div>
             </div>
             <div class="settings-card-body">
-                <div class="form-group">
-                    <label>Teams in rotatie:</label>
-                    <div class="eligible-teams-compact">
-                        ${renderEligibleTeamsCheckboxes()}
-                    </div>
-                </div>
-                <div class="rotation-form" style="margin-top:12px">
+                <div class="rotation-form">
                     ${renderRotationSettingsCompact()}
                 </div>
                 <div class="upcoming-section" style="margin-top:20px">
@@ -10212,6 +10197,13 @@ async function openAddTeamModal() {
         // Update settings (primary source of truth for frontend)
         DataStore.settings.teams[teamId] = { name, color };
         await saveSettings('teams', DataStore.settings.teams);
+
+        // Auto-add to coverage teams
+        const ct = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams);
+        if (!ct.includes(teamId)) { ct.push(teamId); }
+        DataStore.settings.coverageTeams = ct;
+        await saveSettings('coverageTeams', ct);
+
         syncTeamFilters();
         applyTeamColors();
         AppState.apiTeams = null; // Invalidate cache
@@ -10766,15 +10758,29 @@ async function ensureTeamsLoaded() {
 }
 
 function renderTeamsConfig() {
+    const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
+    const eligibleTeams = DataStore.settings.responsibleRotation?.eligibleTeams || [];
     let html = '';
     Object.keys(DataStore.settings.teams).forEach(teamId => {
         const team = DataStore.settings.teams[teamId];
         const teamName = escapeHtml(team.name);
+        const inCoverage = coverageTeams.includes(teamId);
+        const inWeekend = eligibleTeams.includes(teamId);
         html += `
         <div class="team-config-item" data-team-id="${teamId}">
             <div class="team-color-dot" style="background: ${team.color}"></div>
             <div class="team-info">
                 <span class="team-name">${teamName}</span>
+                <div class="team-toggles">
+                    <label class="team-toggle-label" title="Telt mee in bezettingsberekening">
+                        <input type="checkbox" class="coverage-team-cb" data-team-id="${teamId}" ${inCoverage ? 'checked' : ''} onchange="saveTeamToggles()" />
+                        <span>Bezetting</span>
+                    </label>
+                    <label class="team-toggle-label" title="Draait mee in weekendverantwoordelijke rotatie">
+                        <input type="checkbox" class="eligible-team-cb" data-team-id="${teamId}" ${inWeekend ? 'checked' : ''} onchange="saveTeamToggles()" />
+                        <span>Weekend</span>
+                    </label>
+                </div>
             </div>
             <div class="team-actions">
                 <button class="btn-icon-only" onclick="editTeam('${teamId}')" title="Naam bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
@@ -11261,90 +11267,36 @@ async function deleteHolidayPeriod(id) {
     }
 }
 
-function renderCoverageTeamsCheckboxes() {
-    const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
-    const teams = DataStore.settings.teams || {};
-    let html = '';
+// ===== TEAM TOGGLES (bezetting + weekend rotatie) =====
 
-    Object.entries(teams).forEach(([teamId, team]) => {
-        const checked = coverageTeams.includes(teamId) ? 'checked' : '';
-        html += `
-        <label class="checkbox-item">
-            <input type="checkbox" class="coverage-team-cb" data-team-id="${teamId}" ${checked} onchange="saveCoverageTeams()" />
-            <span class="checkbox-label">
-                <span class="team-color-dot" style="background: ${team.color}"></span>
-                ${escapeHtml(team.name)}
-            </span>
-        </label>`;
-    });
-
-    return html;
-}
-
-async function saveCoverageTeams() {
+async function saveTeamToggles() {
+    // Coverage teams
     const coverageTeams = [];
     document.querySelectorAll('.coverage-team-cb').forEach(cb => {
         if (cb.checked) coverageTeams.push(cb.dataset.teamId);
     });
-    if (coverageTeams.length === 0) return;
-
-    DataStore.settings.coverageTeams = coverageTeams;
-    saveToStorage();
-    try {
-        await saveSettings('coverageTeams', coverageTeams);
-    } catch (e) {
-        console.error('Error saving coverageTeams:', e);
+    if (coverageTeams.length > 0) {
+        DataStore.settings.coverageTeams = coverageTeams;
+        try { await saveSettings('coverageTeams', coverageTeams); } catch (e) { console.error('Error saving coverageTeams:', e); }
     }
-    if (typeof renderCoverageHeatmap === 'function' && AppState.showHeatmap) {
-        renderPlanning();
-    }
-}
 
-// ===== VERANTWOORDELIJKE SETTINGS FUNCTIES =====
-
-function renderEligibleTeamsCheckboxes() {
-    const eligibleTeams = DataStore.settings.responsibleRotation?.eligibleTeams || [];
-    const teams = DataStore.settings.teams || {};
-    let html = '';
-
-    Object.entries(teams).forEach(([teamId, team]) => {
-        const checked = eligibleTeams.includes(teamId) ? 'checked' : '';
-        html += `
-        <label class="checkbox-item">
-            <input type="checkbox" class="eligible-team-cb" data-team-id="${teamId}" ${checked} onchange="saveEligibleTeamsQuiet()" />
-            <span class="checkbox-label">
-                <span class="team-color-dot" style="background: ${team.color}"></span>
-                ${escapeHtml(team.name)}
-            </span>
-        </label>`;
-    });
-
-    return html;
-}
-
-function saveEligibleTeams() {
-    saveEligibleTeamsQuiet();
-    showToast('Teams opgeslagen', 'success');
-}
-
-function saveEligibleTeamsQuiet() {
+    // Eligible teams for weekend rotation
     const eligibleTeams = [];
-
     document.querySelectorAll('.eligible-team-cb').forEach(cb => {
         if (cb.checked) eligibleTeams.push(cb.dataset.teamId);
     });
-
-    if (eligibleTeams.length === 0) {
-        return; // Don't save if nothing selected
-    }
-
     if (!DataStore.settings.responsibleRotation) {
         DataStore.settings.responsibleRotation = { eligibleTeams: [], assignments: {} };
     }
     DataStore.settings.responsibleRotation.eligibleTeams = eligibleTeams;
+
     saveToStorage();
 
-    // Update the upcoming list without re-rendering everything
+    // Update heatmap if visible
+    if (typeof renderCoverageHeatmap === 'function' && AppState.showHeatmap) {
+        renderPlanning();
+    }
+    // Update upcoming weekends list
     const upcomingContainer = document.querySelector('.upcoming-responsibles');
     if (upcomingContainer) {
         upcomingContainer.innerHTML = renderUpcomingResponsibles();
@@ -11352,6 +11304,13 @@ function saveEligibleTeamsQuiet() {
         attachUpcomingWeekendListeners(upcomingContainer);
     }
 }
+
+// Legacy aliases
+function saveCoverageTeams() { saveTeamToggles(); }
+function saveEligibleTeamsQuiet() { saveTeamToggles(); }
+function saveEligibleTeams() { saveTeamToggles(); }
+function renderCoverageTeamsCheckboxes() { return ''; }
+function renderEligibleTeamsCheckboxes() { return ''; }
 
 function renderRotationSettings() {
     return renderRotationSettingsCompact();
