@@ -190,52 +190,7 @@ function validateWeekendStatus(date, startTime = null, endTime = null) {
     const dayOfWeek = d.getDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
-    // Check if weekend is open/closed
-    if (isWeekend && !isWeekendOpen(date)) {
-        warnings.push({
-            type: ValidationRules.WARNING,
-            rule: 'Weekend gesloten',
-            message: `Dit weekend (${formatDate(date)}) is gesloten volgens het patroon`
-        });
-    }
-
-    // Check Friday evening (after 18:00) when weekend is closed
-    if (dayOfWeek === 5 && startTime) { // Friday
-        // Check the Saturday of this weekend (tomorrow)
-        const saturday = new Date(d);
-        saturday.setDate(d.getDate() + 1);
-        if (!isWeekendOpen(saturday)) {
-            const [startHour] = startTime.split(':').map(Number);
-            if (startHour >= 18) {
-                warnings.push({
-                    type: ValidationRules.WARNING,
-                    rule: 'Weekend gesloten',
-                    message: `Vrijdag vanaf 18:00 is gesloten (weekend gesloten patroon)`
-                });
-            }
-        }
-    }
-
-    // Check Monday morning (before 7:30) when weekend was closed
-    // Diensten kunnen pas starten vanaf 7:30
-    if (dayOfWeek === 1 && startTime) { // Monday
-        // Check previous weekend (Saturday)
-        const saturday = new Date(d);
-        saturday.setDate(d.getDate() - 2); // Go back to Saturday
-        if (!isWeekendOpen(saturday)) {
-            const [startHour, startMin] = startTime.split(':').map(Number);
-            const startMinutes = startHour * 60 + startMin;
-            const targetMinutes = 7 * 60 + 30; // 7:30
-
-            if (startMinutes < targetMinutes) {
-                warnings.push({
-                    type: ValidationRules.WARNING,
-                    rule: 'Weekend gesloten',
-                    message: `Maandag is gesloten tot 7:30 (weekend gesloten patroon). Dienst kan pas starten vanaf 7:30.`
-                });
-            }
-        }
-    }
+    // Weekend gesloten warnings removed — gesloten dagen zijn al visueel zichtbaar in het rooster
 
     return { errors: [], warnings };
 }
@@ -323,111 +278,7 @@ function validateMaxConsecutiveDays(employeeId, newShift, excludeShiftId = null)
     return { warnings };
 }
 
-function validateRestAfterNight(employeeId, newShift, excludeShiftId = null) {
-    const warnings = [];
-    if (DataStore.settings.rules?.mandatoryRestAfterNight === false) return { warnings };
-
-    const excludeIds = Array.isArray(excludeShiftId) ? excludeShiftId.map(String) : [String(excludeShiftId)];
-    const empShifts = DataStore.shifts.filter(s =>
-        String(s.userId) === String(employeeId) && !excludeIds.includes(String(s.id))
-    );
-
-    // Check 1: Was there a night shift yesterday? New shift must have enough rest
-    const prevDay = new Date(newShift.date + 'T12:00:00');
-    prevDay.setDate(prevDay.getDate() - 1);
-    const prevDayStr = prevDay.toISOString().split('T')[0];
-
-    const nightShiftsBefore = empShifts.filter(s =>
-        s.date === prevDayStr && isNightShift(s.startTime)
-    );
-
-    for (const nightShift of nightShiftsBefore) {
-        const restHours = getHoursBetweenShifts(nightShift, newShift);
-        if (restHours < 11) {
-            warnings.push({
-                type: ValidationRules.WARNING,
-                rule: 'Rust na nachtdienst',
-                message: `Slechts ${Math.round(restHours)}u rust na nachtdienst (${nightShift.startTime}-${nightShift.endTime}). Minimaal 11u vereist.`,
-                shift1: nightShift
-            });
-        }
-    }
-
-    // Check 2: Is the new shift a night shift? Check if tomorrow already has a shift
-    if (isNightShift(newShift.startTime)) {
-        const nextDay = new Date(newShift.date + 'T12:00:00');
-        nextDay.setDate(nextDay.getDate() + 1);
-        const nextDayStr = nextDay.toISOString().split('T')[0];
-
-        const shiftsAfter = empShifts.filter(s => s.date === nextDayStr);
-        for (const afterShift of shiftsAfter) {
-            const restHours = getHoursBetweenShifts(newShift, afterShift);
-            if (restHours < 11) {
-                warnings.push({
-                    type: ValidationRules.WARNING,
-                    rule: 'Rust na nachtdienst',
-                    message: `Slechts ${Math.round(restHours)}u rust tussen nachtdienst en volgende dienst (${afterShift.startTime}-${afterShift.endTime}). Minimaal 11u vereist.`,
-                    shift1: newShift
-                });
-            }
-        }
-    }
-
-    return { warnings };
-}
-
-function validateMinFreeWeekends(employeeId, newShift, excludeShiftId = null) {
-    const warnings = [];
-    const minFree = DataStore.settings.rules?.minFreeWeekendsPerMonth || 1;
-
-    const shiftDate = new Date(newShift.date + 'T12:00:00');
-    const dayOfWeek = shiftDate.getDay(); // 0=zo, 6=za
-
-    // Only check if the new shift falls on a weekend
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) return { warnings };
-
-    const year = shiftDate.getFullYear();
-    const month = shiftDate.getMonth();
-
-    // Count total weekends in this month (count Saturdays)
-    let totalWeekends = 0;
-    const d = new Date(year, month, 1);
-    while (d.getMonth() === month) {
-        if (d.getDay() === 6) totalWeekends++;
-        d.setDate(d.getDate() + 1);
-    }
-
-    // Count weekends where this employee works
-    const excludeIds = Array.isArray(excludeShiftId) ? excludeShiftId.map(String) : [String(excludeShiftId)];
-    const empShifts = DataStore.shifts
-        .filter(s => String(s.userId) === String(employeeId) && !excludeIds.includes(String(s.id)))
-        .concat([newShift]);
-
-    const workedWeekends = new Set();
-    empShifts.forEach(s => {
-        const sd = new Date(s.date + 'T12:00:00');
-        if (sd.getFullYear() === year && sd.getMonth() === month && (sd.getDay() === 0 || sd.getDay() === 6)) {
-            // Group sa+zo: use Saturday as key (if Sunday, go back 1 day)
-            const satDate = new Date(sd);
-            if (satDate.getDay() === 0) satDate.setDate(satDate.getDate() - 1);
-            workedWeekends.add(satDate.toISOString().split('T')[0]);
-        }
-    });
-
-    const freeWeekends = totalWeekends - workedWeekends.size;
-    const monthNames = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
-
-    if (freeWeekends < minFree) {
-        const employee = getEmployee(employeeId);
-        warnings.push({
-            type: ValidationRules.WARNING,
-            rule: 'Min vrije weekenden',
-            message: `${employee?.name || 'Medewerker'} heeft nog maar ${freeWeekends} vrij weekend(en) in ${monthNames[month]} (minimum ${minFree})`
-        });
-    }
-
-    return { warnings };
-}
+// validateRestAfterNight and validateMinFreeWeekends removed per user request
 
 // ===== VOLLEDIGE VALIDATIE =====
 
@@ -460,14 +311,6 @@ function validateShift(shiftData, excludeShiftId = null) {
     // 6. Check max opeenvolgende dagen
     const consecutive = validateMaxConsecutiveDays(shiftData.employeeId, shiftData, excludeShiftId);
     allWarnings.push(...consecutive.warnings);
-
-    // 7. Check rust na nachtdienst
-    const nightRest = validateRestAfterNight(shiftData.employeeId, shiftData, excludeShiftId);
-    allWarnings.push(...nightRest.warnings);
-
-    // 8. Check min vrije weekenden
-    const weekends = validateMinFreeWeekends(shiftData.employeeId, shiftData, excludeShiftId);
-    allWarnings.push(...weekends.warnings);
 
     return {
         isValid: allErrors.length === 0,
@@ -543,20 +386,7 @@ function generateSuggestions(error, shiftData) {
             }
             break;
         }
-        case 'Weekend gesloten': {
-            const d = parseDateOnly(shiftData.date);
-            // Find next Monday
-            const daysUntilMonday = (8 - d.getDay()) % 7 || 7;
-            const nextMonday = new Date(d);
-            nextMonday.setDate(d.getDate() + daysUntilMonday);
-            const mondayStr = nextMonday.toISOString().split('T')[0];
-            suggestions.push({
-                label: `Verplaats naar ma ${formatDate(mondayStr)}`,
-                field: 'date',
-                value: mondayStr
-            });
-            break;
-        }
+        // 'Weekend gesloten' case removed — warnings no longer generated
         case 'Afwezigheid': {
             // Suggest available employees for this slot
             const allEmployees = getAllEmployees ? getAllEmployees(true) : DataStore.employees;
@@ -584,47 +414,7 @@ function generateSuggestions(error, shiftData) {
             });
             break;
         }
-        case 'Rust na nachtdienst': {
-            if (error.shift1) {
-                const nightEnd = getShiftEndDateTime(error.shift1);
-                const safeStart = new Date(nightEnd.getTime() + 11 * 3600000);
-                const shiftDate = parseDateOnly(shiftData.date);
-                if (safeStart.toDateString() === shiftDate.toDateString()) {
-                    const timeStr = `${String(safeStart.getHours()).padStart(2, '0')}:${String(safeStart.getMinutes()).padStart(2, '0')}`;
-                    suggestions.push({
-                        label: `Starttijd naar ${timeStr} (11u rust)`,
-                        field: 'startTime',
-                        value: timeStr
-                    });
-                }
-            }
-            suggestions.push({
-                label: 'Kies andere medewerker',
-                field: 'employeeId',
-                value: null,
-                action: 'focus-employee'
-            });
-            break;
-        }
-        case 'Min vrije weekenden': {
-            const d = parseDateOnly(shiftData.date);
-            const daysUntilMonday = (8 - d.getDay()) % 7 || 7;
-            const nextMonday = new Date(d);
-            nextMonday.setDate(d.getDate() + daysUntilMonday);
-            const mondayStr = nextMonday.toISOString().split('T')[0];
-            suggestions.push({
-                label: `Verplaats naar ma ${formatDate(mondayStr)}`,
-                field: 'date',
-                value: mondayStr
-            });
-            suggestions.push({
-                label: 'Kies andere medewerker',
-                field: 'employeeId',
-                value: null,
-                action: 'focus-employee'
-            });
-            break;
-        }
+        // 'Rust na nachtdienst' and 'Min vrije weekenden' cases removed
     }
 
     return suggestions;

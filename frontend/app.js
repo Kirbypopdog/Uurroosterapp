@@ -1155,16 +1155,16 @@ function setupEventListeners() {
         }
     });
 
-    // Planning controls collapse toggle
+    // Planning controls collapse toggle (only hides filters row, not date nav)
     const planningControlsToggle = document.getElementById('planning-controls-toggle');
     if (planningControlsToggle) {
         planningControlsToggle.addEventListener('click', () => {
             AppState.planningControlsCollapsed = !AppState.planningControlsCollapsed;
             planningControlsToggle.classList.toggle('active', AppState.planningControlsCollapsed);
-            const wrapper = document.getElementById('planning-controls-wrapper');
+            const filtersRow = document.getElementById('planning-filters-row');
             const heatmap = document.getElementById('coverage-heatmap-container');
             const alerts = document.getElementById('validation-alerts');
-            if (wrapper) wrapper.style.display = AppState.planningControlsCollapsed ? 'none' : '';
+            if (filtersRow) filtersRow.style.display = AppState.planningControlsCollapsed ? 'none' : '';
             if (heatmap) heatmap.style.display = AppState.planningControlsCollapsed ? 'none' : '';
             if (alerts) alerts.style.display = AppState.planningControlsCollapsed ? 'none' : '';
         });
@@ -1184,12 +1184,11 @@ function setupEventListeners() {
         });
     }
 
-    // Filter toggle: show only employees with shifts
+    // Filter toggle: show only employees with shifts (toggle switch)
     const filterToggle = document.getElementById('filter-shifts-toggle');
     if (filterToggle) {
-        filterToggle.addEventListener('click', () => {
-            AppState.filterOnlyWithShifts = !AppState.filterOnlyWithShifts;
-            filterToggle.classList.toggle('active', AppState.filterOnlyWithShifts);
+        filterToggle.addEventListener('change', () => {
+            AppState.filterOnlyWithShifts = filterToggle.checked;
             renderPlanning();
         });
     }
@@ -2285,10 +2284,10 @@ function renderPlanning() {
         heatmapBtn.classList.toggle('active', AppState.showHeatmap);
     }
 
-    // Sync filter toggle button state
+    // Sync filter toggle switch state
     const filterBtn = document.getElementById('filter-shifts-toggle');
     if (filterBtn) {
-        filterBtn.classList.toggle('active', AppState.filterOnlyWithShifts);
+        filterBtn.checked = AppState.filterOnlyWithShifts;
     }
 
     // Restore window scroll position after DOM updates
@@ -10055,22 +10054,6 @@ function renderSettingsPlanning(container) {
                     </div>
                     <span class="form-hint">Waarschuwing bij overschrijding in planning</span>
                 </div>
-                <div class="form-group">
-                    <label for="rule-rest-after-night">Verplichte rust na nachtdienst:</label>
-                    <select id="rule-rest-after-night" class="form-input">
-                        <option value="true" ${rules.mandatoryRestAfterNight !== false ? 'selected' : ''}>Ja</option>
-                        <option value="false" ${rules.mandatoryRestAfterNight === false ? 'selected' : ''}>Nee</option>
-                    </select>
-                    <span class="form-hint">Controleert 11u rust na diensten die starten na 20:00 of voor 06:00</span>
-                </div>
-                <div class="form-group">
-                    <label for="rule-free-weekends">Min vrije weekenden per maand:</label>
-                    <div class="input-with-unit">
-                        <input type="number" id="rule-free-weekends" class="form-input" value="${rules.minFreeWeekendsPerMonth || 1}" min="0" max="4" />
-                        <span class="unit">weekenden</span>
-                    </div>
-                    <span class="form-hint">Per kalendermaand, waarschuwing bij weekenddienst toewijzing</span>
-                </div>
                 <button class="btn btn-primary" onclick="saveRules()">Regels opslaan</button>
             </div>
         </div>
@@ -10997,13 +10980,9 @@ async function updateTeamColor(teamId, color) {
 async function saveRules() {
     const minHours = parseInt(document.getElementById('rule-min-hours').value) || 11;
     const maxConsecutive = parseInt(document.getElementById('rule-max-consecutive')?.value) || 6;
-    const restAfterNight = document.getElementById('rule-rest-after-night')?.value !== 'false';
-    const freeWeekends = parseInt(document.getElementById('rule-free-weekends')?.value) || 1;
 
     DataStore.settings.rules.minHoursBetweenShifts = minHours;
     DataStore.settings.rules.maxConsecutiveDays = maxConsecutive;
-    DataStore.settings.rules.mandatoryRestAfterNight = restAfterNight;
-    DataStore.settings.rules.minFreeWeekendsPerMonth = freeWeekends;
 
     saveToStorage();
     try {
@@ -12258,9 +12237,7 @@ function sanitizeSettings(rawSettings) {
         minHoursBetweenShifts: Number(normalized.rules?.minHoursBetweenShifts) || defaults.rules?.minHoursBetweenShifts || 11,
         minStaffingDay: Number(normalized.rules?.minStaffingDay) || defaults.rules?.minStaffingDay || 1,
         minStaffingNight: Number(normalized.rules?.minStaffingNight) || defaults.rules?.minStaffingNight || 1,
-        maxConsecutiveDays: Number(normalized.rules?.maxConsecutiveDays) || defaults.rules?.maxConsecutiveDays || 6,
-        mandatoryRestAfterNight: normalized.rules?.mandatoryRestAfterNight !== false,
-        minFreeWeekendsPerMonth: Number(normalized.rules?.minFreeWeekendsPerMonth) || defaults.rules?.minFreeWeekendsPerMonth || 1
+        maxConsecutiveDays: Number(normalized.rules?.maxConsecutiveDays) || defaults.rules?.maxConsecutiveDays || 6
     };
 
     const holidayRules = {

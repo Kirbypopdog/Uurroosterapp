@@ -130,13 +130,17 @@
                         <button class="view-toggle-btn" data-mode="day">Dag</button>
                     </div>
                 </div>
-                <div class="planning-controls-row">
+                <div class="planning-controls-row" id="planning-filters-row">
                     <div class="team-toggles" id="team-toggles">
                         <!-- Dynamisch gevuld via renderTeamToggles() -->
                     </div>
                     <div class="planning-filter-buttons">
                         <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
-                        <button id="filter-shifts-toggle" class="btn btn-sm btn-secondary" title="Toon alleen medewerkers met een shift">Alleen met shift</button>
+                        <label class="toggle-switch-label" title="Verberg medewerkers zonder dienst">
+                            <input type="checkbox" id="filter-shifts-toggle" class="toggle-switch-input">
+                            <span class="toggle-switch-slider"></span>
+                            <span class="toggle-switch-text">Verberg lege rijen</span>
+                        </label>
                     </div>
                 </div>
             </div>
