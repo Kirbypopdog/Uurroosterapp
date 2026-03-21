@@ -514,6 +514,19 @@ function showToast(message, type = 'info', duration = null) {
     return ToastManager.show(message, type, duration);
 }
 
+// ===== USER-FRIENDLY ERROR MESSAGES =====
+function getUserFriendlyError(err) {
+    if (!err) return 'Er is een onbekende fout opgetreden.';
+    const msg = err.message || err.error || String(err);
+    if (msg.includes('constraint')) return 'Dit kan niet worden opgeslagen — controleer de gegevens.';
+    if (msg.includes('duplicate')) return 'Deze waarde bestaat al.';
+    if (msg.includes('not found') || msg.includes('404')) return 'Dit item werd niet gevonden.';
+    if (msg.includes('unauthorized') || msg.includes('401')) return 'Je bent niet gemachtigd voor deze actie.';
+    if (msg.includes('network') || msg.includes('fetch') || msg.includes('Failed to fetch')) return 'Verbindingsfout — controleer je internetverbinding.';
+    if (msg.includes('Te veel verzoeken')) return msg;
+    return msg;
+}
+
 // ===== DATA LOADING OVERLAY =====
 function showDataLoading(message = 'Bezig met opslaan...') {
     const overlay = document.getElementById('data-loading-overlay');
@@ -572,7 +585,7 @@ function updateShiftRefreshRange() {
 }
 
 // ===== CONFIRMATION DIALOG SYSTEM =====
-function showConfirm(message, title = 'Bevestig actie') {
+function showConfirm(message, title = 'Bevestig actie', options = {}) {
     return new Promise((resolve) => {
         const modal = document.getElementById('confirm-modal');
         const titleEl = document.getElementById('confirm-modal-title');
@@ -583,6 +596,17 @@ function showConfirm(message, title = 'Bevestig actie') {
         // Set content
         titleEl.textContent = title;
         messageEl.textContent = message;
+
+        // Danger styling
+        if (options.danger) {
+            okBtn.classList.add('btn-danger');
+        } else {
+            okBtn.classList.remove('btn-danger');
+        }
+
+        // Custom button text
+        okBtn.textContent = options.confirmText || 'OK';
+        cancelBtn.textContent = options.cancelText || 'Annuleren';
 
         // Show modal
         modal.classList.remove('hidden');
@@ -2617,7 +2641,7 @@ function renderTimelineView() {
     html += '<div class="timeline-body">';
 
     if (employees.length === 0) {
-        html += '<div class="no-shifts-message">Geen diensten deze week</div>';
+        html += '<div class="empty-state"><p>Geen shifts gepland voor deze periode.</p><small>Pas een concept toe of voeg shifts handmatig toe.</small></div>';
     } else {
         // Render each team group
         teamOrder.forEach(teamKey => {
@@ -3085,7 +3109,7 @@ function renderMonthView() {
     html += '<div class="month-body">';
 
     if (employees.length === 0) {
-        html += '<div class="no-shifts-message">Geen diensten deze maand</div>';
+        html += '<div class="empty-state"><p>Geen shifts gepland voor deze periode.</p><small>Pas een concept toe of voeg shifts handmatig toe.</small></div>';
     } else {
         teamOrder.forEach(teamKey => {
             const teamEmployees = employeesByTeam[teamKey];
@@ -3632,7 +3656,7 @@ async function handleShiftDelete(shiftId = null) {
         ? `de dienst van ${shift.employeeName || 'deze medewerker'} op ${shift.date}`
         : 'deze dienst';
 
-    if (await showConfirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?`)) {
+    if (await showConfirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?`, 'Dienst verwijderen', { danger: true, confirmText: 'Verwijderen' })) {
         // Wait for deletion to complete before re-rendering
         await deleteShift(idToDelete);
 
@@ -3859,7 +3883,7 @@ async function handleSwapRequestSubmit() {
         switchView('swaps');
     } catch (error) {
         console.error('Error creating swap request:', error);
-        showToast('Fout bij indienen ruilverzoek: ' + (error.message || 'Onbekende fout'), 'error');
+        showToast('Fout bij indienen ruilverzoek: ' + getUserFriendlyError(error), 'error');
     }
 }
 
@@ -4004,7 +4028,7 @@ async function handleSwapApprove() {
         renderPlanning(); // Refresh planning view to show swapped shifts
     } catch (error) {
         console.error('Error approving swap:', error);
-        showToast('Fout bij goedkeuren: ' + (error.message || 'Onbekende fout'), 'error');
+        showToast('Fout bij goedkeuren: ' + getUserFriendlyError(error), 'error');
     } finally {
         hideSectionLoading('swaps-view');
     }
@@ -4033,7 +4057,7 @@ async function handleSwapReject() {
         renderSwaps();
     } catch (error) {
         console.error('Error rejecting swap:', error);
-        showToast('Fout bij afwijzen: ' + (error.message || 'Onbekende fout'), 'error');
+        showToast('Fout bij afwijzen: ' + getUserFriendlyError(error), 'error');
     } finally {
         hideSectionLoading('swaps-view');
     }
@@ -4124,7 +4148,7 @@ async function handleTakeoverRequestSubmit() {
         switchView('swaps');
     } catch (error) {
         console.error('Error creating takeover request:', error);
-        showToast('Fout bij indienen verzoek: ' + (error.message || 'Onbekende fout'), 'error');
+        showToast('Fout bij indienen verzoek: ' + getUserFriendlyError(error), 'error');
     }
 }
 
@@ -4177,6 +4201,10 @@ async function handleShiftSubmit(e) {
     }
     if (!DOM.shiftStart.value || !DOM.shiftEnd.value) {
         DOM.shiftValidationErrors.innerHTML = '<ul><li>Vul start- en eindtijd in</li></ul>';
+        return;
+    }
+    if (DOM.shiftStart.value === DOM.shiftEnd.value) {
+        DOM.shiftValidationErrors.innerHTML = '<ul><li>Begintijd en eindtijd mogen niet gelijk zijn</li></ul>';
         return;
     }
 
@@ -4262,7 +4290,7 @@ async function handleShiftSubmit(e) {
         }
     } catch (error) {
         console.error('Error in handleShiftSubmit:', error);
-        DOM.shiftValidationErrors.innerHTML = '<ul><li>Er is een fout opgetreden: ' + error.message + '</li></ul>';
+        DOM.shiftValidationErrors.innerHTML = '<ul><li>Er is een fout opgetreden: ' + getUserFriendlyError(error) + '</li></ul>';
     }
 }
 
@@ -4382,7 +4410,7 @@ async function handleActivitySubmit(e) {
         renderPlanning();
         showToast('Activiteit opgeslagen', 'success');
     } catch (error) {
-        showToast('Fout bij opslaan: ' + error.message, 'error');
+        showToast('Fout bij opslaan: ' + getUserFriendlyError(error), 'error');
     }
 }
 
@@ -4397,7 +4425,7 @@ async function handleActivityDelete() {
         renderPlanning();
         showToast('Activiteit verwijderd', 'success');
     } catch (error) {
-        showToast('Fout bij verwijderen: ' + error.message, 'error');
+        showToast('Fout bij verwijderen: ' + getUserFriendlyError(error), 'error');
     }
 }
 
@@ -5133,7 +5161,7 @@ async function handleEmployeeSubmit(e) {
         }
     } catch (error) {
         console.error('Error saving employee:', error);
-        showToast('Fout bij opslaan medewerker: ' + (error.message || 'Onbekende fout'), 'error');
+        showToast('Fout bij opslaan medewerker: ' + getUserFriendlyError(error), 'error');
     } finally {
         hideSectionLoading('employees-view');
     }
@@ -5157,7 +5185,7 @@ async function handleEmployeeDelete() {
         renderPlanning();
     } catch (error) {
         console.error('Error deleting employee:', error);
-        showToast('Fout bij verwijderen: ' + (error.message || 'Onbekende fout'), 'error');
+        showToast('Fout bij verwijderen: ' + getUserFriendlyError(error), 'error');
     } finally {
         hideSectionLoading('employees-view');
     }
@@ -5835,7 +5863,7 @@ async function renderSwaps() {
         console.error('Error rendering swaps:', error);
         swapsList.innerHTML = `<div style="padding: 40px; text-align: center; color: #e11d48;">
             <h3>${IconHelper.html(ICONS.error, 'md')} Fout bij laden ruilverzoeken</h3>
-            <p>${escapeHtml(error.message || 'Onbekende fout')}</p>
+            <p>${escapeHtmlgetUserFriendlyError(error)}</p>
         </div>`;
         IconHelper.init(swapsList);
     }
@@ -6068,7 +6096,7 @@ function attachSwapActionListeners() {
                     switchView('planning'); // Go to planning to see the result
                 } catch (error) {
                     console.error('Error approving swap:', error);
-                    showToast('Fout bij accepteren: ' + (error.message || 'Onbekende fout'), 'error');
+                    showToast('Fout bij accepteren: ' + getUserFriendlyError(error), 'error');
                 }
             }
         });
@@ -6086,7 +6114,7 @@ function attachSwapActionListeners() {
                     renderSwaps();
                 } catch (error) {
                     console.error('Error rejecting swap:', error);
-                    showToast('Fout bij afwijzen: ' + (error.message || 'Onbekende fout'), 'error');
+                    showToast('Fout bij afwijzen: ' + getUserFriendlyError(error), 'error');
                 }
             } else if (notes !== null) {
                 showToast('Je moet een reden opgeven om het verzoek af te wijzen', 'warning');
@@ -6113,7 +6141,7 @@ function attachSwapActionListeners() {
                     renderSwaps();
                 } catch (error) {
                     console.error('Error cancelling swap:', error);
-                    showToast('Fout bij annuleren: ' + (error.message || 'Onbekende fout'), 'error');
+                    showToast('Fout bij annuleren: ' + getUserFriendlyError(error), 'error');
                 }
             }
         });
@@ -6135,7 +6163,7 @@ function attachSwapActionListeners() {
                         switchView('planning'); // Go to planning to see the new shift
                     } catch (error) {
                         console.error('Error accepting takeover:', error);
-                        showToast('Fout bij overnemen: ' + (error.message || 'Onbekende fout'), 'error');
+                        showToast('Fout bij overnemen: ' + getUserFriendlyError(error), 'error');
                     }
                 }
             }
@@ -8120,9 +8148,12 @@ async function deactivateBuilderDraft(draftId) {
 }
 
 async function applyBuilderDraft(draftId) {
+    if (AppState._applyingDraft) return;
+    AppState._applyingDraft = true;
+
     const drafts = DataStore.settings.schedule_drafts || [];
     const draft = drafts.find(d => d.id === draftId);
-    if (!draft) return;
+    if (!draft) { AppState._applyingDraft = false; return; }
 
     const isVakantie = draft.type === 'vakantie';
 
@@ -8153,7 +8184,7 @@ async function applyBuilderDraft(draftId) {
             `Overige medewerkers krijgen GEEN shift tijdens deze periode.`,
             'Vakantieconcept toepassen'
         );
-        if (!confirmed) return;
+        if (!confirmed) { AppState._applyingDraft = false; return; }
 
         showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
         try {
@@ -8184,9 +8215,10 @@ async function applyBuilderDraft(draftId) {
             renderBuilder();
         } catch (error) {
             console.error('Error applying vakantie draft:', error);
-            showToast('Fout bij toepassen vakantieconcept: ' + error.message, 'error');
+            showToast('Fout bij toepassen vakantieconcept: ' + getUserFriendlyError(error), 'error');
         } finally {
             hideSectionLoading('planning-view');
+            AppState._applyingDraft = false;
         }
         return;
     }
@@ -8259,7 +8291,7 @@ async function applyBuilderDraft(draftId) {
 
     // Show apply modal with editable dates + changes preview
     const applyResult = await showDraftApplyModal(draft, weekLabel, changesCount, allEmployees.length, changesSummary);
-    if (!applyResult) return;
+    if (!applyResult) { AppState._applyingDraft = false; return; }
 
     showSectionLoading('planning-view', 'Concept toepassen...');
     try {
@@ -8279,7 +8311,7 @@ async function applyBuilderDraft(draftId) {
                 `De volgende actieve concepten overlappen met deze periode:\n\n• ${overlapNames}\n\nDeze concepten worden ingekort tot ${result.newStartDate}. Doorgaan?`,
                 'Concepten overlappen'
             );
-            if (!confirmed) return;
+            if (!confirmed) { AppState._applyingDraft = false; return; }
             showSectionLoading('planning-view', 'Concept toepassen...');
             result = await applyScheduleDraft(draftId, {
                 clearBlocks: true,
@@ -8373,9 +8405,10 @@ async function applyBuilderDraft(draftId) {
         renderBuilder();
     } catch (error) {
         console.error('Error applying builder draft:', error);
-        showToast('Fout bij toepassen concept: ' + error.message, 'error');
+        showToast('Fout bij toepassen concept: ' + getUserFriendlyError(error), 'error');
     } finally {
         hideSectionLoading('planning-view');
+        AppState._applyingDraft = false;
     }
 }
 
@@ -9531,7 +9564,7 @@ function showEditAccountModal(user, teams, onSave) {
 
         const confirmMsg = `Weet je zeker dat je het account van "${user.name}" wilt verwijderen?\n\nDit verwijdert ook alle gekoppelde diensten en afwezigheden.\n\nDeze actie kan niet ongedaan worden gemaakt.`;
 
-        if (!await showConfirm(confirmMsg, 'Account verwijderen')) return;
+        if (!await showConfirm(confirmMsg, 'Account verwijderen', { danger: true, confirmText: 'Verwijderen' })) return;
 
         try {
             await deleteEmployee(Number(user.id));
@@ -9677,7 +9710,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         const newUser = activeUsers.find(u => String(u.id) === String(newUserId));
         const confirmMsg = `Weet je zeker dat je ${departingUser.name} wilt vervangen door ${newUser.name}?\n\nDeze actie kan niet ongedaan worden gemaakt.`;
 
-        if (!await showConfirm(confirmMsg, 'Medewerker vervangen')) return;
+        if (!await showConfirm(confirmMsg, 'Medewerker vervangen', { danger: true, confirmText: 'Vervangen' })) return;
 
         try {
             const result = await replaceEmployee(Number(departingUser.id), Number(newUserId), fromDate);
@@ -12084,7 +12117,7 @@ async function importData(event) {
             location.reload();
         } catch (error) {
             console.error('Import error:', error);
-            showToast('Fout bij importeren: ' + error.message, 'error');
+            showToast('Fout bij importeren: ' + getUserFriendlyError(error), 'error');
         }
     };
 

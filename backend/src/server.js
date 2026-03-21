@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { pool } = require('./db');
 const emailService = require('./email');
@@ -25,12 +26,25 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
+// Security headers
+app.use(helmet());
+
 // CORS: restrict to frontend origin in production
 const corsOptions = process.env.FRONTEND_URL
   ? { origin: process.env.FRONTEND_URL, credentials: true }
   : {};
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// Global rate limiter
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Te veel verzoeken. Probeer later opnieuw.' }
+});
+app.use(globalLimiter);
 
 // ===== DATE HELPER FUNCTIONS =====
 // Used by apply-schedule endpoint (replicates frontend data.js logic)
@@ -338,6 +352,17 @@ async function ensureSchema() {
         console.log(`  Error creating audit_log table: ${e.message}`);
       }
     }
+
+    // Update audit_log CHECK constraints to include REPLACE/IMPORT/MIGRATE and system/shift_activity/shift_block
+    try {
+      await client.query(`ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check`);
+      await client.query(`ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'CANCEL', 'LOGIN', 'REPLACE', 'IMPORT', 'MIGRATE'))`);
+      await client.query(`ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_resource_type_check`);
+      await client.query(`ALTER TABLE audit_log ADD CONSTRAINT audit_log_resource_type_check CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings', 'system', 'shift_activity', 'shift_block'))`);
+    } catch (e) {
+      console.log(`  Audit log constraint update: ${e.message}`);
+    }
+
     // Check if schedule_drafts table exists
     const draftsTableCheck = await client.query(`
       SELECT table_name FROM information_schema.tables
@@ -525,7 +550,7 @@ ensureSchema().catch(console.error);
 
 function signToken(user) {
   return jwt.sign(
-    { id: user.id, role: user.role, team_id: user.team_id },
+    { id: user.id, role: user.role, team_id: user.team_id, name: user.name },
     JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -581,10 +606,10 @@ async function logAudit(req, action, resourceType, resourceId, details = {}) {
 }
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true });
+  res.json({ status: 'ok', ts: new Date().toISOString() });
 });
 
-app.post('/auth/register', async (req, res) => {
+app.post('/auth/register', requireAuth, requireAdmin, async (req, res) => {
   const { name, email, password } = req.body || {};
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Missing fields' });
@@ -1101,6 +1126,30 @@ app.put('/users/:id', requireAuth, async (req, res) => {
 
   if (!name) {
     return res.status(400).json({ error: 'Naam is verplicht' });
+  }
+
+  // Medewerker can only update name and email
+  if (role === 'medewerker') {
+    try {
+      const result = await pool.query(
+        `UPDATE users SET name = $1, email = $2 WHERE id = $3
+         RETURNING id, name, email, role, team_id,
+                   main_team as "mainTeam", extra_teams as "extraTeams",
+                   contract_hours as "contractHours", active,
+                   week_schedule_week1 as "weekScheduleWeek1",
+                   week_schedule_week2 as "weekScheduleWeek2",
+                   week_schedules as "weekSchedules"`,
+        [name, email || null, userId]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Gebruiker niet gevonden' });
+      }
+      await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
+      return res.json({ user: result.rows[0] });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Server error' });
+    }
   }
 
   try {

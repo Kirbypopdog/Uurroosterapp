@@ -2899,6 +2899,22 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-size: 14px;
 }
 
+.empty-state {
+    padding: 60px 40px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.empty-state p {
+    font-size: 15px;
+    margin: 0 0 8px 0;
+}
+
+.empty-state small {
+    font-size: 13px;
+    opacity: 0.7;
+}
+
 /* ===== MONTH VIEW ===== */
 .month-view-wrapper {
     background: var(--surface-color);

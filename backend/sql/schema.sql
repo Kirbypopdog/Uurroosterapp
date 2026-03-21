@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS users (
   active BOOLEAN DEFAULT true,
   week_schedule_week1 JSONB DEFAULT '[]',
   week_schedule_week2 JSONB DEFAULT '[]',
+  week_schedules JSONB DEFAULT NULL,
+  email_notifications_enabled BOOLEAN DEFAULT true,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -83,7 +85,7 @@ CREATE TABLE IF NOT EXISTS shift_swap_requests (
   target_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
   target_shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
   request_type TEXT NOT NULL DEFAULT 'swap' CHECK (request_type IN ('swap', 'takeover')),
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead', 'expired')),
   message TEXT,
   response_notes TEXT,
   target_approved BOOLEAN DEFAULT NULL,
@@ -108,8 +110,28 @@ CREATE TABLE IF NOT EXISTS schedule_drafts (
   created_by_name TEXT,
   last_applied_at TIMESTAMP,
   last_applied_by TEXT,
+  valid_from DATE,
+  valid_until DATE,
+  last_applied_from DATE,
+  last_applied_until DATE,
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_by_name TEXT,
+  type TEXT DEFAULT 'basis',
+  holiday_period_id TEXT,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Shift activities (activiteiten binnen shifts)
+CREATE TABLE IF NOT EXISTS shift_activities (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date DATE NOT NULL,
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  type TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Audit log (tracks all changes)
@@ -117,8 +139,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
   id SERIAL PRIMARY KEY,
   actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   actor_name TEXT NOT NULL,
-  action TEXT NOT NULL CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'CANCEL', 'LOGIN')),
-  resource_type TEXT NOT NULL CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings')),
+  action TEXT NOT NULL CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'CANCEL', 'LOGIN', 'REPLACE', 'IMPORT', 'MIGRATE')),
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings', 'system', 'shift_activity', 'shift_block')),
   resource_id TEXT,
   details JSONB DEFAULT '{}',
   created_at TIMESTAMP DEFAULT NOW()
@@ -141,3 +163,4 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log(resource_type);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_schedule_drafts_created ON schedule_drafts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_shift_activities_user_date ON shift_activities(user_id, date);
