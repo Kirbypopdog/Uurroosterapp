@@ -5081,9 +5081,13 @@ function loadProfileWeekSchedule() {
     const user = AppState.currentUser;
     if (!user) return;
 
+    // Use DataStore.users for most up-to-date schedule data (AppState.currentUser may be stale)
+    const empId = user.id || user.userId || user.employeeId;
+    const emp = DataStore.users.find(u => u.id === empId) || user;
+
     const cycleLen = getCycleLength();
     for (let w = 1; w <= cycleLen; w++) {
-        const schedule = getEmployeeWeekSchedule(user, w);
+        const schedule = getEmployeeWeekSchedule(emp, w);
         if (schedule && schedule.length > 0) {
             loadProfileWeekScheduleData(w, schedule);
         }
