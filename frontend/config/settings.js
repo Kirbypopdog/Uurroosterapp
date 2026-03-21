@@ -36,6 +36,9 @@ window.DEFAULT_SETTINGS = {
         minHoursBetweenShifts: 11,
         minStaffingDay: 1, // Minimum 1 persoon overdag per team
         minStaffingNight: 1, // Minimum 1 persoon 's nachts totaal
+        maxConsecutiveDays: 6,
+        mandatoryRestAfterNight: true,
+        minFreeWeekendsPerMonth: 1,
     },
     // Dienst templates
     shiftTemplates: {
