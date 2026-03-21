@@ -3,6 +3,7 @@
     --primary-color: #4a7c6f;
     --primary-hover: #3d6a5e;
     --primary-dark: #2d5249;
+    --primary-rgb: 74, 124, 111;
     --accent-blue: #1e40af;
     --secondary-color: #64748b;
     --success-color: #10b981;
@@ -211,7 +212,7 @@ body {
 .select-input:focus {
     outline: none;
     border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(52, 200, 150, 0.15);
+    box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.15);
 }
 
 .form-row {
@@ -289,7 +290,7 @@ textarea {
 .btn-primary:hover {
     background: var(--primary-hover);
     transform: translateY(-1px);
-    box-shadow: 0 4px 6px -1px rgba(52, 200, 150, 0.3);
+    box-shadow: 0 4px 6px -1px rgba(var(--primary-rgb), 0.3);
 }
 
 .btn-secondary {
@@ -562,7 +563,7 @@ textarea {
 .home-card:hover {
     box-shadow: var(--shadow-lg);
     transform: translateY(-2px);
-    border-color: rgba(52, 200, 150, 0.2);
+    border-color: rgba(var(--primary-rgb), 0.2);
 }
 
 .home-card-full {
@@ -3884,9 +3885,9 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .settings-tab:hover {
-    background: rgba(52, 200, 150, 0.06);
+    background: rgba(var(--primary-rgb), 0.06);
     color: var(--text-primary);
-    border-bottom-color: rgba(52, 200, 150, 0.3);
+    border-bottom-color: rgba(var(--primary-rgb), 0.3);
 }
 
 .settings-tab.active {
@@ -4007,6 +4008,10 @@ body[data-view-mode="day"] .timeline-day-cell {
     border-bottom: 1px solid var(--border-color);
     gap: 12px;
 }
+
+.settings-card.collapsed .settings-card-body { display: none; }
+.settings-card.collapsed .collapse-indicator { transform: rotate(-90deg); }
+.collapse-indicator { transition: transform 0.2s; font-size: 12px; color: var(--text-secondary); }
 
 .settings-card-title {
     display: flex;
@@ -5011,8 +5016,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .week-tab:hover {
     color: var(--text-primary);
-    background: rgba(52, 200, 150, 0.06);
-    border-bottom-color: rgba(52, 200, 150, 0.3);
+    background: rgba(var(--primary-rgb), 0.06);
+    border-bottom-color: rgba(var(--primary-rgb), 0.3);
 }
 
 .week-tab.active {
@@ -7404,7 +7409,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 .swap-request-card:hover {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     transform: translateY(-2px);
-    border-color: rgba(52, 200, 150, 0.25);
+    border-color: rgba(var(--primary-rgb), 0.25);
 }
 
 .swap-request-header {
@@ -8251,7 +8256,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .builder-cell:hover:not(.closed):not(.absent) {
     border-color: var(--primary-color);
-    background: rgba(52, 200, 150, 0.05);
+    background: rgba(var(--primary-rgb), 0.05);
 }
 
 .builder-cell.closed {
@@ -8879,7 +8884,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .builder-draft-card:hover {
     border-color: var(--primary-color, #4a7c6f);
-    box-shadow: 0 2px 8px rgba(52, 200, 150, 0.12);
+    box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.12);
     transform: translateY(-1px);
 }
 
@@ -8932,7 +8937,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .builder-template-btn.active {
     border-color: var(--primary-color);
-    background: rgba(52, 200, 150, 0.08);
+    background: rgba(var(--primary-rgb), 0.08);
 }
 
 .builder-template-btn .template-name {
@@ -9104,13 +9109,13 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 #login-form .btn-primary:hover {
-    box-shadow: 0 6px 16px rgba(52, 200, 150, 0.35);
+    box-shadow: 0 6px 16px rgba(var(--primary-rgb), 0.35);
     transform: translateY(-2px);
 }
 
 #login-form .btn-primary:active {
     transform: translateY(0);
-    box-shadow: 0 2px 4px rgba(52, 200, 150, 0.2);
+    box-shadow: 0 2px 4px rgba(var(--primary-rgb), 0.2);
     transition-duration: 0.1s;
 }
 
@@ -9129,13 +9134,13 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .settings-card:hover {
-    border-color: rgba(52, 200, 150, 0.2);
+    border-color: rgba(var(--primary-rgb), 0.2);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 /* Calendar day column hover indicator */
 .calendar-day-column:hover .time-cell:not(.closed) {
-    background: rgba(52, 200, 150, 0.02);
+    background: rgba(var(--primary-rgb), 0.02);
 }
 
 /* Form input focus transitions */
@@ -9143,7 +9148,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 .form-group select:focus,
 .form-group textarea:focus,
 .select-input:focus {
-    box-shadow: 0 0 0 3px rgba(52, 200, 150, 0.12);
+    box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.12);
     border-color: var(--primary-color);
 }
 
@@ -9162,7 +9167,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .user-badge:hover {
-    background: rgba(52, 200, 150, 0.08);
+    background: rgba(var(--primary-rgb), 0.08);
     color: var(--primary-color);
 }
 
@@ -9172,7 +9177,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .checkbox-group label:hover {
-    background: rgba(52, 200, 150, 0.04);
+    background: rgba(var(--primary-rgb), 0.04);
     border-color: var(--primary-color);
     transform: translateX(2px);
 }
@@ -9194,7 +9199,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 .date-navigation .btn:hover {
     background: var(--primary-color);
     color: white;
-    box-shadow: 0 2px 6px rgba(52, 200, 150, 0.25);
+    box-shadow: 0 2px 6px rgba(var(--primary-rgb), 0.25);
 }
 
 /* Staffing warning item hover */

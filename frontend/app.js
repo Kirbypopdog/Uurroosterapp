@@ -1767,6 +1767,10 @@ function renderHomeWeekendInfo() {
 }
 
 async function switchView(viewName) {
+    // Prevent medewerker from accessing settings
+    if (viewName === 'settings' && getEffectiveRole() === 'medewerker') {
+        viewName = 'home';
+    }
     // Warn about unsaved settings changes
     if (AppState.settingsDirty && AppState.currentView === 'settings' && viewName !== 'settings') {
         const proceed = await showConfirm(
@@ -6653,7 +6657,7 @@ function renderBuilderGrid(role, userTeam) {
     html += renderBuilderMeetingsEditor();
 
     // 11-hour rule warnings across consecutive days
-    html += renderBuilder11HourWarnings(employees);
+    html += renderBuilderWarnings(employees);
 
     html += '</div>';
     return html;
@@ -7102,8 +7106,9 @@ function renderBuilderMeetingsEditor() {
     return html;
 }
 
-function renderBuilder11HourWarnings(employees) {
+function renderBuilderWarnings(employees) {
     const minHours = DataStore.settings.rules?.minHoursBetweenShifts || 11;
+    const maxDays = DataStore.settings.rules?.maxConsecutiveDays || 6;
     const warnings = [];
     const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
 
@@ -7111,12 +7116,11 @@ function renderBuilder11HourWarnings(employees) {
         const empGrid = AppState.builderGrid[emp.id] || {};
         const days = Object.keys(empGrid).map(Number).sort((a, b) => a - b);
 
+        // 11-hour rule checks
         for (let i = 0; i < days.length; i++) {
-            // Check next consecutive day
             const nextDay = i < days.length - 1 ? days[i + 1] : null;
             const currentShift = empGrid[days[i]];
 
-            // Also check wrap-around: Sunday (6) → Monday (0) for repeating patterns
             const wrapTarget = days[i] === 6 ? empGrid[0] : null;
 
             const checkPairs = [];
@@ -7134,14 +7138,12 @@ function renderBuilder11HourWarnings(employees) {
                 let endMinutes = endParts[0] * 60 + endParts[1];
                 let startMinutes = startParts[0] * 60 + startParts[1];
 
-                // Handle night shifts (end time < start time means next day)
                 const shift1StartParts = currentShift.startTime.split(':').map(Number);
                 const shift1Start = shift1StartParts[0] * 60 + shift1StartParts[1];
                 if (endMinutes <= shift1Start) {
-                    endMinutes += 24 * 60; // shift ends next day
+                    endMinutes += 24 * 60;
                 }
 
-                // Rest = time from end of shift1 (on day N / day N+1 if night) to start of shift2 (on day N+1 / day 0)
                 const restMinutes = (24 * 60 - endMinutes) + startMinutes;
                 const restHours = restMinutes / 60;
 
@@ -7155,15 +7157,40 @@ function renderBuilder11HourWarnings(employees) {
                 }
             }
         }
+
+        // Max consecutive days check (including wrap-around for repeating pattern)
+        if (days.length > maxDays) {
+            // Count longest consecutive run
+            let maxConsec = 1, currentConsec = 1;
+            for (let i = 1; i < days.length; i++) {
+                if (days[i] === days[i - 1] + 1) { currentConsec++; maxConsec = Math.max(maxConsec, currentConsec); }
+                else currentConsec = 1;
+            }
+            // Check wrap-around (zo→ma)
+            if (days.includes(6) && days.includes(0)) {
+                let tailCount = 0, headCount = 0;
+                for (let i = days.length - 1; i >= 0 && days[i] === 6 - (days.length - 1 - i); i--) tailCount++;
+                for (let i = 0; i < days.length && days[i] === i; i++) headCount++;
+                maxConsec = Math.max(maxConsec, tailCount + headCount);
+            }
+            if (maxConsec > maxDays) {
+                warnings.push(
+                    `<strong>${escapeHtml(emp.name)}</strong>: ${maxConsec} opeenvolgende werkdagen in weekpatroon (max ${maxDays})`
+                );
+            }
+        }
     });
 
     if (warnings.length === 0) return '';
 
     return `<div class="builder-11h-warnings">
-        <div class="builder-11h-warnings-title">11-uur regel waarschuwingen</div>
+        <div class="builder-11h-warnings-title">Planningsregel waarschuwingen</div>
         <ul>${warnings.map(w => `<li>${w}</li>`).join('')}</ul>
     </div>`;
 }
+
+// Legacy alias
+function renderBuilder11HourWarnings(employees) { return renderBuilderWarnings(employees); }
 
 function renderBuilderActions() {
     const hasData = Object.keys(AppState.builderGrid).length > 0 &&
@@ -9064,23 +9091,44 @@ function switchBuilderWeek(weekNumber) {
 
 // ===== END ROOSTERBOUWER =====
 
+// Settings tab configuration: role-based visibility
+const SETTINGS_TAB_CONFIG = [
+    { id: 'accounts', label: 'Accounts', roles: ['admin'] },
+    { id: 'teams', label: 'Teams & Diensten', roles: ['admin', 'roosterverantwoordelijke'] },
+    { id: 'planning', label: 'Planning', roles: ['admin', 'roosterverantwoordelijke'] },
+    { id: 'communicatie', label: 'Communicatie', roles: ['admin', 'roosterverantwoordelijke'] },
+    { id: 'beheer', label: 'Beheer', roles: ['admin'] }
+];
+
 function renderSettings() {
-    // Update tab active states and scroll active into view
-    document.querySelectorAll('.settings-tab').forEach(tab => {
-        const isActive = tab.dataset.settingsTab === AppState.activeSettingsTab;
-        tab.classList.toggle('active', isActive);
-        if (isActive) {
-            // Scroll active tab into view after a brief delay
-            setTimeout(() => {
-                tab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-            }, 100);
-        }
-    });
+    const role = getEffectiveRole();
+    const allowedTabs = SETTINGS_TAB_CONFIG.filter(t => t.roles.includes(role));
+
+    // If current tab is not allowed for this role, reset to first allowed
+    if (!allowedTabs.find(t => t.id === AppState.activeSettingsTab)) {
+        AppState.activeSettingsTab = allowedTabs[0]?.id || 'teams';
+    }
+
+    // Dynamically render tab buttons
+    const tabsContainer = document.getElementById('settings-tabs');
+    if (tabsContainer) {
+        tabsContainer.innerHTML = allowedTabs.map(t =>
+            `<button class="settings-tab ${t.id === AppState.activeSettingsTab ? 'active' : ''}" data-settings-tab="${t.id}">${t.label}</button>`
+        ).join('');
+    }
 
     // Setup tab click listeners
     document.querySelectorAll('.settings-tab').forEach(tab => {
         tab.onclick = () => switchSettingsTab(tab.dataset.settingsTab);
     });
+
+    // Scroll active tab into view
+    const activeTab = document.querySelector('.settings-tab.active');
+    if (activeTab) {
+        setTimeout(() => {
+            activeTab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+        }, 100);
+    }
 
     // Render the active tab content
     renderSettingsTabContent(AppState.activeSettingsTab);
@@ -9121,21 +9169,18 @@ function renderSettingsTabContent(tabName) {
         case 'teams':
             renderSettingsTeams(content);
             break;
-        case 'email':
+        case 'communicatie':
             renderSettingsEmail(content);
             break;
-        case 'systeem':
-            renderSettingsSystem(content);
-            break;
-        case 'audit':
-            renderSettingsAudit(content);
+        case 'beheer':
+            renderSettingsBeheer(content);
             break;
         default:
             content.innerHTML = '<p>Ongeldige tab</p>';
     }
     IconHelper.init(content);
     // Track unsaved changes for all settings tabs with form inputs
-    if (['planning', 'rooster', 'teams', 'email'].includes(tabName)) {
+    if (['planning', 'teams', 'communicatie'].includes(tabName)) {
         trackSettingsDirty(content);
     }
 }
@@ -9199,6 +9244,11 @@ function renderSettingsAccounts(container) {
                     <select id="admin-team-filter" class="form-input">
                         <option value="">Alle teams</option>
                     </select>
+                    <select id="admin-status-filter" class="form-input">
+                        <option value="active" selected>Actief</option>
+                        <option value="inactive">Inactief</option>
+                        <option value="">Alle</option>
+                    </select>
                 </div>
                 <div id="admin-users-list">Laden...</div>
             </div>
@@ -9228,7 +9278,7 @@ async function loadAdminUsers(container) {
         const rows = users.map(user => {
             const isInactive = user.active === false;
             return `
-            <div class="admin-user-row${isInactive ? ' admin-user-inactive' : ''}" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email)}" data-team="${user.team_id || ''}" data-role="${user.role}">
+            <div class="admin-user-row${isInactive ? ' admin-user-inactive' : ''}" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email)}" data-team="${user.team_id || ''}" data-role="${user.role}" data-active="${user.active !== false}">
                 ${isInactive ? '<span class="status-badge inactive">Inactief</span>' : ''}
                 <div class="admin-user-header">
                     <div>
@@ -9275,13 +9325,16 @@ async function loadAdminUsers(container) {
         const applyFilters = () => {
             const searchValue = (container.querySelector('#admin-user-search')?.value || '').toLowerCase().trim();
             const teamValue = container.querySelector('#admin-team-filter')?.value || '';
+            const statusValue = container.querySelector('#admin-status-filter')?.value || '';
             container.querySelectorAll('.admin-user-row').forEach(row => {
                 const name = (row.dataset.name || '').toLowerCase();
                 const email = (row.dataset.email || '').toLowerCase();
                 const team = row.dataset.team || '';
+                const isActive = row.dataset.active === 'true';
                 const matchSearch = !searchValue || name.includes(searchValue) || email.includes(searchValue);
                 const matchTeam = !teamValue || team === teamValue;
-                row.classList.toggle('is-hidden', !(matchSearch && matchTeam));
+                const matchStatus = !statusValue || (statusValue === 'active' && isActive) || (statusValue === 'inactive' && !isActive);
+                row.classList.toggle('is-hidden', !(matchSearch && matchTeam && matchStatus));
             });
         };
 
@@ -9292,6 +9345,12 @@ async function loadAdminUsers(container) {
         if (teamFilter) {
             teamFilter.addEventListener('change', applyFilters);
         }
+        const statusFilter = container.querySelector('#admin-status-filter');
+        if (statusFilter) {
+            statusFilter.addEventListener('change', applyFilters);
+        }
+        // Apply filters on load to hide inactive users by default
+        applyFilters();
 
         // Add user button
         const addUserBtn = container.querySelector('#add-user-btn');
@@ -9826,7 +9885,7 @@ function renderSettingsPlanning(container) {
                         <input type="number" id="rule-max-consecutive" class="form-input" value="${rules.maxConsecutiveDays || 6}" min="1" max="14" />
                         <span class="unit">dagen</span>
                     </div>
-                    <span class="form-hint">Waarde wordt opgeslagen bij instellingen</span>
+                    <span class="form-hint">Waarschuwing bij overschrijding in planning</span>
                 </div>
                 <div class="form-group">
                     <label for="rule-rest-after-night">Verplichte rust na nachtdienst:</label>
@@ -9834,7 +9893,7 @@ function renderSettingsPlanning(container) {
                         <option value="true" ${rules.mandatoryRestAfterNight !== false ? 'selected' : ''}>Ja</option>
                         <option value="false" ${rules.mandatoryRestAfterNight === false ? 'selected' : ''}>Nee</option>
                     </select>
-                    <span class="form-hint">Waarde wordt opgeslagen bij instellingen</span>
+                    <span class="form-hint">Controleert 11u rust na diensten die starten na 20:00 of voor 06:00</span>
                 </div>
                 <div class="form-group">
                     <label for="rule-free-weekends">Min vrije weekenden per maand:</label>
@@ -9842,7 +9901,7 @@ function renderSettingsPlanning(container) {
                         <input type="number" id="rule-free-weekends" class="form-input" value="${rules.minFreeWeekendsPerMonth || 1}" min="0" max="4" />
                         <span class="unit">weekenden</span>
                     </div>
-                    <span class="form-hint">Waarde wordt opgeslagen bij instellingen</span>
+                    <span class="form-hint">Per kalendermaand, waarschuwing bij weekenddienst toewijzing</span>
                 </div>
                 <button class="btn btn-primary" onclick="saveRules()">Regels opslaan</button>
             </div>
@@ -10315,18 +10374,54 @@ function renderSettingsSystem(container) {
     `;
 }
 
-// ===== SETTINGS TAB: AUDIT LOG =====
-function renderSettingsAudit(container) {
-    const role = getEffectiveRole();
-    if (!['admin', 'roosterverantwoordelijke'].includes(role)) {
+// ===== SETTINGS TAB: BEHEER (combined system + audit) =====
+function renderSettingsBeheer(container) {
+    const isAdmin = getEffectiveRole() === 'admin';
+    if (!isAdmin) {
         container.innerHTML = `<div class="settings-card"><div class="settings-card-body">
-            <div class="info-box neutral"><p>Je hebt geen toegang tot het audit log.</p></div>
+            <div class="info-box neutral"><p>Je hebt geen toegang tot deze instellingen.</p></div>
         </div></div>`;
         return;
     }
 
     container.innerHTML = `
-        <div class="settings-card">
+        <!-- Data beheer -->
+        <div class="settings-card" id="settings-data">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Data beheer</h3>
+                    <p class="settings-card-subtitle">Backup, import en reset van de data.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="info-box neutral">
+                    <p>Alle data wordt opgeslagen in de PostgreSQL database.</p>
+                    <p>Exporteer regelmatig een backup om dataverlies te voorkomen.</p>
+                </div>
+                <div class="data-stats">
+                    <div class="stat-item">
+                        <span class="stat-value">${DataStore.employees.length}</span>
+                        <span class="stat-label">Medewerkers</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value">${DataStore.shifts.length}</span>
+                        <span class="stat-label">Diensten</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value">${DataStore.availability.length}</span>
+                        <span class="stat-label">Afwezigheden</span>
+                    </div>
+                </div>
+                <div class="button-group">
+                    <button class="btn btn-secondary" onclick="exportData()">Exporteer</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeer</button>
+                    <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importData(event)">
+                </div>
+            </div>
+        </div>
+
+        <!-- Audit log -->
+        <div class="settings-card" style="margin-top: 24px;">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Audit Log</h3>
@@ -10378,6 +10473,24 @@ function renderSettingsAudit(container) {
                 </div>
                 <div id="audit-log-results"></div>
                 <div id="audit-log-pagination" class="audit-pagination"></div>
+            </div>
+        </div>
+
+        <!-- Gevarenzone (collapsible, starts collapsed) -->
+        <div class="settings-card collapsed" id="settings-danger-zone" style="margin-top: 24px;">
+            <div class="settings-card-header" style="cursor: pointer;" onclick="this.parentElement.classList.toggle('collapsed')">
+                <div class="settings-card-title">
+                    <h3>Gevarenzone</h3>
+                    <p class="settings-card-subtitle">Onomkeerbare acties.</p>
+                </div>
+                <span class="collapse-indicator">&#9660;</span>
+            </div>
+            <div class="settings-card-body">
+                <div class="info-box" style="background: rgba(239, 68, 68, 0.06); border-color: rgba(239, 68, 68, 0.2);">
+                    <p style="color: var(--danger-color); font-weight: 600;">Let op: deze actie kan niet ongedaan worden gemaakt!</p>
+                    <p>Alle planningsdata (diensten, afwezigheden, ruilverzoeken) wordt permanent verwijderd.</p>
+                </div>
+                <button class="btn btn-danger" onclick="resetData()">Alle data wissen</button>
             </div>
         </div>
     `;
