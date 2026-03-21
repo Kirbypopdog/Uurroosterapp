@@ -457,6 +457,11 @@ async function ensureSchema() {
       await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notifications_enabled BOOLEAN DEFAULT true`);
     } catch (e) { /* already exists */ }
 
+    // Onboarding flags (per-user JSON flags for checklist state)
+    try {
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_flags JSONB DEFAULT '{}'`);
+    } catch (e) { /* already exists */ }
+
     // Add 'expired' to swap request status constraint
     try {
       await client.query(`ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS shift_swap_requests_status_check`);
@@ -708,7 +713,8 @@ app.get('/me', requireAuth, async (req, res) => {
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules",
-                email_notifications_enabled as "emailNotificationsEnabled"
+                email_notifications_enabled as "emailNotificationsEnabled",
+                onboarding_flags as "onboardingFlags"
          FROM users WHERE id = $1`,
         [req.user.id]
       );
@@ -796,6 +802,25 @@ app.put('/me/email-preferences', requireAuth, async (req, res) => {
     res.json({ emailNotificationsEnabled: result.rows[0].emailNotificationsEnabled });
   } catch (err) {
     console.error('PUT /me/email-preferences error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// PUT /me/onboarding-flags - Update onboarding flags (merge)
+app.put('/me/onboarding-flags', requireAuth, async (req, res) => {
+  const flags = req.body;
+  if (!flags || typeof flags !== 'object') {
+    return res.status(400).json({ error: 'Body moet een object zijn met flags' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE users SET onboarding_flags = COALESCE(onboarding_flags, '{}'::jsonb) || $1::jsonb WHERE id = $2
+       RETURNING onboarding_flags as "onboardingFlags"`,
+      [JSON.stringify(flags), req.user.id]
+    );
+    res.json({ onboardingFlags: result.rows[0].onboardingFlags });
+  } catch (err) {
+    console.error('PUT /me/onboarding-flags error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });

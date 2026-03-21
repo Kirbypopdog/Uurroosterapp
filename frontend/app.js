@@ -1450,7 +1450,7 @@ function getOnboardingStatus() {
         { id: 'teams', label: 'Teams aanmaken', done: Object.keys(teams).length > 0, view: 'settings', tab: 'teams' },
         { id: 'templates', label: 'Dienst templates instellen', done: Object.keys(templates).length > 0, view: 'settings', tab: 'teams' },
         { id: 'users', label: 'Medewerkers toevoegen', done: users.filter(u => u.role === 'medewerker').length > 0, view: 'settings', tab: 'accounts' },
-        { id: 'rules', label: 'Planningsregels controleren', done: rules.minHoursBetweenShifts != null, view: 'settings', tab: 'planning' },
+        { id: 'rules', label: 'Planningsregels controleren', done: AppState.currentUser?.onboardingFlags?.planning_visited === true, view: 'settings', tab: 'planning' },
         { id: 'holidays', label: 'Vakantieperiodes invoeren', done: holidays.length > 0, view: 'settings', tab: 'planning' },
         { id: 'schedule', label: 'Basisrooster maken', done: DataStore.shifts.length > 0, view: 'builder' },
         { id: 'email', label: 'Email notificaties configureren', done: DataStore.settings.emailNotifications?.globalEnabled === true, view: 'settings', tab: 'communicatie' }
@@ -1458,7 +1458,7 @@ function getOnboardingStatus() {
 }
 
 function renderHomeOnboarding() {
-    if (sessionStorage.getItem('hideOnboardingChecklist')) return '';
+    if (AppState.currentUser?.onboardingFlags?.checklist_dismissed) return '';
 
     const steps = getOnboardingStatus();
     const doneCount = steps.filter(s => s.done).length;
@@ -1470,7 +1470,7 @@ function renderHomeOnboarding() {
     <div class="home-card onboarding-checklist mb-md">
         <div class="onboarding-header">
             <h3 class="onboarding-title">App instellen</h3>
-            <button class="btn btn-sm btn-ghost onboarding-dismiss" onclick="sessionStorage.setItem('hideOnboardingChecklist','1');this.closest('.onboarding-checklist').remove()" title="Verbergen">✕</button>
+            <button class="btn btn-sm btn-ghost onboarding-dismiss" onclick="dismissOnboardingChecklist(this)" title="Verbergen">✕</button>
         </div>
         <div class="onboarding-progress">
             <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
@@ -1483,6 +1483,18 @@ function renderHomeOnboarding() {
             </li>`).join('')}
         </ul>
     </div>`;
+}
+
+async function dismissOnboardingChecklist(btn) {
+    btn.closest('.onboarding-checklist').remove();
+    try {
+        await fetch(`${API}/me/onboarding-flags`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionStorage.getItem('token')}` },
+            body: JSON.stringify({ checklist_dismissed: true })
+        });
+        if (AppState.currentUser) AppState.currentUser.onboardingFlags = { ...AppState.currentUser.onboardingFlags, checklist_dismissed: true };
+    } catch (e) { console.error('Failed to save onboarding dismiss:', e); }
 }
 
 function renderHomeWelcome(user, role) {
@@ -1524,9 +1536,9 @@ function renderHomeShifts(user) {
             return shiftDate >= today && shiftDate <= endDate;
         })
         .sort((a, b) => {
-            const dateCompare = a.date.localeCompare(b.date);
+            const dateCompare = a.date.localeCompare(b.date, 'nl-BE');
             if (dateCompare !== 0) return dateCompare;
-            return (a.startTime || a.start_time || '').localeCompare(b.startTime || b.start_time || '');
+            return (a.startTime || a.start_time || '').localeCompare(b.startTime || b.start_time || '', 'nl-BE');
         });
 
     const dayNames = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
@@ -2583,6 +2595,36 @@ function renderCalendar() {
     }
 }
 
+// Helper: render overnight continuation blocks for day view
+function renderOvernightContinuation(empId, date, START_HOUR, TOTAL_HOURS) {
+    let html = '';
+    const prevDate = new Date(parseDateOnly(date));
+    prevDate.setDate(prevDate.getDate() - 1);
+    const prevDateStr = formatDateYYYYMMDD(prevDate);
+    let prevShifts = getShiftsByEmployee(empId, prevDateStr, prevDateStr);
+    prevShifts = prevShifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+    prevShifts.forEach(prevShift => {
+        const [pH, ] = prevShift.startTime.split(':').map(Number);
+        const [eH, eM] = prevShift.endTime.split(':').map(Number);
+        const prevIsOvernight = eH < pH;
+        if (prevIsOvernight && (eH + eM / 60) > START_HOUR) {
+            const endFrac = eH + eM / 60;
+            const w = ((endFrac - START_HOUR) / TOTAL_HOURS) * 100;
+            html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation"
+                         data-shift-id="${prevShift.id}"
+                         data-employee-id="${prevShift.employeeId}"
+                         data-date="${prevShift.date}"
+                         data-original-date="${prevDateStr}"
+                         data-label="doorloop"
+                         style="left: 0%; width: ${w}%; cursor: pointer; opacity: 0.7;"
+                         data-tooltip="Doorloop van ${prevDateStr}: ${escapeHtml(prevShift.startTime + '-' + prevShift.endTime)}" data-tooltip-pos="bottom">
+                    <span class="block-time">→${prevShift.endTime}</span>
+                </div>`;
+        }
+    });
+    return html;
+}
+
 function renderTimelineView() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
@@ -2627,13 +2669,13 @@ function renderTimelineView() {
     teamOrder.forEach(teamKey => {
         employeesByTeam[teamKey] = employees
             .filter(emp => emp.mainTeam === teamKey)
-            .sort((a, b) => a.name.localeCompare(b.name));
+            .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
     });
 
     // Add employees without a team to a special "no-team" category
     const employeesWithoutTeam = employees
         .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
     if (employeesWithoutTeam.length > 0) {
         employeesByTeam['_no_team'] = employeesWithoutTeam;
     }
@@ -2754,29 +2796,7 @@ function renderTimelineView() {
 
                         // In day view: also show overnight shifts from previous day (continuation)
                         if (isDayView) {
-                            const prevDate = new Date(parseDateOnly(date));
-                            prevDate.setDate(prevDate.getDate() - 1);
-                            const prevDateStr = formatDateYYYYMMDD(prevDate);
-                            let prevShifts = getShiftsByEmployee(emp.id, prevDateStr, prevDateStr);
-                            prevShifts = prevShifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
-                            prevShifts.forEach(prevShift => {
-                                const [pH, ] = prevShift.startTime.split(':').map(Number);
-                                const [eH, eM] = prevShift.endTime.split(':').map(Number);
-                                const prevIsOvernight = eH < pH;
-                                if (prevIsOvernight && (eH + eM / 60) > START_HOUR) {
-                                    // Render continuation block: from START_HOUR to endTime
-                                    const endFrac = eH + eM / 60;
-                                    const w = ((endFrac - START_HOUR) / TOTAL_HOURS) * 100;
-                                    html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation"
-                                                 data-shift-id="${prevShift.id}"
-                                                 data-employee-id="${prevShift.employeeId}"
-                                                 data-date="${prevShift.date}"
-                                                 style="left: 0%; width: ${w}%; cursor: pointer; opacity: 0.7;"
-                                                 data-tooltip="${escapeHtml(prevShift.startTime + '-' + prevShift.endTime + ' (nacht, vervolg)')}" data-tooltip-pos="bottom">
-                                        <span class="block-time">→${prevShift.endTime}</span>
-                                    </div>`;
-                                }
-                            });
+                            html += renderOvernightContinuation(emp.id, date, START_HOUR, TOTAL_HOURS);
                         }
 
                         // Render shifts that start on this day
@@ -2952,28 +2972,7 @@ function renderTimelineView() {
 
                         // In day view: also show overnight shifts from previous day (continuation)
                         if (isDayView) {
-                            const prevDate = new Date(parseDateOnly(date));
-                            prevDate.setDate(prevDate.getDate() - 1);
-                            const prevDateStr = formatDateYYYYMMDD(prevDate);
-                            let prevShifts = getShiftsByEmployee(emp.id, prevDateStr, prevDateStr);
-                            prevShifts = prevShifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
-                            prevShifts.forEach(prevShift => {
-                                const [pH, ] = prevShift.startTime.split(':').map(Number);
-                                const [eH, eM] = prevShift.endTime.split(':').map(Number);
-                                const prevIsOvernight = eH < pH;
-                                if (prevIsOvernight && (eH + eM / 60) > START_HOUR) {
-                                    const endFrac = eH + eM / 60;
-                                    const w = ((endFrac - START_HOUR) / TOTAL_HOURS) * 100;
-                                    html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation"
-                                                 data-shift-id="${prevShift.id}"
-                                                 data-employee-id="${prevShift.employeeId}"
-                                                 data-date="${prevShift.date}"
-                                                 style="left: 0%; width: ${w}%; cursor: pointer; opacity: 0.7;"
-                                                 data-tooltip="${escapeHtml(prevShift.startTime + '-' + prevShift.endTime + ' (nacht, vervolg)')}" data-tooltip-pos="bottom">
-                                        <span class="block-time">→${prevShift.endTime}</span>
-                                    </div>`;
-                                }
-                            });
+                            html += renderOvernightContinuation(emp.id, date, START_HOUR, TOTAL_HOURS);
                         }
 
                         // Render shifts that start on this day
@@ -3149,13 +3148,13 @@ function renderMonthView() {
     teamOrder.forEach(teamKey => {
         employeesByTeam[teamKey] = employees
             .filter(emp => emp.mainTeam === teamKey)
-            .sort((a, b) => a.name.localeCompare(b.name));
+            .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
     });
 
     // Employees without team
     const employeesWithoutTeam = employees
         .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
     if (employeesWithoutTeam.length > 0) {
         employeesByTeam['_no_team'] = employeesWithoutTeam;
     }
@@ -4569,7 +4568,7 @@ function renderEmployees() {
     teamOrder.forEach(teamKey => {
         const teamEmps = employees.filter(emp => emp.mainTeam === teamKey);
 
-        teamEmps.sort((a, b) => a.name.localeCompare(b.name));
+        teamEmps.sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
 
         employeesByTeam[teamKey] = teamEmps;
     });
@@ -5789,7 +5788,7 @@ async function renderSwaps() {
             sr.status === 'pending' &&
             sr.requester_user_id !== currentUser.id &&
             AppState.swapTeamFilter.includes(sr.requester_shift_team)
-        ).sort((a, b) => (a.requester_shift_date || '').localeCompare(b.requester_shift_date || ''));
+        ).sort((a, b) => (a.requester_shift_date || '').localeCompare(b.requester_shift_date || '', 'nl-BE'));
 
         // Team filter toggles (dynamisch uit settings)
         const teamSettings = DataStore.settings.teams || {};
@@ -6631,7 +6630,7 @@ function renderBuilderGrid(role, userTeam) {
     } else {
         employees = getAllEmployees(true);
     }
-    employees = employees.sort((a, b) => a.name.localeCompare(b.name));
+    employees = employees.sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
 
     if (employees.length === 0) {
         return '<div class="builder-empty">Geen medewerkers gevonden voor het geselecteerde team</div>';
@@ -6648,7 +6647,7 @@ function renderBuilderGrid(role, userTeam) {
         const hpName = hp ? escapeHtml(hp.name) : 'Onbekende periode';
         const hpDates = hp ? `${parseDateOnly(hp.startDate).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })} – ${parseDateOnly(hp.endDate).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })}` : '';
         // Vakantie verantwoordelijke picker (per week)
-        const activeEmps = getAllEmployees(true).sort((a, b) => a.name.localeCompare(b.name));
+        const activeEmps = getAllEmployees(true).sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
         const wn = AppState.builderWeekNumber;
         const weeklyResps = hp ? (hp.weeklyResponsibles || {}) : {};
         const currentRespId = String(weeklyResps[String(wn)] || '');
@@ -9222,6 +9221,18 @@ async function switchSettingsTab(tabName) {
         AppState.settingsDirty = false;
     }
     AppState.activeSettingsTab = tabName;
+
+    // Track onboarding: mark planning tab as visited
+    if (tabName === 'planning' && AppState.currentUser && !AppState.currentUser.onboardingFlags?.planning_visited) {
+        fetch(`${API}/me/onboarding-flags`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionStorage.getItem('token')}` },
+            body: JSON.stringify({ planning_visited: true })
+        }).catch(e => console.error('Failed to save onboarding flag:', e));
+        if (!AppState.currentUser.onboardingFlags) AppState.currentUser.onboardingFlags = {};
+        AppState.currentUser.onboardingFlags.planning_visited = true;
+    }
+
     document.querySelectorAll('.settings-tab').forEach(tab => {
         const isActive = tab.dataset.settingsTab === tabName;
         tab.classList.toggle('active', isActive);
@@ -11322,6 +11333,8 @@ async function saveTeamToggles() {
     DataStore.settings.responsibleRotation.eligibleTeams = eligibleTeams;
 
     saveToStorage();
+
+    showToast('Teaminstellingen opgeslagen', 'success');
 
     // Update heatmap if visible
     if (typeof renderCoverageHeatmap === 'function' && AppState.showHeatmap) {
