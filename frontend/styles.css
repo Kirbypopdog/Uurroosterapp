@@ -460,29 +460,6 @@ textarea {
     box-shadow: var(--shadow-sm);
 }
 
-.employee-sort-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.employee-sort-controls label {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    white-space: nowrap;
-}
-
-.employee-sort-controls select {
-    padding: 6px 10px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    background: white;
-    color: var(--text-primary);
-    cursor: pointer;
-}
-
 .employees-filters .filter-label {
     font-size: 12px;
     font-weight: 600;
@@ -975,15 +952,30 @@ textarea {
 /* ===== PLANNING VIEW ===== */
 .planning-controls {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
     margin-bottom: 24px;
-    padding: 16px;
+    padding: 12px 16px;
     background: var(--surface-color);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
+    gap: 10px;
+}
+
+.planning-controls-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     flex-wrap: wrap;
-    gap: 16px;
+}
+
+.planning-controls-row:first-child {
+    justify-content: space-between;
+}
+
+.planning-filter-buttons {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
 }
 
 .date-navigation {
@@ -2749,9 +2741,10 @@ body[data-view-mode="day"] .timeline-day-cell {
     bottom: 4px;
     border-radius: 4px;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 3px;
+    gap: 1px;
     cursor: pointer;
     transition: all 0.15s;
     box-shadow: 0 1px 3px rgba(0,0,0,0.15);
@@ -2760,12 +2753,20 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* Activity chips inside timeline blocks - compact inline style */
+.timeline-block .activity-chips-row {
+    display: flex;
+    gap: 2px;
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+}
+
 .timeline-block .activity-chip {
     padding: 0 3px;
-    font-size: 8px;
+    font-size: 7px;
     border-left-width: 2px;
     border-radius: 2px;
-    line-height: 14px;
+    line-height: 12px;
 }
 
 .timeline-block:hover {

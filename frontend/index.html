@@ -99,21 +99,27 @@
             </div>
 
             <div class="planning-controls">
-                <div class="date-navigation">
-                    <button id="prev-week" class="btn" aria-label="Vorige week"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
-                    <button id="today-btn" class="btn">Vandaag</button>
-                    <button id="next-week" class="btn" aria-label="Volgende week"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+                <div class="planning-controls-row">
+                    <div class="date-navigation">
+                        <button id="prev-week" class="btn" aria-label="Vorige week"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
+                        <button id="today-btn" class="btn">Vandaag</button>
+                        <button id="next-week" class="btn" aria-label="Volgende week"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+                    </div>
+                    <div id="current-period" class="period-display"></div>
+                    <div class="view-toggle-controls">
+                        <button class="view-toggle-btn active" data-mode="week">Week</button>
+                        <button class="view-toggle-btn" data-mode="day">Dag</button>
+                    </div>
                 </div>
-                <div id="current-period" class="period-display"></div>
-                <div class="view-toggle-controls">
-                    <button class="view-toggle-btn active" data-mode="week">Week</button>
-                    <button class="view-toggle-btn" data-mode="day">Dag</button>
+                <div class="planning-controls-row">
+                    <div class="team-toggles" id="team-toggles">
+                        <!-- Dynamisch gevuld via renderTeamToggles() -->
+                    </div>
+                    <div class="planning-filter-buttons">
+                        <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
+                        <button id="filter-shifts-toggle" class="btn btn-sm btn-secondary" title="Toon alleen medewerkers met een shift">Alleen met shift</button>
+                    </div>
                 </div>
-                <div class="team-toggles" id="team-toggles">
-                    <!-- Dynamisch gevuld via renderTeamToggles() -->
-                </div>
-                <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
-                <button id="filter-shifts-toggle" class="btn btn-sm btn-secondary" title="Toon alleen medewerkers met een shift">Alleen met shift</button>
             </div>
 
             <div id="coverage-heatmap-container"></div>
@@ -144,14 +150,6 @@
                 <button id="add-employee-btn" class="btn btn-primary">+ Medewerker toevoegen</button>
             </div>
             <div class="employees-filters">
-                <div class="employee-sort-controls">
-                    <label for="employee-sort">Sorteren:</label>
-                    <select id="employee-sort" class="form-control">
-                        <option value="name">Naam (A-Z)</option>
-                        <option value="hours-low">Minste uren t.o.v. contract</option>
-                        <option value="hours-high">Overuren (meeste eerst)</option>
-                    </select>
-                </div>
                 <div class="team-toggles" id="employee-team-toggles">
                     <!-- Dynamisch gevuld via renderEmployeeTeamToggles() -->
                 </div>

@@ -43,7 +43,6 @@ const AppState = {
     showHeatmap: false,
     filterOnlyWithShifts: false,
     settingsDirty: false,
-    employeeSortMode: 'name',
     swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
 };
 
@@ -1029,15 +1028,6 @@ function setupEventListeners() {
     // Team toggle buttons for planning view — attached dynamically via renderTeamToggles()
 
     // Team toggle buttons for employees view — attached dynamically via renderEmployeeTeamToggles()
-
-    // Employee sort dropdown
-    const employeeSortSelect = document.getElementById('employee-sort');
-    if (employeeSortSelect) {
-        employeeSortSelect.addEventListener('change', (e) => {
-            AppState.employeeSortMode = e.target.value;
-            renderEmployees();
-        });
-    }
 
     DOM.addEmployeeBtn.addEventListener('click', openAddEmployeeModal);
     DOM.shiftForm.addEventListener('submit', handleShiftSubmit);
@@ -2760,6 +2750,35 @@ function renderTimelineView() {
                         // Filter by visible teams (include shifts without team)
                         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
 
+                        const isDayView = AppState.viewMode === 'day';
+
+                        // In day view: also show overnight shifts from previous day (continuation)
+                        if (isDayView) {
+                            const prevDate = new Date(parseDateOnly(date));
+                            prevDate.setDate(prevDate.getDate() - 1);
+                            const prevDateStr = formatDateYYYYMMDD(prevDate);
+                            let prevShifts = getShiftsByEmployee(emp.id, prevDateStr, prevDateStr);
+                            prevShifts = prevShifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+                            prevShifts.forEach(prevShift => {
+                                const [pH, ] = prevShift.startTime.split(':').map(Number);
+                                const [eH, eM] = prevShift.endTime.split(':').map(Number);
+                                const prevIsOvernight = eH < pH;
+                                if (prevIsOvernight && (eH + eM / 60) > START_HOUR) {
+                                    // Render continuation block: from START_HOUR to endTime
+                                    const endFrac = eH + eM / 60;
+                                    const w = ((endFrac - START_HOUR) / TOTAL_HOURS) * 100;
+                                    html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation"
+                                                 data-shift-id="${prevShift.id}"
+                                                 data-employee-id="${prevShift.employeeId}"
+                                                 data-date="${prevShift.date}"
+                                                 style="left: 0%; width: ${w}%; cursor: pointer; opacity: 0.7;"
+                                                 data-tooltip="${escapeHtml(prevShift.startTime + '-' + prevShift.endTime + ' (nacht, vervolg)')}" data-tooltip-pos="bottom">
+                                        <span class="block-time">→${prevShift.endTime}</span>
+                                    </div>`;
+                                }
+                            });
+                        }
+
                         // Render shifts that start on this day
                         shifts.forEach(shift => {
                             const validation = validateShift(shift, shift.id);
@@ -2787,10 +2806,8 @@ function renderTimelineView() {
                                 const hoursDay1 = END_HOUR - startFrac; // van start tot 24:00
                                 const hoursDay2 = Math.max(0, (endHour + endMin / 60) - START_HOUR); // van 7:00 tot eind
 
-                                // Check if this is Sunday (last day of week view) - if so, only show day 1 portion
-                                // to prevent overflow outside the visible week
-                                if (dayOfWeek === 0) {
-                                    // Sunday: only show the portion until midnight (don't extend into next week)
+                                // Clip to own cell in day view or on Sunday (last day of week)
+                                if (dayOfWeek === 0 || isDayView) {
                                     const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
                                     widthPercent = `${widthDay1Percent}%`;
                                 } else {
@@ -2871,7 +2888,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 <span class="block-time">${shift.startTime}-${shift.endTime}</span>
-                                ${actChips}
+                                ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -2931,6 +2948,34 @@ function renderTimelineView() {
                         let shifts = getShiftsByEmployee(emp.id, date, date);
                         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
 
+                        const isDayView = AppState.viewMode === 'day';
+
+                        // In day view: also show overnight shifts from previous day (continuation)
+                        if (isDayView) {
+                            const prevDate = new Date(parseDateOnly(date));
+                            prevDate.setDate(prevDate.getDate() - 1);
+                            const prevDateStr = formatDateYYYYMMDD(prevDate);
+                            let prevShifts = getShiftsByEmployee(emp.id, prevDateStr, prevDateStr);
+                            prevShifts = prevShifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+                            prevShifts.forEach(prevShift => {
+                                const [pH, ] = prevShift.startTime.split(':').map(Number);
+                                const [eH, eM] = prevShift.endTime.split(':').map(Number);
+                                const prevIsOvernight = eH < pH;
+                                if (prevIsOvernight && (eH + eM / 60) > START_HOUR) {
+                                    const endFrac = eH + eM / 60;
+                                    const w = ((endFrac - START_HOUR) / TOTAL_HOURS) * 100;
+                                    html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation"
+                                                 data-shift-id="${prevShift.id}"
+                                                 data-employee-id="${prevShift.employeeId}"
+                                                 data-date="${prevShift.date}"
+                                                 style="left: 0%; width: ${w}%; cursor: pointer; opacity: 0.7;"
+                                                 data-tooltip="${escapeHtml(prevShift.startTime + '-' + prevShift.endTime + ' (nacht, vervolg)')}" data-tooltip-pos="bottom">
+                                        <span class="block-time">→${prevShift.endTime}</span>
+                                    </div>`;
+                                }
+                            });
+                        }
+
                         // Render shifts that start on this day
                         shifts.forEach(shift => {
                             const validation = validateShift(shift, shift.id);
@@ -2956,9 +3001,8 @@ function renderTimelineView() {
                                 const hoursDay1 = END_HOUR - startFrac; // van start tot 24:00
                                 const hoursDay2 = Math.max(0, (endHour + endMin / 60) - START_HOUR); // van 7:00 tot eind
 
-                                // Check if this is Sunday (last day of week view)
-                                if (dayOfWeek === 0) {
-                                    // Sunday: only show the portion until midnight
+                                // Clip to own cell in day view or on Sunday
+                                if (dayOfWeek === 0 || isDayView) {
                                     const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
                                     widthPercent = `${widthDay1Percent}%`;
                                 } else {
@@ -3033,7 +3077,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 <span class="block-time">${shift.startTime}-${shift.endTime}</span>
-                                ${actChips}
+                                ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -4525,20 +4569,7 @@ function renderEmployees() {
     teamOrder.forEach(teamKey => {
         const teamEmps = employees.filter(emp => emp.mainTeam === teamKey);
 
-        if (AppState.employeeSortMode === 'hours-low' || AppState.employeeSortMode === 'hours-high') {
-            teamEmps.forEach(emp => {
-                const hoursThisWeek = getEmployeeHoursThisWeek(emp.id, currentWeekStartDate);
-                const contractHours = emp.contractHours || 0;
-                emp._hoursDiff = contractHours > 0 ? hoursThisWeek - contractHours : hoursThisWeek;
-            });
-            if (AppState.employeeSortMode === 'hours-low') {
-                teamEmps.sort((a, b) => a._hoursDiff - b._hoursDiff);
-            } else {
-                teamEmps.sort((a, b) => b._hoursDiff - a._hoursDiff);
-            }
-        } else {
-            teamEmps.sort((a, b) => a.name.localeCompare(b.name));
-        }
+        teamEmps.sort((a, b) => a.name.localeCompare(b.name));
 
         employeesByTeam[teamKey] = teamEmps;
     });
