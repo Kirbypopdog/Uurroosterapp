@@ -1467,14 +1467,14 @@ function renderHomeOnboarding() {
     const pct = Math.round((doneCount / steps.length) * 100);
 
     return `
-    <div class="home-card onboarding-checklist" style="margin-bottom: 16px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-            <h3 style="margin: 0; font-size: 16px;">App instellen</h3>
-            <button class="btn btn-sm btn-ghost" onclick="sessionStorage.setItem('hideOnboardingChecklist','1');this.closest('.onboarding-checklist').remove()" title="Verbergen">✕</button>
+    <div class="home-card onboarding-checklist mb-md">
+        <div class="onboarding-header">
+            <h3 class="onboarding-title">App instellen</h3>
+            <button class="btn btn-sm btn-ghost onboarding-dismiss" onclick="sessionStorage.setItem('hideOnboardingChecklist','1');this.closest('.onboarding-checklist').remove()" title="Verbergen">✕</button>
         </div>
         <div class="onboarding-progress">
             <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-            <span style="font-size: 13px; color: var(--text-secondary); white-space: nowrap;">${doneCount}/${steps.length}</span>
+            <span class="text-xs text-muted text-nowrap">${doneCount}/${steps.length}</span>
         </div>
         <ul class="onboarding-steps">
             ${steps.map(s => `<li class="${s.done ? 'done' : ''}">
@@ -1757,10 +1757,10 @@ function renderHomeWeekendInfo() {
     // Holiday indicator
     if (isHoliday && holidayPeriod) {
         bodyHtml += `
-            <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(245, 158, 11, 0.1); border-radius: 8px; margin-bottom: 12px; border-left: 3px solid var(--warning-color);">
+            <div class="warning-banner">
                 <div>
                     <strong>Vakantiewerking actief</strong>
-                    <div style="font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(holidayPeriod.name || 'Vakantieperiode')}</div>
+                    <div class="text-sm text-muted">${escapeHtml(holidayPeriod.name || 'Vakantieperiode')}</div>
                 </div>
             </div>
         `;
@@ -1774,20 +1774,20 @@ function renderHomeWeekendInfo() {
             const isThisWeek = weekend.weekMonday.getTime() === thisMonday.getTime();
             const weekHoliday = typeof getHolidayPeriod === 'function' ? getHolidayPeriod(weekend.date) : null;
             const isVakantieResp = weekHoliday && weekHoliday.responsibleId && weekend.responsible;
-            const vakantieBadge = isVakantieResp ? '<span style="font-size: 0.7rem; background: #f59e0b; color: white; padding: 1px 5px; border-radius: 3px; margin-left: 4px;">vakantie</span>' : '';
+            const vakantieBadge = isVakantieResp ? '<span class="shift-badge-upcoming">vakantie</span>' : '';
 
             bodyHtml += `
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-color); ${!isThisWeek ? 'opacity: 0.7;' : ''}">
+                <div class="shift-list-item${!isThisWeek ? ' opacity-70' : ''}">
                     <div>
-                        <span style="font-weight: ${isThisWeek ? '600' : '400'};">Weekend ${dateStr}</span>
-                        ${isThisWeek ? '<span style="font-size: 0.75rem; background: var(--primary-color); color: white; padding: 1px 6px; border-radius: 4px; margin-left: 6px;">Deze week</span>' : ''}
+                        <span class="${isThisWeek ? 'fw-600' : ''}">Weekend ${dateStr}</span>
+                        ${isThisWeek ? '<span class="shift-badge-today">Deze week</span>' : ''}
                     </div>
-                    <span style="font-size: 0.9rem; color: var(--text-secondary);">${respName}${vakantieBadge}</span>
+                    <span class="text-sm text-muted">${respName}${vakantieBadge}</span>
                 </div>
             `;
         });
     } else {
-        bodyHtml += '<div style="color: var(--text-secondary); font-size: 0.9rem; padding: 8px 0;">Geen open weekenden komende 4 weken</div>';
+        bodyHtml += '<div class="text-muted text-sm py-sm">Geen open weekenden komende 4 weken</div>';
     }
 
     bodyHtml += '</div>';
@@ -1796,7 +1796,7 @@ function renderHomeWeekendInfo() {
         <div class="home-card">
             <div class="home-card-header">
                 Weekend & Vakantie
-                ${isHoliday ? '<span class="card-count" style="background: var(--warning-color); color: white; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">Vakantie</span>' : ''}
+                ${isHoliday ? '<span class="shift-badge-upcoming">Vakantie</span>' : ''}
             </div>
             ${bodyHtml}
         </div>
@@ -3783,7 +3783,7 @@ function openSwapRequestModal(shift) {
 
     // Clear target preview
     const targetPreview = document.getElementById('swap-target-shift-preview');
-    targetPreview.innerHTML = '<p style="color: #94a3b8;">Selecteer eerst een collega en shift</p>';
+    targetPreview.innerHTML = '<p class="text-muted">Selecteer eerst een collega en shift</p>';
 
     // Populate employee dropdown (exclude current user)
     const employeeSelect = document.getElementById('swap-target-employee');
@@ -3837,7 +3837,7 @@ async function handleSwapTargetEmployeeChange() {
         shiftSelect.disabled = true;
         swapRequestState.targetEmployeeId = null;
         swapRequestState.targetShiftId = null;
-        document.getElementById('swap-target-shift-preview').innerHTML = '<p style="color: #94a3b8;">Selecteer eerst een collega en shift</p>';
+        document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer eerst een collega en shift</p>';
         return;
     }
 
@@ -3873,7 +3873,7 @@ function handleSwapTargetShiftChange() {
 
     if (!shiftId) {
         swapRequestState.targetShiftId = null;
-        document.getElementById('swap-target-shift-preview').innerHTML = '<p style="color: #94a3b8;">Selecteer een shift</p>';
+        document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer een shift</p>';
         document.getElementById('swap-validation-display').style.display = 'none';
         return;
     }
@@ -3933,7 +3933,7 @@ function runSwapValidation() {
         validationDisplay.innerHTML = `
             <div class="validation-success">
                 <strong>${IconHelper.html(ICONS.success, 'sm')} Geen problemen gevonden</strong>
-                <p style="margin-top: 0.5rem;">Deze ruil kan worden ingediend voor goedkeuring.</p>
+                <p class="mt-sm">Deze ruil kan worden ingediend voor goedkeuring.</p>
             </div>
         `;
     }
@@ -4085,7 +4085,7 @@ function openSwapReviewModal(swapId) {
             validationDisplay.innerHTML = `
                 <div class="validation-success">
                     <strong>${IconHelper.html(ICONS.success, 'sm')} Geen problemen gevonden</strong>
-                    <p style="margin-top: 0.5rem;">Deze ruil kan veilig worden goedgekeurd.</p>
+                    <p class="mt-sm">Deze ruil kan veilig worden goedgekeurd.</p>
                 </div>
             `;
         }
@@ -4793,7 +4793,7 @@ function renderProfile() {
                 }
             })()}
 
-            <div class="settings-card" style="grid-column: 1 / -1;">
+            <div class="settings-card col-span-full">
                 <div class="settings-card-header">
                     <h3><span class="settings-icon">${IconHelper.html(ICONS.search, 'md')}</span> Account overzicht</h3>
                 </div>
@@ -5762,7 +5762,7 @@ async function renderSwaps() {
 
         // Add safety check for currentUser
         if (!currentUser) {
-            swapsList.innerHTML = `<div style="padding: 40px; text-align: center;">
+            swapsList.innerHTML = `<div class="empty-state">
                 <p>Je moet ingelogd zijn om ruilverzoeken te zien.</p>
             </div>`;
             IconHelper.init(swapsList);
@@ -5809,7 +5809,7 @@ async function renderSwaps() {
                     Voor mij
                     <span class="swap-section-count">${targetPendingRequests.length}</span>
                 </h3>
-                <p style="font-size: 0.9rem; color: #64748b; margin-top: -0.5rem; margin-bottom: 1rem;">
+                <p class="text-sm text-muted mb-md">
                     Deze collega's willen graag met jou ruilen
                 </p>`;
 
@@ -5827,7 +5827,7 @@ async function renderSwaps() {
                     Beschikbare shifts
                     <span class="swap-section-count">${openTakeoverRequests.length}</span>
                 </h3>
-                <p style="font-size: 0.9rem; color: #64748b; margin-top: -0.5rem; margin-bottom: 1rem;">
+                <p class="text-sm text-muted mb-md">
                     Collega's zoeken iemand om hun shift over te nemen
                 </p>`;
 
@@ -5866,7 +5866,7 @@ async function renderSwaps() {
         if (myRequests.length === 0) {
             html += `<div class="swap-empty-state">
                 <p>Je hebt nog geen ruilverzoeken ingediend</p>
-                <button class="btn btn-primary" onclick="switchView('planning')" style="margin-top: 1rem;">Bekijk mijn shifts in de planning</button>
+                <button class="btn btn-primary mt-md" onclick="switchView('planning')">Bekijk mijn shifts in de planning</button>
             </div>`;
         } else {
             myRequests.forEach(sr => {
@@ -5884,7 +5884,7 @@ async function renderSwaps() {
         // Section 3.5: Expired requests (collapsible)
         if (expiredRequests.length > 0) {
             html += `<div class="swap-section swap-section-expired">
-                <h3 style="cursor: pointer; opacity: 0.6;" onclick="this.parentElement.classList.toggle('expanded')">
+                <h3 class="cursor-pointer opacity-60" onclick="this.parentElement.classList.toggle('expanded')">
                     Verlopen
                     <span class="swap-section-count" style="background: #94a3b8;">${expiredRequests.length}</span>
                     <span style="font-size: 0.8rem; font-weight: 400; margin-left: 0.5rem;">klik om te tonen</span>
@@ -5943,7 +5943,7 @@ async function renderSwaps() {
 
     } catch (error) {
         console.error('Error rendering swaps:', error);
-        swapsList.innerHTML = `<div style="padding: 40px; text-align: center; color: #e11d48;">
+        swapsList.innerHTML = `<div class="empty-state text-danger">
             <h3>${IconHelper.html(ICONS.error, 'md')} Fout bij laden ruilverzoeken</h3>
             <p>${escapeHtml(getUserFriendlyError(error))}</p>
         </div>`;
@@ -5972,7 +5972,7 @@ function renderSwapRequestCard(swapRequest, mode) {
 
     if (mode === 'target' && swapRequest.status === 'pending') {
         actionsHtml = `
-            <div class="swap-request-actions" style="display: flex; gap: 0.5rem;">
+            <div class="swap-request-actions d-flex gap-sm">
                 <button class="btn btn-primary btn-target-approve-swap" data-swap-id="${swapRequest.id}">
                     ${IconHelper.html(ICONS.check, 'xs')} Accepteren
                 </button>
@@ -6053,7 +6053,7 @@ function renderSwapRequestCard(swapRequest, mode) {
             ${messageHtml}
             ${acceptedByHtml}
             ${responseHtml}
-            <p style="font-size: 0.85rem; color: #64748b; margin: 0.5rem 0 0 0;">
+            <p class="text-sm text-muted mt-sm">
                 Aangevraagd op ${createdDate}
             </p>
             ${actionsHtml}
@@ -6157,7 +6157,7 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
             </div>
             ${acceptedByHtml}
             ${messageHtml}
-            <p style="font-size: 0.85rem; color: #64748b; margin: 0.5rem 0 0 0;">
+            <p class="text-sm text-muted mt-sm">
                 Geplaatst op ${createdDate}
             </p>
             ${actionsHtml}
@@ -6276,7 +6276,7 @@ function renderBuilderEditor(container) {
     // Topbar with back button + concept name
     html += `<div class="builder-editor-topbar">
         <button class="btn btn-secondary btn-sm" id="builder-back-to-overview">
-            <i data-lucide="arrow-left" style="width:16px;height:16px"></i> Terug
+            <i data-lucide="arrow-left" class="lucide-sm"></i> Terug
         </button>
         <span class="builder-editor-title">
             ${AppState.builderLoadedDraftName ? escapeHtml(AppState.builderLoadedDraftName) : 'Nieuw concept'}
@@ -6337,9 +6337,9 @@ function renderBuilderOverview(container) {
     if (activatable.length > 0) {
         notificationHtml = activatable.map(d => `
             <div class="builder-notification info">
-                <i data-lucide="calendar-check" style="width:16px;height:16px"></i>
+                <i data-lucide="calendar-check" class="lucide-sm"></i>
                 Concept "${escapeHtml(d.name)}" is nu geldig!
-                <button class="btn btn-secondary btn-sm concept-card-apply" data-draft-id="${escapeHtml(d.id)}" style="margin-left:auto">Nu toepassen</button>
+                <button class="btn btn-secondary btn-sm concept-card-apply ml-auto" data-draft-id="${escapeHtml(d.id)}">Nu toepassen</button>
             </div>
         `).join('');
     }
@@ -6376,7 +6376,7 @@ function renderBuilderOverview(container) {
             <div class="builder-overview-header">
                 <div class="builder-overview-title-row">
                     <h3>Concepten</h3>
-                    ${getEffectiveRole() === 'admin' ? `<button class="btn btn-secondary btn-sm" id="builder-upload-concept" title="Concept importeren"><i data-lucide="upload" style="width:14px;height:14px"></i> Importeren</button>` : ''}
+                    ${getEffectiveRole() === 'admin' ? `<button class="btn btn-secondary btn-sm" id="builder-upload-concept" title="Concept importeren"><i data-lucide="upload" class="lucide-xs"></i> Importeren</button>` : ''}
                 </div>
                 <div class="builder-overview-filter-row">
                     <select id="builder-overview-filter" class="form-input form-input-sm">
@@ -6388,8 +6388,8 @@ function renderBuilderOverview(container) {
             ${otherDrafts.length > 0 || activeDrafts.length > 0 ? '<div class="builder-other-label">Overige concepten</div>' : ''}
             <div class="builder-concept-grid">
                 <div class="builder-concept-card builder-concept-new" id="builder-new-concept-card">
-                    <i data-lucide="plus" style="width:24px;height:24px"></i>
-                    <span style="font-size:13px">Nieuw concept</span>
+                    <i data-lucide="plus" class="lucide-lg"></i>
+                    <span class="text-xs">Nieuw concept</span>
                 </div>
                 ${cardsHtml}
             </div>
@@ -6459,7 +6459,7 @@ function renderConceptCard(draft, newestActiveId) {
                 <span class="concept-card-name">${escapeHtml(draft.name)}</span>
                 <div class="concept-card-menu">
                     <button class="concept-card-menu-trigger" data-draft-id="${dId}">
-                        <i data-lucide="more-vertical" style="width:16px;height:16px"></i>
+                        <i data-lucide="more-vertical" class="lucide-sm"></i>
                     </button>
                     <div class="concept-card-menu-dropdown">
                         ${menuItems}
@@ -6573,7 +6573,7 @@ function renderBuilderControls(role, userTeam) {
 
     // Team filter - dropdown for all roles that can access builder
     const teams = DataStore.settings.teams || {};
-    const teamFilterHtml = `<select id="builder-team-select" class="form-input" style="width: auto;">
+    const teamFilterHtml = `<select id="builder-team-select" class="form-input w-auto">
         <option value="">Alle teams</option>
         ${Object.entries(teams).map(([key, t]) =>
             `<option value="${key}" ${AppState.builderTeamFilter === key ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
@@ -6612,7 +6612,7 @@ function renderBuilderControls(role, userTeam) {
                 </div>
                 ${AppState.builderLoadedDraftName ? `
                     <div class="builder-loaded-draft">
-                        <i data-lucide="file-text" style="width:14px;height:14px"></i>
+                        <i data-lucide="file-text" class="lucide-xs"></i>
                         Concept: <strong>${escapeHtml(AppState.builderLoadedDraftName)}</strong>
                         ${AppState.builderIsDirty ? '<span class="builder-draft-unsaved">(gewijzigd)</span>' : '<span class="builder-draft-saved">(opgeslagen)</span>'}
                     </div>
@@ -7383,9 +7383,9 @@ function renderBuilderDrafts() {
     if (activatable.length > 0) {
         notificationHtml = activatable.map(d => `
             <div class="builder-notification info">
-                <i data-lucide="calendar-check" style="width:16px;height:16px"></i>
+                <i data-lucide="calendar-check" class="lucide-sm"></i>
                 Concept "${escapeHtml(d.name)}" is nu geldig!
-                <button class="btn btn-primary btn-sm builder-draft-apply" data-draft-id="${escapeHtml(d.id)}" style="margin-left:auto">Nu toepassen</button>
+                <button class="btn btn-primary btn-sm builder-draft-apply ml-auto" data-draft-id="${escapeHtml(d.id)}">Nu toepassen</button>
             </div>
         `).join('');
     }
@@ -7829,13 +7829,13 @@ function showNewConceptTypeModal() {
     const overlay = document.createElement('div');
     overlay.className = 'modal';
     overlay.innerHTML = `
-        <div class="modal-content" style="max-width:440px">
+        <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2>Nieuw concept</h2>
                 <span class="modal-close">&times;</span>
             </div>
             <div class="modal-body" style="padding:20px">
-                <p style="margin:0 0 16px;color:var(--text-secondary);font-size:14px">Kies het type concept dat je wilt aanmaken.</p>
+                <p class="text-sm text-muted mb-md">Kies het type concept dat je wilt aanmaken.</p>
                 <div class="concept-type-options">
                     <label class="concept-type-option selected" data-value="basis">
                         <input type="radio" name="concept-type" value="basis" checked>
@@ -7958,7 +7958,7 @@ function showDraftSaveModal() {
         const overlay = document.createElement('div');
         overlay.className = 'modal';
         overlay.innerHTML = `
-            <div class="modal-content" style="max-width:400px">
+            <div class="modal-content modal-content--xs">
                 <div class="modal-header">
                     <h2>Concept opslaan</h2>
                     <span class="modal-close" id="draft-save-close"><i data-lucide="x"></i></span>
@@ -8189,7 +8189,7 @@ async function deactivateBuilderDraft(draftId) {
         const overlay = document.createElement('div');
         overlay.className = 'modal';
         overlay.innerHTML = `
-            <div class="modal-content" style="max-width:450px">
+            <div class="modal-content modal-content--sm">
                 <div class="modal-header">
                     <h2>Concept deactiveren</h2>
                     <span class="modal-close" id="deactivate-close"><i data-lucide="x"></i></span>
@@ -8547,7 +8547,7 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
 
         overlay.className = 'modal';
         overlay.innerHTML = `
-            <div class="modal-content" style="max-width:500px">
+            <div class="modal-content modal-content--md">
                 <div class="modal-header">
                     <h2>Concept toepassen</h2>
                     <span class="modal-close" id="draft-apply-close"><i data-lucide="x"></i></span>
@@ -8560,17 +8560,17 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                         <button class="btn btn-secondary btn-sm apply-preset" data-start="" data-end="">Aangepaste periode</button>
                     </div>
                     <div class="form-row" style="gap:12px">
-                        <div class="form-group" style="flex:1">
+                        <div class="form-group flex-1">
                             <label>Van</label>
                             <input type="date" id="draft-apply-start-date" class="form-input" value="${defaultStart}" required>
                         </div>
-                        <div class="form-group" style="flex:1">
+                        <div class="form-group flex-1">
                             <label>Tot</label>
                             <input type="date" id="draft-apply-end-date" class="form-input" value="${defaultEnd}" required>
                         </div>
                     </div>
                     <span class="form-hint" style="display:block;margin-top:4px">Shifts worden alleen gegenereerd binnen deze periode. Bestaande shifts buiten deze periode blijven ongewijzigd.</span>
-                    <div style="margin-top:12px;padding:10px;background:var(--bg-color);border-radius:6px;font-size:12px;max-height:200px;overflow-y:auto;white-space:pre-wrap;font-family:monospace">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
+                    <div class="code-block">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary btn-sm" id="draft-apply-cancel">Annuleren</button>
@@ -8628,14 +8628,14 @@ function showReapplyAfterEditModal(draftName) {
         const overlay = document.createElement('div');
         overlay.className = 'modal';
         overlay.innerHTML = `
-            <div class="modal-content" style="max-width:400px">
+            <div class="modal-content modal-content--xs">
                 <div class="modal-header">
                     <h2>Wijzigingen toepassen?</h2>
                     <span class="modal-close" id="reapply-close"><i data-lucide="x"></i></span>
                 </div>
                 <div class="modal-body">
                     <p style="margin:0 0 8px">Het concept <strong>"${escapeHtml(draftName)}"</strong> is momenteel actief.</p>
-                    <p style="margin:0">Wil je de wijzigingen nu toepassen op het rooster?</p>
+                    <p>Wil je de wijzigingen nu toepassen op het rooster?</p>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary btn-sm" id="reapply-no">Nee, later</button>
@@ -9448,7 +9448,7 @@ function showAddUserModal(teams) {
     modal.id = 'add-user-modal';
     modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 450px;">
+        <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2>Nieuwe gebruiker</h2>
                 <button class="modal-close" onclick="document.getElementById('add-user-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
@@ -9559,25 +9559,25 @@ function showEditAccountModal(user, teams, onSave) {
     modal.id = 'edit-account-modal';
     modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 480px;">
+        <div class="modal-content modal-content--md">
             <div class="modal-header">
                 <h2>Account bewerken</h2>
                 <button class="modal-close" onclick="document.getElementById('edit-account-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body" style="padding: 12px 16px;">
                 <form id="edit-account-form">
-                    <div class="form-row" style="display: flex; gap: 10px;">
-                        <div class="form-group" style="flex: 1;">
+                    <div class="form-row d-flex gap-10">
+                        <div class="form-group flex-1">
                             <label for="edit-user-name">Naam</label>
                             <input type="text" id="edit-user-name" class="form-input" value="${escapeHtml(user.name)}" required />
                         </div>
-                        <div class="form-group" style="flex: 1;">
+                        <div class="form-group flex-1">
                             <label for="edit-user-email">Email</label>
                             <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email)}" required />
                         </div>
                     </div>
-                    <div class="form-row" style="display: flex; gap: 10px;">
-                        <div class="form-group" style="flex: 1;">
+                    <div class="form-row d-flex gap-10">
+                        <div class="form-group flex-1">
                             <label for="edit-user-role">Rol</label>
                             <select id="edit-user-role" class="form-input" required>
                                 <option value="medewerker" ${user.role === 'medewerker' ? 'selected' : ''}>Medewerker</option>
@@ -9586,7 +9586,7 @@ function showEditAccountModal(user, teams, onSave) {
                             </select>
                             <span class="form-hint role-hint" id="edit-user-role-hint" style="font-size: 11px;">${getRoleDescription(user.role)}</span>
                         </div>
-                        <div class="form-group" style="flex: 1;">
+                        <div class="form-group flex-1">
                             <label for="edit-user-team">Team</label>
                             <select id="edit-user-team" class="form-input">
                                 <option value="">(geen team)</option>
@@ -9594,15 +9594,15 @@ function showEditAccountModal(user, teams, onSave) {
                             </select>
                         </div>
                     </div>
-                    <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
-                        <label class="toggle-switch" style="flex-shrink: 0;">
+                    <div class="form-group form-row-inline mb-sm">
+                        <label class="toggle-switch flex-shrink-0">
                             <input type="checkbox" id="edit-user-email-notif" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
                             <span class="toggle-slider"></span>
                         </label>
-                        <label for="edit-user-email-notif" style="margin: 0; cursor: pointer; font-size: 13px;">Email notificaties</label>
+                        <label for="edit-user-email-notif" class="text-xs cursor-pointer">Email notificaties</label>
                     </div>
-                    <div class="modal-actions" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; padding-top: 8px; border-top: 1px solid var(--border-color, #e2e8f0);">
-                        <div style="display: flex; gap: 6px; align-items: center;">
+                    <div class="modal-actions modal-actions-split">
+                        <div class="modal-actions-left">
                             <button type="button" class="btn btn-danger btn-sm" id="edit-account-delete-btn">${IconHelper.html('trash-2', 'xs')}</button>
                             <button type="button" class="btn btn-secondary btn-sm" id="edit-account-replace-btn">${IconHelper.html('user-round-plus', 'xs')} Vervang</button>
                             <button type="button" class="btn btn-secondary btn-sm" id="edit-account-reset-btn">${IconHelper.html('key-round', 'xs')} Reset ww</button>
@@ -9742,7 +9742,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
     modal.id = 'replace-employee-modal';
     modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-content modal-content--md">
             <div class="modal-header">
                 <h2>${IconHelper.html('user-round-plus', 'md')} Medewerker vervangen</h2>
                 <button class="modal-close" onclick="document.getElementById('replace-employee-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
@@ -9759,12 +9759,12 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                             ${userOptions}
                         </select>
                     </div>
-                    <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
-                        <label class="toggle-switch" style="flex-shrink: 0;">
+                    <div class="form-group form-row-inline">
+                        <label class="toggle-switch flex-shrink-0">
                             <input type="checkbox" id="replace-transfer-shifts" />
                             <span class="toggle-slider"></span>
                         </label>
-                        <label for="replace-transfer-shifts" style="margin: 0; cursor: pointer;">Toekomstige diensten overnemen</label>
+                        <label for="replace-transfer-shifts" class="cursor-pointer">Toekomstige diensten overnemen</label>
                     </div>
                     <div class="form-group" id="replace-date-group" style="display: none;">
                         <label for="replace-from-date">Overnemen vanaf *</label>
@@ -9815,7 +9815,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 String(s.employeeId) === String(departingUser.id) && s.date >= fromDate
             );
             summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${fromDate})`;
-            summaryHtml += `<br><small style="color:var(--text-secondary)">Telling op basis van geladen planning — werkelijk aantal kan hoger zijn</small></li>`;
+            summaryHtml += `<br><small class="text-muted">Telling op basis van geladen planning — werkelijk aantal kan hoger zijn</small></li>`;
         } else {
             summaryHtml += `<li>Geen diensten overgedragen — pas het actief concept opnieuw toe via Rooster Bouwen</li>`;
         }
@@ -9934,7 +9934,7 @@ function renderSettingsPlanning(container) {
     container.innerHTML = `
         ${holidayBanner}
         <!-- Planning regels -->
-        <div class="settings-card" id="settings-rules" style="margin-top: 24px;">
+        <div class="settings-card mt-lg" id="settings-rules">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Planning regels</h3>
@@ -9950,7 +9950,7 @@ function renderSettingsPlanning(container) {
                     </div>
                     <span class="form-hint">Wettelijk minimum is 11 uur</span>
                 </div>
-                <hr style="margin: 16px 0; border-color: var(--border-color);">
+                <hr class="my-md">
                 <div class="form-group">
                     <label for="rule-max-consecutive">Max opeenvolgende werkdagen:</label>
                     <div class="input-with-unit">
@@ -9980,7 +9980,7 @@ function renderSettingsPlanning(container) {
         </div>
 
         <!-- Vakantiewerking -->
-        <div class="settings-card" id="settings-holidays" style="margin-top: 24px;">
+        <div class="settings-card mt-lg" id="settings-holidays">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Vakantiewerking</h3>
@@ -10086,7 +10086,7 @@ function renderSettingsTeams(container) {
         </div>
 
         <!-- Dienst templates -->
-        <div class="settings-card" id="settings-templates" style="margin-top: 24px;">
+        <div class="settings-card mt-lg" id="settings-templates">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Dienst templates</h3>
@@ -10104,7 +10104,7 @@ function renderSettingsTeams(container) {
         </div>
 
         <!-- Weekendverantwoordelijke rotatie -->
-        <div class="settings-card" id="settings-weekend-responsible" style="margin-top: 24px;">
+        <div class="settings-card mt-lg" id="settings-weekend-responsible">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Weekendverantwoordelijke</h3>
@@ -10313,7 +10313,7 @@ function renderSettingsEmail(container) {
             <div class="settings-card-body">
                 <div class="email-setting-row email-setting-global">
                     <div class="email-setting-info">
-                        <span class="email-setting-label" style="font-weight: 600;">Alle email notificaties</span>
+                        <span class="email-setting-label fw-600">Alle email notificaties</span>
                         <span class="email-setting-desc">Schakel alle email notificaties in of uit</span>
                     </div>
                     <label class="toggle-switch">
@@ -10321,9 +10321,9 @@ function renderSettingsEmail(container) {
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
-                <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 8px 0;" />
+                <hr class="my-sm" style="border:none;border-top:1px solid var(--border-color)" />
                 ${typeToggles}
-                <div class="form-actions" style="margin-top: 16px;">
+                <div class="form-actions mt-md">
                     <button type="button" class="btn btn-primary" id="email-settings-save-btn">Opslaan</button>
                 </div>
                 <div id="email-settings-message" class="form-message" style="display: none; margin-top: 8px;"></div>
@@ -10416,8 +10416,8 @@ function renderSettingsSystem(container) {
                     <h4>Database migratie (dev)</h4>
                     <p>Voer database migraties uit om data te repareren (bijv. weekroosters fixen).</p>
                     <button class="btn btn-secondary" onclick="runMigration()">Database migreren</button>
-                    <button class="btn btn-secondary" onclick="seedTeams()" style="margin-left: 8px;">Teams aanmaken</button>
-                    <button class="btn btn-secondary" onclick="showDebugInfo()" style="margin-left: 8px;">Debug info</button>
+                    <button class="btn btn-secondary ml-sm" onclick="seedTeams()">Teams aanmaken</button>
+                    <button class="btn btn-secondary ml-sm" onclick="showDebugInfo()">Debug info</button>
                 </div>
                 ` : ''}
                 ${isAdmin ? `
@@ -10431,7 +10431,7 @@ function renderSettingsSystem(container) {
         </div>
 
         <!-- App info -->
-        <div class="settings-card" id="settings-about" style="margin-top: 24px;">
+        <div class="settings-card mt-lg" id="settings-about">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Over de app</h3>
@@ -10499,7 +10499,7 @@ function renderSettingsBeheer(container) {
         </div>
 
         <!-- Audit log -->
-        <div class="settings-card" style="margin-top: 24px;">
+        <div class="settings-card mt-lg">
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Audit Log</h3>
@@ -10544,7 +10544,7 @@ function renderSettingsBeheer(container) {
                                 <option value="settings">Instellingen</option>
                             </select>
                         </div>
-                        <div class="form-group" style="align-self: flex-end;">
+                        <div class="form-group self-end">
                             <button class="btn btn-primary" onclick="loadAuditLog(1)">Zoeken</button>
                             <button class="btn btn-secondary" onclick="exportAuditLog()">Exporteer CSV</button>
                         </div>
@@ -10556,8 +10556,8 @@ function renderSettingsBeheer(container) {
         </div>
 
         <!-- Gevarenzone (collapsible, starts collapsed) -->
-        <div class="settings-card collapsed" id="settings-danger-zone" style="margin-top: 24px;">
-            <div class="settings-card-header" style="cursor: pointer;" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="settings-card collapsed mt-lg" id="settings-danger-zone">
+            <div class="settings-card-header cursor-pointer" onclick="this.parentElement.classList.toggle('collapsed')">
                 <div class="settings-card-title">
                     <h3>Gevarenzone</h3>
                     <p class="settings-card-subtitle">Onomkeerbare acties.</p>
@@ -10566,7 +10566,7 @@ function renderSettingsBeheer(container) {
             </div>
             <div class="settings-card-body">
                 <div class="info-box" style="background: rgba(239, 68, 68, 0.06); border-color: rgba(239, 68, 68, 0.2);">
-                    <p style="color: var(--danger-color); font-weight: 600;">Let op: deze actie kan niet ongedaan worden gemaakt!</p>
+                    <p class="text-danger fw-600">Let op: deze actie kan niet ongedaan worden gemaakt!</p>
                     <p>Alle planningsdata (diensten, afwezigheden, ruilverzoeken) wordt permanent verwijderd.</p>
                 </div>
                 <button class="btn btn-danger" onclick="resetData()">Alle data wissen</button>
@@ -10600,7 +10600,7 @@ async function loadAuditLog(page) {
     const paginationEl = document.getElementById('audit-log-pagination');
     if (!resultsEl) return;
 
-    resultsEl.innerHTML = '<p style="padding: 16px; color: var(--text-secondary);">Laden...</p>';
+    resultsEl.innerHTML = '<p class="p-md text-muted">Laden...</p>';
 
     const filters = {
         page,
@@ -11163,7 +11163,7 @@ async function setHolidayWeekResponsible(periodId, weekNum, employeeId) {
 function openAddHolidayModal() {
     const modalHtml = `
     <div class="modal" id="holiday-modal" onclick="closeHolidayModal()">
-        <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 450px;">
+        <div class="modal-content" onclick="event.stopPropagation()" class="modal-content--sm">
             <div class="modal-header">
                 <h2>Vakantieperiode toevoegen</h2>
                 <button class="modal-close" onclick="closeHolidayModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
@@ -11374,7 +11374,7 @@ function renderRotationSettingsCompact() {
                 ${employeeOptions}
             </select>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="saveRotationSettings()" style="align-self: flex-end;">Opslaan</button>
+        <button class="btn btn-primary btn-sm self-end" onclick="saveRotationSettings()">Opslaan</button>
     </div>`;
 }
 
@@ -11444,7 +11444,7 @@ function renderUpcomingResponsibles() {
                 const responsibleName = escapeHtml(responsible.name);
                 const weekHoliday = typeof getHolidayPeriod === 'function' ? getHolidayPeriod(weekendSat) : null;
                 const isVakantieResp = weekHoliday && weekHoliday.responsibleId;
-                const badge = isVakantieResp ? ' <span class="upcoming-manual-badge" style="background:#f59e0b;color:#fff;">vakantie</span>'
+                const badge = isVakantieResp ? ' <span class="upcoming-manual-badge shift-badge-upcoming">vakantie</span>'
                     : isManual ? ' <span class="upcoming-manual-badge">handmatig</span>' : '';
                 html += `
                 <div class="upcoming-item upcoming-item-clickable" data-monday="${mondayKey}">
@@ -11492,7 +11492,7 @@ function showWeekendResponsiblePicker(mondayKey) {
     const overlay = document.createElement('div');
     overlay.className = 'modal';
     overlay.innerHTML = `
-        <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-content modal-content--xs">
             <div class="modal-header">
                 <h3>Weekendverantwoordelijke</h3>
                 <span class="modal-close" id="weekend-picker-close">&times;</span>

@@ -278,7 +278,7 @@
                 <div id="shift-validation-errors" class="validation-errors"></div>
                 <div class="modal-actions modal-actions-split">
                     <div class="modal-actions-left">
-                        <button type="button" class="btn btn-danger" id="shift-delete-btn" style="display: none;">Verwijderen</button>
+                        <button type="button" class="btn btn-danger" id="shift-delete-btn" style="display:none">Verwijderen</button>
                     </div>
                     <div class="modal-actions-right">
                         <button type="button" class="btn btn-secondary" id="shift-cancel-btn">Annuleren</button>
@@ -291,7 +291,7 @@
 
     <!-- Modal: Activiteit toevoegen/bewerken -->
     <div id="activity-modal" class="modal hidden">
-        <div class="modal-content" style="max-width: 450px;">
+        <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2 id="activity-modal-title">Activiteit toevoegen</h2>
                 <span class="modal-close"><i data-lucide="x"></i></span>
@@ -330,7 +330,7 @@
                 </div>
                 <div class="modal-actions modal-actions-split">
                     <div class="modal-actions-left">
-                        <button type="button" class="btn btn-danger" id="activity-delete-btn" style="display: none;">Verwijderen</button>
+                        <button type="button" class="btn btn-danger" id="activity-delete-btn" style="display:none">Verwijderen</button>
                     </div>
                     <div class="modal-actions-right">
                         <button type="button" class="btn btn-secondary" id="activity-cancel-btn">Annuleren</button>
@@ -421,7 +421,7 @@
                 </div>
 
                 <div class="modal-actions">
-                    <button type="button" class="btn btn-danger" id="employee-delete-btn" style="display: none; margin-right: auto;">Verwijderen</button>
+                    <button type="button" class="btn btn-danger" id="employee-delete-btn" class="mr-auto" style="display:none">Verwijderen</button>
                     <button type="button" class="btn btn-secondary" id="employee-cancel-btn">Annuleren</button>
                     <button type="submit" class="btn btn-primary">Opslaan</button>
                 </div>
@@ -476,7 +476,7 @@
                 </div>
             </div>
             <div class="modal-actions">
-                <button type="button" class="btn btn-danger" id="remove-absence-btn" style="display:none; margin-right: auto;">Verwijderen</button>
+                <button type="button" class="btn btn-danger" id="remove-absence-btn" class="mr-auto" style="display:none">Verwijderen</button>
                 <button type="button" class="btn btn-secondary" id="availability-cancel-btn">Annuleren</button>
                 <button type="button" class="btn btn-primary" id="availability-save-btn">Opslaan</button>
             </div>
@@ -526,7 +526,7 @@
                 </div>
 
                 <!-- Validation Display -->
-                <div id="swap-validation-display" style="display: none;"></div>
+                <div id="swap-validation-display" style="display:none"></div>
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn btn-secondary" id="swap-request-cancel-btn">Annuleren</button>
@@ -563,17 +563,17 @@
                 </div>
 
                 <!-- Message from requester -->
-                <div class="form-group" id="swap-review-message-group" style="display: none;">
+                <div class="form-group" id="swap-review-message-group" style="display:none">
                     <label>Bericht van aanvrager:</label>
                     <div id="swap-review-message" class="message-display"></div>
                 </div>
 
                 <!-- Validation Display -->
-                <div id="swap-review-validation" style="margin: 1rem 0;"></div>
+                <div id="swap-review-validation" class="my-md"></div>
 
                 <!-- Response Notes -->
                 <div class="form-group">
-                    <label for="swap-response-notes">Reactie <span id="swap-response-notes-required" style="color: red; display: none;">*</span></label>
+                    <label for="swap-response-notes">Reactie <span id="swap-response-notes-required" class="text-danger" style="display:none">*</span></label>
                     <textarea id="swap-response-notes" class="form-control" rows="3" placeholder="Optionele toelichting bij goedkeuring of verplicht bij afwijzing"></textarea>
                 </div>
             </div>
@@ -587,25 +587,25 @@
 
     <!-- Modal: Shift Afstaan Choice -->
     <div id="shift-afstaan-choice-modal" class="modal hidden">
-        <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-content modal-content--md">
             <div class="modal-header">
                 <h2>Shift afstaan</h2>
                 <span class="modal-close" id="shift-afstaan-choice-close"><i data-lucide="x"></i></span>
             </div>
             <div class="modal-body">
-                <p style="margin-bottom: 1.5rem; color: #666;">
+                <p class="modal-intro-text">
                     Hoe wil je deze shift afstaan?
                 </p>
 
-                <div style="display: flex; flex-direction: column; gap: 12px;">
-                    <button type="button" class="btn btn-primary" id="choice-swap-btn" style="padding: 16px; text-align: left; display: flex; flex-direction: column; gap: 4px;">
-                        <div style="font-weight: 600; font-size: 16px;"><i data-lucide="repeat-2" class="lucide-sm" style="display:inline-block;vertical-align:middle;margin-right:4px;"></i> Ruilen met collega</div>
-                        <div style="font-size: 13px; opacity: 0.9;">Zoek een collega om shifts te ruilen (jij neemt hun shift over)</div>
+                <div class="choice-stack">
+                    <button type="button" class="btn btn-primary btn-choice" id="choice-swap-btn">
+                        <div class="btn-choice-title"><i data-lucide="repeat-2" class="lucide-sm icon-inline"></i> Ruilen met collega</div>
+                        <div class="btn-choice-desc">Zoek een collega om shifts te ruilen (jij neemt hun shift over)</div>
                     </button>
 
-                    <button type="button" class="btn btn-secondary" id="choice-takeover-btn" style="padding: 16px; text-align: left; display: flex; flex-direction: column; gap: 4px;">
-                        <div style="font-weight: 600; font-size: 16px;"><i data-lucide="hand" class="lucide-sm" style="display:inline-block;vertical-align:middle;margin-right:4px;"></i> Iemand zoeken</div>
-                        <div style="font-size: 13px; opacity: 0.9;">Stel je shift beschikbaar voor iedereen (zonder ruilen)</div>
+                    <button type="button" class="btn btn-secondary btn-choice" id="choice-takeover-btn">
+                        <div class="btn-choice-title"><i data-lucide="hand" class="lucide-sm icon-inline"></i> Iemand zoeken</div>
+                        <div class="btn-choice-desc">Stel je shift beschikbaar voor iedereen (zonder ruilen)</div>
                     </button>
                 </div>
             </div>
@@ -623,7 +623,7 @@
                 <span class="modal-close" id="takeover-request-modal-close"><i data-lucide="x"></i></span>
             </div>
             <div class="modal-body">
-                <p style="margin-bottom: 1rem; color: #666;">
+                <p class="modal-intro-text">
                     Je shift wordt beschikbaar gesteld aan alle collega's. Iedereen kan deze overnemen.
                 </p>
 
@@ -639,8 +639,8 @@
                     <textarea id="takeover-message" class="form-control" rows="3" placeholder=""></textarea>
                 </div>
 
-                <p style="margin-top: 1rem; padding: 0.75rem; background: #fef3c7; border-radius: 4px; font-size: 0.9rem;">
-                    <i data-lucide="lightbulb" class="lucide-sm" style="display:inline-block;vertical-align:middle;margin-right:4px;"></i> Zodra iemand je shift accepteert, krijgt die persoon de shift toegewezen.
+                <p class="info-box">
+                    <i data-lucide="lightbulb" class="lucide-sm icon-inline"></i> Zodra iemand je shift accepteert, krijgt die persoon de shift toegewezen.
                 </p>
             </div>
             <div class="modal-actions">
@@ -680,18 +680,18 @@
 
     <!-- Modal: Roosterbouwer Dienst Kiezen -->
     <div id="builder-shift-modal" class="modal hidden">
-        <div class="modal-content" style="max-width: 420px;">
+        <div class="modal-content modal-content--xs">
             <div class="modal-header">
                 <h2 id="builder-shift-modal-title">Dienst toewijzen</h2>
                 <span class="modal-close" id="builder-shift-modal-close"><i data-lucide="x"></i></span>
             </div>
             <div class="modal-body">
-                <div id="builder-shift-employee-info" class="form-group" style="margin-bottom: 16px;"></div>
+                <div id="builder-shift-employee-info" class="form-group mb-md"></div>
                 <div class="form-group">
                     <label>Dienst type</label>
                     <div id="builder-shift-templates" class="builder-template-buttons"></div>
                 </div>
-                <div id="builder-custom-times" class="form-row" style="display: none;">
+                <div id="builder-custom-times" class="form-row" style="display:none">
                     <div class="form-group">
                         <label for="builder-shift-start">Starttijd</label>
                         <input type="time" id="builder-shift-start" class="form-input">
@@ -704,7 +704,7 @@
                 <div id="builder-shift-validation" class="validation-errors"></div>
             </div>
             <div class="modal-actions">
-                <button type="button" class="btn btn-danger" id="builder-shift-clear" style="margin-right: auto;">Leegmaken</button>
+                <button type="button" class="btn btn-danger" id="builder-shift-clear" class="mr-auto">Leegmaken</button>
                 <button type="button" class="btn btn-secondary" id="builder-shift-cancel">Annuleren</button>
                 <button type="button" class="btn btn-primary" id="builder-shift-save">Toewijzen</button>
             </div>
