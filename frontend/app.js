@@ -762,9 +762,8 @@ function initDOM() {
     DOM.loginForm = document.getElementById('login-form');
     DOM.usernameInput = document.getElementById('username');
     DOM.passwordInput = document.getElementById('password');
-    DOM.navButtons = document.querySelectorAll('.nav-btn');
+    DOM.navButtons = document.querySelectorAll('.nav-center .nav-btn');
     DOM.logoutBtn = document.getElementById('logout-btn');
-    DOM.currentUserSpan = document.getElementById('current-user');
     DOM.homeView = document.getElementById('home-view');
     DOM.planningView = document.getElementById('planning-view');
     DOM.employeesView = document.getElementById('employees-view');
@@ -953,6 +952,40 @@ function setupEventListeners() {
         mobileMenuBtn.addEventListener('click', () => {
             mobileMenuBtn.classList.toggle('active');
             navMenu.classList.toggle('open');
+        });
+    }
+
+    // User menu (avatar dropdown) toggle
+    const userMenu = document.getElementById('user-menu');
+    const userMenuTrigger = document.getElementById('user-menu-trigger');
+    if (userMenu && userMenuTrigger) {
+        userMenuTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            userMenu.classList.toggle('open');
+            userMenuTrigger.setAttribute('aria-expanded', userMenu.classList.contains('open'));
+        });
+        // Close on click outside
+        document.addEventListener('click', (e) => {
+            if (!userMenu.contains(e.target)) {
+                userMenu.classList.remove('open');
+                userMenuTrigger.setAttribute('aria-expanded', 'false');
+            }
+        });
+        // Close on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && userMenu.classList.contains('open')) {
+                userMenu.classList.remove('open');
+                userMenuTrigger.setAttribute('aria-expanded', 'false');
+                userMenuTrigger.focus();
+            }
+        });
+        // Dropdown nav items (profile, settings)
+        userMenu.querySelectorAll('.user-menu-item[data-view]').forEach(item => {
+            item.addEventListener('click', () => {
+                userMenu.classList.remove('open');
+                userMenuTrigger.setAttribute('aria-expanded', 'false');
+                switchView(item.dataset.view);
+            });
         });
     }
 
@@ -1317,10 +1350,30 @@ function showLogin() {
     DOM.passwordInput.value = '';
 }
 
+function getInitials(name) {
+    if (!name) return '?';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
+
+function populateUserMenu() {
+    const user = AppState.currentUser;
+    if (!user) return;
+    const avatar = document.getElementById('avatar-circle');
+    const menuName = document.getElementById('user-menu-name');
+    const dropdownName = document.getElementById('dropdown-user-name');
+    const dropdownRole = document.getElementById('dropdown-user-role');
+    if (avatar) avatar.textContent = getInitials(user.name);
+    if (menuName) menuName.textContent = user.name;
+    if (dropdownName) dropdownName.textContent = user.name;
+    if (dropdownRole) dropdownRole.textContent = getRoleDescription(user.role);
+}
+
 function showApp() {
     DOM.loginContainer.classList.add('hidden');
     DOM.appContainer.classList.remove('hidden');
-    DOM.currentUserSpan.textContent = AppState.currentUser.name;
+    populateUserMenu();
     applyRoleVisibility();
     // Restore saved view from localStorage, or use default
     const savedView = localStorage.getItem('hetvlot_activeView');
@@ -1373,6 +1426,19 @@ function applyRoleVisibility() {
         const isAllowed = allowedViews.has(view);
         btn.style.display = isAllowed ? '' : 'none';
     });
+
+    // Show/hide admin nav group based on whether any admin buttons are visible
+    const adminGroup = document.querySelector('.nav-group-admin');
+    if (adminGroup) {
+        const hasVisibleBtn = Array.from(adminGroup.querySelectorAll('.nav-btn')).some(b => b.style.display !== 'none');
+        adminGroup.style.display = hasVisibleBtn ? '' : 'none';
+    }
+
+    // Show/hide settings item in user dropdown
+    const dropdownSettings = document.getElementById('dropdown-settings-item');
+    if (dropdownSettings) {
+        dropdownSettings.style.display = allowedViews.has('settings') ? '' : 'none';
+    }
 
     if (!allowedViews.has(AppState.currentView)) {
         AppState.currentView = 'home';

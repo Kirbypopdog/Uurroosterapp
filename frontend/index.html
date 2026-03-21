@@ -57,14 +57,16 @@
                 <h1 class="app-title">Het Vlot</h1>
             </div>
             <div class="nav-center" id="nav-menu">
-                <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i> Home</button>
-                <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i> Planning</button>
-                <button class="nav-btn" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
-                <button class="nav-btn" data-view="profile"><i data-lucide="user" class="nav-icon"></i> Profiel</button>
-                <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i> Afwezigheid</button>
-                <button class="nav-btn" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster Bouwen</button>
-                <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i> Ruilen</button>
-                <button class="nav-btn" data-view="settings"><i data-lucide="settings" class="nav-icon"></i> Instellingen</button>
+                <div class="nav-group-primary">
+                    <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i> Home</button>
+                    <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i> Planning</button>
+                    <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i> Afwezigheid</button>
+                    <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i> Ruilen</button>
+                </div>
+                <div class="nav-group-admin">
+                    <button class="nav-btn" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
+                    <button class="nav-btn" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster Bouwen</button>
+                </div>
             </div>
             <div class="nav-right">
                 <div id="role-switcher" class="role-switcher hidden">
@@ -75,8 +77,24 @@
                         <option value="medewerker">Medewerker</option>
                     </select>
                 </div>
-                <span id="current-user" class="user-badge"></span>
-                <button id="logout-btn" class="btn btn-secondary btn-sm"><i data-lucide="log-out" class="lucide-sm logout-icon"></i> Uitloggen</button>
+                <div class="user-menu" id="user-menu">
+                    <button class="user-menu-trigger" id="user-menu-trigger" aria-expanded="false" aria-haspopup="true">
+                        <span class="avatar-circle" id="avatar-circle"></span>
+                        <span class="user-menu-name" id="user-menu-name"></span>
+                        <i data-lucide="chevron-down" class="lucide-sm user-menu-chevron"></i>
+                    </button>
+                    <div class="user-menu-dropdown" id="user-menu-dropdown">
+                        <div class="user-menu-header">
+                            <span class="user-menu-header-name" id="dropdown-user-name"></span>
+                            <span class="user-menu-header-role" id="dropdown-user-role"></span>
+                        </div>
+                        <div class="user-menu-divider"></div>
+                        <button class="user-menu-item" data-view="profile"><i data-lucide="user" class="lucide-sm"></i> Profiel</button>
+                        <button class="user-menu-item" data-view="settings" id="dropdown-settings-item"><i data-lucide="settings" class="lucide-sm"></i> Instellingen</button>
+                        <div class="user-menu-divider"></div>
+                        <button class="user-menu-item user-menu-item-danger" id="logout-btn"><i data-lucide="log-out" class="lucide-sm"></i> Uitloggen</button>
+                    </div>
+                </div>
             </div>
         </nav>
 
