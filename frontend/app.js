@@ -5914,9 +5914,11 @@ async function renderSwaps() {
             sr.status === 'expired' && sr.requester_user_id === currentUser.id
         ).slice(0, 10);
 
-        // Collapse state (persist in AppState)
+        // Collapse state (persist in localStorage)
         if (!AppState.swapCollapseState) {
-            AppState.swapCollapseState = { ruil: false, overname: false, verlopen: true };
+            try {
+                AppState.swapCollapseState = JSON.parse(localStorage.getItem('swapCollapseState')) || { ruil: false, overname: false, verlopen: true };
+            } catch { AppState.swapCollapseState = { ruil: false, overname: false, verlopen: true }; }
         }
 
         // Team filter toggles
@@ -6054,6 +6056,7 @@ async function renderSwaps() {
                 const section = header.closest('.swap-group');
                 section.classList.toggle('collapsed');
                 AppState.swapCollapseState[group] = section.classList.contains('collapsed');
+                try { localStorage.setItem('swapCollapseState', JSON.stringify(AppState.swapCollapseState)); } catch {}
                 IconHelper.init(section);
             });
         });
