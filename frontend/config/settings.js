@@ -52,6 +52,9 @@ window.DEFAULT_SETTINGS = {
         overkoepelend: { name: 'Overkoepelend (Kantoor)', color: '#f59e0b' },
         jobstudent: { name: 'Jobstudenten/Stagiairs', color: '#ec4899' }
     },
+    // Teams die meetellen voor bezettingsnormen (heatmap)
+    // Cargo, Overkoepelend en Jobstudenten tellen standaard niet mee
+    coverageTeams: ['vlot1', 'vlot2'],
     // Vakantieperiodes
     holidayPeriods: [],
     // Vakantie regels (Vlot 1 + Vlot 2 worden samengevoegd)

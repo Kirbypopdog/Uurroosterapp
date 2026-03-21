@@ -58,6 +58,13 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 -- Shift blocks (prevent auto-regeneration of deleted shifts)
+-- CONCEPT-DRIVEN NOTE: In het concept-driven systeem worden shift_blocks nog gebruikt als
+-- veiligheidsnet bij:
+--   1. DELETE /shifts/:id → maakt block aan (voorkomt dat apply-schedule ze terugzet)
+--   2. POST /shifts (manual create) → verwijdert block voor die user/date
+--   3. generateAutoShifts() checked blocks vóór generatie
+--   4. schedule-drafts/:id/apply respecteert blocks tenzij clearBlocks=true
+-- Kandidaat voor toekomstige vereenvoudiging wanneer alle regeneratie via concepten loopt.
 CREATE TABLE IF NOT EXISTS shift_blocks (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -133,3 +140,4 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log(resource_type);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_schedule_drafts_created ON schedule_drafts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date);

@@ -218,6 +218,12 @@ body {
     gap: 16px;
 }
 
+.employee-profile-fields {
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
 .checkbox-group {
     display: flex;
     flex-direction: column;
@@ -2685,6 +2691,11 @@ body[data-view-mode="day"] .timeline-header {
     overflow: visible;
 }
 
+/* In dagweergave: clip nachtshift overflow (geen volgende kolom om in te lopen) */
+body[data-view-mode="day"] .timeline-day-cell {
+    overflow: hidden !important;
+}
+
 .timeline-block {
     position: absolute;
     top: 4px;
@@ -4006,6 +4017,13 @@ body[data-view-mode="day"] .timeline-header {
     gap: 8px;
     align-items: center;
     flex-wrap: wrap;
+    padding: 12px 16px;
+}
+
+/* Ensure buttons inside cards have consistent spacing */
+.settings-card .btn,
+.employee-card .btn {
+    margin: 4px 0;
 }
 
 .settings-icon {

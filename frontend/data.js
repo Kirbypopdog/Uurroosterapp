@@ -224,7 +224,8 @@ async function loadDataFromAPI() {
             schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern,
             emailNotifications: apiSettings.email_notifications || DataStore.settings.emailNotifications,
             schoolYearStart: apiSettings.school_year_start || DataStore.settings.schoolYearStart,
-            teamMeetings: apiSettings.team_meetings || DataStore.settings.teamMeetings
+            teamMeetings: apiSettings.team_meetings || DataStore.settings.teamMeetings,
+            coverageTeams: apiSettings.coverageTeams || DataStore.settings.coverageTeams
         });
 
         // Use schedule_drafts from dedicated table if available (overrides settings fallback)

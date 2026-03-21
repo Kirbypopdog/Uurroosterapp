@@ -41,6 +41,7 @@ const AppState = {
     builderShowMeetingsEditor: false, // toggle teamvergaderingen editor
     builderMeetings: {},              // per-concept teamvergaderingen { [teamId]: [{ day, from, to }] }
     showHeatmap: false,
+    filterOnlyWithShifts: false,
     settingsDirty: false,
     employeeSortMode: 'name',
     swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
@@ -860,6 +861,11 @@ function handleTooltipShow(e) {
         // Flip naar bottom als top niet past
         top = rect.bottom + 8;
     }
+    if (top + tooltipRect.height > window.innerHeight - 10) {
+        // Flip naar top als bottom niet past
+        top = rect.top - tooltipRect.height - 8;
+        if (top < 10) top = 10;
+    }
 
     tooltipElement.style.top = `${top}px`;
     tooltipElement.style.left = `${left}px`;
@@ -1112,6 +1118,16 @@ function setupEventListeners() {
                 container.innerHTML = AppState.showHeatmap ? renderCoverageHeatmap() : '';
                 if (AppState.showHeatmap) IconHelper.init(container);
             }
+        });
+    }
+
+    // Filter toggle: show only employees with shifts
+    const filterToggle = document.getElementById('filter-shifts-toggle');
+    if (filterToggle) {
+        filterToggle.addEventListener('click', () => {
+            AppState.filterOnlyWithShifts = !AppState.filterOnlyWithShifts;
+            filterToggle.classList.toggle('active', AppState.filterOnlyWithShifts);
+            renderPlanning();
         });
     }
 
@@ -2110,6 +2126,12 @@ function renderPlanning() {
         heatmapBtn.classList.toggle('active', AppState.showHeatmap);
     }
 
+    // Sync filter toggle button state
+    const filterBtn = document.getElementById('filter-shifts-toggle');
+    if (filterBtn) {
+        filterBtn.classList.toggle('active', AppState.filterOnlyWithShifts);
+    }
+
     // Restore window scroll position after DOM updates
     requestAnimationFrame(() => {
         window.scrollTo(0, savedScrollY);
@@ -2124,7 +2146,9 @@ function calcPlanningHourlyHeadcount(date, hour) {
     prev.setDate(prev.getDate() - 1);
     const prevDate = formatDateYYYYMMDD(prev);
 
-    let count = 0;
+    let bruto = 0;
+    const workingEmployees = new Set(); // track who is working at this hour
+
     for (const s of DataStore.shifts) {
         if (!coverageTeams.includes(s.team)) continue;
         const [sh, sm] = s.startTime.split(':').map(Number);
@@ -2133,19 +2157,39 @@ function calcPlanningHourlyHeadcount(date, hour) {
         const endDec = eh + em / 60;
         const isNight = endDec <= startDec;
 
+        let isWorking = false;
         if (s.date === date) {
-            // Same-day shift or night shift starting today
             if (isNight) {
-                if (hour >= startDec) count++;
+                if (hour >= startDec) isWorking = true;
             } else {
-                if (hour >= startDec && hour < endDec) count++;
+                if (hour >= startDec && hour < endDec) isWorking = true;
             }
         } else if (s.date === prevDate && isNight) {
-            // Yesterday's night shift extending into today
-            if (hour < endDec) count++;
+            if (hour < endDec) isWorking = true;
+        }
+
+        if (isWorking) {
+            bruto++;
+            workingEmployees.add(String(s.employeeId || s.userId || s.user_id));
         }
     }
-    return count;
+
+    // Netto: subtract employees who have an activity at this hour (only if they have a shift)
+    let activityCount = 0;
+    const activities = DataStore.activities.filter(a => a.date === date);
+    for (const act of activities) {
+        const empId = String(act.userId);
+        if (!workingEmployees.has(empId)) continue; // only count if employee has a shift
+        const [ash, asm] = act.startTime.split(':').map(Number);
+        const [aeh, aem] = act.endTime.split(':').map(Number);
+        const actStart = ash + asm / 60;
+        const actEnd = aeh + aem / 60;
+        if (hour >= actStart && hour < actEnd) {
+            activityCount++;
+        }
+    }
+
+    return { bruto, netto: bruto - activityCount };
 }
 
 function renderCoverageHeatmap() {
@@ -2182,17 +2226,20 @@ function renderCoverageHeatmap() {
 
         if (!closed) {
             for (let h = 7; h < 24; h += 0.5) {
-                const actual = calcPlanningHourlyHeadcount(date, h);
+                const { bruto, netto } = calcPlanningHourlyHeadcount(date, h);
                 let segClass = 'heatmap-seg';
-                if (actual >= 2) segClass += ' seg-ok';
-                else if (actual > 0) segClass += ' seg-warn';
+                if (netto >= 2) segClass += ' seg-ok';
+                else if (netto > 0) segClass += ' seg-warn';
                 else segClass += ' seg-danger';
 
                 const leftPct = ((h - 7) / 17) * 100;
                 const widthPct = (0.5 / 17) * 100;
                 const timeLabel = formatStaffingHour(h);
+                const tooltipText = netto < bruto
+                    ? `${timeLabel} — ${netto} beschikbaar (${bruto} ingepland, ${bruto - netto} in activiteit)`
+                    : `${timeLabel} — ${bruto} medewerkers`;
                 html += `<span class="${segClass}" style="left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%"
-                    data-tooltip="${timeLabel} — ${actual} medewerkers" data-tooltip-pos="top"></span>`;
+                    data-tooltip="${tooltipText}" data-tooltip-pos="top"></span>`;
             }
         }
 
@@ -2500,6 +2547,11 @@ function renderTimelineView() {
         }
     });
     let employees = [...employeeMap.values()];
+
+    // Filter: only show employees with shifts if toggle is active
+    if (AppState.filterOnlyWithShifts) {
+        employees = employees.filter(emp => employeeIdsWithShifts.has(emp.id));
+    }
 
     // Group employees by their main team - only show visible teams
     const teams = DataStore.settings.teams || {};
@@ -4859,15 +4911,15 @@ function renderEmployeeCard(emp) {
     const mainTeamName = escapeHtml(mainTeam.name);
     const contractHours = emp.contractHours || 0;
 
+    const teamName = (DataStore.settings.teams || {})[emp.mainTeam]?.name || emp.mainTeam || '';
+    const teamColor = (DataStore.settings.teams || {})[emp.mainTeam]?.color || '#94a3b8';
+
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
             <div class="employee-header">
+                <span class="team-color-dot" style="background: ${teamColor}" title="${escapeHtml(teamName)}"></span>
                 <div class="employee-name">${employeeName}</div>
                 <span class="employee-status ${statusClass}">${statusText}</span>
-            </div>
-            <div class="employee-card-meta">
-                ${emp.email ? `<span class="employee-meta-item">${IconHelper.html(ICONS.email, 'xs')} ${employeeEmail}</span>` : ''}
-                ${contractHours ? `<span class="employee-meta-item">${IconHelper.html(ICONS.clock, 'xs')} ${contractHours}u/week</span>` : ''}
             </div>
         </div>
     `;
@@ -4877,8 +4929,38 @@ function openAddEmployeeModal() {
     AppState.editingEmployeeId = null;
     DOM.employeeModalTitle.textContent = 'Medewerker toevoegen';
     DOM.employeeForm.reset();
-    DOM.employeeActive.checked = true;
+    DOM.employeeActive.value = 'true';
     DOM.employeeDeleteBtn.style.display = 'none';
+
+    // Populate team dropdown
+    const mainTeamSelect = DOM.employeeMainTeam;
+    mainTeamSelect.innerHTML = '';
+    const teams = DataStore.settings.teams || {};
+    for (const [teamId, teamInfo] of Object.entries(teams)) {
+        const opt = document.createElement('option');
+        opt.value = teamId;
+        opt.textContent = teamInfo.name || teamId;
+        mainTeamSelect.appendChild(opt);
+    }
+
+    // Extra teams checkboxes (empty for new)
+    const extraTeamsContainer = document.getElementById('employee-extra-teams-checkboxes');
+    if (extraTeamsContainer) {
+        extraTeamsContainer.innerHTML = '';
+        for (const [teamId, teamInfo] of Object.entries(teams)) {
+            const label = document.createElement('label');
+            label.className = 'checkbox-label';
+            label.innerHTML = `<input type="checkbox" name="extra_teams" value="${teamId}"> ${teamInfo.name || teamId}`;
+            extraTeamsContainer.appendChild(label);
+        }
+    }
+
+    // Show profile fields and actions
+    const profileFields = document.getElementById('employee-profile-fields');
+    if (profileFields) profileFields.style.display = '';
+    const modalActions = DOM.employeeModal.querySelector('.modal-actions');
+    if (modalActions) modalActions.style.display = '';
+
     generateWeekScheduleHTML();
     resetWeekScheduleForm();
     DOM.employeeModal.classList.remove('hidden');
@@ -4890,20 +4972,50 @@ function openEditEmployeeModal(employeeId) {
     AppState.editingEmployeeId = employeeId;
     DOM.employeeModalTitle.textContent = employee.name;
 
-    // Hidden fields for form submission (preserve existing values)
+    const canEdit = ['admin', 'roosterverantwoordelijke'].includes(getEffectiveRole());
+
+    // Profile fields
     DOM.employeeName.value = employee.name;
     DOM.employeeEmail.value = employee.email || '';
-    DOM.employeeMainTeam.value = employee.mainTeam;
     DOM.employeeContract.value = employee.contractHours || '';
     DOM.employeeActive.value = employee.active !== false ? 'true' : 'false';
 
-    // Show read-only schedule from active concept instead of editable form
-    generateReadOnlyWeekScheduleHTML(employee);
+    // Populate team dropdown
+    const mainTeamSelect = DOM.employeeMainTeam;
+    mainTeamSelect.innerHTML = '';
+    const teams = DataStore.settings.teams || {};
+    for (const [teamId, teamInfo] of Object.entries(teams)) {
+        const opt = document.createElement('option');
+        opt.value = teamId;
+        opt.textContent = teamInfo.name || teamId;
+        mainTeamSelect.appendChild(opt);
+    }
+    mainTeamSelect.value = employee.mainTeam;
 
-    // Hide save/cancel/delete — modal is read-only
-    DOM.employeeDeleteBtn.style.display = 'none';
+    // Extra teams checkboxes
+    const extraTeamsContainer = document.getElementById('employee-extra-teams-checkboxes');
+    if (extraTeamsContainer) {
+        const currentExtra = employee.extraTeams || employee.extra_teams || [];
+        extraTeamsContainer.innerHTML = '';
+        for (const [teamId, teamInfo] of Object.entries(teams)) {
+            const label = document.createElement('label');
+            label.className = 'checkbox-label';
+            label.innerHTML = `<input type="checkbox" name="extra_teams" value="${teamId}" ${currentExtra.includes(teamId) ? 'checked' : ''}> ${teamInfo.name || teamId}`;
+            extraTeamsContainer.appendChild(label);
+        }
+    }
+
+    // Show/hide profile fields and actions based on permissions
+    const profileFields = document.getElementById('employee-profile-fields');
+    if (profileFields) profileFields.style.display = canEdit ? '' : 'none';
+
     const modalActions = DOM.employeeModal.querySelector('.modal-actions');
-    if (modalActions) modalActions.style.display = 'none';
+    if (modalActions) modalActions.style.display = canEdit ? '' : 'none';
+
+    DOM.employeeDeleteBtn.style.display = canEdit ? '' : 'none';
+
+    // Show read-only schedule from active concept
+    generateReadOnlyWeekScheduleHTML(employee);
 
     // Add "Bekijk in planning" button
     const container = document.getElementById('week-schedule-container');
@@ -4990,11 +5102,17 @@ function closeEmployeeModal() {
 async function handleEmployeeSubmit(e) {
     e.preventDefault();
 
+    // Collect extra teams from checkboxes
+    const extraTeamsChecked = [];
+    document.querySelectorAll('#employee-extra-teams-checkboxes input[name="extra_teams"]:checked').forEach(cb => {
+        if (cb.value !== DOM.employeeMainTeam.value) extraTeamsChecked.push(cb.value);
+    });
+
     const employeeData = {
         name: DOM.employeeName.value.trim(),
         email: DOM.employeeEmail.value.trim(),
         mainTeam: DOM.employeeMainTeam.value,
-        extraTeams: [],
+        extraTeams: extraTeamsChecked,
         contractHours: parseFloat(DOM.employeeContract.value) || 0,
         active: DOM.employeeActive.value === 'true'
     };
@@ -7050,6 +7168,12 @@ function getDraftStatus(draft, newestActiveId) {
             if (today >= fromDate && today <= untilDate) {
                 // Only the most recently applied draft with overlapping period is "active"
                 if (newestActiveId && draft.id !== newestActiveId) {
+                    // Check if overridden by a vacation concept (temporary pause, not permanent override)
+                    const allDrafts = DataStore.settings.schedule_drafts || [];
+                    const newestDraft = allDrafts.find(d => d.id === newestActiveId);
+                    if (newestDraft && newestDraft.type === 'vakantie') {
+                        return { label: `Gepauzeerd (vakantie): ${from} – ${until}`, cls: 'scheduled' };
+                    }
                     return { label: `Overschreven: ${from} – ${until}`, cls: 'expired' };
                 }
                 return { label: `Actief: ${from} – ${until}`, cls: 'active' };
@@ -8033,7 +8157,18 @@ async function applyBuilderDraft(draftId) {
 
         showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
         try {
-            const result = await applyScheduleDraft(draftId, { clearBlocks: true });
+            let result = await applyScheduleDraft(draftId, { clearBlocks: true });
+
+            // Handmatige wijzigingen detectie
+            if (result.needsManualConfirmation) {
+                hideSectionLoading('planning-view');
+                const overwrite = await showConfirm(
+                    `Er zijn ${result.manualShiftCount} handmatige diensten in de vakantieperiode.\n\nOK — Alles verwijderen (handmatige aanpassingen gaan verloren)\nAnnuleren — Alleen automatische diensten verwijderen`,
+                    'Handmatige diensten gevonden'
+                );
+                showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
+                result = await applyScheduleDraft(draftId, { clearBlocks: true, confirmOverwrite: overwrite });
+            }
 
             showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt)`, 'success');
 
@@ -8045,7 +8180,7 @@ async function applyBuilderDraft(draftId) {
                 draftToMark.lastAppliedUntil = hp.endDate;
             }
 
-            await Promise.all([refreshShifts(), fetchShiftBlocks()]);
+            await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshActivities()]);
             renderBuilder();
         } catch (error) {
             console.error('Error applying vakantie draft:', error);
@@ -8234,7 +8369,7 @@ async function applyBuilderDraft(draftId) {
         }
         // Rotation is managed via Settings > Planning, not per concept
 
-        await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshUsers()]);
+        await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshUsers(), refreshActivities()]);
         renderBuilder();
     } catch (error) {
         console.error('Error applying builder draft:', error);
@@ -11107,16 +11242,31 @@ function showWeekendResponsiblePicker(mondayKey) {
                             ${autoResponsible ? `<span class="weekend-picker-hint">→ ${escapeHtml(autoResponsible.name)}</span>` : ''}
                         </span>
                     </label>
-                    ${eligible.map(emp => {
-                        const teamColor = DataStore.settings.teams[emp.mainTeam]?.color || '#6b7280';
-                        const isSelected = currentAssignment === String(emp.id);
-                        return `
-                        <label class="weekend-picker-option ${isSelected ? 'selected' : ''}" data-value="${emp.id}">
-                            <input type="radio" name="weekend-responsible" value="${emp.id}" ${isSelected ? 'checked' : ''}>
-                            <span class="weekend-picker-color" style="background: ${teamColor};"></span>
-                            <span class="weekend-picker-label">${escapeHtml(emp.name)}</span>
-                        </label>`;
-                    }).join('')}
+                    ${(() => {
+                        // Group eligible employees by team
+                        const byTeam = {};
+                        eligible.forEach(emp => {
+                            const team = emp.mainTeam || 'other';
+                            if (!byTeam[team]) byTeam[team] = [];
+                            byTeam[team].push(emp);
+                        });
+                        return Object.entries(byTeam).map(([teamId, emps]) => {
+                            const teamInfo = (DataStore.settings.teams || {})[teamId] || {};
+                            const teamColor = teamInfo.color || '#6b7280';
+                            const teamName = teamInfo.name || teamId;
+                            return `<div class="weekend-picker-team-group">
+                                <div class="weekend-picker-team-header" style="border-left: 3px solid ${teamColor}; padding-left: 8px; font-size: 12px; color: var(--text-secondary); font-weight: 600; margin: 8px 0 4px;">${escapeHtml(teamName)}</div>
+                                ${emps.map(emp => {
+                                    const isSelected = currentAssignment === String(emp.id);
+                                    return `<label class="weekend-picker-option ${isSelected ? 'selected' : ''}" data-value="${emp.id}">
+                                        <input type="radio" name="weekend-responsible" value="${emp.id}" ${isSelected ? 'checked' : ''}>
+                                        <span class="weekend-picker-color" style="background: ${teamColor};"></span>
+                                        <span class="weekend-picker-label">${escapeHtml(emp.name)}</span>
+                                    </label>`;
+                                }).join('')}
+                            </div>`;
+                        }).join('');
+                    })()}
                 </div>
             </div>
             <div class="modal-actions">

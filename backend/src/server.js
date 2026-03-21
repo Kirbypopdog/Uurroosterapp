@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const { pool } = require('./db');
 const emailService = require('./email');
 
@@ -457,6 +458,14 @@ async function ensureSchema() {
       console.log(`  shift_activities table: ${e.message}`);
     }
 
+    // Indexes for shift_activities and schedule_drafts
+    try {
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shift_activities_user_date ON shift_activities(user_id, date)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date)`);
+    } catch (e) {
+      console.log(`  extra indexes: ${e.message}`);
+    }
+
     // Phase 4: Add valid_from/valid_until to schedule_drafts for school year scheduling
     try {
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS valid_from DATE`);
@@ -608,7 +617,16 @@ app.post('/auth/register', async (req, res) => {
   }
 });
 
-app.post('/auth/login', async (req, res) => {
+// Rate limiting on login endpoint
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  message: { success: false, message: 'Te veel inlogpogingen. Probeer opnieuw over 15 minuten.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.post('/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
     return res.status(400).json({ error: 'Missing fields' });
