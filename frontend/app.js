@@ -425,6 +425,82 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+// ===== MODAL FOCUS TRAP =====
+const FocusTrap = {
+    _activeModal: null,
+    _handler: null,
+    _previousFocus: null,
+
+    activate(modal) {
+        this.deactivate();
+        this._activeModal = modal;
+        this._previousFocus = document.activeElement;
+
+        this._handler = (e) => {
+            if (e.key === 'Tab') {
+                const focusable = modal.querySelectorAll(
+                    'button:not([disabled]):not(.hidden), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+                );
+                const visible = [...focusable].filter(el => el.offsetParent !== null);
+                if (visible.length === 0) return;
+
+                const first = visible[0];
+                const last = visible[visible.length - 1];
+
+                if (e.shiftKey) {
+                    if (document.activeElement === first) {
+                        e.preventDefault();
+                        last.focus();
+                    }
+                } else {
+                    if (document.activeElement === last) {
+                        e.preventDefault();
+                        first.focus();
+                    }
+                }
+            }
+        };
+        document.addEventListener('keydown', this._handler);
+
+        // Focus first focusable element
+        const firstFocusable = modal.querySelector('button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])');
+        if (firstFocusable) setTimeout(() => firstFocusable.focus(), 50);
+    },
+
+    deactivate() {
+        if (this._handler) {
+            document.removeEventListener('keydown', this._handler);
+            this._handler = null;
+        }
+        if (this._previousFocus && this._previousFocus.focus) {
+            try { this._previousFocus.focus(); } catch (e) { /* element may be gone */ }
+        }
+        this._activeModal = null;
+        this._previousFocus = null;
+    }
+};
+
+// Auto-activate focus trap when modals become visible
+function initModalFocusTrap() {
+    const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                const el = mutation.target;
+                if (!el.classList.contains('modal')) continue;
+                if (el.classList.contains('hidden')) {
+                    if (FocusTrap._activeModal === el) FocusTrap.deactivate();
+                } else {
+                    FocusTrap.activate(el);
+                }
+            }
+        }
+    });
+
+    document.querySelectorAll('.modal').forEach(modal => {
+        observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
+    });
+}
+
 // ===== TOAST NOTIFICATION SYSTEM =====
 const ToastManager = {
     container: null,
@@ -951,6 +1027,7 @@ function init() {
         console.log('Het Vlot Roosterplanning start...');
         console.log('Data loaded:', DataStore);
         initDOM();
+        initModalFocusTrap();
         applyTeamColors();
         console.log('DOM initialized');
         document.body.setAttribute('data-view-mode', AppState.viewMode);
@@ -3910,6 +3987,17 @@ let swapRequestState = {
 };
 
 function openSwapRequestModal(shift) {
+    // Pre-check: are there colleagues with shifts to swap with?
+    const colleagues = getAllEmployees(true).filter(emp => emp.id !== shift.userId);
+    const colleagueIds = new Set(colleagues.map(c => c.id));
+    const colleagueShifts = DataStore.shifts.filter(s =>
+        colleagueIds.has(s.userId) || colleagueIds.has(s.user_id)
+    );
+    if (colleagueShifts.length === 0) {
+        showToast('Geen ruilbare diensten gevonden bij collega\'s.', 'warning');
+        return;
+    }
+
     swapRequestState.requesterShift = shift;
     swapRequestState.targetEmployeeId = null;
     swapRequestState.targetShiftId = null;
@@ -3924,7 +4012,7 @@ function openSwapRequestModal(shift) {
 
     // Populate employee dropdown (exclude current user)
     const employeeSelect = document.getElementById('swap-target-employee');
-    let employees = getAllEmployees(true).filter(emp => emp.id !== shift.userId);
+    let employees = colleagues;
     let html = '<option value="">-- Selecteer collega --</option>';
     employees.forEach(emp => {
         html += `<option value="${emp.id}">${escapeHtml(emp.name)}</option>`;
