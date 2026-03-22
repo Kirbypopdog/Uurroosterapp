@@ -42,7 +42,7 @@ const AppState = {
     builderMeetings: {},              // per-concept teamvergaderingen { [teamId]: [{ day, from, to }] }
     showHeatmap: false,
     filterOnlyWithShifts: false,
-    planningControlsCollapsed: false,
+    planningControlsCollapsed: true,
     settingsDirty: false,
     swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
 };
@@ -688,6 +688,52 @@ function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
     });
 }
 
+function showSelectPrompt(message, title, options) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('input-prompt-modal');
+        const messageEl = document.getElementById('input-prompt-message');
+        const inputEl = document.getElementById('input-prompt-value');
+        const okBtn = document.getElementById('input-prompt-ok');
+        const cancelBtn = document.getElementById('input-prompt-cancel');
+
+        messageEl.textContent = message;
+
+        // Replace input with select temporarily
+        const selectEl = document.createElement('select');
+        selectEl.className = inputEl.className;
+        selectEl.id = 'input-prompt-select';
+        options.forEach(opt => {
+            const o = document.createElement('option');
+            o.value = opt.value;
+            o.textContent = opt.label;
+            selectEl.appendChild(o);
+        });
+        inputEl.replaceWith(selectEl);
+        modal.classList.remove('hidden');
+        setTimeout(() => selectEl.focus(), 50);
+
+        const handleOk = () => { cleanup(); resolve(selectEl.value); };
+        const handleCancel = () => { cleanup(); resolve(null); };
+        const cleanup = () => {
+            modal.classList.add('hidden');
+            selectEl.replaceWith(inputEl);
+            okBtn.removeEventListener('click', handleOk);
+            cancelBtn.removeEventListener('click', handleCancel);
+            modal.removeEventListener('click', handleBackdropClick);
+            document.removeEventListener('keydown', handleKeys);
+        };
+        const handleBackdropClick = (e) => { if (e.target === modal) handleCancel(); };
+        const handleKeys = (e) => {
+            if (e.key === 'Escape') handleCancel();
+            if (e.key === 'Enter') handleOk();
+        };
+        okBtn.addEventListener('click', handleOk);
+        cancelBtn.addEventListener('click', handleCancel);
+        modal.addEventListener('click', handleBackdropClick);
+        document.addEventListener('keydown', handleKeys);
+    });
+}
+
 async function apiFetch(path, options = {}) {
     const headers = { ...(options.headers || {}) };
     if (AppState.authToken) {
@@ -1164,9 +1210,9 @@ function setupEventListeners() {
             const filtersRow = document.getElementById('planning-filters-row');
             const heatmap = document.getElementById('coverage-heatmap-container');
             const alerts = document.getElementById('validation-alerts');
-            if (filtersRow) filtersRow.style.display = AppState.planningControlsCollapsed ? 'none' : '';
-            if (heatmap) heatmap.style.display = AppState.planningControlsCollapsed ? 'none' : '';
-            if (alerts) alerts.style.display = AppState.planningControlsCollapsed ? 'none' : '';
+            if (filtersRow) filtersRow.classList.toggle('hidden', AppState.planningControlsCollapsed);
+            if (heatmap) heatmap.classList.toggle('hidden', AppState.planningControlsCollapsed);
+            if (alerts) alerts.classList.toggle('hidden', AppState.planningControlsCollapsed);
         });
     }
 
@@ -1403,10 +1449,11 @@ function applyRoleVisibility() {
     const isRealAdmin = AppState.currentUser?.role === 'admin';
     const allowedViews = new Set(['home', 'planning', 'profile']);
 
-    // Show/hide role switcher for admin
+    // Show/hide role switcher for admin (only on localhost/dev)
     const roleSwitcher = document.getElementById('role-switcher');
     if (roleSwitcher) {
-        if (isRealAdmin) {
+        const isDevHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        if (isRealAdmin && isDevHost) {
             roleSwitcher.classList.remove('hidden');
             const select = document.getElementById('role-switch-select');
             if (select) {
@@ -1414,6 +1461,7 @@ function applyRoleVisibility() {
             }
         } else {
             roleSwitcher.classList.add('hidden');
+            AppState.simulatedRole = null; // Clear any simulated role in production
         }
     }
 
@@ -1439,20 +1487,20 @@ function applyRoleVisibility() {
     DOM.navButtons.forEach(btn => {
         const view = btn.dataset.view;
         const isAllowed = allowedViews.has(view);
-        btn.style.display = isAllowed ? '' : 'none';
+        btn.classList.toggle('hidden', !isAllowed);
     });
 
     // Show/hide admin nav group based on whether any admin buttons are visible
     const adminGroup = document.querySelector('.nav-group-admin');
     if (adminGroup) {
-        const hasVisibleBtn = Array.from(adminGroup.querySelectorAll('.nav-btn')).some(b => b.style.display !== 'none');
-        adminGroup.style.display = hasVisibleBtn ? '' : 'none';
+        const hasVisibleBtn = Array.from(adminGroup.querySelectorAll('.nav-btn')).some(b => !b.classList.contains('hidden'));
+        adminGroup.classList.toggle('hidden', !hasVisibleBtn);
     }
 
     // Show/hide settings item in user dropdown
     const dropdownSettings = document.getElementById('dropdown-settings-item');
     if (dropdownSettings) {
-        dropdownSettings.style.display = allowedViews.has('settings') ? '' : 'none';
+        dropdownSettings.classList.toggle('hidden', !allowedViews.has('settings'));
     }
 
     if (!allowedViews.has(AppState.currentView)) {
@@ -1462,13 +1510,13 @@ function applyRoleVisibility() {
     // Team filters: always visible for roles that can see the employee tab
     const employeeFilters = document.getElementById('employee-team-toggles');
     if (employeeFilters) {
-        employeeFilters.style.display = '';
+        employeeFilters.classList.remove('hidden');
     }
 
     // Hide "Medewerker toevoegen" button - new employees are created via account management
     // This button is now obsolete after the employees/users merge
     if (DOM.addEmployeeBtn) {
-        DOM.addEmployeeBtn.style.display = 'none';
+        DOM.addEmployeeBtn.classList.add('hidden');
     }
 }
 
@@ -1527,11 +1575,15 @@ function getOnboardingStatus() {
     const holidays = DataStore.settings.holidayPeriods || [];
     const rules = DataStore.settings.rules || {};
 
+    const minHours = rules.minHoursBetweenShifts ?? 11;
+    const maxDays = rules.maxConsecutiveDays ?? 6;
+
     return [
         { id: 'teams', label: 'Teams aanmaken', done: Object.keys(teams).length > 0, view: 'settings', tab: 'teams' },
         { id: 'templates', label: 'Dienst templates instellen', done: Object.keys(templates).length > 0, view: 'settings', tab: 'teams' },
         { id: 'users', label: 'Medewerkers toevoegen', done: users.filter(u => u.role === 'medewerker').length > 0, view: 'settings', tab: 'accounts' },
-        { id: 'rules', label: 'Planningsregels controleren', done: AppState.currentUser?.onboardingFlags?.planning_visited === true, view: 'settings', tab: 'planning' },
+        { id: 'rules', label: 'Planningsregels controleren', done: AppState.currentUser?.onboardingFlags?.planning_visited === true, view: 'settings', tab: 'planning',
+          hint: `Stel de minimale rustperiode tussen diensten en het maximaal aantal opeenvolgende werkdagen in. Dit beschermt het welzijn van medewerkers en voldoet aan wettelijke vereisten. Huidig: ${minHours}u rust, max ${maxDays} dagen.` },
         { id: 'holidays', label: 'Vakantieperiodes invoeren', done: holidays.length > 0, view: 'settings', tab: 'planning' },
         { id: 'schedule', label: 'Basisrooster maken', done: DataStore.shifts.length > 0, view: 'builder' },
         { id: 'email', label: 'Email notificaties configureren', done: DataStore.settings.emailNotifications?.globalEnabled === true, view: 'settings', tab: 'communicatie' }
@@ -1561,6 +1613,7 @@ function renderHomeOnboarding() {
             ${steps.map(s => `<li class="${s.done ? 'done' : ''}">
                 <span class="step-check">${s.done ? '✓' : '○'}</span>
                 <a href="#" onclick="event.preventDefault();${s.tab ? `AppState.settingsActiveTab='${s.tab}';` : ''}switchView('${s.view}');">${s.label}</a>
+                ${s.hint ? `<p class="onboarding-hint">${s.hint}</p>` : ''}
             </li>`).join('')}
         </ul>
     </div>`;
@@ -3595,7 +3648,7 @@ function openAddShiftModal() {
     DOM.shiftForm.reset();
     DOM.shiftValidationErrors.innerHTML = '';
     DOM.shiftDate.value = formatDateYYYYMMDD(new Date());
-    DOM.shiftDeleteBtn.style.display = 'none';
+    DOM.shiftDeleteBtn.classList.add('hidden');
 
     // Populate dropdown with filtered employees
     populateEmployeeDropdown();
@@ -3612,7 +3665,7 @@ function openAddShiftModal() {
     }
 
     // Show submit button, hide delete button
-    DOM.shiftSubmitBtn.style.display = 'inline-block';
+    DOM.shiftSubmitBtn.classList.remove('hidden');
     resetShiftSubmitBtn();
 
     DOM.shiftModal.classList.remove('hidden');
@@ -3624,7 +3677,7 @@ function openAddShiftForEmployee(employeeId, date) {
     DOM.shiftForm.reset();
     DOM.shiftValidationErrors.innerHTML = '';
     DOM.shiftDate.value = date;
-    DOM.shiftDeleteBtn.style.display = 'none';
+    DOM.shiftDeleteBtn.classList.add('hidden');
     populateEmployeeDropdown();
     DOM.shiftEmployee.value = employeeId;
     DOM.shiftModal.classList.remove('hidden');
@@ -3711,8 +3764,8 @@ function openShiftModal(shift, canEdit) {
     });
 
     // Show/hide action buttons
-    DOM.shiftSubmitBtn.style.display = canEdit ? 'inline-block' : 'none';
-    DOM.shiftDeleteBtn.style.display = canEdit ? 'block' : 'none';
+    DOM.shiftSubmitBtn.classList.toggle('hidden', !canEdit);
+    DOM.shiftDeleteBtn.classList.toggle('hidden', !canEdit);
     resetShiftSubmitBtn();
 
     // Add combined "Shift afstaan" button if user can request swap
@@ -3885,7 +3938,7 @@ function openSwapRequestModal(shift) {
 
     // Clear message and validation
     document.getElementById('swap-message').value = '';
-    document.getElementById('swap-validation-display').style.display = 'none';
+    document.getElementById('swap-validation-display').classList.add('hidden');
 
     // Show modal
     document.getElementById('swap-request-modal').classList.remove('hidden');
@@ -3958,7 +4011,7 @@ function handleSwapTargetShiftChange() {
     if (!shiftId) {
         swapRequestState.targetShiftId = null;
         document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer een shift</p>';
-        document.getElementById('swap-validation-display').style.display = 'none';
+        document.getElementById('swap-validation-display').classList.add('hidden');
         return;
     }
 
@@ -3992,7 +4045,7 @@ function runSwapValidation() {
     });
 
     const validationDisplay = document.getElementById('swap-validation-display');
-    validationDisplay.style.display = 'block';
+    validationDisplay.classList.remove('hidden');
     validationDisplay.className = '';
 
     if (!validation.isValid) {
@@ -4010,7 +4063,7 @@ function runSwapValidation() {
                 <strong>${IconHelper.html(ICONS.warning, 'sm')} Waarschuwingen:</strong>
                 <ul>${validation.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
             </div>
-            <p style="margin-top: 0.5rem; color: #92400e;">Je kunt dit verzoek indienen, maar een verantwoordelijke moet het goedkeuren.</p>
+            <p class="validation-hint text-warning">Je kunt dit verzoek indienen, maar een verantwoordelijke moet het goedkeuren.</p>
         `;
     } else {
         validationDisplay.classList.add('is-valid');
@@ -4122,10 +4175,10 @@ function openSwapReviewModal(swapId) {
     const messageDisplay = document.getElementById('swap-review-message');
 
     if (swapRequest.message) {
-        messageGroup.style.display = 'block';
+        messageGroup.classList.remove('hidden');
         messageDisplay.textContent = swapRequest.message;
     } else {
-        messageGroup.style.display = 'none';
+        messageGroup.classList.add('hidden');
     }
 
     // Run validation
@@ -4149,7 +4202,7 @@ function openSwapReviewModal(swapId) {
                     <strong>${IconHelper.html(ICONS.error, 'sm')} Fouten:</strong>
                     <ul>${validation.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
                 </div>
-                <p style="margin-top: 0.5rem; color: #991b1b; font-weight: 500;">
+                <p class="validation-hint text-danger fw-600">
                     Deze ruil kan niet worden goedgekeurd vanwege bovenstaande fouten.
                 </p>
             `;
@@ -4160,7 +4213,7 @@ function openSwapReviewModal(swapId) {
                     <strong>${IconHelper.html(ICONS.warning, 'sm')} Waarschuwingen:</strong>
                     <ul>${validation.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
                 </div>
-                <p style="margin-top: 0.5rem; color: #92400e;">
+                <p class="validation-hint text-warning">
                     Je kunt deze ruil goedkeuren ondanks de waarschuwingen.
                 </p>
             `;
@@ -4178,7 +4231,7 @@ function openSwapReviewModal(swapId) {
 
     // Clear response notes
     document.getElementById('swap-response-notes').value = '';
-    document.getElementById('swap-response-notes-required').style.display = 'none';
+    document.getElementById('swap-response-notes-required').classList.add('hidden');
 
     // Show modal
     document.getElementById('swap-review-modal').classList.remove('hidden');
@@ -4220,7 +4273,7 @@ async function handleSwapReject() {
 
     if (!responseNotes) {
         showToast('Voeg een reden toe bij afwijzing', 'warning');
-        document.getElementById('swap-response-notes-required').style.display = 'inline';
+        document.getElementById('swap-response-notes-required').classList.remove('hidden');
         return;
     }
 
@@ -4516,7 +4569,7 @@ function openAddActivityModal(userId, date, shiftStart, shiftEnd) {
     document.getElementById('activity-start').value = '';
     document.getElementById('activity-end').value = '';
     document.getElementById('activity-description').value = '';
-    document.getElementById('activity-delete-btn').style.display = 'none';
+    document.getElementById('activity-delete-btn').classList.add('hidden');
     document.getElementById('activity-modal').classList.remove('hidden');
     IconHelper.init(document.getElementById('activity-modal'));
 }
@@ -4539,7 +4592,7 @@ function openEditActivityModal(activityId) {
     document.getElementById('activity-start').value = activity.startTime;
     document.getElementById('activity-end').value = activity.endTime;
     document.getElementById('activity-description').value = activity.description || '';
-    document.getElementById('activity-delete-btn').style.display = '';
+    document.getElementById('activity-delete-btn').classList.remove('hidden');
     document.getElementById('activity-modal').classList.remove('hidden');
     IconHelper.init(document.getElementById('activity-modal'));
 }
@@ -5170,7 +5223,7 @@ function openAddEmployeeModal() {
     DOM.employeeModalTitle.textContent = 'Medewerker toevoegen';
     DOM.employeeForm.reset();
     DOM.employeeActive.value = 'true';
-    DOM.employeeDeleteBtn.style.display = 'none';
+    DOM.employeeDeleteBtn.classList.add('hidden');
 
     // Populate team dropdown
     const mainTeamSelect = DOM.employeeMainTeam;
@@ -5183,23 +5236,11 @@ function openAddEmployeeModal() {
         mainTeamSelect.appendChild(opt);
     }
 
-    // Extra teams checkboxes (empty for new)
-    const extraTeamsContainer = document.getElementById('employee-extra-teams-checkboxes');
-    if (extraTeamsContainer) {
-        extraTeamsContainer.innerHTML = '';
-        for (const [teamId, teamInfo] of Object.entries(teams)) {
-            const label = document.createElement('label');
-            label.className = 'checkbox-label';
-            label.innerHTML = `<input type="checkbox" name="extra_teams" value="${teamId}"> ${teamInfo.name || teamId}`;
-            extraTeamsContainer.appendChild(label);
-        }
-    }
-
     // Show profile fields and actions
     const profileFields = document.getElementById('employee-profile-fields');
-    if (profileFields) profileFields.style.display = '';
+    if (profileFields) profileFields.classList.remove('hidden');
     const modalActions = DOM.employeeModal.querySelector('.modal-actions');
-    if (modalActions) modalActions.style.display = '';
+    if (modalActions) modalActions.classList.remove('hidden');
 
     generateWeekScheduleHTML();
     resetWeekScheduleForm();
@@ -5232,27 +5273,14 @@ function openEditEmployeeModal(employeeId) {
     }
     mainTeamSelect.value = employee.mainTeam;
 
-    // Extra teams checkboxes
-    const extraTeamsContainer = document.getElementById('employee-extra-teams-checkboxes');
-    if (extraTeamsContainer) {
-        const currentExtra = employee.extraTeams || employee.extra_teams || [];
-        extraTeamsContainer.innerHTML = '';
-        for (const [teamId, teamInfo] of Object.entries(teams)) {
-            const label = document.createElement('label');
-            label.className = 'checkbox-label';
-            label.innerHTML = `<input type="checkbox" name="extra_teams" value="${teamId}" ${currentExtra.includes(teamId) ? 'checked' : ''}> ${teamInfo.name || teamId}`;
-            extraTeamsContainer.appendChild(label);
-        }
-    }
-
     // Show/hide profile fields and actions based on permissions
     const profileFields = document.getElementById('employee-profile-fields');
-    if (profileFields) profileFields.style.display = canEdit ? '' : 'none';
+    if (profileFields) profileFields.classList.toggle('hidden', !canEdit);
 
     const modalActions = DOM.employeeModal.querySelector('.modal-actions');
-    if (modalActions) modalActions.style.display = canEdit ? '' : 'none';
+    if (modalActions) modalActions.classList.toggle('hidden', !canEdit);
 
-    DOM.employeeDeleteBtn.style.display = canEdit ? '' : 'none';
+    DOM.employeeDeleteBtn.classList.toggle('hidden', !canEdit);
 
     // Show read-only schedule from active concept
     generateReadOnlyWeekScheduleHTML(employee);
@@ -5333,26 +5361,19 @@ function closeEmployeeModal() {
     DOM.employeeModal.classList.add('hidden');
     DOM.employeeForm.reset();
     AppState.editingEmployeeId = null;
-    DOM.employeeDeleteBtn.style.display = 'none';
+    DOM.employeeDeleteBtn.classList.add('hidden');
     // Restore modal-actions visibility for next open (add mode needs it)
     const modalActions = DOM.employeeModal.querySelector('.modal-actions');
-    if (modalActions) modalActions.style.display = '';
+    if (modalActions) modalActions.classList.remove('hidden');
 }
 
 async function handleEmployeeSubmit(e) {
     e.preventDefault();
 
-    // Collect extra teams from checkboxes
-    const extraTeamsChecked = [];
-    document.querySelectorAll('#employee-extra-teams-checkboxes input[name="extra_teams"]:checked').forEach(cb => {
-        if (cb.value !== DOM.employeeMainTeam.value) extraTeamsChecked.push(cb.value);
-    });
-
     const employeeData = {
         name: DOM.employeeName.value.trim(),
         email: DOM.employeeEmail.value.trim(),
         mainTeam: DOM.employeeMainTeam.value,
-        extraTeams: extraTeamsChecked,
         contractHours: parseFloat(DOM.employeeContract.value) || 0,
         active: DOM.employeeActive.value === 'true'
     };
@@ -6758,7 +6779,7 @@ function renderBuilderGrid(role, userTeam) {
 
     let employees;
     if (AppState.builderTeamFilter) {
-        employees = getEmployeesByTeam(AppState.builderTeamFilter, true);
+        employees = getEmployeesByTeam(AppState.builderTeamFilter);
     } else {
         employees = getAllEmployees(true);
     }
@@ -6872,7 +6893,7 @@ function renderBuilderGrid(role, userTeam) {
     return html;
 }
 
-// Get meetings for an employee on a specific day (only mainTeam — extraTeams zijn bijspring-teams, geen vaste vergaderingen)
+// Get meetings for an employee on a specific day
 function getEmployeeMeetings(employee, dayIndex) {
     const meetings = AppState.builderMeetings || {};
     const teams = DataStore.settings.teams || {};
@@ -7605,7 +7626,7 @@ function openBuilderShiftModal(employeeId, dayIndex) {
     </button>`;
     templatesEl.innerHTML = buttonsHtml;
 
-    customTimes.style.display = 'none';
+    customTimes.classList.add('hidden');
     startInput.value = '';
     endInput.value = '';
     validationEl.innerHTML = '';
@@ -7623,7 +7644,7 @@ function openBuilderShiftModal(employeeId, dayIndex) {
             const btn = templatesEl.querySelector(`[data-template="${matchingKey[0]}"]`);
             if (btn) btn.classList.add('active');
         } else {
-            customTimes.style.display = 'flex';
+            customTimes.classList.remove('hidden');
             const customBtn = templatesEl.querySelector('[data-template="custom"]');
             if (customBtn) customBtn.classList.add('active');
         }
@@ -7636,9 +7657,9 @@ function openBuilderShiftModal(employeeId, dayIndex) {
             btn.classList.add('active');
             const templateKey = btn.dataset.template;
             if (templateKey === 'custom') {
-                customTimes.style.display = 'flex';
+                customTimes.classList.remove('hidden');
             } else {
-                customTimes.style.display = 'none';
+                customTimes.classList.add('hidden');
                 const template = shiftTemplates[templateKey];
                 startInput.value = template.start;
                 endInput.value = template.end;
@@ -7707,7 +7728,7 @@ function loadBuilderFromBaseSchedules() {
 
     let employees;
     if (AppState.builderTeamFilter) {
-        employees = getEmployeesByTeam(AppState.builderTeamFilter, true);
+        employees = getEmployeesByTeam(AppState.builderTeamFilter);
     } else {
         employees = getAllEmployees(true);
     }
@@ -8015,7 +8036,7 @@ function showNewConceptTypeModal() {
             opt.classList.add('selected');
             opt.querySelector('input').checked = true;
             const periodSelect = overlay.querySelector('#vakantie-period-select');
-            periodSelect.style.display = opt.dataset.value === 'vakantie' ? 'block' : 'none';
+            periodSelect.classList.toggle('hidden', opt.dataset.value !== 'vakantie');
         });
     });
 
@@ -8482,7 +8503,7 @@ async function applyBuilderDraft(draftId) {
 
     // Get all affected employees (filtered by team if applicable)
     let allEmployees = draft.teamFilter
-        ? getEmployeesByTeam(draft.teamFilter, true)
+        ? getEmployeesByTeam(draft.teamFilter)
         : getAllEmployees(true);
 
     const empIdsInGrid = new Set();
@@ -9930,7 +9951,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
     const transferCheckbox = modal.querySelector('#replace-transfer-shifts');
     const dateGroup = modal.querySelector('#replace-date-group');
     transferCheckbox.addEventListener('change', () => {
-        dateGroup.style.display = transferCheckbox.checked ? '' : 'none';
+        dateGroup.classList.toggle('hidden', !transferCheckbox.checked);
         updateReplaceSummary();
     });
 
@@ -9946,7 +9967,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         const fromDate = modal.querySelector('#replace-from-date').value;
 
         if (!newUser) {
-            summaryEl.style.display = 'none';
+            summaryEl.classList.add('hidden');
             return;
         }
 
@@ -9967,7 +9988,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         summaryHtml += '</ul></div>';
 
         summaryEl.innerHTML = summaryHtml;
-        summaryEl.style.display = '';
+        summaryEl.classList.remove('hidden');
     }
 
     // Submit handler
@@ -10487,13 +10508,13 @@ function renderSettingsEmail(container) {
             DataStore.settings.emailNotifications = settings;
             msg.textContent = 'Email instellingen opgeslagen.';
             msg.className = 'form-message success';
-            msg.style.display = 'block';
+            msg.classList.remove('hidden');
             markSettingsSaved();
             showToast('Email instellingen opgeslagen', 'success');
         } catch (err) {
             msg.textContent = 'Opslaan mislukt: ' + (err.message || 'Onbekende fout');
             msg.className = 'form-message error';
-            msg.style.display = 'block';
+            msg.classList.remove('hidden');
         } finally {
             saveBtn.disabled = false;
             saveBtn.textContent = 'Opslaan';
@@ -10697,9 +10718,9 @@ function renderSettingsBeheer(container) {
                 <i data-lucide="chevron-down" class="lucide-sm collapse-indicator"></i>
             </div>
             <div class="settings-card-body">
-                <div class="info-box" style="background: rgba(239, 68, 68, 0.06); border-color: rgba(239, 68, 68, 0.2);">
+                <div class="info-box info-box-danger">
                     <p class="text-danger fw-600">Let op: deze actie kan niet ongedaan worden gemaakt!</p>
-                    <p>Alle planningsdata (diensten, afwezigheden, ruilverzoeken) wordt permanent verwijderd.</p>
+                    <p>Kies wat je wilt verwijderen: alleen data, data + accounts, of alles behalve je eigen account.</p>
                 </div>
                 <button class="btn btn-danger" onclick="resetData()">Alle data wissen</button>
             </div>
@@ -11901,13 +11922,13 @@ function openAvailabilityModal(employeeId = null, date = null) {
         if (absence && absence.type) {
             absenceTypeSelect.value = absence.type;
             reasonInput.value = absence.reason || '';
-            removeBtn.style.display = 'inline-block';
+            removeBtn.classList.remove('hidden');
             modal.dataset.editMode = 'single';
             modal.dataset.originalDate = date;
         } else {
             absenceTypeSelect.value = '';
             reasonInput.value = '';
-            removeBtn.style.display = 'none';
+            removeBtn.classList.add('hidden');
             modal.dataset.editMode = 'new';
         }
 
@@ -11926,7 +11947,7 @@ function openAvailabilityModal(employeeId = null, date = null) {
         endDateInput.value = '';
         absenceTypeSelect.value = '';
         reasonInput.value = '';
-        removeBtn.style.display = 'none';
+        removeBtn.classList.add('hidden');
         warningDiv.innerHTML = '';
         modal.dataset.editMode = 'new';
     }
@@ -12372,7 +12393,6 @@ function sanitizeImportedData(rawData) {
             const id = Number(emp?.id);
             if (!Number.isFinite(id)) return null;
             const mainTeam = settings.teams[emp?.mainTeam] ? emp.mainTeam : Object.keys(settings.teams)[0];
-            const extraTeams = Array.isArray(emp?.extraTeams) ? emp.extraTeams.filter(teamId => settings.teams[teamId]) : [];
             // Support both new weekSchedules array and old weekScheduleWeek1/2 format
             let weekScheduleWeek1, weekScheduleWeek2, weekSchedules;
             if (Array.isArray(emp?.weekSchedules) && emp.weekSchedules.length >= 2) {
@@ -12404,7 +12424,6 @@ function sanitizeImportedData(rawData) {
                 name: sanitizeString(emp?.name || 'Onbekend', 80),
                 email: sanitizeString(emp?.email || '', 120),
                 mainTeam,
-                extraTeams,
                 contractHours: Number(emp?.contractHours) || 0,
                 active: emp?.active !== false,
                 weekScheduleWeek1: weekScheduleWeek1.map(sanitizeScheduleItem).filter(Boolean),
@@ -12494,7 +12513,6 @@ async function importData(event) {
                     name: emp.name || 'Onbekend',
                     email: emp.email || null,
                     mainTeam: emp.mainTeam || null,
-                    extraTeams: Array.isArray(emp.extraTeams) ? emp.extraTeams : [],
                     contractHours: Number(emp.contractHours) || 0,
                     active: emp.active !== false,
                     weekScheduleWeek1: Array.isArray(emp.weekScheduleWeek1) ? emp.weekScheduleWeek1 : [],

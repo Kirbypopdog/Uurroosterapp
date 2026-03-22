@@ -746,7 +746,7 @@ app.get('/me', requireAuth, async (req, res) => {
 });
 
 app.put('/me', requireAuth, async (req, res) => {
-  const { name, email, password, mainTeam, extraTeams, contractHours, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
+  const { name, email, password, mainTeam, contractHours, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
   if (!name || !email) {
     return res.status(400).json({ error: 'Missing fields' });
   }
@@ -769,22 +769,21 @@ app.put('/me', requireAuth, async (req, res) => {
            email = $2,
            password_hash = COALESCE($3, password_hash),
            main_team = COALESCE($4, main_team),
-           extra_teams = COALESCE($5, extra_teams),
-           contract_hours = COALESCE($6, contract_hours),
-           week_schedule_week1 = COALESCE($7::jsonb, week_schedule_week1),
-           week_schedule_week2 = COALESCE($8::jsonb, week_schedule_week2),
-           week_schedules = COALESCE($9::jsonb, jsonb_build_array(
-             COALESCE($7::jsonb, week_schedule_week1),
-             COALESCE($8::jsonb, week_schedule_week2)
+           contract_hours = COALESCE($5, contract_hours),
+           week_schedule_week1 = COALESCE($6::jsonb, week_schedule_week1),
+           week_schedule_week2 = COALESCE($7::jsonb, week_schedule_week2),
+           week_schedules = COALESCE($8::jsonb, jsonb_build_array(
+             COALESCE($6::jsonb, week_schedule_week1),
+             COALESCE($7::jsonb, week_schedule_week2)
            ))
-       WHERE id = $10
+       WHERE id = $9
        RETURNING id, name, email, role, team_id,
                  main_team as "mainTeam", extra_teams as "extraTeams",
                  contract_hours as "contractHours", active,
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"`,
-      [name, email.toLowerCase(), passwordHash, mainTeam, extraTeams, contractHours, week1Json, week2Json, weekSchedulesJson, req.user.id]
+      [name, email.toLowerCase(), passwordHash, mainTeam, contractHours, week1Json, week2Json, weekSchedulesJson, req.user.id]
     );
     await logAudit(req, 'UPDATE', 'user', req.user.id, { action: 'self_update', name, email });
     res.json({ user: result.rows[0] });
@@ -1018,7 +1017,7 @@ app.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
 
 // Create new user (with optional schedule data)
 app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
-  const { name, email, password, role, team_id, mainTeam, extraTeams, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
+  const { name, email, password, role, team_id, mainTeam, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
   if (!name || !email || !password || !role) {
     return res.status(400).json({ error: 'Naam, email, wachtwoord en rol zijn verplicht' });
   }
@@ -1037,8 +1036,8 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
       : JSON.stringify([weekScheduleWeek1 || [], weekScheduleWeek2 || []]);
 
     const result = await pool.query(
-      `INSERT INTO users (name, email, password_hash, role, team_id, main_team, extra_teams, contract_hours, active, week_schedule_week1, week_schedule_week2, week_schedules)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb)
+      `INSERT INTO users (name, email, password_hash, role, team_id, main_team, contract_hours, active, week_schedule_week1, week_schedule_week2, week_schedules)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb)
        RETURNING id, name, email, role, team_id,
                  main_team as "mainTeam", extra_teams as "extraTeams",
                  contract_hours as "contractHours", active,
@@ -1052,7 +1051,6 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
         role,
         team_id || mainTeam || null, // team_id for role access, defaults to mainTeam
         mainTeam || null,
-        extraTeams || [],
         contractHours || 0,
         active !== false,
         week1Json,
@@ -1075,7 +1073,7 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
 // Update user (role, team, and schedule data)
 app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = Number(req.params.id);
-  const { role, team_id, name, email, mainTeam, extraTeams, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules, emailNotificationsEnabled } = req.body || {};
+  const { role, team_id, name, email, mainTeam, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules, emailNotificationsEnabled } = req.body || {};
   if (!userId || !role) {
     return res.status(400).json({ error: 'Missing fields' });
   }
@@ -1097,17 +1095,16 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
            name = COALESCE($3, name),
            email = COALESCE($4, email),
            main_team = COALESCE($5, main_team),
-           extra_teams = COALESCE($6, extra_teams),
-           contract_hours = COALESCE($7, contract_hours),
-           active = COALESCE($8, active),
-           week_schedule_week1 = COALESCE($9::jsonb, week_schedule_week1),
-           week_schedule_week2 = COALESCE($10::jsonb, week_schedule_week2),
-           week_schedules = COALESCE($11::jsonb, jsonb_build_array(
-             COALESCE($9::jsonb, week_schedule_week1),
-             COALESCE($10::jsonb, week_schedule_week2)
+           contract_hours = COALESCE($6, contract_hours),
+           active = COALESCE($7, active),
+           week_schedule_week1 = COALESCE($8::jsonb, week_schedule_week1),
+           week_schedule_week2 = COALESCE($9::jsonb, week_schedule_week2),
+           week_schedules = COALESCE($10::jsonb, jsonb_build_array(
+             COALESCE($8::jsonb, week_schedule_week1),
+             COALESCE($9::jsonb, week_schedule_week2)
            )),
-           email_notifications_enabled = COALESCE($13, email_notifications_enabled)
-       WHERE id = $12
+           email_notifications_enabled = COALESCE($12, email_notifications_enabled)
+       WHERE id = $11
        RETURNING id, name, email, role, team_id,
                  main_team as "mainTeam", extra_teams as "extraTeams",
                  contract_hours as "contractHours", active,
@@ -1121,7 +1118,6 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
         name,
         email ? email.toLowerCase() : null,
         mainTeam,
-        extraTeams,
         contractHours,
         active,
         week1Json,
@@ -1143,7 +1139,7 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
 // Update user schedule data (for non-admin users who can edit employee profiles)
 app.put('/users/:id', requireAuth, async (req, res) => {
   const userId = Number(req.params.id);
-  const { name, email, mainTeam, extraTeams, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
+  const { name, email, mainTeam, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
 
   // Permission check: admin/roosterverantwoordelijke can edit anyone,
   // medewerker can only edit themselves
@@ -1204,20 +1200,19 @@ app.put('/users/:id', requireAuth, async (req, res) => {
            email = $2,
            main_team = $3,
            team_id = $3,
-           extra_teams = $4,
-           contract_hours = $5,
-           active = $6,
-           week_schedule_week1 = $7::jsonb,
-           week_schedule_week2 = $8::jsonb,
-           week_schedules = $9::jsonb
-       WHERE id = $10
+           contract_hours = $4,
+           active = $5,
+           week_schedule_week1 = $6::jsonb,
+           week_schedule_week2 = $7::jsonb,
+           week_schedules = $8::jsonb
+       WHERE id = $9
        RETURNING id, name, email, role, team_id,
                  main_team as "mainTeam", extra_teams as "extraTeams",
                  contract_hours as "contractHours", active,
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"`,
-      [name, email || null, mainTeam || null, extraTeams || [], contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
+      [name, email || null, mainTeam || null, contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
     );
 
     if (result.rows.length === 0) {
@@ -2548,7 +2543,7 @@ app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
         const shiftTeam = shift.team;
         const teamMembers = await pool.query(
           `SELECT id, name, email, email_notifications_enabled FROM users
-           WHERE active = true AND (main_team = $1 OR $1 = ANY(extra_teams))`,
+           WHERE active = true AND main_team = $1`,
           [shiftTeam]
         );
         const requester = await pool.query(
@@ -3370,8 +3365,8 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
          FROM users WHERE active = true`;
     const employeeParams = [];
     if (draft.team_filter) {
-      employeeQuery += ` AND (main_team = $1 OR extra_teams @> $2::jsonb)`;
-      employeeParams.push(draft.team_filter, JSON.stringify([draft.team_filter]));
+      employeeQuery += ` AND main_team = $1`;
+      employeeParams.push(draft.team_filter);
     }
     const allEmployeesResult = await client.query(employeeQuery, employeeParams);
 
@@ -3739,17 +3734,15 @@ app.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke'
             UPDATE users SET
               name = $1,
               main_team = $2,
-              extra_teams = $3,
-              contract_hours = $4,
-              active = $5,
-              week_schedule_week1 = $6::jsonb,
-              week_schedule_week2 = $7::jsonb,
-              week_schedules = $8::jsonb
-            WHERE email = $9
+              contract_hours = $3,
+              active = $4,
+              week_schedule_week1 = $5::jsonb,
+              week_schedule_week2 = $6::jsonb,
+              week_schedules = $7::jsonb
+            WHERE email = $8
           `, [
             user.name,
             mainTeam,
-            user.extraTeams || [],
             user.contractHours || 0,
             user.active !== false,
             week1Json,
@@ -3768,15 +3761,14 @@ app.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke'
             : JSON.stringify([user.weekScheduleWeek1 || [], user.weekScheduleWeek2 || []]);
 
           await pool.query(`
-            INSERT INTO users (name, email, password_hash, role, team_id, main_team, extra_teams, contract_hours, active, week_schedule_week1, week_schedule_week2, week_schedules)
-            VALUES ($1, $2, $3, 'medewerker', $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb)
+            INSERT INTO users (name, email, password_hash, role, team_id, main_team, contract_hours, active, week_schedule_week1, week_schedule_week2, week_schedules)
+            VALUES ($1, $2, $3, 'medewerker', $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)
           `, [
             user.name,
             user.email.toLowerCase(),
             passwordHash,
             mainTeam,
             mainTeam,
-            user.extraTeams || [],
             user.contractHours || 0,
             user.active !== false,
             week1Json,
@@ -3835,20 +3827,52 @@ app.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke'
 
 // Reset all data (admin only)
 app.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
+  const scope = req.query.scope || 'data';
+  if (!['data', 'data_users', 'all'].includes(scope)) {
+    return res.status(400).json({ error: 'Invalid scope. Use: data, data_users, or all' });
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // Delete in correct order due to foreign keys
-    await client.query('DELETE FROM shift_swap_requests');
-    await client.query('DELETE FROM shift_blocks');
-    await client.query('DELETE FROM availability');
-    await client.query('DELETE FROM shifts');
-    await client.query('DELETE FROM settings');
-    // Note: We don't delete users as that would log everyone out
-    await client.query('COMMIT');
-    await logAudit(req, 'DELETE', 'system', '', { action: 'reset_all_data', tables: ['shift_swap_requests', 'shift_blocks', 'availability', 'shifts', 'settings'] });
+    const deletedTables = [];
 
-    res.json({ ok: true, message: 'Planning data gewist (gebruikers behouden)' });
+    // Always delete planning data (correct order for foreign keys)
+    await client.query('DELETE FROM shift_swap_requests');
+    deletedTables.push('shift_swap_requests');
+    await client.query('DELETE FROM shift_blocks');
+    deletedTables.push('shift_blocks');
+    await client.query('DELETE FROM shift_activities');
+    deletedTables.push('shift_activities');
+    await client.query('DELETE FROM availability');
+    deletedTables.push('availability');
+    await client.query('DELETE FROM shifts');
+    deletedTables.push('shifts');
+    await client.query('DELETE FROM settings');
+    deletedTables.push('settings');
+    await client.query('DELETE FROM schedule_drafts');
+    deletedTables.push('schedule_drafts');
+
+    // Delete users if requested
+    if (scope === 'data_users') {
+      // Delete non-admin users
+      await client.query('DELETE FROM users WHERE role != $1', ['admin']);
+      deletedTables.push('users (non-admin)');
+    } else if (scope === 'all') {
+      // Delete all users except the requesting admin
+      await client.query('DELETE FROM users WHERE id != $1', [req.user.id]);
+      deletedTables.push('users (all except self)');
+    }
+
+    await client.query('COMMIT');
+    await logAudit(req, 'DELETE', 'system', '', { action: 'reset_data', scope, tables: deletedTables });
+
+    const messages = {
+      data: 'Planning data gewist (gebruikers behouden)',
+      data_users: 'Planning data en medewerker-accounts gewist',
+      all: 'Alle data en accounts gewist (behalve eigen account)'
+    };
+    res.json({ ok: true, message: messages[scope] });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);

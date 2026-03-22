@@ -346,12 +346,8 @@ function getAllEmployees(activeOnly = false) {
     return employees;
 }
 
-function getEmployeesByTeam(teamId, includeExtra = true) {
-    return getAllEmployees(true).filter(e => {
-        if (e.mainTeam === teamId) return true;
-        if (includeExtra && e.extraTeams && e.extraTeams.includes(teamId)) return true;
-        return false;
-    });
+function getEmployeesByTeam(teamId) {
+    return getAllEmployees(true).filter(e => e.mainTeam === teamId);
 }
 
 // ===== DIENSTEN FUNCTIES =====
@@ -1629,17 +1625,25 @@ function loadFromStorage() {
 }
 
 async function resetData() {
-    if (!await showConfirm('Weet je zeker dat je ALLE data wilt verwijderen?\n\nDit verwijdert alle diensten en afwezigheden.\nGebruikers blijven behouden.\nDit kan niet ongedaan worden gemaakt!', 'Alle data verwijderen')) {
-        return;
-    }
+    const scope = await showSelectPrompt(
+        'Wat wil je verwijderen? Dit kan niet ongedaan worden gemaakt!',
+        'Data wissen',
+        [
+            { value: 'data', label: 'Alleen planning data (diensten, afwezigheden, instellingen)' },
+            { value: 'data_users', label: 'Planning data + medewerker-accounts' },
+            { value: 'all', label: 'Alles behalve mijn account' }
+        ]
+    );
+    if (!scope) return;
 
-    if (!await showConfirm('LAATSTE WAARSCHUWING: Alle planning data wordt permanent verwijderd. Doorgaan?', 'Laatste waarschuwing')) {
+    const labels = { data: 'planning data', data_users: 'planning data en medewerker-accounts', all: 'alle data en accounts (behalve jouw account)' };
+    if (!await showConfirm(`LAATSTE WAARSCHUWING: ${labels[scope]} wordt permanent verwijderd. Doorgaan?`, 'Laatste waarschuwing')) {
         return;
     }
 
     try {
-        await dataApiFetch('/reset-data', { method: 'DELETE' });
-        alert('Alle planning data is gewist. De pagina wordt herladen.');
+        await dataApiFetch(`/reset-data?scope=${scope}`, { method: 'DELETE' });
+        alert('Data is gewist. De pagina wordt herladen.');
         location.reload();
     } catch (error) {
         showToast('Fout bij wissen: ' + error.message, 'error');

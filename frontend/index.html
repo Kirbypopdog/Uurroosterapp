@@ -114,7 +114,7 @@
                     </div>
                     <button id="add-shift-btn" class="btn btn-primary btn-primary-lg"><i data-lucide="plus" class="lucide-sm"></i> Dienst toevoegen</button>
                 </div>
-                <button id="planning-controls-toggle" class="btn btn-sm btn-secondary" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
+                <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
             </div>
 
             <div class="planning-controls" id="planning-controls-wrapper">
@@ -130,7 +130,7 @@
                         <button class="view-toggle-btn" data-mode="day">Dag</button>
                     </div>
                 </div>
-                <div class="planning-controls-row" id="planning-filters-row">
+                <div class="planning-controls-row hidden" id="planning-filters-row">
                     <div class="team-toggles" id="team-toggles">
                         <!-- Dynamisch gevuld via renderTeamToggles() -->
                     </div>
@@ -301,7 +301,7 @@
                 <div id="shift-validation-errors" class="validation-errors"></div>
                 <div class="modal-actions modal-actions-split">
                     <div class="modal-actions-left">
-                        <button type="button" class="btn btn-danger" id="shift-delete-btn" style="display:none">Verwijderen</button>
+                        <button type="button" class="btn btn-danger hidden" id="shift-delete-btn">Verwijderen</button>
                     </div>
                     <div class="modal-actions-right">
                         <button type="button" class="btn btn-secondary" id="shift-cancel-btn">Annuleren</button>
@@ -353,7 +353,7 @@
                 </div>
                 <div class="modal-actions modal-actions-split">
                     <div class="modal-actions-left">
-                        <button type="button" class="btn btn-danger" id="activity-delete-btn" style="display:none">Verwijderen</button>
+                        <button type="button" class="btn btn-danger hidden" id="activity-delete-btn">Verwijderen</button>
                     </div>
                     <div class="modal-actions-right">
                         <button type="button" class="btn btn-secondary" id="activity-cancel-btn">Annuleren</button>
@@ -428,10 +428,6 @@
                                 <option value="false">Inactief</option>
                             </select>
                         </div>
-                        <div class="form-group" id="employee-extra-teams-group">
-                            <label>Extra teams</label>
-                            <div id="employee-extra-teams-checkboxes" class="checkbox-group"></div>
-                        </div>
                     </div>
                 </div>
 
@@ -444,7 +440,7 @@
                 </div>
 
                 <div class="modal-actions">
-                    <button type="button" class="btn btn-danger mr-auto" id="employee-delete-btn" style="display:none">Verwijderen</button>
+                    <button type="button" class="btn btn-danger mr-auto hidden" id="employee-delete-btn">Verwijderen</button>
                     <button type="button" class="btn btn-secondary" id="employee-cancel-btn">Annuleren</button>
                     <button type="submit" class="btn btn-primary">Opslaan</button>
                 </div>
@@ -499,7 +495,7 @@
                 </div>
             </div>
             <div class="modal-actions">
-                <button type="button" class="btn btn-danger mr-auto" id="remove-absence-btn" style="display:none">Verwijderen</button>
+                <button type="button" class="btn btn-danger mr-auto hidden" id="remove-absence-btn">Verwijderen</button>
                 <button type="button" class="btn btn-secondary" id="availability-cancel-btn">Annuleren</button>
                 <button type="button" class="btn btn-primary" id="availability-save-btn">Opslaan</button>
             </div>
@@ -549,7 +545,7 @@
                 </div>
 
                 <!-- Validation Display -->
-                <div id="swap-validation-display" style="display:none"></div>
+                <div id="swap-validation-display" class="hidden"></div>
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn btn-secondary" id="swap-request-cancel-btn">Annuleren</button>
@@ -586,7 +582,7 @@
                 </div>
 
                 <!-- Message from requester -->
-                <div class="form-group" id="swap-review-message-group" style="display:none">
+                <div class="form-group hidden" id="swap-review-message-group">
                     <label>Bericht van aanvrager:</label>
                     <div id="swap-review-message" class="message-display"></div>
                 </div>
@@ -596,7 +592,7 @@
 
                 <!-- Response Notes -->
                 <div class="form-group">
-                    <label for="swap-response-notes">Reactie <span id="swap-response-notes-required" class="text-danger" style="display:none">*</span></label>
+                    <label for="swap-response-notes">Reactie <span id="swap-response-notes-required" class="text-danger hidden">*</span></label>
                     <textarea id="swap-response-notes" class="form-control" rows="3" placeholder="Optionele toelichting bij goedkeuring of verplicht bij afwijzing"></textarea>
                 </div>
             </div>
@@ -714,7 +710,7 @@
                     <label>Dienst type</label>
                     <div id="builder-shift-templates" class="builder-template-buttons"></div>
                 </div>
-                <div id="builder-custom-times" class="form-row" style="display:none">
+                <div id="builder-custom-times" class="form-row hidden">
                     <div class="form-group">
                         <label for="builder-shift-start">Starttijd</label>
                         <input type="time" id="builder-shift-start" class="form-input">

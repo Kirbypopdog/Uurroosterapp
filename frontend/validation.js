@@ -130,10 +130,8 @@ function validateTeamAssignment(employeeId, teamId) {
     // Check if employee belongs to the assigned team
     if (teamId) {
         const mainTeam = employee.mainTeam || employee.main_team;
-        const extraTeams = employee.extraTeams || employee.extra_teams || [];
-        const employeeTeams = [mainTeam, ...extraTeams].filter(t => t);
 
-        if (!employeeTeams.includes(teamId)) {
+        if (mainTeam !== teamId) {
             const teamName = DataStore.settings.teams?.[teamId]?.name || teamId;
             const employeeTeamName = DataStore.settings.teams?.[mainTeam]?.name || mainTeam || 'Onbekend';
             warnings.push({
