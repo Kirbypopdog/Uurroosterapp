@@ -30,11 +30,11 @@ open ../frontend/index.html
 ### Frontend (`frontend/`)
 | Bestand | Regels | Doel |
 |---------|--------|------|
-| `app.js` | ~7000 | Hoofd UI: modals, event handlers, rendering, admin panel |
-| `data.js` | ~1300 | DataStore, API fetch wrappers, data loading |
-| `validation.js` | ~570 | Business rules: 11-uur regel, overlap, min bezetting |
-| `drag-handler.js` | ~770 | Drag & drop shifts tussen medewerkers |
-| `styles.css` | groot | Alle CSS inclusief responsive, themas |
+| `app.js` | ~12.700 | Hoofd UI: modals, event handlers, rendering, admin panel |
+| `data.js` | ~1.755 | DataStore, API fetch wrappers, data loading |
+| `validation.js` | ~593 | Business rules: 11-uur regel, overlap, min bezetting |
+| `drag-handler.js` | ~1.201 | Drag & drop shifts tussen medewerkers |
+| `styles.css` | ~10.800 | Alle CSS inclusief responsive, themas |
 | `index.html` | ~800 | HTML markup: modals, formulieren, planning grid |
 | `config/settings.js` | ~60 | API URL auto-detect, shift templates, team kleuren |
 
@@ -50,7 +50,7 @@ open ../frontend/index.html
 
 ## Database Schema
 
-**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests
+**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, schedule_drafts, shift_activities, audit_log
 
 Kernrelaties:
 - `shifts.user_id` → `users.id`
@@ -77,6 +77,9 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 5. **Permissions** checken in ZOWEL frontend ALS backend
 6. **Auto-migratie**: `ensureSchema()` in server.js draait bij elke startup - voeg nieuwe schema changes daar toe
 7. **shift_blocks**: Bij shift delete wordt block aangemaakt (voorkomt auto-regeneratie). Manual shift create verwijdert block.
+8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging (zie issue #33)
+9. **apiFetch vs dataApiFetch**: Gebruik `dataApiFetch()` uit data.js als standaard — niet beide (zie issue #26)
+10. **console.log**: Nooit toevoegen zonder debug-guard (`if (DEBUG) ...`) — productie draait op Render (zie issue #32)
 
 ## API Endpoints (belangrijk)
 
@@ -112,6 +115,60 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 ## Deploy
 
 Zie `DEPLOY.md` voor deployment instructies (Render platform).
+
+## GitHub Issues — Workflow
+
+Alle bugs, technische schuld en features worden bijgehouden via **GitHub Issues**:
+<https://github.com/Kirbypopdog/Uurroosterapp/issues>
+
+### Wanneer een issue aanmaken?
+- Je vindt een bug tijdens het werken → maak een issue aan, werk dan verder
+- Je doet een review → log elke bevinding als apart issue
+- Je maakt een plan → schrijf de stappen als issues, niet als commentaar
+- Je ziet technische schuld maar lost het nu niet op → issue aanmaken en doorgaan
+
+### Hoe?
+```bash
+# Bug gevonden tijdens werk
+gh issue create --repo Kirbypopdog/Uurroosterapp \
+  --title "[BUG] Korte beschrijving" \
+  --label "type:bug,prioriteit:hoog" \
+  --milestone "v1.1 — Stabilisatie" \
+  --body "Beschrijving + stappen + acceptatiecriteria"
+
+# Review bevinding
+gh issue create --repo Kirbypopdog/Uurroosterapp \
+  --title "[REVIEW] Bevinding" \
+  --label "type:tech-debt,prioriteit:medium" \
+  --milestone "v1.2 — Refactor" \
+  --body "..."
+```
+
+### Milestones
+| Milestone | Focus |
+|-----------|-------|
+| v1.1 — Stabilisatie | Bugs fixen, UI stabiliseren, geen nieuwe features |
+| v1.2 — Refactor | app.js opsplitsen, tech debt, email config |
+| v1.3 — Features | Overuren, seizoenen, setup wizard |
+
+### Labels
+- **prioriteit:** `prioriteit:kritiek` / `prioriteit:hoog` / `prioriteit:medium` / `prioriteit:laag`
+- **type:** `type:bug` / `type:tech-debt` / `type:feature` / `type:security` / `type:ux` / `type:performance`
+- **gebied:** `gebied:frontend` / `gebied:backend` / `gebied:database`
+
+## Actieve Bekende Problemen
+
+Controleer de open issues voor context bij het werken aan deze gebieden:
+
+| Issue | Beschrijving |
+|-------|--------------|
+| #25 | app.js splitsen — 12.700 regels, niet aanraken zonder plan |
+| #26 | Twee fetch-wrappers — gebruik dataApiFetch() |
+| #29 | Contracturen verdwenen uit UI |
+| #30 | Stale ruilverzoeken blijven staan |
+| #31 | Vergadering badges weg na refresh |
+| #34 | Shifts tijdens vakantie worden niet verwijderd |
+| #35 | shift_activities mist CASCADE DELETE |
 
 ## Agent Aanbevelingen
 
