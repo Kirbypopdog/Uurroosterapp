@@ -156,6 +156,15 @@ gh issue create --repo Kirbypopdog/Uurroosterapp \
 - **type:** `type:bug` / `type:tech-debt` / `type:feature` / `type:security` / `type:ux` / `type:performance`
 - **gebied:** `gebied:frontend` / `gebied:backend` / `gebied:database`
 
+## Prioriteitsregel
+
+> ⚠️ Als er open issues zijn met label `prioriteit:kritiek`, worden die **eerst opgelost** voor nieuwe features worden toegevoegd — tenzij Victor dit expliciet anders vraagt.
+
+Check voor je begint:
+```bash
+gh issue list --repo Kirbypopdog/Uurroosterapp --label "prioriteit:kritiek" --state open
+```
+
 ## Actieve Bekende Problemen
 
 Controleer de open issues voor context bij het werken aan deze gebieden:
