@@ -2381,7 +2381,7 @@ app.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
         const approverName = targetUser ? targetUser.name : 'Collega';
         const rShift = { date: swap.requester_date, start_time: swap.requester_start, end_time: swap.requester_end, team: swap.requester_team };
         const tShift = { date: swap.target_date, start_time: swap.target_start, end_time: swap.target_end, team: swap.target_team };
-        emailService.notifySwapApproved([requesterUser, targetUser].filter(Boolean), approverName, rShift, tShift);
+        emailService.notifySwapApproved([requesterUser, targetUser].filter(Boolean), approverName, rShift, tShift, requesterUser, targetUser);
       } catch (e) { console.error('Email notification error:', e.message); }
     })();
 
@@ -2759,7 +2759,7 @@ app.put('/swap-requests/:id/approve', requireAuth, async (req, res) => {
         const approverName = approver ? approver.name : 'Verantwoordelijke';
         const rShift = { date: swap.requester_date, start_time: null, end_time: null, team: swap.requester_team };
         const tShift = { date: swap.target_date, start_time: null, end_time: null, team: swap.target_team };
-        emailService.notifySwapApproved([requesterUser, targetUser].filter(Boolean), approverName, rShift, tShift);
+        emailService.notifySwapApproved([requesterUser, targetUser].filter(Boolean), approverName, rShift, tShift, requesterUser, targetUser);
       } catch (e) { console.error('Email notification error:', e.message); }
     })();
 

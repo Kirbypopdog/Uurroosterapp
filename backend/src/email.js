@@ -207,19 +207,31 @@ async function notifySickLeave(managers, employee, startDate, endDate, shiftCoun
 }
 
 /**
- * 4/6. Ruil goedgekeurd → betrokkenen
+ * 4/6. Ruil goedgekeurd → aanvrager + doelmedewerker (gepersonaliseerd)
  */
-async function notifySwapApproved(recipients, approverName, requesterShift, targetShift) {
+async function notifySwapApproved(recipients, approverName, requesterShift, targetShift, requesterUser, targetUser) {
   if (!await isTypeEnabled('swap_approved')) return;
-  const html = baseTemplate('Ruil goedgekeurd', `
-    <h2>Ruilverzoek goedgekeurd</h2>
-    <p>${escapeHtml(approverName)} heeft het ruilverzoek goedgekeurd. De diensten zijn gewisseld.</p>
-    ${requesterShift ? `<p class="detail-label" style="margin-top:16px">Dienst 1</p>${shiftDetailBox(requesterShift)}` : ''}
-    ${targetShift ? `<p class="detail-label">Dienst 2</p>${shiftDetailBox(targetShift)}` : ''}
-  `);
-  for (const user of recipients) {
-    if (!user.email_notifications_enabled) continue;
-    sendEmailAsync(user.email, 'Ruilverzoek goedgekeurd', html);
+
+  // Email voor de aanvrager
+  if (requesterUser?.email_notifications_enabled) {
+    const html = baseTemplate('Ruil goedgekeurd', `
+      <h2>Jouw ruilverzoek is goedgekeurd!</h2>
+      <p>De diensten zijn gewisseld.</p>
+      ${requesterShift ? `<p class="detail-label" style="margin-top:16px">Jouw nieuwe dienst</p>${shiftDetailBox(targetShift)}` : ''}
+      ${targetShift ? `<p class="detail-label">Dienst die je afstaat</p>${shiftDetailBox(requesterShift)}` : ''}
+    `);
+    sendEmailAsync(requesterUser.email, 'Jouw ruilverzoek is goedgekeurd', html);
+  }
+
+  // Email voor de doelmedewerker
+  if (targetUser?.email_notifications_enabled) {
+    const html = baseTemplate('Ruil geaccepteerd', `
+      <h2>Je hebt het ruilverzoek geaccepteerd.</h2>
+      <p>De diensten zijn gewisseld.</p>
+      ${targetShift ? `<p class="detail-label" style="margin-top:16px">Jouw nieuwe dienst</p>${shiftDetailBox(requesterShift)}` : ''}
+      ${requesterShift ? `<p class="detail-label">Dienst die je afstaat</p>${shiftDetailBox(targetShift)}` : ''}
+    `);
+    sendEmailAsync(targetUser.email, 'Je hebt het ruilverzoek geaccepteerd', html);
   }
 }
 
