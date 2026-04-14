@@ -10202,7 +10202,6 @@ function renderSettingsPlanning(container) {
                     </div>
                     <span class="form-hint">Wettelijk minimum is 11 uur</span>
                 </div>
-                <hr class="my-md">
                 <div class="form-group">
                     <label for="rule-max-consecutive">Max opeenvolgende werkdagen:</label>
                     <div class="input-with-unit">
