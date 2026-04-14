@@ -123,7 +123,9 @@ function escapeHtml(str) {
 }
 
 function formatDate(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
+  // Haal alleen YYYY-MM-DD op (voorkomt problemen met volledige ISO timestamps)
+  const datePart = String(dateStr).slice(0, 10);
+  const d = new Date(datePart + 'T00:00:00');
   return d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
