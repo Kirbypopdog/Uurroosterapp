@@ -12101,8 +12101,9 @@ async function handleAvailabilitySave() {
             checkDate.setDate(checkDate.getDate() + 1);
         }
 
-        // Warn about conflicts
-        if (conflictDates.length > 0) {
+        // Warn about conflicts — alleen voor admins/roosterverantwoordelijken
+        const effectiveRole = getEffectiveRole();
+        if (conflictDates.length > 0 && (effectiveRole === 'admin' || effectiveRole === 'roosterverantwoordelijke')) {
             const employee = getEmployee(employeeId);
             const employeeName = employee?.name || 'Deze medewerker';
             const confirmMsg = `Let op: ${employeeName} heeft nog ${conflictDates.length} dienst(en) ingepland op deze dagen!\n\nDiensten op: ${conflictDates.map(d => formatDate(d)).join(', ')}\n\nDe afwezigheid wordt geregistreerd, maar de diensten blijven staan. Vergeet niet deze diensten te verwijderen of opnieuw toe te wijzen!\n\nDoorgaan?`;
@@ -12142,7 +12143,7 @@ async function handleAvailabilitySave() {
         let msg = `${typeName} geregistreerd voor ${employeeName} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
         showToast(msg, 'success');
 
-        if (conflictDates.length > 0) {
+        if (conflictDates.length > 0 && (effectiveRole === 'admin' || effectiveRole === 'roosterverantwoordelijke')) {
             showToast(`Vergeet niet de ${conflictDates.length} conflicterende dienst(en) aan te passen in de planning!`, 'warning');
         }
 
