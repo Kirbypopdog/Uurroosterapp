@@ -11,20 +11,22 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
-const DEFAULT_RESET_PASSWORD = process.env.DEFAULT_RESET_PASSWORD || 'Welkom123!';
-
-// Validate critical env vars in production
-if (process.env.NODE_ENV === 'production') {
-  if (!process.env.JWT_SECRET) {
-    console.error('FATAL: JWT_SECRET env var is required in production');
-    process.exit(1);
-  }
-  if (!process.env.DATABASE_URL) {
-    console.error('FATAL: DATABASE_URL env var is required in production');
-    process.exit(1);
-  }
+// Validate critical env vars (all environments)
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET env var is required (stel in via .env voor lokale ontwikkeling)');
+  process.exit(1);
 }
+if (!process.env.DEFAULT_RESET_PASSWORD) {
+  console.error('FATAL: DEFAULT_RESET_PASSWORD env var is required (stel in via .env voor lokale ontwikkeling)');
+  process.exit(1);
+}
+if (!process.env.DATABASE_URL) {
+  console.error('FATAL: DATABASE_URL env var is required (stel in via .env voor lokale ontwikkeling)');
+  process.exit(1);
+}
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const DEFAULT_RESET_PASSWORD = process.env.DEFAULT_RESET_PASSWORD;
 
 // Security headers
 app.use(helmet());
@@ -1018,8 +1020,8 @@ app.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
 // Create new user (with optional schedule data)
 app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
   const { name, email, password, role, team_id, mainTeam, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
-  if (!name || !email || !password || !role) {
-    return res.status(400).json({ error: 'Naam, email, wachtwoord en rol zijn verplicht' });
+  if (!name || !email || !role) {
+    return res.status(400).json({ error: 'Naam, email en rol zijn verplicht' });
   }
   try {
     // Check if email already exists
@@ -1028,7 +1030,9 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Email bestaat al' });
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    // Gebruik opgegeven wachtwoord of val terug op DEFAULT_RESET_PASSWORD
+    const userPassword = (password && password.trim()) ? password : DEFAULT_RESET_PASSWORD;
+    const passwordHash = await bcrypt.hash(userPassword, 12);
     const week1Json = JSON.stringify(weekScheduleWeek1 || []);
     const week2Json = JSON.stringify(weekScheduleWeek2 || []);
     const weekSchedulesJson = Array.isArray(weekSchedules) && weekSchedules.length > 0
@@ -1061,7 +1065,7 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
     await logAudit(req, 'CREATE', 'user', result.rows[0].id, { user: { name, email, role, mainTeam } });
 
     // Welkomst-email (fire-and-forget)
-    emailService.notifyWelcome({ name, email: email.toLowerCase() }, password);
+    emailService.notifyWelcome({ name, email: email.toLowerCase() });
 
     res.status(201).json({ user: result.rows[0] });
   } catch (err) {
@@ -1273,7 +1277,7 @@ app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (re
     // Send password reset email (fire-and-forget)
     const userResult = await pool.query('SELECT name, email FROM users WHERE id = $1', [userId]);
     if (userResult.rows[0]) {
-      emailService.notifyPasswordReset(userResult.rows[0], DEFAULT_RESET_PASSWORD);
+      emailService.notifyPasswordReset(userResult.rows[0]);
     }
     res.json({ ok: true, newPassword: DEFAULT_RESET_PASSWORD });
   } catch (err) {
@@ -2932,7 +2936,7 @@ app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
 
 // ===== SETTINGS API =====
 
-app.get('/settings', requireAuth, async (req, res) => {
+app.get('/settings', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const result = await pool.query('SELECT key, value FROM settings');
     const settings = {};
@@ -4097,55 +4101,6 @@ app.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// Debug endpoint to check database state
-app.get('/admin/debug', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const teams = await pool.query('SELECT * FROM teams ORDER BY id');
-    const users = await pool.query(`
-      SELECT id, name, email, role, main_team, team_id,
-             week_schedule_week1, week_schedule_week2,
-             pg_typeof(week_schedule_week1) as type_week1,
-             pg_typeof(week_schedule_week2) as type_week2
-      FROM users
-      ORDER BY name
-    `);
-
-    const tableCheck = await pool.query(`
-      SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'employees') as employees_exists
-    `);
-
-    const userDebug = users.rows.map(u => ({
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      role: u.role,
-      mainTeam: u.main_team,
-      teamId: u.team_id,
-      weekScheduleWeek1: {
-        type: u.type_week1,
-        value: u.week_schedule_week1,
-        isArray: Array.isArray(u.week_schedule_week1),
-        length: Array.isArray(u.week_schedule_week1) ? u.week_schedule_week1.length : 'N/A'
-      },
-      weekScheduleWeek2: {
-        type: u.type_week2,
-        value: u.week_schedule_week2,
-        isArray: Array.isArray(u.week_schedule_week2),
-        length: Array.isArray(u.week_schedule_week2) ? u.week_schedule_week2.length : 'N/A'
-      }
-    }));
-
-    res.json({
-      teams: teams.rows,
-      userCount: users.rows.length,
-      users: userDebug,
-      employeesTableExists: tableCheck.rows[0].employees_exists
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 app.listen(PORT, () => {
   console.log(`API running on :${PORT}`);

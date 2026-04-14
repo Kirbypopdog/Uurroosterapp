@@ -284,15 +284,15 @@ async function notifyRequestCancelled(recipients, cancellerName, shift) {
 /**
  * 10. Welkomst-email bij account aanmaken
  */
-async function notifyWelcome(newUser, password) {
+async function notifyWelcome(newUser) {
   if (!await isTypeEnabled('welcome')) return;
   const html = baseTemplate('Welkom bij Het Vlot', `
     <h2>Welkom, ${escapeHtml(newUser.name)}!</h2>
     <p>Er is een account voor je aangemaakt bij Het Vlot Roosterplanning.</p>
     <div class="detail-box">
       <p class="detail-label">Inloggegevens</p>
-      <p><strong>Email:</strong> ${newUser.email}</p>
-      <p><strong>Wachtwoord:</strong> ${password}</p>
+      <p><strong>Email:</strong> ${escapeHtml(newUser.email)}</p>
+      <p>Je ontvangt je tijdelijk wachtwoord apart van de administrator.</p>
     </div>
     <p>Wijzig je wachtwoord na je eerste login via je profiel.</p>
   `);
@@ -302,17 +302,13 @@ async function notifyWelcome(newUser, password) {
 /**
  * 11. Wachtwoord reset email
  */
-async function notifyPasswordReset(user, newPassword) {
+async function notifyPasswordReset(user) {
   if (!await isTypeEnabled('welcome')) return;
   const html = baseTemplate('Wachtwoord gereset', `
     <h2>Wachtwoord gereset</h2>
     <p>Hallo ${escapeHtml(user.name)},</p>
     <p>Je wachtwoord is gereset door een administrator.</p>
-    <div class="detail-box">
-      <p class="detail-label">Nieuw wachtwoord</p>
-      <p><strong>${newPassword}</strong></p>
-    </div>
-    <p>Wijzig je wachtwoord na je eerste login via je profiel.</p>
+    <p>De administrator deelt je tijdelijk wachtwoord mee. Wijzig het daarna via je profiel.</p>
   `);
   sendEmailAsync(user.email, 'Wachtwoord gereset — Het Vlot Rooster', html);
 }

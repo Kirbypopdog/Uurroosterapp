@@ -12591,7 +12591,7 @@ async function importData(event) {
                 return;
             }
 
-            if (!await showConfirm(`${usersToImport.length} medewerkers gevonden. Importeren naar de database?\n\nNieuwe medewerkers krijgen het standaard wachtwoord: Welkom123!`, 'Backup importeren')) {
+            if (!await showConfirm(`${usersToImport.length} medewerkers gevonden. Importeren naar de database?\n\nNieuwe medewerkers krijgen het standaard wachtwoord (DEFAULT_RESET_PASSWORD — stel in via Render).`, 'Backup importeren')) {
                 return;
             }
 

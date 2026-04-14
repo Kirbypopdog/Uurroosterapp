@@ -15,7 +15,7 @@ npm run dev                   # Backend op :3001
 
 # 3. Frontend openen in browser:
 open ../frontend/index.html
-# Login: admin@hetvlot.be / VlotAdmin2025!
+# Login: admin@hetvlot.be / <zie Render dashboard of .env>
 ```
 
 ## Architectuur
@@ -216,5 +216,5 @@ DATABASE_URL=postgresql://...     # PostgreSQL connection string
 JWT_SECRET=...                    # JWT signing secret
 ADMIN_EMAIL=admin@hetvlot.be     # Initieel admin account
 ADMIN_PASSWORD=...                # Admin wachtwoord
-DEFAULT_RESET_PASSWORD=Welkom123! # Reset wachtwoord voor nieuwe users
+DEFAULT_RESET_PASSWORD=...                # Reset wachtwoord voor nieuwe users (zie Render dashboard)
 ```
