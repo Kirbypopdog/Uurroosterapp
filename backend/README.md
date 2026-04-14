@@ -101,6 +101,40 @@ npm run dev         # Start met file watching op :3001
 | POST | `/admin/seed-teams` | Ja | Teams opnieuw seeden |
 | GET | `/admin/debug` | Ja | Debug info ophalen |
 
+### Shift Activities
+| Method | Endpoint | Auth | Beschrijving |
+|--------|----------|------|-------------|
+| GET | `/shift-activities?start=&end=` | Ja | Activiteiten in datumbereik |
+| POST | `/shift-activities` | Ja | Activiteit aanmaken |
+| PUT | `/shift-activities/:id` | Ja | Activiteit bijwerken |
+| DELETE | `/shift-activities/:id` | Ja | Activiteit verwijderen |
+
+### Schedule Drafts
+| Method | Endpoint | Auth | Beschrijving |
+|--------|----------|------|-------------|
+| GET | `/schedule-drafts` | Ja | Alle concepten ophalen |
+| POST | `/schedule-drafts` | Ja | Concept aanmaken |
+| PUT | `/schedule-drafts/:id` | Ja | Concept bijwerken |
+| DELETE | `/schedule-drafts/:id` | Ja | Concept verwijderen |
+| POST | `/schedule-drafts/:id/apply` | Ja | Concept toepassen op datumbereik |
+
+### Planning
+| Method | Endpoint | Auth | Beschrijving |
+|--------|----------|------|-------------|
+| POST | `/users/:id/apply-schedule` | Ja | Basisrooster toepassen (atomisch) |
+| POST | `/availability/sick-with-takeover` | Ja | Bulk ziekmelding + auto-takeover |
+| POST | `/admin/users/:id/replace` | Ja | Medewerker vervangen |
+
+### Audit Log
+| Method | Endpoint | Auth | Beschrijving |
+|--------|----------|------|-------------|
+| GET | `/audit-log` | Ja | Audit log met filters en paginatie |
+
+### Email Preferences
+| Method | Endpoint | Auth | Beschrijving |
+|--------|----------|------|-------------|
+| PUT | `/me/email-preferences` | Ja | Email notificatie voorkeur |
+
 ### Health
 | Method | Endpoint | Auth | Beschrijving |
 |--------|----------|------|-------------|
@@ -110,6 +144,6 @@ npm run dev         # Start met file watching op :3001
 
 Schema: `sql/schema.sql`
 
-Tabellen: `teams`, `users`, `shifts`, `availability`, `settings`, `shift_blocks`, `shift_swap_requests`
+Tabellen: `teams`, `users`, `shifts`, `availability`, `settings`, `shift_blocks`, `shift_swap_requests`, `audit_log`, `schedule_drafts`, `shift_activities`
 
 Auto-migratie draait bij elke server start via `ensureSchema()`.

@@ -43,6 +43,7 @@ open ../frontend/index.html
 |---------|------|
 | `src/server.js` | Alle API endpoints + auto-migratie bij startup |
 | `src/db.js` | PostgreSQL connection pool |
+| `src/email.js` | Resend email service (9 notificatie types) |
 | `sql/schema.sql` | Database schema (bron van waarheid) |
 | `scripts/seed.js` | Seed teams + admin account |
 | `scripts/setup-db.js` | Voert schema.sql uit |
@@ -50,7 +51,7 @@ open ../frontend/index.html
 
 ## Database Schema
 
-**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, schedule_drafts, shift_activities, audit_log
+**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities
 
 Kernrelaties:
 - `shifts.user_id` → `users.id`
@@ -98,11 +99,23 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 - `GET /settings` - App instellingen
 - `PUT /settings/:key` - Setting opslaan (admin/hoofd)
 
+### Planning
+- `CRUD /shift-activities` - Activiteiten binnen shifts
+- `CRUD /schedule-drafts` - Roosterconcepten
+- `POST /schedule-drafts/:id/apply` - Concept toepassen op datumbereik
+- `POST /users/:id/apply-schedule` - Basisrooster toepassen (atomisch)
+- `POST /availability/sick-with-takeover` - Bulk ziekmelding + auto-takeover
+
 ### Swap/Takeover
 - `POST /swap-requests` - Ruilverzoek aanmaken
 - `POST /shift-requests/takeover` - Overnameverzoek aanmaken
 - `PUT /swap-requests/:id/approve` - Lead keurt goed
 - `PUT /swap-requests/:id/reject` - Lead wijst af
+
+### Admin
+- `GET /audit-log` - Audit log met filters en paginatie
+- `POST /admin/users/:id/replace` - Medewerker vervangen
+- `PUT /me/email-preferences` - Email notificatie voorkeur
 
 ## Frontend Patronen
 
