@@ -1526,6 +1526,18 @@ function showApp() {
     if (savedView && ['home', 'planning', 'employees', 'profile', 'availability', 'builder', 'swaps', 'settings'].includes(savedView)) {
         AppState.currentView = savedView;
     }
+    // If builder was active with a loaded draft, restore it (incl. meeting badges)
+    if (AppState.currentView === 'builder') {
+        const savedDraftId = localStorage.getItem('hetvlot_activeDraftId');
+        if (savedDraftId) {
+            const drafts = DataStore.settings.schedule_drafts || [];
+            const draft = drafts.find(d => String(d.id) === savedDraftId);
+            if (draft) {
+                doLoadDraft(draft); // restores AppState incl. meetings, calls renderBuilder()
+                return;
+            }
+        }
+    }
     switchView(AppState.currentView);
 }
 
@@ -2079,6 +2091,7 @@ async function switchView(viewName) {
         AppState.builderShowStaffingEditor = false;
         AppState.builderShowMeetingsEditor = false;
         AppState.builderMeetings = {};
+        localStorage.removeItem('hetvlot_activeDraftId');
     }
     // Clear undo history when switching views
     UndoManager.clear();
@@ -8368,6 +8381,7 @@ function doLoadDraft(draft) {
 
     AppState.builderLoadedDraftId = draft.id;
     AppState.builderLoadedDraftName = draft.name;
+    localStorage.setItem('hetvlot_activeDraftId', String(draft.id));
     AppState.builderConceptType = draft.type || 'basis';
     AppState.builderHolidayPeriodId = draft.holidayPeriodId || null;
     AppState.builderIsDirty = false;
