@@ -4144,8 +4144,10 @@ app.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
 });
 
 
-app.listen(PORT, () => {
-  console.log(`API running on :${PORT}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`API running on :${PORT}`);
+  });
+}
 
 module.exports = app;

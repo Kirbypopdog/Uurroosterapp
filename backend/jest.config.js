@@ -4,8 +4,9 @@ module.exports = {
   testMatch: ['**/tests/**/*.test.js'],
   // Increase timeout for async tests
   testTimeout: 10000,
-  // Force jest to exit after all tests complete (avoids hanging due to open server handles)
-  forceExit: true,
+  // Set NODE_ENV=test so server.js skips app.listen() (avoids open handles)
+  testEnvironmentOptions: {},
+  globals: {},
   // Show coverage by default when running `npm test`
   collectCoverageFrom: [
     'src/**/*.js',

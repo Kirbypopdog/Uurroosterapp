@@ -8,7 +8,7 @@
     "dev": "node --watch src/server.js",
     "seed": "node scripts/seed.js",
     "db:setup": "node scripts/setup-db.js && npm run seed",
-    "test": "jest --runInBand"
+    "test": "NODE_ENV=test jest --runInBand"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
