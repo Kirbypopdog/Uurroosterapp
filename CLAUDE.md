@@ -78,9 +78,10 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 5. **Permissions** checken in ZOWEL frontend ALS backend
 6. **Auto-migratie**: `ensureSchema()` in server.js draait bij elke startup - voeg nieuwe schema changes daar toe
 7. **shift_blocks**: Bij shift delete wordt block aangemaakt (voorkomt auto-regeneratie). Manual shift create verwijdert block.
-8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging (zie issue #33)
+8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging
 9. **apiFetch vs dataApiFetch**: Gebruik `dataApiFetch()` uit data.js als standaard — niet beide (zie issue #26)
-10. **console.log**: Nooit toevoegen zonder debug-guard (`if (DEBUG) ...`) — productie draait op Render (zie issue #32)
+10. **console.log**: Nooit toevoegen zonder debug-guard — `DEBUG` variabele staat bovenaan app.js en onderdrukt logs in productie automatisch
+11. **Email optioneel**: Accounts kunnen zonder e-mail worden aangemaakt. Welkomstmail wordt automatisch verstuurd zodra een e-mail voor het eerst wordt ingesteld via PATCH /admin/users of PUT /users/:id
 
 ## API Endpoints (belangrijk)
 
@@ -186,11 +187,7 @@ Controleer de open issues voor context bij het werken aan deze gebieden:
 |-------|--------------|
 | #25 | app.js splitsen — 12.700 regels, niet aanraken zonder plan |
 | #26 | Twee fetch-wrappers — gebruik dataApiFetch() |
-| #29 | Contracturen verdwenen uit UI |
-| #30 | Stale ruilverzoeken blijven staan |
 | #31 | Vergadering badges weg na refresh |
-| #34 | Shifts tijdens vakantie worden niet verwijderd |
-| #35 | shift_activities mist CASCADE DELETE |
 
 ## Agent Aanbevelingen
 

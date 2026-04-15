@@ -11,10 +11,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 - Modal focus trap (FocusTrap utility via MutationObserver)
 - Swap modal: pre-check of collega's ruilbare shifts hebben
 - Login pagina: "Wachtwoord vergeten?"-melding
+- Accounts aanmaken zonder e-mailadres (e-mail optioneel)
+- Welkomstmail wordt automatisch gestuurd zodra een e-mail voor het eerst wordt ingesteld
+- "Geen email" badge op medewerkerkaarten voor accounts zonder e-mailadres
+- Contracturen zichtbaar en bewerkbaar op de profiel-pagina (admin/roosterverantwoordelijke)
 
 ### Gefixt
 - Mobiel menu z-index (dropdown viel achter planning content)
 - Role-switcher verborgen in productie (alleen localhost)
+- Stale ruilverzoeken blijven open staan na verlopen shiftdatum (#30)
+- Shifts tijdens vakantie worden niet verwijderd bij toepassen vakantie-concept (#34)
+- shift_activities worden nu mee verwijderd bij shift delete (#35)
+- Contracturen niet meer instelbaar in UI (#29)
+- FK constraints hersteld: shift_blocks.created_by en swap_requests.responded_by ON DELETE SET NULL
+- Hardcoded credentials verwijderd uit alle bronbestanden (CONTRIBUTING.md, CLAUDE.md, DEPLOY.md)
+- Plaintext wachtwoorden verwijderd uit welkomst- en reset-emails
+- /admin/debug endpoint verwijderd (exposeerde systeeminformatie)
+- GET /settings beveiligd met role-check
 
 ### Verbeterd
 - 40+ inline `style.display` toggles → `classList.hidden`
@@ -22,6 +35,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 - Reset data: dropdown keuze (data / data+accounts / alles behalve eigen account)
 - Extra teams verwijderd uit UI (DB kolom behouden)
 - Planning filters standaard ingeklapt
+- console.log/debug onderdrukt in productie via DEBUG guard (#32)
+- 5 ontbrekende database indexes toegevoegd voor query performance
 
 ---
 

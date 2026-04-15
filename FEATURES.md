@@ -59,11 +59,13 @@
 - Gesloten dagen per week instelbaar
 
 ### Medewerkers
-- Profiel met naam, email, rol, team, contracturen
+- Profiel met naam, e-mail (optioneel), rol, team, contracturen
 - Hoofd-team + extra teams
 - Vast werkrooster (basisrooster) per week
 - Actief/inactief status
 - Medewerker vervangen: kopieer basisrooster + optioneel shifts/blocks/activities
+- Accounts aanmaken zonder e-mail: rooster bouwen, e-mail later toevoegen
+- "Geen email" badge op medewerkerkaart als herinnering
 
 ### Rollen & Permissies
 | Rol | Planning | Medewerkers | Settings | Accounts |
@@ -160,6 +162,7 @@
 
 ### Email Notificaties (Resend)
 - 9 trigger points: swap aangemaakt, takeover beschikbaar, ziekmelding, goedgekeurd, afgewezen, overname geaccepteerd, geannuleerd, welkom, wachtwoord reset
+- Welkomstmail automatisch verstuurd zodra e-mail voor het eerst aan een account wordt toegevoegd
 - Fire-and-forget (niet-blokkerend)
 - Opt-out per gebruiker
 - Graceful degradatie zonder API key
