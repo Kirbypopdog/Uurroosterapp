@@ -120,6 +120,8 @@ open frontend/index.html
 │   ├── src/server.js           # Alle endpoints + auto-migratie (ensureSchema)
 │   ├── src/db.js               # PostgreSQL connection pool
 │   ├── src/email.js            # Resend email service (9 notificatie types)
+│   ├── src/utils.js            # Pure datumhulpfuncties
+│   ├── tests/                  # Jest test suite (117 tests)
 │   ├── sql/schema.sql          # Database schema (bron van waarheid)
 │   ├── scripts/                # Setup & seed scripts
 │   └── import-backup.js        # CLI backup import tool
@@ -197,6 +199,19 @@ Zie [DEPLOY.md](DEPLOY.md) voor volledige instructies. Korte samenvatting:
 ## Ontwikkeling
 
 Dit project is volledig ontwikkeld met AI-assistentie via [Claude Code](https://claude.ai). Zie [CLAUDE.md](CLAUDE.md) voor architectuurregels en coderingsinstructies.
+
+### Tests
+
+```bash
+cd backend && npm test   # 117 tests, geen DB vereist
+```
+
+| Testbestand | Beschrijving |
+|-------------|--------------|
+| `tests/utils.test.js` | Pure datumhulpfuncties |
+| `tests/email.test.js` | Email helpers (XSS-preventie, templates) |
+| `tests/api.test.js` | API-endpoints via supertest (auth, shifts, teams, …) |
+| `tests/validation.test.js` | Frontend tijdberekeningsfuncties |
 
 ### Belangrijke regels
 - **Geen frameworks** — vanilla JS, geen React/Vue/build tools

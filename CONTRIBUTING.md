@@ -80,6 +80,24 @@ Zie `CLAUDE.md` voor het volledige overzicht. Kritieke regels:
 
 ---
 
+## Tests uitvoeren
+
+```bash
+cd backend
+npm test        # Alle 117 tests (jest + supertest, geen DB vereist)
+```
+
+Voeg tests toe bij elke nieuwe pure functie of backend endpoint. Testbestanden staan in `backend/tests/`:
+
+| Bestand | Wat |
+|---------|-----|
+| `utils.test.js` | Datumhulpfuncties in `src/utils.js` |
+| `email.test.js` | Email helpers (escapeHtml, templates) |
+| `api.test.js` | API-endpoints — gebruik `jest.mock('../src/db')` voor de database |
+| `validation.test.js` | Frontend pure tijdfuncties |
+
+---
+
 ## Reviews
 
 Gebruik `REVIEW.md` als checklist bij elke code review.

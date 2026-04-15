@@ -24,6 +24,7 @@ npm run dev         # Start met file watching op :3001
 |--------|----------|------|
 | Start | `npm start` | Productie server |
 | Dev | `npm run dev` | Dev server met auto-reload |
+| Test | `npm test` | Alle tests uitvoeren (jest + supertest) |
 | DB Setup | `npm run db:setup` | Schema + seed uitvoeren |
 | Seed | `npm run seed` | Alleen seed (teams + admin) |
 | Import | `node import-backup.js <bestand>` | JSON backup importeren |
@@ -147,3 +148,20 @@ Schema: `sql/schema.sql`
 Tabellen: `teams`, `users`, `shifts`, `availability`, `settings`, `shift_blocks`, `shift_swap_requests`, `audit_log`, `schedule_drafts`, `shift_activities`
 
 Auto-migratie draait bij elke server start via `ensureSchema()`.
+
+## Tests
+
+```bash
+npm test   # 117 tests, geen echte database vereist
+```
+
+Testbestanden in `tests/`:
+
+| Bestand | Tests | Beschrijving |
+|---------|-------|--------------|
+| `utils.test.js` | 25 | Pure datumhulpfuncties in `src/utils.js` |
+| `email.test.js` | 31 | Email helpers: escapeHtml, formatDate, formatTime, templates |
+| `api.test.js` | 46 | Integratietests voor auth, shifts, teams, settings, swap-requests |
+| `validation.test.js` | 15 | Frontend pure tijdfuncties (parseDateTime, shiftsOverlap, …) |
+
+De database (`pool`) wordt volledig gemockt via `jest.mock('../src/db')`. Je hoeft geen echte PostgreSQL-verbinding te hebben om de tests te draaien.
