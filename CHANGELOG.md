@@ -7,6 +7,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 
 ## [Unreleased — v1.1]
 
+---
+
+## [1.0.1] — 2026-04-15
+
 ### Toegevoegd
 - Modal focus trap (FocusTrap utility via MutationObserver)
 - Swap modal: pre-check of collega's ruilbare shifts hebben

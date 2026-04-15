@@ -1,4 +1,4 @@
-# Het Vlot Roosterplanning v1.0
+# Het Vlot Roosterplanning v1.0.1
 
 Webapplicatie voor shiftplanning bij Het Vlot. Medewerkers bekijken hun rooster, ruilen shifts en melden afwezigheid. Admins en roosterverantwoordelijken beheren het volledige rooster via een visuele builder.
 

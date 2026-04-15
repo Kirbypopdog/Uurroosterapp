@@ -1,4 +1,4 @@
-# Het Vlot Roosterplanning — Features v1.0
+# Het Vlot Roosterplanning — Features v1.0.1
 
 ## Rooster & Planning
 
@@ -207,7 +207,11 @@
 
 ## Versie Historie
 
-### v1.0 — 2026-03-21 (huidige release)
+### v1.0.1 — 2026-04-15 (huidige release)
+- Stabilisatie-patch: bugfixes, security hardening, email optioneel
+- Zie CHANGELOG.md voor volledig overzicht
+
+### v1.0 — 2026-03-21
 - Volledige roosterplanning applicatie
 - 208 commits, 10 database tabellen
 - Deep-dive security audit: 25 fixes doorgevoerd
