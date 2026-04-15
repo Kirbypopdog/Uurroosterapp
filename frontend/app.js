@@ -9768,15 +9768,15 @@ function showAddUserModal(teams) {
                     </div>
                     <div class="form-group">
                         <label for="new-user-email">Email</label>
-                        <input type="email" id="new-user-email" class="form-input" required />
+                        <input type="email" id="new-user-email" class="form-input" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen" />
                     </div>
                     <div class="form-group">
                         <label for="new-user-password">Wachtwoord</label>
-                        <input type="password" id="new-user-password" class="form-input" required minlength="6" />
+                        <input type="password" id="new-user-password" class="form-input" placeholder="Laat leeg voor standaard wachtwoord" minlength="6" />
                     </div>
                     <div class="form-group">
                         <label for="new-user-password-confirm">Bevestig wachtwoord</label>
-                        <input type="password" id="new-user-password-confirm" class="form-input" required minlength="6" />
+                        <input type="password" id="new-user-password-confirm" class="form-input" minlength="6" />
                     </div>
                     <div class="form-group">
                         <label for="new-user-role">Rol</label>
@@ -9817,14 +9817,14 @@ function showAddUserModal(teams) {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const name = form.querySelector('#new-user-name').value.trim();
-        const email = form.querySelector('#new-user-email').value.trim();
+        const email = form.querySelector('#new-user-email').value.trim() || null;
         const password = form.querySelector('#new-user-password').value;
         const passwordConfirm = form.querySelector('#new-user-password-confirm').value;
         const role = form.querySelector('#new-user-role').value;
         const team_id = form.querySelector('#new-user-team').value || null;
 
-        // Validate passwords match
-        if (password !== passwordConfirm) {
+        // Validate passwords match (alleen als er een wachtwoord ingevuld is)
+        if (password && password !== passwordConfirm) {
             showToast('Wachtwoorden komen niet overeen. Probeer opnieuw.', 'warning');
             return;
         }
@@ -9835,10 +9835,10 @@ function showAddUserModal(teams) {
                 body: JSON.stringify({
                     name,
                     email,
-                    password,
+                    password: password || undefined,
                     role,
                     team_id,
-                    mainTeam: team_id, // Also set mainTeam for schedule/employee grouping
+                    mainTeam: team_id,
                     employee_id: null
                 })
             });
