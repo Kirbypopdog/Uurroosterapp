@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   -- Account fields
   name TEXT NOT NULL,
-  email TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin', 'roosterverantwoordelijke', 'medewerker')),
   team_id TEXT REFERENCES teams(id),

@@ -560,6 +560,13 @@ async function ensureSchema() {
       console.log(`  schedule_drafts vakantie columns: ${e.message}`);
     }
 
+    // Make users.email nullable (allow accounts without email address)
+    try {
+      await client.query(`ALTER TABLE users ALTER COLUMN email DROP NOT NULL`);
+    } catch (e) {
+      // Already nullable or constraint doesn't exist
+    }
+
     // Phase 4: school_year_start setting (default: 1 sept current school year)
     try {
       const syResult = await client.query(`SELECT 1 FROM settings WHERE key = 'school_year_start'`);
@@ -1048,14 +1055,17 @@ app.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
 // Create new user (with optional schedule data)
 app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
   const { name, email, password, role, team_id, mainTeam, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
-  if (!name || !email || !role) {
-    return res.status(400).json({ error: 'Naam, email en rol zijn verplicht' });
+  if (!name || !role) {
+    return res.status(400).json({ error: 'Naam en rol zijn verplicht' });
   }
   try {
-    // Check if email already exists
-    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
-    if (existing.rows.length > 0) {
-      return res.status(400).json({ error: 'Email bestaat al' });
+    // Check if email already exists (only when email is provided)
+    const normalizedEmail = email ? email.trim().toLowerCase() : null;
+    if (normalizedEmail) {
+      const existing = await pool.query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+      if (existing.rows.length > 0) {
+        return res.status(400).json({ error: 'Email bestaat al' });
+      }
     }
 
     // Gebruik opgegeven wachtwoord of val terug op DEFAULT_RESET_PASSWORD
@@ -1078,10 +1088,10 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
                 week_schedules as "weekSchedules"`,
       [
         name,
-        email.toLowerCase(),
+        normalizedEmail,
         passwordHash,
         role,
-        team_id || mainTeam || null, // team_id for role access, defaults to mainTeam
+        team_id || mainTeam || null,
         mainTeam || null,
         contractHours || 0,
         active !== false,
@@ -1090,10 +1100,12 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
         weekSchedulesJson
       ]
     );
-    await logAudit(req, 'CREATE', 'user', result.rows[0].id, { user: { name, email, role, mainTeam } });
+    await logAudit(req, 'CREATE', 'user', result.rows[0].id, { user: { name, email: normalizedEmail, role, mainTeam } });
 
-    // Welkomst-email (fire-and-forget)
-    emailService.notifyWelcome({ name, email: email.toLowerCase() });
+    // Welkomst-email alleen als er een email is (fire-and-forget)
+    if (normalizedEmail) {
+      emailService.notifyWelcome({ name, email: normalizedEmail });
+    }
 
     res.status(201).json({ user: result.rows[0] });
   } catch (err) {
@@ -1161,6 +1173,13 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
     );
 
     await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
+
+    // Welkomst-email als email voor het eerst wordt ingesteld (fire-and-forget)
+    const newEmail = email ? email.toLowerCase() : null;
+    if (!oldEmail && newEmail) {
+      emailService.notifyWelcome({ name: result.rows[0].name, email: newEmail });
+    }
+
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -1193,6 +1212,8 @@ app.put('/users/:id', requireAuth, async (req, res) => {
   // Medewerker can only update name and email
   if (role === 'medewerker') {
     try {
+      const oldMedResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+      const oldMedEmail = oldMedResult.rows.length > 0 ? oldMedResult.rows[0].email : null;
       const result = await pool.query(
         `UPDATE users SET name = $1, email = $2 WHERE id = $3
          RETURNING id, name, email, role, team_id,
@@ -1207,6 +1228,10 @@ app.put('/users/:id', requireAuth, async (req, res) => {
         return res.status(404).json({ error: 'Gebruiker niet gevonden' });
       }
       await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
+      const newMedEmail = email ? email.trim().toLowerCase() : null;
+      if (!oldMedEmail && newMedEmail) {
+        emailService.notifyWelcome({ name: result.rows[0].name, email: newMedEmail });
+      }
       return res.json({ user: result.rows[0] });
     } catch (err) {
       console.error(err);
@@ -1252,6 +1277,13 @@ app.put('/users/:id', requireAuth, async (req, res) => {
     }
 
     await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
+
+    // Welkomst-email als email voor het eerst wordt ingesteld (fire-and-forget)
+    const newEmail = email ? email.trim().toLowerCase() : null;
+    if (!oldEmail && newEmail) {
+      emailService.notifyWelcome({ name: result.rows[0].name, email: newEmail });
+    }
+
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);

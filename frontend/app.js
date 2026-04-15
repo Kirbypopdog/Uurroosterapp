@@ -5347,11 +5347,14 @@ function renderEmployeeCard(emp) {
     const teamName = (DataStore.settings.teams || {})[emp.mainTeam]?.name || emp.mainTeam || '';
     const teamColor = (DataStore.settings.teams || {})[emp.mainTeam]?.color || '#94a3b8';
 
+    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" title="Geen e-mail — voeg toe om welkomstmail te sturen">Geen email</span>` : '';
+
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
             <div class="employee-header">
                 <span class="team-color-dot" style="background: ${teamColor}" title="${escapeHtml(teamName)}"></span>
                 <div class="employee-name">${employeeName}</div>
+                ${noEmailBadge}
                 <span class="employee-status ${statusClass}">${statusText}</span>
             </div>
         </div>
@@ -5512,7 +5515,7 @@ async function handleEmployeeSubmit(e) {
 
     const employeeData = {
         name: DOM.employeeName.value.trim(),
-        email: DOM.employeeEmail.value.trim(),
+        email: DOM.employeeEmail.value.trim() || null,
         mainTeam: DOM.employeeMainTeam.value,
         contractHours: parseFloat(DOM.employeeContract.value) || 0,
         active: DOM.employeeActive.value === 'true'
