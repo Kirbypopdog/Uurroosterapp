@@ -4017,6 +4017,15 @@ body[data-view-mode="day"] .timeline-day-cell {
     background: #94a3b8;
 }
 
+.employee-status.no-email {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.employee-status.no-email::before {
+    background: #f59e0b;
+}
+
 .employee-card-meta {
     display: flex;
     flex-wrap: wrap;

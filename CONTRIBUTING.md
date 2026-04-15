@@ -21,7 +21,7 @@ npm run db:setup       # Schema + seed (admin + teams)
 npm run dev            # Backend op :3001
 
 # Frontend: open frontend/index.html in browser
-# Login: admin@hetvlot.be / VlotAdmin2025!
+# Login: admin@hetvlot.be / <zie Render dashboard of .env>
 ```
 
 ---

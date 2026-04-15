@@ -258,7 +258,7 @@ async function addEmployee(employeeData) {
         // Create a user with employee/schedule data
         const userData = {
             ...employeeData,
-            password: 'Welkom123!', // Default password
+            // Geen wachtwoord meesturen — backend gebruikt DEFAULT_RESET_PASSWORD
             role: 'medewerker'
         };
 

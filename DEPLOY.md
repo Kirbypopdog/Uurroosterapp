@@ -30,7 +30,7 @@ De app bestaat uit 3 onderdelen op Render:
    - `JWT_SECRET` = (genereer een sterk wachtwoord)
    - `ADMIN_EMAIL` = `admin@hetvlot.be`
    - `ADMIN_PASSWORD` = (kies een sterk wachtwoord)
-   - `DEFAULT_RESET_PASSWORD` = `Welkom123!`
+   - `DEFAULT_RESET_PASSWORD` = (kies een sterk wachtwoord voor nieuwe accounts)
    - `NODE_ENV` = `production`
 5. Deploy → Backend start, `ensureSchema()` maakt automatisch alle tabellen
 
@@ -100,7 +100,7 @@ node import-backup.js /pad/naar/hetvlot-backup-DATUM.json
 | `JWT_SECRET` | Ja | Secret voor JWT token signing |
 | `ADMIN_EMAIL` | Ja | Email voor admin account (seed) |
 | `ADMIN_PASSWORD` | Ja | Wachtwoord voor admin account (seed) |
-| `DEFAULT_RESET_PASSWORD` | Nee | Reset wachtwoord (default: Welkom123!) |
+| `DEFAULT_RESET_PASSWORD` | Ja | Tijdelijk wachtwoord voor nieuwe/gereset accounts |
 | `NODE_ENV` | Nee | `production` op Render |
 | `PORT` | Nee | Render stelt dit automatisch in |
 

@@ -11,20 +11,22 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
-const DEFAULT_RESET_PASSWORD = process.env.DEFAULT_RESET_PASSWORD || 'Welkom123!';
-
-// Validate critical env vars in production
-if (process.env.NODE_ENV === 'production') {
-  if (!process.env.JWT_SECRET) {
-    console.error('FATAL: JWT_SECRET env var is required in production');
-    process.exit(1);
-  }
-  if (!process.env.DATABASE_URL) {
-    console.error('FATAL: DATABASE_URL env var is required in production');
-    process.exit(1);
-  }
+// Validate critical env vars (all environments)
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET env var is required (stel in via .env voor lokale ontwikkeling)');
+  process.exit(1);
 }
+if (!process.env.DEFAULT_RESET_PASSWORD) {
+  console.error('FATAL: DEFAULT_RESET_PASSWORD env var is required (stel in via .env voor lokale ontwikkeling)');
+  process.exit(1);
+}
+if (!process.env.DATABASE_URL) {
+  console.error('FATAL: DATABASE_URL env var is required (stel in via .env voor lokale ontwikkeling)');
+  process.exit(1);
+}
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const DEFAULT_RESET_PASSWORD = process.env.DEFAULT_RESET_PASSWORD;
 
 // Security headers
 app.use(helmet());
@@ -498,6 +500,34 @@ async function ensureSchema() {
       console.log(`  extra indexes: ${e.message}`);
     }
 
+    // Fix FK constraints: ON DELETE SET NULL for nullable user references
+    try {
+      await client.query(`ALTER TABLE shift_blocks DROP CONSTRAINT IF EXISTS shift_blocks_created_by_fkey`);
+      await client.query(`ALTER TABLE shift_blocks ADD CONSTRAINT shift_blocks_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch (e) {
+      console.log(`  shift_blocks FK fix: ${e.message}`);
+    }
+    try {
+      await client.query(`ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS shift_swap_requests_responded_by_fkey`);
+      await client.query(`ALTER TABLE shift_swap_requests ADD CONSTRAINT shift_swap_requests_responded_by_fkey FOREIGN KEY (responded_by) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch (e) {
+      console.log(`  shift_swap_requests FK fix: ${e.message}`);
+    }
+
+    // Fix shift_activities FK: add ON DELETE CASCADE via shift cleanup (no shift_id column)
+    // Ensure shift_activities are removed when parent shift is deleted (handled in DELETE endpoint)
+
+    // Missing indexes for frequently filtered columns
+    try {
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_source ON shifts(source)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_availability_type ON availability(type)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_swap_requests_type ON shift_swap_requests(request_type)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_schedule_drafts_type ON schedule_drafts(type)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id)`);
+    } catch (e) {
+      console.log(`  missing indexes: ${e.message}`);
+    }
+
     // Phase 4: Add valid_from/valid_until to schedule_drafts for school year scheduling
     try {
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS valid_from DATE`);
@@ -528,6 +558,13 @@ async function ensureSchema() {
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS holiday_period_id TEXT`);
     } catch (e) {
       console.log(`  schedule_drafts vakantie columns: ${e.message}`);
+    }
+
+    // Make users.email nullable (allow accounts without email address)
+    try {
+      await client.query(`ALTER TABLE users ALTER COLUMN email DROP NOT NULL`);
+    } catch (e) {
+      // Already nullable or constraint doesn't exist
     }
 
     // Phase 4: school_year_start setting (default: 1 sept current school year)
@@ -1018,17 +1055,22 @@ app.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
 // Create new user (with optional schedule data)
 app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
   const { name, email, password, role, team_id, mainTeam, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
-  if (!name || !email || !password || !role) {
-    return res.status(400).json({ error: 'Naam, email, wachtwoord en rol zijn verplicht' });
+  if (!name || !role) {
+    return res.status(400).json({ error: 'Naam en rol zijn verplicht' });
   }
   try {
-    // Check if email already exists
-    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
-    if (existing.rows.length > 0) {
-      return res.status(400).json({ error: 'Email bestaat al' });
+    // Check if email already exists (only when email is provided)
+    const normalizedEmail = email ? email.trim().toLowerCase() : null;
+    if (normalizedEmail) {
+      const existing = await pool.query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+      if (existing.rows.length > 0) {
+        return res.status(400).json({ error: 'Email bestaat al' });
+      }
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    // Gebruik opgegeven wachtwoord of val terug op DEFAULT_RESET_PASSWORD
+    const userPassword = (password && password.trim()) ? password : DEFAULT_RESET_PASSWORD;
+    const passwordHash = await bcrypt.hash(userPassword, 12);
     const week1Json = JSON.stringify(weekScheduleWeek1 || []);
     const week2Json = JSON.stringify(weekScheduleWeek2 || []);
     const weekSchedulesJson = Array.isArray(weekSchedules) && weekSchedules.length > 0
@@ -1046,10 +1088,10 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
                 week_schedules as "weekSchedules"`,
       [
         name,
-        email.toLowerCase(),
+        normalizedEmail,
         passwordHash,
         role,
-        team_id || mainTeam || null, // team_id for role access, defaults to mainTeam
+        team_id || mainTeam || null,
         mainTeam || null,
         contractHours || 0,
         active !== false,
@@ -1058,10 +1100,12 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
         weekSchedulesJson
       ]
     );
-    await logAudit(req, 'CREATE', 'user', result.rows[0].id, { user: { name, email, role, mainTeam } });
+    await logAudit(req, 'CREATE', 'user', result.rows[0].id, { user: { name, email: normalizedEmail, role, mainTeam } });
 
-    // Welkomst-email (fire-and-forget)
-    emailService.notifyWelcome({ name, email: email.toLowerCase() }, password);
+    // Welkomst-email alleen als er een email is (fire-and-forget)
+    if (normalizedEmail) {
+      emailService.notifyWelcome({ name, email: normalizedEmail });
+    }
 
     res.status(201).json({ user: result.rows[0] });
   } catch (err) {
@@ -1129,6 +1173,13 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
     );
 
     await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
+
+    // Welkomst-email als email voor het eerst wordt ingesteld (fire-and-forget)
+    const newEmail = email ? email.toLowerCase() : null;
+    if (!oldEmail && newEmail) {
+      emailService.notifyWelcome({ name: result.rows[0].name, email: newEmail });
+    }
+
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -1161,6 +1212,8 @@ app.put('/users/:id', requireAuth, async (req, res) => {
   // Medewerker can only update name and email
   if (role === 'medewerker') {
     try {
+      const oldMedResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+      const oldMedEmail = oldMedResult.rows.length > 0 ? oldMedResult.rows[0].email : null;
       const result = await pool.query(
         `UPDATE users SET name = $1, email = $2 WHERE id = $3
          RETURNING id, name, email, role, team_id,
@@ -1175,6 +1228,10 @@ app.put('/users/:id', requireAuth, async (req, res) => {
         return res.status(404).json({ error: 'Gebruiker niet gevonden' });
       }
       await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
+      const newMedEmail = email ? email.trim().toLowerCase() : null;
+      if (!oldMedEmail && newMedEmail) {
+        emailService.notifyWelcome({ name: result.rows[0].name, email: newMedEmail });
+      }
       return res.json({ user: result.rows[0] });
     } catch (err) {
       console.error(err);
@@ -1220,6 +1277,13 @@ app.put('/users/:id', requireAuth, async (req, res) => {
     }
 
     await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
+
+    // Welkomst-email als email voor het eerst wordt ingesteld (fire-and-forget)
+    const newEmail = email ? email.trim().toLowerCase() : null;
+    if (!oldEmail && newEmail) {
+      emailService.notifyWelcome({ name: result.rows[0].name, email: newEmail });
+    }
+
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -1273,7 +1337,7 @@ app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (re
     // Send password reset email (fire-and-forget)
     const userResult = await pool.query('SELECT name, email FROM users WHERE id = $1', [userId]);
     if (userResult.rows[0]) {
-      emailService.notifyPasswordReset(userResult.rows[0], DEFAULT_RESET_PASSWORD);
+      emailService.notifyPasswordReset(userResult.rows[0]);
     }
     res.json({ ok: true, newPassword: DEFAULT_RESET_PASSWORD });
   } catch (err) {
@@ -1578,6 +1642,12 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
       }
     }
+
+    // Delete related activities (shift_activities links via user_id + date, no shift_id FK)
+    await client.query(
+      'DELETE FROM shift_activities WHERE user_id = $1 AND date = $2',
+      [shift.user_id, shift.date]
+    );
 
     // Delete the shift
     await client.query('DELETE FROM shifts WHERE id = $1', [id]);
@@ -2932,7 +3002,7 @@ app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
 
 // ===== SETTINGS API =====
 
-app.get('/settings', requireAuth, async (req, res) => {
+app.get('/settings', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const result = await pool.query('SELECT key, value FROM settings');
     const settings = {};
@@ -3255,6 +3325,10 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
 
     const { confirmOverlap = false, confirmOverwrite = null } = req.body || {};
 
+    // Vakantieconcepten overschrijven altijd alle shifts (auto + manual):
+    // vakantie is een expliciete beslissing — niets uit het basisrooster mag blijven staan.
+    const effectiveConfirmOverwrite = isVakantie ? true : confirmOverwrite;
+
     // 2a. Overlap detectie — zoek actieve niet-vakantie concepten die overlappen
     if (!isVakantie && !confirmOverlap) {
       const overlapping = await client.query(
@@ -3281,8 +3355,8 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
       }
     }
 
-    // 2b. Handmatige wijzigingen detectie
-    if (confirmOverwrite === null) {
+    // 2b. Handmatige wijzigingen detectie (niet voor vakantieconcepten)
+    if (effectiveConfirmOverwrite === null) {
       const manualResult = await client.query(
         `SELECT COUNT(*)::int as count FROM shifts WHERE source = 'manual'
          AND date >= $1::date AND date <= $2::date`,
@@ -3423,7 +3497,7 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
 
         // Delete shifts in range (excluding vakantie period dates for non-vakantie drafts)
         // confirmOverwrite: true = delete all shifts (incl manual), false/null = only auto shifts
-        const sourceFilter = confirmOverwrite === true ? '' : ` AND source = 'auto'`;
+        const sourceFilter = effectiveConfirmOverwrite === true ? '' : ` AND source = 'auto'`;
         let deleteQuery = `DELETE FROM shifts WHERE user_id = $1${sourceFilter} AND date >= $2::date AND date <= $3::date`;
         const deleteParams = [emp.id, startStr, endStr];
         if (vakantieSkipRanges.length > 0) {
@@ -4097,55 +4171,6 @@ app.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// Debug endpoint to check database state
-app.get('/admin/debug', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const teams = await pool.query('SELECT * FROM teams ORDER BY id');
-    const users = await pool.query(`
-      SELECT id, name, email, role, main_team, team_id,
-             week_schedule_week1, week_schedule_week2,
-             pg_typeof(week_schedule_week1) as type_week1,
-             pg_typeof(week_schedule_week2) as type_week2
-      FROM users
-      ORDER BY name
-    `);
-
-    const tableCheck = await pool.query(`
-      SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'employees') as employees_exists
-    `);
-
-    const userDebug = users.rows.map(u => ({
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      role: u.role,
-      mainTeam: u.main_team,
-      teamId: u.team_id,
-      weekScheduleWeek1: {
-        type: u.type_week1,
-        value: u.week_schedule_week1,
-        isArray: Array.isArray(u.week_schedule_week1),
-        length: Array.isArray(u.week_schedule_week1) ? u.week_schedule_week1.length : 'N/A'
-      },
-      weekScheduleWeek2: {
-        type: u.type_week2,
-        value: u.week_schedule_week2,
-        isArray: Array.isArray(u.week_schedule_week2),
-        length: Array.isArray(u.week_schedule_week2) ? u.week_schedule_week2.length : 'N/A'
-      }
-    }));
-
-    res.json({
-      teams: teams.rows,
-      userCount: users.rows.length,
-      users: userDebug,
-      employeesTableExists: tableCheck.rows[0].employees_exists
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 app.listen(PORT, () => {
   console.log(`API running on :${PORT}`);

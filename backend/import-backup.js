@@ -7,7 +7,12 @@ async function importBackup() {
 
   try {
     // Read backup file
-    const backupPath = process.argv[2] || '/Users/victor/Downloads/hetvlot-backup-2026-02-09.json';
+    const backupPath = process.argv[2];
+    if (!backupPath) {
+      console.error('❌ ERROR: Geef het pad naar het backup bestand mee als argument.');
+      console.error('Gebruik: node import-backup.js /pad/naar/backup.json');
+      process.exit(1);
+    }
     console.log(`Reading backup from: ${backupPath}`);
 
     const backup = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
@@ -24,12 +29,17 @@ async function importBackup() {
     await client.query("SELECT setval('users_id_seq', (SELECT MAX(id) FROM users))");
     await client.query("SELECT setval('shifts_id_seq', 1, false)");
 
-    // Generate default password hash for imported users (password: "test123")
-    const defaultPasswordHash = await bcrypt.hash('test123', 10);
+    // Generate default password hash for imported users
+    const importPassword = process.env.DEFAULT_RESET_PASSWORD;
+    if (!importPassword) {
+      console.error('❌ ERROR: DEFAULT_RESET_PASSWORD env var is niet ingesteld.');
+      process.exit(1);
+    }
+    const defaultPasswordHash = await bcrypt.hash(importPassword, 12);
 
     // Import users
     console.log(`Importing ${backup.users.length} users...`);
-    console.log('ℹ️  All imported users will have password: test123');
+    console.log('ℹ️  Alle geïmporteerde users krijgen het wachtwoord uit DEFAULT_RESET_PASSWORD.');
     for (const user of backup.users) {
       await client.query(`
         INSERT INTO users (id, name, email, password_hash, role, team_id, main_team, extra_teams, contract_hours, active, week_schedule_week1, week_schedule_week2)

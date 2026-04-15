@@ -15,7 +15,11 @@ const { pool } = require('../src/db');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
-const DEFAULT_PASSWORD = process.env.DEFAULT_RESET_PASSWORD || 'Welkom123!';
+const DEFAULT_PASSWORD = process.env.DEFAULT_RESET_PASSWORD;
+if (!DEFAULT_PASSWORD) {
+  console.error('FATAL: DEFAULT_RESET_PASSWORD env var is required');
+  process.exit(1);
+}
 
 async function migrate() {
   console.log('Starting migration: Merge employees into users...\n');
