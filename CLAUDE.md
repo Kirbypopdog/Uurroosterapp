@@ -44,10 +44,19 @@ open ../frontend/index.html
 | `src/server.js` | Alle API endpoints + auto-migratie bij startup |
 | `src/db.js` | PostgreSQL connection pool |
 | `src/email.js` | Resend email service (9 notificatie types) |
+| `src/utils.js` | Pure datumhulpfuncties (`getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`) |
 | `sql/schema.sql` | Database schema (bron van waarheid) |
 | `scripts/seed.js` | Seed teams + admin account |
 | `scripts/setup-db.js` | Voert schema.sql uit |
 | `import-backup.js` | CLI tool voor JSON backup import |
+
+### Tests (`backend/tests/`)
+| Bestand | Doel |
+|---------|------|
+| `utils.test.js` | Unit tests voor `src/utils.js` (25 tests) |
+| `email.test.js` | Unit tests voor email helpers: `escapeHtml`, `formatDate`, `formatTime`, `shiftDetailBox`, `baseTemplate` (31 tests) |
+| `api.test.js` | Integratietests voor API-endpoints — auth, shifts, teams, settings, swap-requests (46 tests) |
+| `validation.test.js` | Unit tests voor frontend pure functies in `validation.js` (15 tests) |
 
 ## Database Schema
 
@@ -129,6 +138,24 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 ## Deploy
 
 Zie `DEPLOY.md` voor deployment instructies (Render platform).
+
+## Tests
+
+```bash
+cd backend
+npm test           # Alle tests uitvoeren (117 tests, ~3 seconden)
+```
+
+Testbestanden in `backend/tests/`:
+
+| Bestand | Dekking |
+|---------|---------|
+| `utils.test.js` | `getMonday`, `formatDateYYYYMMDD`, `parseLocalDate` |
+| `email.test.js` | `escapeHtml`, `formatDate`, `formatTime`, `shiftDetailBox`, `baseTemplate` |
+| `api.test.js` | API-endpoints: auth, shifts, teams, settings, swap-requests |
+| `validation.test.js` | Frontend tijdfuncties: `parseDateTime`, `getShiftEndDateTime`, `getHoursBetweenShifts`, `shiftsOverlap` |
+
+Tests gebruiken Jest + Supertest. De database wordt volledig gemockt — geen echte DB vereist.
 
 ## GitHub Issues — Workflow
 
