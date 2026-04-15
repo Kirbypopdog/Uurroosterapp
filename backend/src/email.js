@@ -324,5 +324,7 @@ module.exports = {
   notifyTakeoverAccepted,
   notifyRequestCancelled,
   notifyWelcome,
-  notifyPasswordReset
+  notifyPasswordReset,
+  // Exported for unit testing only
+  _helpers: { escapeHtml, formatDate, formatTime, shiftDetailBox, baseTemplate }
 };

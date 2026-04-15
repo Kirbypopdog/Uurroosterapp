@@ -591,3 +591,9 @@ function validateSwapRequest(swapData) {
 }
 
 console.log('Validation systeem geladen');
+
+// Allow pure utility functions to be imported in Node.js (for unit tests)
+// This does not affect browser behavior since `module` is not defined there.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { parseDateTime, getShiftEndDateTime, getHoursBetweenShifts, shiftsOverlap };
+}
