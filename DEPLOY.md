@@ -119,7 +119,7 @@ node import-backup.js /pad/naar/hetvlot-backup-DATUM.json
 - `npm run seed` draait automatisch NIET op Render - admin account wordt aangemaakt via env vars door de auto-migratie
 
 ### Frontend toont "kan niet verbinden"
-- Check of backend online is: ga naar `https://uurrooster-app.onrender.com/health`
+- Check of backend online is: ga naar `https://vlot-dashboard.site/health`
 - Check `frontend/config/settings.js` - de productie URL moet kloppen
 - Free tier backend gaat slapen na 15 min inactiviteit (eerste request duurt ~30 sec)
 

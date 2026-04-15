@@ -2,7 +2,7 @@
 
 Webapplicatie voor shiftplanning bij Het Vlot. Medewerkers bekijken hun rooster, ruilen shifts en melden afwezigheid. Admins en roosterverantwoordelijken beheren het volledige rooster via een visuele builder.
 
-**Live**: [uurrooster-app.onrender.com](https://uurrooster-app.onrender.com)
+**Live**: [vlot-dashboard.site](https://vlot-dashboard.site)
 
 ---
 
