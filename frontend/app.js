@@ -1,5 +1,13 @@
 // HET VLOT ROOSTERPLANNING - MAIN APPLICATION
 
+// Debug guard: console.log alleen actief op localhost
+const DEBUG = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+if (!DEBUG) {
+  // Silence logs in production; errors/warnings blijven zichtbaar
+  console.log = function() {};
+  console.debug = function() {};
+}
+
 // App State
 const AppState = {
     currentUser: null,
@@ -4903,6 +4911,8 @@ function renderProfile() {
     const hoursWeek = getEmployeeHoursThisWeek(resolvedId, weekDates[0]);
     const hoursMonth = getEmployeeHoursThisMonth(resolvedId, weekDates[0]);
 
+    const canEditContract = ['admin', 'roosterverantwoordelijke'].includes(user.role);
+
     // Build hours card content
     let hoursCardContent = '';
     if (contractHours > 0) {
@@ -5024,6 +5034,13 @@ function renderProfile() {
                         <span class="profile-meta-value">${escapeHtml(accessSummary)}</span>
                     </div>
                     <div class="profile-meta-row">
+                        <span class="profile-meta-label">Contracturen</span>
+                        <span class="profile-meta-value" id="profile-contract-cell">
+                            <span id="profile-contract-display">${contractHours > 0 ? contractHours + ' u/week' : '—'}</span>
+                            ${canEditContract ? `<button type="button" class="btn btn-secondary btn-xs ml-sm" id="profile-contract-edit-btn">Bewerken</button>` : ''}
+                        </span>
+                    </div>
+                    <div class="profile-meta-row">
                         <span class="profile-meta-label">Email notificaties</span>
                         <span class="profile-meta-value">
                             <label class="toggle-switch" title="Ontvang email meldingen bij ruilverzoeken, overnames en ziekmeldingen">
@@ -5062,6 +5079,41 @@ function renderProfile() {
                 emailToggle.checked = !emailToggle.checked;
                 showToast('Kon voorkeur niet opslaan: ' + error.message, 'error');
             }
+        });
+    }
+
+    // Contract hours inline edit (admin/roosterverantwoordelijke only)
+    const contractEditBtn = document.getElementById('profile-contract-edit-btn');
+    if (contractEditBtn) {
+        contractEditBtn.addEventListener('click', () => {
+            const cell = document.getElementById('profile-contract-cell');
+            if (!cell) return;
+            const currentVal = contractHours || '';
+            cell.innerHTML = `<input type="number" id="profile-contract-input" class="form-input" style="width:80px;display:inline-block" value="${currentVal}" min="0" max="60" step="0.5"> u/week
+                <button type="button" class="btn btn-primary btn-xs ml-sm" id="profile-contract-save">Opslaan</button>
+                <button type="button" class="btn btn-secondary btn-xs ml-sm" id="profile-contract-cancel">Annuleren</button>`;
+            document.getElementById('profile-contract-input')?.focus();
+
+            document.getElementById('profile-contract-cancel')?.addEventListener('click', renderProfile);
+
+            document.getElementById('profile-contract-save')?.addEventListener('click', async () => {
+                const newHours = parseFloat(document.getElementById('profile-contract-input')?.value) || 0;
+                const saveBtn = document.getElementById('profile-contract-save');
+                if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Opslaan...'; }
+                try {
+                    const currentEmpData = DataStore.users.find(u => u.id === resolvedId) || emp;
+                    await updateEmployee(resolvedId, { ...currentEmpData, contractHours: newHours });
+                    if (AppState.currentUser && AppState.currentUser.id === resolvedId) {
+                        AppState.currentUser.contractHours = newHours;
+                        sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+                    }
+                    showToast('Contracturen bijgewerkt.', 'success');
+                    renderProfile();
+                } catch (err) {
+                    showToast('Fout bij opslaan: ' + getUserFriendlyError(err), 'error');
+                    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Opslaan'; }
+                }
+            });
         });
     }
 }

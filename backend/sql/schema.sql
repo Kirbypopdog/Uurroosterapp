@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS shift_blocks (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   date DATE NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  created_by INTEGER REFERENCES users(id),
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   reason TEXT,
   UNIQUE(user_id, date)
 );
@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS shift_swap_requests (
   lead_responded_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW(),
   responded_at TIMESTAMP,
-  responded_by INTEGER REFERENCES users(id)
+  responded_by INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- Schedule drafts (roster builder concepts)
@@ -165,3 +165,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_schedule_drafts_created ON schedule_drafts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_shift_activities_user_date ON shift_activities(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_shifts_source ON shifts(source);
+CREATE INDEX IF NOT EXISTS idx_availability_type ON availability(type);
+CREATE INDEX IF NOT EXISTS idx_swap_requests_type ON shift_swap_requests(request_type);
+CREATE INDEX IF NOT EXISTS idx_schedule_drafts_type ON schedule_drafts(type);
+CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id);

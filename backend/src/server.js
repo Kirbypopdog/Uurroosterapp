@@ -500,6 +500,34 @@ async function ensureSchema() {
       console.log(`  extra indexes: ${e.message}`);
     }
 
+    // Fix FK constraints: ON DELETE SET NULL for nullable user references
+    try {
+      await client.query(`ALTER TABLE shift_blocks DROP CONSTRAINT IF EXISTS shift_blocks_created_by_fkey`);
+      await client.query(`ALTER TABLE shift_blocks ADD CONSTRAINT shift_blocks_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch (e) {
+      console.log(`  shift_blocks FK fix: ${e.message}`);
+    }
+    try {
+      await client.query(`ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS shift_swap_requests_responded_by_fkey`);
+      await client.query(`ALTER TABLE shift_swap_requests ADD CONSTRAINT shift_swap_requests_responded_by_fkey FOREIGN KEY (responded_by) REFERENCES users(id) ON DELETE SET NULL`);
+    } catch (e) {
+      console.log(`  shift_swap_requests FK fix: ${e.message}`);
+    }
+
+    // Fix shift_activities FK: add ON DELETE CASCADE via shift cleanup (no shift_id column)
+    // Ensure shift_activities are removed when parent shift is deleted (handled in DELETE endpoint)
+
+    // Missing indexes for frequently filtered columns
+    try {
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_source ON shifts(source)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_availability_type ON availability(type)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_swap_requests_type ON shift_swap_requests(request_type)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_schedule_drafts_type ON schedule_drafts(type)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id)`);
+    } catch (e) {
+      console.log(`  missing indexes: ${e.message}`);
+    }
+
     // Phase 4: Add valid_from/valid_until to schedule_drafts for school year scheduling
     try {
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS valid_from DATE`);
@@ -1582,6 +1610,12 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
       }
     }
+
+    // Delete related activities (shift_activities links via user_id + date, no shift_id FK)
+    await client.query(
+      'DELETE FROM shift_activities WHERE user_id = $1 AND date = $2',
+      [shift.user_id, shift.date]
+    );
 
     // Delete the shift
     await client.query('DELETE FROM shifts WHERE id = $1', [id]);
@@ -3259,6 +3293,10 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
 
     const { confirmOverlap = false, confirmOverwrite = null } = req.body || {};
 
+    // Vakantieconcepten overschrijven altijd alle shifts (auto + manual):
+    // vakantie is een expliciete beslissing — niets uit het basisrooster mag blijven staan.
+    const effectiveConfirmOverwrite = isVakantie ? true : confirmOverwrite;
+
     // 2a. Overlap detectie — zoek actieve niet-vakantie concepten die overlappen
     if (!isVakantie && !confirmOverlap) {
       const overlapping = await client.query(
@@ -3285,8 +3323,8 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
       }
     }
 
-    // 2b. Handmatige wijzigingen detectie
-    if (confirmOverwrite === null) {
+    // 2b. Handmatige wijzigingen detectie (niet voor vakantieconcepten)
+    if (effectiveConfirmOverwrite === null) {
       const manualResult = await client.query(
         `SELECT COUNT(*)::int as count FROM shifts WHERE source = 'manual'
          AND date >= $1::date AND date <= $2::date`,
@@ -3427,7 +3465,7 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
 
         // Delete shifts in range (excluding vakantie period dates for non-vakantie drafts)
         // confirmOverwrite: true = delete all shifts (incl manual), false/null = only auto shifts
-        const sourceFilter = confirmOverwrite === true ? '' : ` AND source = 'auto'`;
+        const sourceFilter = effectiveConfirmOverwrite === true ? '' : ` AND source = 'auto'`;
         let deleteQuery = `DELETE FROM shifts WHERE user_id = $1${sourceFilter} AND date >= $2::date AND date <= $3::date`;
         const deleteParams = [emp.id, startStr, endStr];
         if (vakantieSkipRanges.length > 0) {
