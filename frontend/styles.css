@@ -7549,18 +7549,24 @@ body[data-view-mode="day"] .timeline-day-cell {
 
     /* ===== MOBILE DAY VIEW FOR PLANNING ===== */
 
-    /* Dag-modus: toon mobiele dag-navigatie en verberg timeline header */
-    body[data-view-mode="day"] .mobile-day-nav {
-        display: flex !important;
-    }
-
-    body[data-view-mode="day"] .timeline-header {
+    /* Op kleine schermen: verberg "Week"-knop, alleen dagweergave beschikbaar */
+    .view-toggle-btn[data-mode="week"] {
         display: none !important;
     }
 
-    /* Timeline: show only employee name + 1 selected day */
+    /* Toon mobiele dag-navigatie */
+    .mobile-day-nav {
+        display: flex !important;
+    }
+
+    /* Verberg timeline header — dag wordt getoond in de dag-navigatiebalk */
+    .timeline-header {
+        display: none !important;
+    }
+
+    /* Timeline: toon enkel naam + 1 geselecteerde dag */
     .timeline-view-wrapper {
-        overflow: visible !important; /* Allow sticky positioning */
+        overflow: visible !important;
         width: 100% !important;
         max-width: 100% !important;
     }
@@ -7571,7 +7577,6 @@ body[data-view-mode="day"] .timeline-day-cell {
         max-width: 100% !important;
     }
 
-    /* Allow sticky positioning on calendar container */
     .calendar-container {
         overflow: visible !important;
         width: 100% !important;
@@ -7594,86 +7599,32 @@ body[data-view-mode="day"] .timeline-day-cell {
         min-width: 0 !important;
     }
 
-    /* DAG-MODUS: verberg alle kolommen en toon enkel de geselecteerde dag */
-    body[data-view-mode="day"] .timeline-scale,
-    body[data-view-mode="day"] .timeline-day-cell {
+    /* Verberg alle dagkolommen, toon enkel de geselecteerde dag */
+    .timeline-scale,
+    .timeline-day-cell {
         display: none !important;
     }
 
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="0"] .timeline-scale:nth-child(2),
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="0"] .timeline-day-cell:nth-child(2) {
-        display: block !important;
-    }
+    .timeline-view-wrapper[data-mobile-day="0"] .timeline-scale:nth-child(2),
+    .timeline-view-wrapper[data-mobile-day="0"] .timeline-day-cell:nth-child(2) { display: block !important; }
 
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="1"] .timeline-scale:nth-child(3),
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="1"] .timeline-day-cell:nth-child(3) {
-        display: block !important;
-    }
+    .timeline-view-wrapper[data-mobile-day="1"] .timeline-scale:nth-child(3),
+    .timeline-view-wrapper[data-mobile-day="1"] .timeline-day-cell:nth-child(3) { display: block !important; }
 
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="2"] .timeline-scale:nth-child(4),
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="2"] .timeline-day-cell:nth-child(4) {
-        display: block !important;
-    }
+    .timeline-view-wrapper[data-mobile-day="2"] .timeline-scale:nth-child(4),
+    .timeline-view-wrapper[data-mobile-day="2"] .timeline-day-cell:nth-child(4) { display: block !important; }
 
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="3"] .timeline-scale:nth-child(5),
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="3"] .timeline-day-cell:nth-child(5) {
-        display: block !important;
-    }
+    .timeline-view-wrapper[data-mobile-day="3"] .timeline-scale:nth-child(5),
+    .timeline-view-wrapper[data-mobile-day="3"] .timeline-day-cell:nth-child(5) { display: block !important; }
 
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="4"] .timeline-scale:nth-child(6),
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="4"] .timeline-day-cell:nth-child(6) {
-        display: block !important;
-    }
+    .timeline-view-wrapper[data-mobile-day="4"] .timeline-scale:nth-child(6),
+    .timeline-view-wrapper[data-mobile-day="4"] .timeline-day-cell:nth-child(6) { display: block !important; }
 
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="5"] .timeline-scale:nth-child(7),
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="5"] .timeline-day-cell:nth-child(7) {
-        display: block !important;
-    }
+    .timeline-view-wrapper[data-mobile-day="5"] .timeline-scale:nth-child(7),
+    .timeline-view-wrapper[data-mobile-day="5"] .timeline-day-cell:nth-child(7) { display: block !important; }
 
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="6"] .timeline-scale:nth-child(8),
-    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="6"] .timeline-day-cell:nth-child(8) {
-        display: block !important;
-    }
-
-    /* WEEK-MODUS op mobiel: horizontaal scrollbaar zodat alle 7 dagen zichtbaar zijn */
-    body[data-view-mode="week"] .calendar-container {
-        overflow-x: auto !important;
-        overflow-y: visible !important;
-        -webkit-overflow-scrolling: touch !important;
-    }
-
-    body[data-view-mode="week"] .timeline-view-wrapper {
-        min-width: 680px !important;
-        width: 680px !important;
-        max-width: none !important;
-        overflow: visible !important;
-    }
-
-    body[data-view-mode="week"] .timeline-view-wrapper > * {
-        min-width: 680px !important;
-        width: 680px !important;
-        max-width: none !important;
-    }
-
-    body[data-view-mode="week"] .timeline-header {
-        display: grid !important;
-        grid-template-columns: 80px repeat(7, minmax(80px, 1fr)) !important;
-        min-width: 680px !important;
-        position: static !important;
-    }
-
-    body[data-view-mode="week"] .timeline-scale-row,
-    body[data-view-mode="week"] .timeline-row {
-    body[data-view-mode="week"] .timeline-scale-row,
-    body[data-view-mode="week"] .timeline-row {
-        grid-template-columns: 80px repeat(7, minmax(80px, 1fr)) !important;
-        min-width: 680px !important;
-    }
-
-    body[data-view-mode="week"] .timeline-scale,
-    body[data-view-mode="week"] .timeline-day-cell {
-        display: block !important;
-    }
+    .timeline-view-wrapper[data-mobile-day="6"] .timeline-scale:nth-child(8),
+    .timeline-view-wrapper[data-mobile-day="6"] .timeline-day-cell:nth-child(8) { display: block !important; }
 
     /* Day cell should fill available space and maintain positioning */
     .timeline-day-cell {

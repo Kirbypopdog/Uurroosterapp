@@ -2125,6 +2125,11 @@ async function switchView(viewName) {
     // Reset shift range when leaving planning, set when entering
     if (viewName === 'planning') {
         updateShiftRefreshRange();
+        // Op kleine schermen (≤ 480px) is alleen dagweergave beschikbaar
+        if (window.innerWidth <= 480 && AppState.viewMode !== 'day') {
+            AppState.viewMode = 'day';
+            document.body.setAttribute('data-view-mode', 'day');
+        }
     } else {
         setActiveShiftRange(null, null);
     }
