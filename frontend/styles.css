@@ -7664,6 +7664,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 
     body[data-view-mode="week"] .timeline-scale-row,
     body[data-view-mode="week"] .timeline-row {
+    body[data-view-mode="week"] .timeline-scale-row,
+    body[data-view-mode="week"] .timeline-row {
         grid-template-columns: 80px repeat(7, minmax(80px, 1fr)) !important;
         min-width: 680px !important;
     }
