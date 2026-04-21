@@ -41,6 +41,8 @@ const AppState = {
     builderLoadedDraftId: null,   // ID van het geladen concept (null = geen concept geladen)
     builderLoadedDraftName: null, // naam van het geladen concept
     builderIsDirty: false,
+    builderAutoSaveTimer: null,
+    builderAutoSavedAt: null,
     builderPatternExpanded: false,
     builderPattern: null,         // lokaal patroon (null = gebruik globaal)
     builderStaffingRules: {},     // huidige week bezettingsregels { [dayIndex]: { [hour]: minCount } }
@@ -2050,6 +2052,7 @@ async function switchView(viewName) {
     }
     // Warn about unsaved builder changes
     if (AppState.builderIsDirty && AppState.currentView === 'builder' && viewName !== 'builder') {
+        stopBuilderAutoSave();
         const proceed = await showConfirm(
             'Je hebt onopgeslagen wijzigingen in de roosterbouwer. Wil je doorgaan zonder op te slaan?',
             'Onopgeslagen wijzigingen'
@@ -2069,6 +2072,7 @@ async function switchView(viewName) {
         AppState.builderShowMeetingsEditor = false;
         AppState.builderMeetings = {};
     } else if (AppState.currentView === 'builder' && viewName !== 'builder') {
+        stopBuilderAutoSave();
         // Also reset when leaving builder without unsaved changes
         AppState.builderScreen = 'overview';
         AppState.builderPattern = null;
@@ -2138,6 +2142,7 @@ async function switchView(viewName) {
         case 'builder':
             DOM.builderView.classList.add('active');
             renderBuilder();
+            startBuilderAutoSave();
             break;
         case 'settings':
             DOM.settingsView.classList.add('active');
@@ -6577,6 +6582,7 @@ function renderBuilderEditor(container) {
             ${AppState.builderLoadedDraftName ? escapeHtml(AppState.builderLoadedDraftName) : 'Nieuw concept'}
             ${AppState.builderIsDirty ? ' <span class="builder-dirty-badge">(gewijzigd)</span>' : ''}
         </span>
+        <span id="builder-autosave-status" class="builder-autosave-status">${AppState.builderAutoSavedAt ? `Automatisch opgeslagen om ${AppState.builderAutoSavedAt}` : ''}</span>
     </div>`;
 
     html += renderBuilderControls(role, userTeam);
@@ -6810,7 +6816,7 @@ function addBuilderWeek() {
     if (newLength > 8) return;
     pattern.cycleLength = newLength;
     pattern.weeks[String(newLength)] = { closedDays: [], label: 'alle dagen open' };
-    AppState.builderIsDirty = true;
+    setBuilderDirty();
     // Switch to new week
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
     AppState.builderWeekNumber = newLength;
@@ -6842,7 +6848,7 @@ function removeBuilderWeek(weekNum) {
         AppState.builderWeekNumber = pattern.cycleLength;
     }
     AppState.builderGrid = AppState.builderGridByWeek[AppState.builderWeekNumber] || {};
-    AppState.builderIsDirty = true;
+    setBuilderDirty();
     renderBuilder();
 }
 
@@ -6858,7 +6864,7 @@ function toggleBuilderClosedDay(jsDow) {
     }
     weekConfig.label = weekConfig.closedDays.length > 0 ? formatClosedDays(weekConfig.closedDays) : 'alle dagen open';
     pattern.weeks[String(wn)] = weekConfig;
-    AppState.builderIsDirty = true;
+    setBuilderDirty();
     renderBuilder();
 }
 
@@ -7829,7 +7835,7 @@ function openBuilderShiftModal(employeeId, dayIndex) {
             endTime: end,
             team: employee.mainTeam || AppState.builderTeamFilter || null
         };
-        AppState.builderIsDirty = true;
+        setBuilderDirty();
         modal.classList.add('hidden');
         renderBuilder();
     });
@@ -7845,7 +7851,7 @@ function openBuilderShiftModal(employeeId, dayIndex) {
                 delete AppState.builderGrid[employeeId];
             }
         }
-        AppState.builderIsDirty = true;
+        setBuilderDirty();
         modal.classList.add('hidden');
         renderBuilder();
     });
@@ -7911,9 +7917,79 @@ function loadBuilderFromBaseSchedules() {
     AppState.builderPattern = null;
     AppState.builderConceptType = 'basis';
     AppState.builderHolidayPeriodId = null;
-    AppState.builderIsDirty = true;
+    setBuilderDirty();
     renderBuilder();
     showToast(`Basisrooster week ${weekNumber} geladen`, 'success');
+}
+
+// --- Builder: Auto-save ---
+
+function setBuilderDirty() {
+    AppState.builderIsDirty = true;
+    scheduleBuilderAutoSave();
+}
+
+function scheduleBuilderAutoSave() {
+    if (!AppState.builderLoadedDraftId) return;
+    if (AppState.builderAutoSaveTimer) clearTimeout(AppState.builderAutoSaveTimer);
+    AppState.builderAutoSaveTimer = setTimeout(() => autoSaveBuilderDraft(), 3000);
+}
+
+function startBuilderAutoSave() {
+    AppState.builderAutoSavedAt = null;
+}
+
+function stopBuilderAutoSave() {
+    if (AppState.builderAutoSaveTimer) {
+        clearTimeout(AppState.builderAutoSaveTimer);
+        AppState.builderAutoSaveTimer = null;
+    }
+}
+
+async function autoSaveBuilderDraft() {
+    AppState.builderAutoSaveTimer = null;
+    if (!AppState.builderIsDirty || !AppState.builderLoadedDraftId) return;
+
+    AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+    const multiGrid = { _multiWeek: true };
+    for (const [weekNum, weekGrid] of Object.entries(AppState.builderGridByWeek)) {
+        if (Object.keys(weekGrid).length > 0 && Object.values(weekGrid).some(d => Object.keys(d).length > 0)) {
+            multiGrid[weekNum] = weekGrid;
+        }
+    }
+
+    const updateData = {
+        grid: JSON.parse(JSON.stringify(multiGrid)),
+        weekNumber: AppState.builderWeekNumber,
+        teamFilter: AppState.builderTeamFilter,
+        type: AppState.builderConceptType || 'basis',
+        holidayPeriodId: AppState.builderHolidayPeriodId || null
+    };
+    if (AppState.builderPattern) updateData.grid._pattern = AppState.builderPattern;
+    AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules));
+    if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
+        updateData.grid._staffingRules = AppState.builderStaffingRulesByWeek;
+    }
+    if (Object.keys(AppState.builderMeetings || {}).length > 0) {
+        updateData.grid._teamMeetings = AppState.builderMeetings;
+    }
+
+    try {
+        await updateScheduleDraft(AppState.builderLoadedDraftId, updateData);
+        const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
+        if (cached) {
+            cached.grid = updateData.grid;
+            cached.weekNumber = AppState.builderWeekNumber;
+            cached.updatedAt = new Date().toISOString();
+        }
+        AppState.builderIsDirty = false;
+        const now = new Date();
+        AppState.builderAutoSavedAt = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const statusEl = document.getElementById('builder-autosave-status');
+        if (statusEl) statusEl.textContent = `Automatisch opgeslagen om ${AppState.builderAutoSavedAt}`;
+    } catch (err) {
+        console.error('Auto-save failed:', err);
+    }
 }
 
 // --- Builder: Draft management ---
@@ -8149,6 +8225,10 @@ function showNewConceptTypeModal() {
                         </div>
                     </label>
                 </div>
+                <div style="margin-top:16px">
+                    <label class="form-label" for="concept-name-input">Naam:</label>
+                    <input id="concept-name-input" type="text" class="form-input" placeholder="Basisrooster" value="Basisrooster">
+                </div>
                 <div id="vakantie-period-select" style="display:none;margin-top:16px">
                     <label class="form-label">Gekoppelde vakantieperiode:</label>
                     ${availablePeriods.length > 0 ? `
@@ -8179,18 +8259,26 @@ function showNewConceptTypeModal() {
             opt.classList.add('selected');
             opt.querySelector('input').checked = true;
             const periodSelect = overlay.querySelector('#vakantie-period-select');
-            periodSelect.classList.toggle('hidden', opt.dataset.value !== 'vakantie');
+            const isVakantie = opt.dataset.value === 'vakantie';
+            periodSelect.style.display = isVakantie ? 'block' : 'none';
+            const nameInput = overlay.querySelector('#concept-name-input');
+            if (!isVakantie) nameInput.value = 'Basisrooster';
         });
+    });
+
+    // Auto-fill name when a vakantie period is selected
+    overlay.querySelector('#vakantie-period-id')?.addEventListener('change', (e) => {
+        const period = availablePeriods.find(p => String(p.id) === e.target.value);
+        if (period) overlay.querySelector('#concept-name-input').value = period.name;
     });
 
     overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
     overlay.querySelector('#concept-type-cancel').addEventListener('click', () => overlay.remove());
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
-    overlay.querySelector('#concept-type-confirm').addEventListener('click', () => {
+    overlay.querySelector('#concept-type-confirm').addEventListener('click', async () => {
         const type = overlay.querySelector('input[name="concept-type"]:checked')?.value || 'basis';
         let holidayPeriodId = null;
-        let conceptName = null;
 
         if (type === 'vakantie') {
             const selectEl = overlay.querySelector('#vakantie-period-id');
@@ -8199,13 +8287,14 @@ function showNewConceptTypeModal() {
                 return;
             }
             holidayPeriodId = selectEl.value;
-            const period = availablePeriods.find(p => String(p.id) === String(holidayPeriodId));
-            conceptName = period ? period.name : 'Vakantieconcept';
         }
+
+        const nameInputEl = overlay.querySelector('#concept-name-input');
+        const conceptName = (nameInputEl?.value || '').trim() || (type === 'vakantie' ? 'Vakantieconcept' : 'Basisrooster');
 
         overlay.remove();
 
-        // Initialize new concept
+        // Initialize new concept in AppState
         AppState.builderGrid = {};
         AppState.builderGridByWeek = {};
         AppState.builderStaffingRules = {};
@@ -8243,7 +8332,47 @@ function showNewConceptTypeModal() {
         AppState.builderWeekNumber = 1;
         AppState.builderConceptType = type;
         AppState.builderHolidayPeriodId = holidayPeriodId;
+
+        // Immediately save new empty concept to DB so auto-save has a valid ID
+        const newDraftId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        const draftData = {
+            id: newDraftId,
+            name: conceptName,
+            teamFilter: AppState.builderTeamFilter,
+            weekNumber: 1,
+            grid: { _multiWeek: true, _pattern: AppState.builderPattern },
+            validFrom: null,
+            validUntil: null,
+            type,
+            holidayPeriodId: holidayPeriodId || null
+        };
+        try {
+            if (DataStore._draftsFromTable) {
+                const apiResult = await createScheduleDraft(draftData);
+                const savedDraft = apiResult.draft;
+                if (!DataStore.settings.schedule_drafts) DataStore.settings.schedule_drafts = [];
+                DataStore.settings.schedule_drafts.push(savedDraft);
+                AppState.builderLoadedDraftId = savedDraft.id;
+                AppState.builderLoadedDraftName = savedDraft.name;
+            } else {
+                draftData.createdBy = AppState.currentUser?.id;
+                draftData.createdByName = AppState.currentUser?.name || 'Onbekend';
+                draftData.createdAt = new Date().toISOString();
+                draftData.updatedAt = new Date().toISOString();
+                const drafts = [...(DataStore.settings.schedule_drafts || []), draftData];
+                await saveSettings('schedule_drafts', drafts);
+                DataStore.settings.schedule_drafts = drafts;
+                AppState.builderLoadedDraftId = newDraftId;
+                AppState.builderLoadedDraftName = conceptName;
+            }
+        } catch (err) {
+            console.error('Error creating draft:', err);
+            showToast('Fout bij aanmaken concept', 'error');
+            return;
+        }
+
         AppState.builderScreen = 'editor';
+        startBuilderAutoSave();
         renderBuilder();
     });
 }
@@ -9189,6 +9318,7 @@ function attachBuilderEventListeners(container) {
             if (AppState.builderIsDirty) {
                 const ok = await showConfirm('Je hebt onopgeslagen wijzigingen. Wil je terug zonder op te slaan?');
                 if (!ok) return;
+                stopBuilderAutoSave();
             }
             AppState.builderScreen = 'overview';
             renderBuilder();
@@ -9248,7 +9378,7 @@ function attachBuilderEventListeners(container) {
             if (!AppState.builderStaffingRules[day]) AppState.builderStaffingRules[day] = [];
             if (!Array.isArray(AppState.builderStaffingRules[day])) AppState.builderStaffingRules[day] = [];
             AppState.builderStaffingRules[day].push({ from: 7, to: 17, min: 1 });
-            AppState.builderIsDirty = true;
+            setBuilderDirty();
             renderBuilder();
         });
     });
@@ -9262,7 +9392,7 @@ function attachBuilderEventListeners(container) {
                 AppState.builderStaffingRules[day].splice(idx, 1);
                 if (AppState.builderStaffingRules[day].length === 0) delete AppState.builderStaffingRules[day];
             }
-            AppState.builderIsDirty = true;
+            setBuilderDirty();
             renderBuilder();
         });
     });
@@ -9278,7 +9408,7 @@ function attachBuilderEventListeners(container) {
             if (e.target.classList.contains('staffing-from')) rule.from = parseFloat(e.target.value);
             else if (e.target.classList.contains('staffing-to')) rule.to = parseFloat(e.target.value);
             else rule.min = Math.max(0, parseInt(e.target.value) || 0);
-            AppState.builderIsDirty = true;
+            setBuilderDirty();
             renderBuilder();
         });
     });
@@ -9292,7 +9422,7 @@ function attachBuilderEventListeners(container) {
             for (let w = 1; w <= cl; w++) {
                 AppState.builderStaffingRulesByWeek[w] = JSON.parse(JSON.stringify(current));
             }
-            AppState.builderIsDirty = true;
+            setBuilderDirty();
             showToast(`Bezettingsregels gekopieerd naar alle ${cl} weken`, 'success');
         });
     }
@@ -9302,7 +9432,7 @@ function attachBuilderEventListeners(container) {
     if (clearAllBtn) {
         clearAllBtn.addEventListener('click', () => {
             AppState.builderStaffingRules = {};
-            AppState.builderIsDirty = true;
+            setBuilderDirty();
             renderBuilder();
         });
     }
@@ -9323,7 +9453,7 @@ function attachBuilderEventListeners(container) {
             if (!AppState.builderMeetings) AppState.builderMeetings = {};
             if (!AppState.builderMeetings[teamId]) AppState.builderMeetings[teamId] = [];
             AppState.builderMeetings[teamId].push({ day: 0, from: 9, to: 11 });
-            AppState.builderIsDirty = true;
+            setBuilderDirty();
             renderBuilder();
         });
     });
@@ -9336,7 +9466,7 @@ function attachBuilderEventListeners(container) {
             if (AppState.builderMeetings?.[teamId]) {
                 AppState.builderMeetings[teamId].splice(idx, 1);
                 if (AppState.builderMeetings[teamId].length === 0) delete AppState.builderMeetings[teamId];
-                AppState.builderIsDirty = true;
+                setBuilderDirty();
                 renderBuilder();
             }
         });
@@ -9353,7 +9483,7 @@ function attachBuilderEventListeners(container) {
             if (e.target.classList.contains('meeting-day')) m.day = parseInt(e.target.value);
             else if (e.target.classList.contains('meeting-from')) m.from = parseFloat(e.target.value);
             else if (e.target.classList.contains('meeting-to')) m.to = parseFloat(e.target.value);
-            AppState.builderIsDirty = true;
+            setBuilderDirty();
             renderBuilder();
         });
     });
