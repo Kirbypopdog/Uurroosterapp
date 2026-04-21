@@ -7547,6 +7547,44 @@ body[data-view-mode="day"] .timeline-day-cell {
         font-size: 14px;
     }
 
+    /* ===== PLANNING CONTROLS OP MOBIEL ===== */
+    /* Verberg de kaart-stijl standaard — zichtbaar zodra filters uitgevouwen zijn */
+    .planning-controls {
+        background: transparent !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        padding: 0 !important;
+        margin-bottom: 8px !important;
+        gap: 0 !important;
+    }
+
+    /* Herstel kaart-stijl wanneer de filterrij zichtbaar is */
+    .planning-controls:has(#planning-filters-row:not(.hidden)) {
+        background: var(--surface-color) !important;
+        box-shadow: var(--shadow-sm) !important;
+        border-radius: var(--radius-lg) !important;
+        padding: 12px 16px !important;
+        margin-bottom: 16px !important;
+        gap: 10px !important;
+    }
+
+    /* Filterrij: verticaal stapelen op mobiel */
+    #planning-filters-row {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 8px !important;
+    }
+
+    #planning-filters-row .planning-filter-buttons {
+        margin-left: 0 !important;
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+    }
+
+    #planning-filters-row #team-toggles {
+        width: 100% !important;
+    }
+
     /* ===== MOBILE DAY VIEW FOR PLANNING ===== */
 
     /* Op kleine schermen: verberg beide weergave-knoppen, alleen dagweergave beschikbaar */
