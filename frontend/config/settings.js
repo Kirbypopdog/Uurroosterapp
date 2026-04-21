@@ -42,9 +42,12 @@ window.DEFAULT_SETTINGS = {
     shiftTemplates: {
         vroeg: { start: '07:30', end: '16:00', name: 'Vroege dienst' },
         laat: { start: '16:00', end: '23:00', name: 'Late dienst' },
-        nacht: { start: '23:00', end: '09:00', name: 'Nachtdienst' },
+        nacht: { start: '18:00', end: '09:00', name: 'Nachtdienst' },
         lang: { start: '09:00', end: '21:00', name: 'Lange dienst' }
     },
+    // Forfait voor nachtdiensten: uren toegevoegd bovenop actieve uren vóór/na slaapvenster (23:00-07:00)
+    // Nacht 18:00-09:00 = 5u actief voor 23:00 + 2u actief na 07:00 + 5u15 forfait = 12u15
+    nachtForfait: 5.25,
     // Teams configuratie
     teams: {
         vlot1: { name: 'Vlot 1 (Begeleiding)', color: '#3b82f6' },
