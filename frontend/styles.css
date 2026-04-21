@@ -7201,6 +7201,18 @@ body[data-view-mode="day"] .timeline-day-cell {
         padding: 2px;
     }
 
+    /* Dropdown op mobiel: fixed positioning zodat overflow-x:hidden op .main-nav het niet knipt */
+    .user-menu-dropdown {
+        position: fixed;
+        top: 52px;
+        right: 8px;
+        left: auto;
+        bottom: auto;
+        z-index: 9000;
+        max-height: calc(100vh - 64px);
+        overflow-y: auto;
+    }
+
     .main-nav {
         max-width: 100vw !important;
         overflow-x: hidden !important;
