@@ -9880,7 +9880,7 @@ function showEditAccountModal(user, teams, onSave) {
                         </div>
                         <div class="form-group flex-1">
                             <label for="edit-user-email">Email</label>
-                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email)}" required />
+                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email || '')}" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen" />
                         </div>
                     </div>
                     <div class="form-row d-flex gap-10">
@@ -9945,18 +9945,13 @@ function showEditAccountModal(user, teams, onSave) {
             showToast('Naam is verplicht', 'warning');
             return;
         }
-        if (!newEmail) {
-            showToast('Email is verplicht', 'warning');
-            return;
-        }
-
         try {
             const emailNotif = form.querySelector('#edit-user-email-notif').checked;
             await apiFetch(`/admin/users/${user.id}`, {
                 method: 'PATCH',
                 body: JSON.stringify({
                     name: newName,
-                    email: newEmail,
+                    email: newEmail || null,
                     role: newRole,
                     team_id: newTeamId,
                     mainTeam: newTeamId,
@@ -11382,7 +11377,8 @@ function closeTemplateModal() {
     if (modal) modal.remove();
 }
 
-function saveTemplate(originalId) {
+
+async function saveTemplate(originalId) {
     const name = document.getElementById('template-name').value.trim();
     const start = document.getElementById('template-start').value;
     const end = document.getElementById('template-end').value;
@@ -11423,7 +11419,14 @@ function saveTemplate(originalId) {
 
     DataStore.settings.shiftTemplates[id] = { name, start, end, icon };
     saveToStorage();
-    try { saveSettings('shiftTemplates', DataStore.settings.shiftTemplates); } catch (e) { console.error('Error saving templates:', e); }
+    try {
+        await saveSettings('shiftTemplates', DataStore.settings.shiftTemplates);
+    } catch (e) {
+        console.error('Error saving templates:', e);
+        showToast('Fout bij opslaan template', 'error');
+        return;
+    }
+
     closeTemplateModal();
     renderSettings();
 }

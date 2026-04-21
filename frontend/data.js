@@ -225,7 +225,9 @@ async function loadDataFromAPI() {
             emailNotifications: apiSettings.email_notifications || DataStore.settings.emailNotifications,
             schoolYearStart: apiSettings.school_year_start || DataStore.settings.schoolYearStart,
             teamMeetings: apiSettings.team_meetings || DataStore.settings.teamMeetings,
-            coverageTeams: apiSettings.coverageTeams || DataStore.settings.coverageTeams
+            coverageTeams: apiSettings.coverageTeams || DataStore.settings.coverageTeams,
+            shiftTemplates: apiSettings.shiftTemplates || DataStore.settings.shiftTemplates,
+            nachtForfait: apiSettings.nachtForfait ?? DataStore.settings.nachtForfait
         });
 
         // Use schedule_drafts from dedicated table if available (overrides settings fallback)
@@ -981,6 +983,32 @@ async function acceptTakeoverRequest(id, responseNotes) {
 
 // ===== SETTINGS FUNCTIES =====
 
+async function refreshSettings() {
+    try {
+        const settingsData = await dataApiFetch('/settings');
+        const apiSettings = settingsData.settings || {};
+        DataStore.settings = normalizeSettings({
+            ...DataStore.settings,
+            ...apiSettings.general,
+            teams: apiSettings.teams || DataStore.settings.teams,
+            rules: apiSettings.rules || DataStore.settings.rules,
+            holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
+            holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
+            responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
+            schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
+            schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern,
+            emailNotifications: apiSettings.email_notifications || DataStore.settings.emailNotifications,
+            schoolYearStart: apiSettings.school_year_start || DataStore.settings.schoolYearStart,
+            teamMeetings: apiSettings.team_meetings || DataStore.settings.teamMeetings,
+            coverageTeams: apiSettings.coverageTeams || DataStore.settings.coverageTeams,
+            shiftTemplates: apiSettings.shiftTemplates || DataStore.settings.shiftTemplates,
+            nachtForfait: apiSettings.nachtForfait ?? DataStore.settings.nachtForfait
+        });
+    } catch (err) {
+        console.error('Fout bij herladen settings:', err);
+    }
+}
+
 async function saveSettings(key, value) {
     try {
         await dataApiFetch(`/settings/${key}`, {
@@ -1033,19 +1061,33 @@ function calculateShiftHours(shift) {
     const start = parseDateTime(shift.date, shift.startTime);
     const end = getShiftEndDateTime(shift);
 
-    const diffMs = end - start;
-    let hours = diffMs / (1000 * 60 * 60);
-
     const sleepStart = parseDateTime(shift.date, '23:00');
     const sleepEnd = parseDateTime(shift.date, '07:00');
     sleepEnd.setDate(sleepEnd.getDate() + 1);
+
+    const [startHours] = shift.startTime.split(':').map(Number);
+    const [endHours] = shift.endTime.split(':').map(Number);
+
+    // Nachtdienst-forfait: dienst overspant slaapvenster (23:00-07:00)
+    // Formule: actieve uren vóór 23u + actieve uren na 07u + forfait
+    if (endHours < startHours && endHours >= 7) {
+        const nachtForfait = (DataStore.settings && DataStore.settings.nachtForfait != null)
+            ? DataStore.settings.nachtForfait
+            : 5.25;
+        const beforeSleep = Math.max(0, (Math.min(end.getTime(), sleepStart.getTime()) - start.getTime()) / (1000 * 60 * 60));
+        const afterSleep = Math.max(0, (end.getTime() - sleepEnd.getTime()) / (1000 * 60 * 60));
+        return beforeSleep + afterSleep + nachtForfait;
+    }
+
+    // Reguliere berekening: totaal minus slaapoverlap
+    const diffMs = end - start;
+    let hours = diffMs / (1000 * 60 * 60);
 
     const overlapStart = Math.max(start.getTime(), sleepStart.getTime());
     const overlapEnd = Math.min(end.getTime(), sleepEnd.getTime());
 
     if (overlapEnd > overlapStart) {
-        const sleepMs = overlapEnd - overlapStart;
-        hours -= sleepMs / (1000 * 60 * 60);
+        hours -= (overlapEnd - overlapStart) / (1000 * 60 * 60);
     }
 
     return Math.max(0, hours);
