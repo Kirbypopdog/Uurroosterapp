@@ -910,7 +910,7 @@ function initDOM() {
     DOM.prevWeekBtn = document.getElementById('prev-week');
     DOM.nextWeekBtn = document.getElementById('next-week');
     DOM.todayBtn = document.getElementById('today-btn');
-    DOM.currentPeriod = document.getElementById('current-period');
+    DOM.currentPeriod = document.getElementById('current-period-text');
     DOM.viewToggleBtns = document.querySelectorAll('.view-toggle-btn');
     DOM.rosterCalendar = document.getElementById('roster-calendar');
     DOM.validationAlerts = document.getElementById('validation-alerts');
@@ -1153,6 +1153,31 @@ function setupEventListeners() {
         }
     });
     DOM.todayBtn.addEventListener('click', jumpToToday);
+
+    // Week-jump date picker: click on period display to open
+    const weekJumpInput = document.getElementById('week-jump-input');
+    const periodContainer = document.getElementById('current-period');
+    if (weekJumpInput && periodContainer) {
+        periodContainer.addEventListener('click', () => {
+            if (AppState.currentWeekStart) {
+                weekJumpInput.value = formatDateYYYYMMDD(AppState.currentWeekStart);
+            }
+            if (weekJumpInput.showPicker) {
+                weekJumpInput.showPicker();
+            } else {
+                weekJumpInput.click();
+            }
+        });
+        weekJumpInput.addEventListener('change', (e) => {
+            const parts = e.target.value.split('-');
+            if (parts.length === 3) {
+                const selected = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+                if (!isNaN(selected.getTime())) {
+                    jumpToDate(selected);
+                }
+            }
+        });
+    }
 
     // Mobile day navigation
     if (DOM.mobilePrevDay) {
@@ -1521,6 +1546,7 @@ function populateUserMenu() {
 function showApp() {
     DOM.loginContainer.classList.add('hidden');
     DOM.appContainer.classList.remove('hidden');
+    IconHelper.init(document.getElementById('current-period'));
     populateUserMenu();
     applyRoleVisibility();
     // Restore saved view from localStorage, or use default

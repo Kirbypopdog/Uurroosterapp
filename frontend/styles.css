@@ -1436,6 +1436,31 @@ textarea:focus-visible {
     text-align: center;
 }
 
+.period-display--clickable {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    border-radius: var(--radius-md);
+    padding: 4px 8px;
+    transition: background 0.15s;
+    position: relative;
+}
+.period-display--clickable:hover {
+    background: var(--bg-color);
+}
+.period-calendar-icon {
+    opacity: 0.45;
+    flex-shrink: 0;
+}
+.week-jump-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 0;
+    height: 0;
+}
+
 /* Mobile day navigation (hidden by default, shown on mobile) */
 .mobile-day-nav {
     display: none;
@@ -7199,6 +7224,18 @@ body[data-view-mode="day"] .timeline-day-cell {
 
     .user-menu-trigger {
         padding: 2px;
+    }
+
+    /* Dropdown op mobiel: fixed positioning zodat overflow-x:hidden op .main-nav het niet knipt */
+    .user-menu-dropdown {
+        position: fixed;
+        top: 52px;
+        right: 8px;
+        left: auto;
+        bottom: auto;
+        z-index: 9000;
+        max-height: calc(100vh - 64px);
+        overflow-y: auto;
     }
 
     .main-nav {

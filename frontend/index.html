@@ -125,7 +125,11 @@
                         <button id="today-btn" class="btn">Vandaag</button>
                         <button id="next-week" class="btn" aria-label="Volgende week"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
                     </div>
-                    <div id="current-period" class="period-display"></div>
+                    <div id="current-period" class="period-display period-display--clickable" title="Klik om naar een datum te springen">
+                        <i data-lucide="calendar" class="lucide-xs period-calendar-icon"></i>
+                        <span id="current-period-text"></span>
+                        <input type="date" id="week-jump-input" class="week-jump-input" aria-label="Spring naar week">
+                    </div>
                     <div class="view-toggle-controls">
                         <button class="view-toggle-btn active" data-mode="week">Week</button>
                         <button class="view-toggle-btn" data-mode="day">Dag</button>
