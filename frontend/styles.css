@@ -7549,13 +7549,12 @@ body[data-view-mode="day"] .timeline-day-cell {
 
     /* ===== MOBILE DAY VIEW FOR PLANNING ===== */
 
-    /* Show mobile day navigation */
-    .mobile-day-nav {
+    /* Dag-modus: toon mobiele dag-navigatie en verberg timeline header */
+    body[data-view-mode="day"] .mobile-day-nav {
         display: flex !important;
     }
 
-    /* Hide the full header - mobile shows day in separate nav */
-    .timeline-header {
+    body[data-view-mode="day"] .timeline-header {
         display: none !important;
     }
 
@@ -7639,16 +7638,30 @@ body[data-view-mode="day"] .timeline-day-cell {
     /* WEEK-MODUS op mobiel: horizontaal scrollbaar zodat alle 7 dagen zichtbaar zijn */
     body[data-view-mode="week"] .calendar-container {
         overflow-x: auto !important;
+        overflow-y: visible !important;
         -webkit-overflow-scrolling: touch !important;
     }
 
     body[data-view-mode="week"] .timeline-view-wrapper {
         min-width: 680px !important;
-        width: max-content !important;
+        width: 680px !important;
+        max-width: none !important;
+        overflow: visible !important;
+    }
+
+    body[data-view-mode="week"] .timeline-view-wrapper > * {
+        min-width: 680px !important;
+        width: 680px !important;
         max-width: none !important;
     }
 
-    body[data-view-mode="week"] .timeline-header,
+    body[data-view-mode="week"] .timeline-header {
+        display: grid !important;
+        grid-template-columns: 80px repeat(7, minmax(80px, 1fr)) !important;
+        min-width: 680px !important;
+        position: static !important;
+    }
+
     body[data-view-mode="week"] .timeline-scale-row,
     body[data-view-mode="week"] .timeline-row {
         grid-template-columns: 80px repeat(7, minmax(80px, 1fr)) !important;
