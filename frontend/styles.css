@@ -7358,20 +7358,17 @@ body[data-view-mode="day"] .timeline-day-cell {
     }
 
     html {
-        overflow: hidden !important;
-        position: fixed !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
         width: 100% !important;
-        height: 100% !important;
     }
 
     body {
         overflow-x: hidden !important;
         overflow-y: auto !important;
         width: 100% !important;
-        height: 100% !important;
         max-width: 100% !important;
-        position: fixed !important;
-        overscroll-behavior: contain !important;
+        overscroll-behavior-x: none !important;
     }
 
     .container, #app-container, .view, main, #planning-view,
@@ -7598,45 +7595,68 @@ body[data-view-mode="day"] .timeline-day-cell {
         min-width: 0 !important;
     }
 
-    /* Hide all day columns by default */
-    .timeline-scale,
-    .timeline-day-cell {
+    /* DAG-MODUS: verberg alle kolommen en toon enkel de geselecteerde dag */
+    body[data-view-mode="day"] .timeline-scale,
+    body[data-view-mode="day"] .timeline-day-cell {
         display: none !important;
     }
 
-    /* Show only the selected day column based on data attribute */
-    .timeline-view-wrapper[data-mobile-day="0"] .timeline-scale:nth-child(2),
-    .timeline-view-wrapper[data-mobile-day="0"] .timeline-day-cell:nth-child(2) {
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="0"] .timeline-scale:nth-child(2),
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="0"] .timeline-day-cell:nth-child(2) {
         display: block !important;
     }
 
-    .timeline-view-wrapper[data-mobile-day="1"] .timeline-scale:nth-child(3),
-    .timeline-view-wrapper[data-mobile-day="1"] .timeline-day-cell:nth-child(3) {
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="1"] .timeline-scale:nth-child(3),
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="1"] .timeline-day-cell:nth-child(3) {
         display: block !important;
     }
 
-    .timeline-view-wrapper[data-mobile-day="2"] .timeline-scale:nth-child(4),
-    .timeline-view-wrapper[data-mobile-day="2"] .timeline-day-cell:nth-child(4) {
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="2"] .timeline-scale:nth-child(4),
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="2"] .timeline-day-cell:nth-child(4) {
         display: block !important;
     }
 
-    .timeline-view-wrapper[data-mobile-day="3"] .timeline-scale:nth-child(5),
-    .timeline-view-wrapper[data-mobile-day="3"] .timeline-day-cell:nth-child(5) {
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="3"] .timeline-scale:nth-child(5),
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="3"] .timeline-day-cell:nth-child(5) {
         display: block !important;
     }
 
-    .timeline-view-wrapper[data-mobile-day="4"] .timeline-scale:nth-child(6),
-    .timeline-view-wrapper[data-mobile-day="4"] .timeline-day-cell:nth-child(6) {
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="4"] .timeline-scale:nth-child(6),
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="4"] .timeline-day-cell:nth-child(6) {
         display: block !important;
     }
 
-    .timeline-view-wrapper[data-mobile-day="5"] .timeline-scale:nth-child(7),
-    .timeline-view-wrapper[data-mobile-day="5"] .timeline-day-cell:nth-child(7) {
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="5"] .timeline-scale:nth-child(7),
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="5"] .timeline-day-cell:nth-child(7) {
         display: block !important;
     }
 
-    .timeline-view-wrapper[data-mobile-day="6"] .timeline-scale:nth-child(8),
-    .timeline-view-wrapper[data-mobile-day="6"] .timeline-day-cell:nth-child(8) {
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="6"] .timeline-scale:nth-child(8),
+    body[data-view-mode="day"] .timeline-view-wrapper[data-mobile-day="6"] .timeline-day-cell:nth-child(8) {
+        display: block !important;
+    }
+
+    /* WEEK-MODUS op mobiel: horizontaal scrollbaar zodat alle 7 dagen zichtbaar zijn */
+    body[data-view-mode="week"] .calendar-container {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
+    body[data-view-mode="week"] .timeline-view-wrapper {
+        min-width: 680px !important;
+        width: max-content !important;
+        max-width: none !important;
+    }
+
+    body[data-view-mode="week"] .timeline-header,
+    body[data-view-mode="week"] .timeline-scale-row,
+    body[data-view-mode="week"] .timeline-row {
+        grid-template-columns: 80px repeat(7, minmax(80px, 1fr)) !important;
+        min-width: 680px !important;
+    }
+
+    body[data-view-mode="week"] .timeline-scale,
+    body[data-view-mode="week"] .timeline-day-cell {
         display: block !important;
     }
 
