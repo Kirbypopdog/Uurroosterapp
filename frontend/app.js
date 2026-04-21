@@ -2084,6 +2084,7 @@ async function switchView(viewName) {
             'Onopgeslagen wijzigingen'
         );
         if (!proceed) return;
+        await unlockScheduleDraft(AppState.builderLoadedDraftId);
         // Reset builder state so returning shows overview
         AppState.builderScreen = 'overview';
         AppState.builderIsDirty = false;
@@ -2099,6 +2100,9 @@ async function switchView(viewName) {
         AppState.builderMeetings = {};
     } else if (AppState.currentView === 'builder' && viewName !== 'builder') {
         stopBuilderAutoSave();
+        await unlockScheduleDraft(AppState.builderLoadedDraftId);
+        AppState.builderLoadedDraftId = null;
+        AppState.builderLoadedDraftName = null;
         // Also reset when leaving builder without unsaved changes
         AppState.builderScreen = 'overview';
         AppState.builderPattern = null;
@@ -7619,6 +7623,11 @@ function renderBuilderActions() {
     `;
 }
 
+function isDraftLockActive(lockedAt) {
+    if (!lockedAt) return false;
+    return (Date.now() - new Date(lockedAt).getTime()) < 30 * 60 * 1000;
+}
+
 function getDraftStatus(draft, newestActiveId) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -7750,10 +7759,11 @@ function renderBuilderDrafts() {
                         ? `<span class="builder-draft-meta">Geldig: ${draft.validFrom ? new Date(draft.validFrom).toLocaleDateString('nl-BE') : '...'} – ${draft.validUntil ? new Date(draft.validUntil).toLocaleDateString('nl-BE') : '...'}</span>`
                         : '';
                     return `
-                        <div class="builder-draft-card${status?.cls === 'active' ? ' draft-active' : status?.cls === 'activatable' ? ' draft-activatable' : ''}" data-draft-id="${escapeHtml(draft.id)}">
+                        <div class="builder-draft-card${status?.cls === 'active' ? ' draft-active' : status?.cls === 'activatable' ? ' draft-activatable' : ''}${isDraftLockActive(draft.lockedAt) && draft.lockedBy !== AppState.currentUser?.id ? ' draft-locked' : ''}" data-draft-id="${escapeHtml(draft.id)}">
                             <div class="builder-draft-info">
                                 <strong>${escapeHtml(draft.name)}</strong>
                                 ${status ? `<span class="builder-draft-badge draft-badge-${status.cls}">${status.label}</span>` : ''}
+                                ${isDraftLockActive(draft.lockedAt) && draft.lockedBy !== AppState.currentUser?.id ? `<span class="builder-draft-badge draft-badge-locked"><i data-lucide="lock" class="lucide-xs"></i> In bewerking door ${escapeHtml(draft.lockedByName || 'iemand')}</span>` : ''}
                                 <span class="builder-draft-meta">${weekLabel} &middot; ${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers</span>
                                 ${dateRange}
                                 <span class="builder-draft-meta">${escapeHtml(draft.createdByName || 'Onbekend')} &middot; ${dateStr}</span>
@@ -8074,6 +8084,7 @@ async function saveBuilderDraft() {
                 cached.updatedByName = AppState.currentUser?.name || 'Onbekend';
             }
             AppState.builderIsDirty = false;
+            await unlockScheduleDraft(AppState.builderLoadedDraftId);
             AppState.builderScreen = 'overview';
             renderBuilder();
             showToast(`Concept "${AppState.builderLoadedDraftName}" bijgewerkt`, 'success');
@@ -8468,19 +8479,30 @@ function showDraftSaveModal() {
     });
 }
 
-function loadBuilderDraft(draftId) {
+async function loadBuilderDraft(draftId) {
     const drafts = DataStore.settings.schedule_drafts || [];
     const draft = drafts.find(d => d.id === draftId);
     if (!draft) return;
 
-    if (AppState.builderIsDirty) {
-        showConfirm('Je hebt onopgeslagen wijzigingen. Wil je doorgaan?').then(confirmed => {
-            if (!confirmed) return;
-            doLoadDraft(draft);
-        });
-    } else {
-        doLoadDraft(draft);
+    // Try to acquire lock
+    const lockResult = await lockScheduleDraft(draftId, false);
+    if (!lockResult.ok && lockResult.status === 423) {
+        const force = await showConfirm(
+            `Dit concept wordt momenteel bewerkt door ${escapeHtml(lockResult.lockedByName || 'iemand anders')}. Wil je het toch openen? De andere bewerker verliest dan zijn vergrendeling.`,
+            'Concept in gebruik'
+        );
+        if (!force) return;
+        await lockScheduleDraft(draftId, true);
     }
+
+    if (AppState.builderIsDirty) {
+        const confirmed = await showConfirm('Je hebt onopgeslagen wijzigingen. Wil je doorgaan?');
+        if (!confirmed) {
+            await unlockScheduleDraft(draftId);
+            return;
+        }
+    }
+    doLoadDraft(draft);
 }
 
 function doLoadDraft(draft) {
@@ -9351,6 +9373,9 @@ function attachBuilderEventListeners(container) {
                 if (!ok) return;
                 stopBuilderAutoSave();
             }
+            await unlockScheduleDraft(AppState.builderLoadedDraftId);
+            AppState.builderLoadedDraftId = null;
+            AppState.builderLoadedDraftName = null;
             AppState.builderScreen = 'overview';
             renderBuilder();
         });

@@ -1732,6 +1732,26 @@ async function deleteScheduleDraft(id) {
     });
 }
 
+async function lockScheduleDraft(id, force = false) {
+    const token = sessionStorage.getItem('hetvlot_token');
+    const response = await fetch(`${window.API_BASE}/schedule-drafts/${id}/lock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ force })
+    });
+    const data = await response.json().catch(() => ({}));
+    return { ok: response.ok, status: response.status, ...data };
+}
+
+async function unlockScheduleDraft(id) {
+    if (!id) return;
+    const token = sessionStorage.getItem('hetvlot_token');
+    await fetch(`${window.API_BASE}/schedule-drafts/${id}/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
+    }).catch(() => {});
+}
+
 async function applyScheduleDraft(draftId, { clearBlocks = true, applyStartDate = null, applyEndDate = null, confirmOverlap = false, confirmOverwrite = null } = {}) {
     return dataApiFetch(`/schedule-drafts/${draftId}/apply`, {
         method: 'POST',
