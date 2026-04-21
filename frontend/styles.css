@@ -7549,8 +7549,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 
     /* ===== MOBILE DAY VIEW FOR PLANNING ===== */
 
-    /* Op kleine schermen: verberg "Week"-knop, alleen dagweergave beschikbaar */
-    .view-toggle-btn[data-mode="week"] {
+    /* Op kleine schermen: verberg beide weergave-knoppen, alleen dagweergave beschikbaar */
+    .view-toggle-controls {
         display: none !important;
     }
 
