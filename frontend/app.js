@@ -7163,7 +7163,7 @@ function renderBuilderEmployeeRow(employee) {
     // Hours
     const hoursClass = totalHours > contractHours ? 'over-hours' : (totalHours < contractHours ? 'under-hours' : 'exact-hours');
     html += `<div class="builder-hours-cell ${hoursClass}">
-        <span class="planned-hours">${totalHours.toFixed(1)}</span>
+        <span class="planned-hours">${+totalHours.toFixed(2)}</span>
         <span class="contract-hours">/ ${contractHours}u</span>
     </div>`;
 
