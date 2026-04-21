@@ -983,6 +983,32 @@ async function acceptTakeoverRequest(id, responseNotes) {
 
 // ===== SETTINGS FUNCTIES =====
 
+async function refreshSettings() {
+    try {
+        const settingsData = await dataApiFetch('/settings');
+        const apiSettings = settingsData.settings || {};
+        DataStore.settings = normalizeSettings({
+            ...DataStore.settings,
+            ...apiSettings.general,
+            teams: apiSettings.teams || DataStore.settings.teams,
+            rules: apiSettings.rules || DataStore.settings.rules,
+            holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
+            holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
+            responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
+            schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
+            schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern,
+            emailNotifications: apiSettings.email_notifications || DataStore.settings.emailNotifications,
+            schoolYearStart: apiSettings.school_year_start || DataStore.settings.schoolYearStart,
+            teamMeetings: apiSettings.team_meetings || DataStore.settings.teamMeetings,
+            coverageTeams: apiSettings.coverageTeams || DataStore.settings.coverageTeams,
+            shiftTemplates: apiSettings.shiftTemplates || DataStore.settings.shiftTemplates,
+            nachtForfait: apiSettings.nachtForfait ?? DataStore.settings.nachtForfait
+        });
+    } catch (err) {
+        console.error('Fout bij herladen settings:', err);
+    }
+}
+
 async function saveSettings(key, value) {
     try {
         await dataApiFetch(`/settings/${key}`, {

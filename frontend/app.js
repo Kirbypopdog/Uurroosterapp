@@ -11377,6 +11377,22 @@ function closeTemplateModal() {
     if (modal) modal.remove();
 }
 
+function updateBuilderAssignmentTimes(oldStart, oldEnd, newStart, newEnd) {
+    const updateGrid = grid => {
+        Object.values(grid).forEach(dayGrid => {
+            Object.values(dayGrid).forEach(a => {
+                if (a.startTime === oldStart && a.endTime === oldEnd) {
+                    a.startTime = newStart;
+                    a.endTime = newEnd;
+                }
+            });
+        });
+    };
+    updateGrid(AppState.builderGrid);
+    Object.values(AppState.builderGridByWeek || {}).forEach(updateGrid);
+    AppState.builderIsDirty = true;
+}
+
 function saveTemplate(originalId) {
     const name = document.getElementById('template-name').value.trim();
     const start = document.getElementById('template-start').value;
@@ -11412,6 +11428,10 @@ function saveTemplate(originalId) {
         id = `${id}_${suffix}`;
     }
 
+    // Capture old times before overwriting (to update builder assignments below)
+    const oldTemplate = originalId ? DataStore.settings.shiftTemplates[originalId] : null;
+    const timesChanged = oldTemplate && (oldTemplate.start !== start || oldTemplate.end !== end);
+
     if (originalId && originalId !== id) {
         delete DataStore.settings.shiftTemplates[originalId];
     }
@@ -11419,6 +11439,13 @@ function saveTemplate(originalId) {
     DataStore.settings.shiftTemplates[id] = { name, start, end, icon };
     saveToStorage();
     try { saveSettings('shiftTemplates', DataStore.settings.shiftTemplates); } catch (e) { console.error('Error saving templates:', e); }
+
+    // Update any builder assignments that still use the old template times
+    if (timesChanged) {
+        updateBuilderAssignmentTimes(oldTemplate.start, oldTemplate.end, start, end);
+        if (AppState.currentView === 'builder') renderBuilder();
+    }
+
     closeTemplateModal();
     renderSettings();
 }
