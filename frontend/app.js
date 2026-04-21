@@ -9880,7 +9880,7 @@ function showEditAccountModal(user, teams, onSave) {
                         </div>
                         <div class="form-group flex-1">
                             <label for="edit-user-email">Email</label>
-                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email)}" required />
+                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email || '')}" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen" />
                         </div>
                     </div>
                     <div class="form-row d-flex gap-10">
@@ -9945,18 +9945,13 @@ function showEditAccountModal(user, teams, onSave) {
             showToast('Naam is verplicht', 'warning');
             return;
         }
-        if (!newEmail) {
-            showToast('Email is verplicht', 'warning');
-            return;
-        }
-
         try {
             const emailNotif = form.querySelector('#edit-user-email-notif').checked;
             await apiFetch(`/admin/users/${user.id}`, {
                 method: 'PATCH',
                 body: JSON.stringify({
                     name: newName,
-                    email: newEmail,
+                    email: newEmail || null,
                     role: newRole,
                     team_id: newTeamId,
                     mainTeam: newTeamId,
