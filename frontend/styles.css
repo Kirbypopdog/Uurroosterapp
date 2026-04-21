@@ -10287,6 +10287,12 @@ body[data-view-mode="day"] .timeline-day-cell {
     color: var(--text-secondary);
     font-style: italic;
 }
+.builder-autosave-status {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-style: italic;
+}
 
 @media (max-width: 768px) {
     .builder-concept-grid {
