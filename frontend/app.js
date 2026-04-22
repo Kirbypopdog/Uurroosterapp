@@ -10428,20 +10428,20 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
 function renderClosedDatesList() {
     const closedDates = DataStore.settings.closedDates || [];
     if (closedDates.length === 0) {
-        return `<p class="empty-state-text" style="color:var(--text-secondary,#64748b);font-size:14px">Geen manueel gesloten datums ingesteld.</p>`;
+        return '<p class="empty-state-text" style="color:var(--text-secondary,#64748b);font-size:14px">Geen manueel gesloten datums ingesteld.</p>';
     }
-    return `<ul class="closed-dates-list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">
-        ${closedDates.map(cd => {
-            const d = parseDateOnly(cd.date);
-            const label = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-            return `<li style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--border-color,#e2e8f0);border-radius:6px;font-size:14px">
-                <span>${IconHelper.html(ICONS.lock,'xs')} <strong>${escapeHtml(label)}</strong>${cd.reason ? ` — ${escapeHtml(cd.reason)}` : ''}</span>
-                <button class="btn btn-sm btn-danger" onclick="handleRemoveClosedDate('${cd.date}')" title="Verwijder">
-                    ${IconHelper.html(ICONS.delete,'xs')}
-                </button>
-            </li>`;
-        }).join('')}
-    </ul>`;
+    const items = closedDates.map(cd => {
+        const d = parseDateOnly(cd.date);
+        const label = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const reasonHtml = cd.reason ? ' — ' + escapeHtml(cd.reason) : '';
+        return `<li style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--border-color,#e2e8f0);border-radius:6px;font-size:14px">
+            <span>${IconHelper.html(ICONS.lock,'xs')} <strong>${escapeHtml(label)}</strong>${reasonHtml}</span>
+            <button class="btn btn-sm btn-danger" onclick="handleRemoveClosedDate('${cd.date}')" title="Verwijder">
+                ${IconHelper.html(ICONS.delete,'xs')}
+            </button>
+        </li>`;
+    }).join('');
+    return `<ul class="closed-dates-list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">${items}</ul>`;
 }
 
 async function openAddClosedDateDialog() {
@@ -10593,6 +10593,9 @@ function renderSettingsPlanning(container) {
         </div>
 
     `;
+}
+
+// ===== SETTINGS TAB: ROOSTER =====
 async function saveSchedulePattern() {
     const cycleLengthInput = document.getElementById('schedule-cycle-length');
     const refDateInput = document.getElementById('schedule-reference-date');
