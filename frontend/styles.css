@@ -2969,6 +2969,72 @@ body[data-view-mode="day"] .timeline-header {
     50% { transform: translateY(-2px); }
 }
 
+/* ===== BELGISCHE FEESTDAGEN ===== */
+.timeline-day-header.feestdag,
+.month-day-header.feestdag {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+}
+
+/* Feestdag wint visueel van vakantieperiode bij overlap */
+.timeline-day-header.holiday.feestdag,
+.month-day-header.holiday.feestdag {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+}
+
+.feestdag-badge {
+    display: inline-block;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+/* ===== MANUEEL GESLOTEN DATUMS ===== */
+.timeline-day-header.manually-closed,
+.month-day-header.manually-closed {
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0.85;
+}
+
+.closed-date-badge {
+    display: inline-block;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+/* Context menu voor dag sluiten/openen */
+.day-context-menu {
+    position: fixed;
+    z-index: 9999;
+    background: var(--bg-card, #fff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    padding: 4px 0;
+    min-width: 180px;
+}
+
+.day-context-menu button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 14px;
+    background: none;
+    border: none;
+    text-align: left;
+    font-size: 14px;
+    color: var(--text-primary, #1e293b);
+    cursor: pointer;
+    border-radius: 0;
+}
+
+.day-context-menu button:hover {
+    background: var(--bg-hover, #f1f5f9);
+}
+
+.day-context-menu button.danger {
+    color: #dc2626;
+}
+
 .timeline-scale-row {
     display: grid;
     grid-template-columns: 140px repeat(7, minmax(0, 1fr));

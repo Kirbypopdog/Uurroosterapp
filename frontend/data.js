@@ -153,7 +153,9 @@ const DataStore = {
     shiftBlocks: [],
     swapRequests: [],
     settings: normalizeSettings(DEFAULT_SETTINGS),
-    _loaded: false
+    _loaded: false,
+    _publicHolidaysCache: {},           // { [year]: [{ date, name }, ...] }
+    _publicHolidaysFetching: new Set()  // years currently being fetched
 };
 
 // ===== API HELPER =====
@@ -217,6 +219,7 @@ async function loadDataFromAPI() {
             rules: apiSettings.rules || DataStore.settings.rules,
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
+            closedDates: apiSettings.closedDates || DataStore.settings.closedDates,
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
             // planningHorizon: legacy, replaced by school year logic
             schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
@@ -237,6 +240,15 @@ async function loadDataFromAPI() {
         }
 
         DataStore._loaded = true;
+
+        // Pre-warm public holiday cache voor dit jaar en aangrenzende jaren
+        const now = new Date();
+        await Promise.all([
+            fetchPublicHolidays(now.getFullYear() - 1),
+            fetchPublicHolidays(now.getFullYear()),
+            fetchPublicHolidays(now.getFullYear() + 1)
+        ]);
+
         console.log('Data geladen van API:', {
             users: DataStore.users.length,
             employees: DataStore.employees.length, // via getter
@@ -994,6 +1006,7 @@ async function refreshSettings() {
             rules: apiSettings.rules || DataStore.settings.rules,
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
+            closedDates: apiSettings.closedDates || DataStore.settings.closedDates,
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
             schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
             schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern,
@@ -1314,6 +1327,8 @@ function getWeekLabel(weekNumber, forDate) {
 }
 
 function isDayClosed(date) {
+    const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
+    if (isDateManuallyClosed(dateStr)) return true;
     const d = parseDateOnly(date);
     const dayOfWeek = d.getDay();
     const weekNumber = getWeekNumber(date);
@@ -1405,6 +1420,69 @@ async function removeHolidayPeriod(id) {
 async function updateHolidayRules(rules) {
     DataStore.settings.holidayRules = { ...DataStore.settings.holidayRules, ...rules };
     await saveHolidaySettings();
+}
+
+// ===== BELGISCHE FEESTDAGEN =====
+
+async function fetchPublicHolidays(year) {
+    if (DataStore._publicHolidaysCache[year]) return DataStore._publicHolidaysCache[year];
+    if (DataStore._publicHolidaysFetching.has(year)) return DataStore._publicHolidaysCache[year] || [];
+    DataStore._publicHolidaysFetching.add(year);
+    try {
+        const response = await fetch(`${window.API_BASE}/public-holidays?year=${year}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        DataStore._publicHolidaysCache[year] = data.holidays || [];
+    } catch (err) {
+        console.error('[fetchPublicHolidays] Fout:', err);
+        DataStore._publicHolidaysCache[year] = [];
+    } finally {
+        DataStore._publicHolidaysFetching.delete(year);
+    }
+    return DataStore._publicHolidaysCache[year];
+}
+
+function isPublicHoliday(date) {
+    const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
+    const year = parseInt(dateStr.slice(0, 4), 10);
+    const cached = DataStore._publicHolidaysCache[year];
+    if (!cached) return false;
+    return cached.some(h => h.date === dateStr);
+}
+
+function getPublicHoliday(date) {
+    const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
+    const year = parseInt(dateStr.slice(0, 4), 10);
+    const cached = DataStore._publicHolidaysCache[year];
+    if (!cached) return null;
+    return cached.find(h => h.date === dateStr) || null;
+}
+
+// ===== MANUEEL GESLOTEN DATUMS =====
+
+function isDateManuallyClosed(date) {
+    const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
+    return (DataStore.settings.closedDates || []).some(d => d.date === dateStr);
+}
+
+function getClosedDateInfo(date) {
+    const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
+    return (DataStore.settings.closedDates || []).find(d => d.date === dateStr) || null;
+}
+
+async function addClosedDate(date, reason = '') {
+    const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
+    if (!DataStore.settings.closedDates) DataStore.settings.closedDates = [];
+    if (DataStore.settings.closedDates.some(d => d.date === dateStr)) return;
+    DataStore.settings.closedDates.push({ date: dateStr, reason });
+    DataStore.settings.closedDates.sort((a, b) => a.date.localeCompare(b.date));
+    await saveSettings('closedDates', DataStore.settings.closedDates);
+}
+
+async function removeClosedDate(date) {
+    const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
+    DataStore.settings.closedDates = (DataStore.settings.closedDates || []).filter(d => d.date !== dateStr);
+    await saveSettings('closedDates', DataStore.settings.closedDates);
 }
 
 // ===== WEEKEND/VAKANTIE VERANTWOORDELIJKE =====

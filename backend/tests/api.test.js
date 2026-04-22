@@ -467,6 +467,7 @@ describe('POST /shifts', () => {
     mockActiveUser();
     const newShift = { id: 10, userId: 5, employeeId: 5, team: null, date: '2026-04-15', startTime: '09:00', endTime: '17:00', notes: '', source: 'manual' };
     pool.query
+      .mockResolvedValueOnce({ rows: [] })         // closedDates check
       .mockResolvedValueOnce({ rows: [newShift] }) // INSERT
       .mockResolvedValueOnce({ rows: [] })         // DELETE shift_blocks
       .mockResolvedValueOnce({ rows: [] });         // logAudit
