@@ -821,25 +821,6 @@ function showSelectPrompt(message, title, options) {
     });
 }
 
-async function apiFetch(path, options = {}) {
-    const headers = { ...(options.headers || {}) };
-    if (AppState.authToken) {
-        headers.Authorization = `Bearer ${AppState.authToken}`;
-    }
-    if (options.body && !headers['Content-Type']) {
-        headers['Content-Type'] = 'application/json';
-    }
-    const response = await fetch(`${API_BASE}${path}`, {
-        ...options,
-        headers
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        const message = data.error || 'Request failed';
-        throw new Error(message);
-    }
-    return data;
-}
 
 async function syncEmployeeAccountLinks() {
     // No longer needed - users and employees are now merged
@@ -1444,7 +1425,7 @@ async function handleLogin(e) {
     AppState.isAuthenticating = true;
 
     try {
-        const data = await apiFetch('/auth/login', {
+        const data = await dataApiFetch('/auth/login', {
             method: 'POST',
             body: JSON.stringify({ email, password })
         });
@@ -1502,7 +1483,7 @@ async function checkSession() {
     }
     AppState.authToken = savedToken;
     try {
-        const data = await apiFetch('/me');
+        const data = await dataApiFetch('/me');
         AppState.currentUser = data.user;
         sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
         // Load data from database
@@ -5146,7 +5127,7 @@ function renderProfile() {
     if (emailToggle) {
         emailToggle.addEventListener('change', async () => {
             try {
-                const data = await apiFetch('/me/email-preferences', {
+                const data = await dataApiFetch('/me/email-preferences', {
                     method: 'PUT',
                     body: JSON.stringify({ emailNotificationsEnabled: emailToggle.checked })
                 });
@@ -5294,7 +5275,7 @@ function openProfileEditModal() {
             submitBtn.textContent = 'Opslaan...';
             const payload = { name, email };
             if (password) payload.password = password;
-            const data = await apiFetch('/me', {
+            const data = await dataApiFetch('/me', {
                 method: 'PUT',
                 body: JSON.stringify(payload)
             });
@@ -8049,9 +8030,7 @@ async function autoSaveBuilderDraft() {
     if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
         updateData.grid._staffingRules = AppState.builderStaffingRulesByWeek;
     }
-    if (Object.keys(AppState.builderMeetings || {}).length > 0) {
-        updateData.grid._teamMeetings = AppState.builderMeetings;
-    }
+    updateData.grid._teamMeetings = AppState.builderMeetings || {};
 
     try {
         await updateScheduleDraft(AppState.builderLoadedDraftId, updateData);
@@ -8106,9 +8085,7 @@ async function saveBuilderDraft() {
                 updateData.grid._staffingRules = AppState.builderStaffingRulesByWeek;
             }
             // Save team meetings in draft
-            if (Object.keys(AppState.builderMeetings || {}).length > 0) {
-                updateData.grid._teamMeetings = AppState.builderMeetings;
-            }
+            updateData.grid._teamMeetings = AppState.builderMeetings || {};
             // Rotation is managed via Settings, not stored in draft
             const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
             if (cached) cached._previousGrid = JSON.parse(JSON.stringify(cached.grid || {}));
@@ -8156,9 +8133,7 @@ async function saveBuilderDraft() {
     if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
         draftGrid._staffingRules = AppState.builderStaffingRulesByWeek;
     }
-    if (Object.keys(AppState.builderMeetings || {}).length > 0) {
-        draftGrid._teamMeetings = AppState.builderMeetings;
-    }
+    draftGrid._teamMeetings = AppState.builderMeetings || {};
     // Rotation is managed via Settings, not stored in draft
     const draftData = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -8227,9 +8202,7 @@ async function saveBuilderDraftAs() {
     if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
         draftGrid._staffingRules = AppState.builderStaffingRulesByWeek;
     }
-    if (Object.keys(AppState.builderMeetings || {}).length > 0) {
-        draftGrid._teamMeetings = AppState.builderMeetings;
-    }
+    draftGrid._teamMeetings = AppState.builderMeetings || {};
     // Rotation is managed via Settings, not stored in draft
     const draftData = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -9592,7 +9565,6 @@ function attachBuilderEventListeners(container) {
             AppState.builderGridByWeek = {};
             AppState.builderStaffingRules = {};
             AppState.builderStaffingRulesByWeek = {};
-            AppState.builderMeetings = {};
             AppState.builderIsDirty = false;
             renderBuilder();
         });
@@ -9872,7 +9844,7 @@ function renderSettingsAccounts(container) {
 async function loadAdminUsers(container) {
     try {
         const teams = await ensureTeamsLoaded();
-        const data = await apiFetch('/admin/users');
+        const data = await dataApiFetch('/admin/users');
         const users = data.users || [];
 
         const teamOptions = ['<option value="">(geen team)</option>']
@@ -10055,7 +10027,7 @@ function showAddUserModal(teams) {
         }
 
         try {
-            const response = await apiFetch('/admin/users', {
+            const response = await dataApiFetch('/admin/users', {
                 method: 'POST',
                 body: JSON.stringify({
                     name,
@@ -10172,7 +10144,7 @@ function showEditAccountModal(user, teams, onSave) {
         }
         try {
             const emailNotif = form.querySelector('#edit-user-email-notif').checked;
-            await apiFetch(`/admin/users/${user.id}`, {
+            await dataApiFetch(`/admin/users/${user.id}`, {
                 method: 'PATCH',
                 body: JSON.stringify({
                     name: newName,
@@ -10209,7 +10181,7 @@ function showEditAccountModal(user, teams, onSave) {
     modal.querySelector('#edit-account-reset-btn').addEventListener('click', async () => {
         if (!await showConfirm('Wachtwoord resetten naar standaard?')) return;
         try {
-            const result = await apiFetch(`/admin/users/${user.id}/reset-password`, {
+            const result = await dataApiFetch(`/admin/users/${user.id}/reset-password`, {
                 method: 'POST'
             });
             const newPw = result.newPassword || '(standaard)';
@@ -10741,7 +10713,7 @@ async function editTeam(teamId) {
 
         // Also update teams DB table (for FK constraints)
         try {
-            await apiFetch(`/teams/${teamId}`, {
+            await dataApiFetch(`/teams/${teamId}`, {
                 method: 'PUT',
                 body: JSON.stringify({ name })
             });
@@ -10780,7 +10752,7 @@ async function deleteTeam(teamId) {
         syncTeamFilters();
 
         try {
-            await apiFetch(`/teams/${teamId}`, { method: 'DELETE' });
+            await dataApiFetch(`/teams/${teamId}`, { method: 'DELETE' });
         } catch (e) {
             console.warn('Teams DB delete skipped:', e.message);
         }
@@ -10829,7 +10801,7 @@ async function openAddTeamModal() {
 
         // Also create in teams DB table (for FK constraints)
         try {
-            await apiFetch('/teams', {
+            await dataApiFetch('/teams', {
                 method: 'POST',
                 body: JSON.stringify({ id: teamId, name, color })
             });
@@ -11401,7 +11373,7 @@ async function exportAuditLog() {
 async function ensureTeamsLoaded() {
     // Try loading from API, merge with settings teams
     try {
-        const data = await apiFetch('/teams');
+        const data = await dataApiFetch('/teams');
         AppState.apiTeams = data.teams || [];
     } catch (e) {
         AppState.apiTeams = AppState.apiTeams || [];
@@ -12801,7 +12773,7 @@ async function runMigration() {
     }
 
     try {
-        const result = await apiFetch('/admin/migrate', { method: 'POST' });
+        const result = await dataApiFetch('/admin/migrate', { method: 'POST' });
         let message = 'Migratie succesvol!\n\n';
 
         if (result.results.migrations.length > 0) {
@@ -12829,7 +12801,7 @@ async function runMigration() {
 
 async function seedTeams() {
     try {
-        const result = await apiFetch('/admin/seed-teams', { method: 'POST' });
+        const result = await dataApiFetch('/admin/seed-teams', { method: 'POST' });
         showToast(`Teams aangemaakt! Nieuw: ${result.created}, Bijgewerkt: ${result.updated}, Totaal: ${result.total}`, 'success');
 
         // Reload data
@@ -12842,7 +12814,7 @@ async function seedTeams() {
 
 async function showDebugInfo() {
     try {
-        const result = await apiFetch('/admin/debug');
+        const result = await dataApiFetch('/admin/debug');
 
         let message = `=== DATABASE DEBUG INFO ===\n\n`;
         message += `TEAMS (${result.teams.length}):\n`;
@@ -13111,7 +13083,7 @@ async function importData(event) {
                 }))
             };
 
-            const result = await apiFetch('/import', {
+            const result = await dataApiFetch('/import', {
                 method: 'POST',
                 body: JSON.stringify(importPayload)
             });

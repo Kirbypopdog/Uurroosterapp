@@ -2998,7 +2998,7 @@ app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
 
 // ===== SETTINGS API =====
 
-app.get('/settings', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+app.get('/settings', requireAuth, async (req, res) => {
   try {
     const result = await pool.query('SELECT key, value FROM settings');
     const settings = {};
