@@ -88,7 +88,7 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 6. **Auto-migratie**: `ensureSchema()` in server.js draait bij elke startup - voeg nieuwe schema changes daar toe
 7. **shift_blocks**: Bij shift delete wordt block aangemaakt (voorkomt auto-regeneratie). Manual shift create verwijdert block.
 8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging
-9. **apiFetch vs dataApiFetch**: Gebruik `dataApiFetch()` uit data.js als standaard — niet beide (zie issue #26)
+9. **Fetch wrapper**: Gebruik uitsluitend `dataApiFetch()` uit `data.js`. `apiFetch()` is verwijderd (issue #26 opgelost). Uitzondering: `fetchPublicHolidays()` gebruikt plain `fetch()` want `/public-holidays` vereist geen auth.
 10. **console.log**: Nooit toevoegen zonder debug-guard — `DEBUG` variabele staat bovenaan app.js en onderdrukt logs in productie automatisch
 11. **Email optioneel**: Accounts kunnen zonder e-mail worden aangemaakt. Welkomstmail wordt automatisch verstuurd zodra een e-mail voor het eerst wordt ingesteld via PATCH /admin/users of PUT /users/:id
 
@@ -215,8 +215,9 @@ Controleer de open issues voor context bij het werken aan deze gebieden:
 
 | Issue | Beschrijving |
 |-------|--------------|
-| #25 | app.js splitsen — 13.100 regels, niet aanraken zonder plan |
-| #26 | Twee fetch-wrappers — gebruik dataApiFetch() (uitzondering: `fetchPublicHolidays` gebruikt plain fetch, want /public-holidays vereist geen auth) |
+| #25 | app.js splitsen — ~13.000 regels, niet aanraken zonder plan |
+| #59 | Basisrooster koppelen aan actief concept (nu: één statisch veld per user) |
+| #60 | Afwezigheid-tab: medewerkers kunnen afwezigheid van teamgenoten invullen (mag niet) |
 
 ## Agent Aanbevelingen
 

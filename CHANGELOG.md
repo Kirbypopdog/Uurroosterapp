@@ -13,9 +13,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 
 ### Gefixt
 - **Settings 403 voor medewerkers**: `GET /settings` was onterecht beperkt tot admin/roosterverantwoordelijke. Medewerkers kregen 403 waardoor team-kleuren en -namen niet laadden en op defaults bleven staan.
+- **Vergadering badges verdwijnen na refresh** (issue #31): Twee samenhangende bugs in de roosterbouwer save-logica:
+  1. Teamfilter-wijziging resette `AppState.builderMeetings = {}` zonder `builderIsDirty = true` te zetten — volgende auto-save schreef lege meetings naar DB.
+  2. Conditionele write (`if Object.keys(...).length > 0`) sloeg `_teamMeetings` over bij lege state, waardoor de bestaande DB-waarde onterecht werd overschreven met een grid zónder meetings-sleutel.
 
 ### Verbeterd
 - **Fetch-wrappers geünificeerd** (issue #26): `apiFetch()` in `app.js` verwijderd, alle 16 aanroepen gemigreerd naar `dataApiFetch()` in `data.js`. Één bron van waarheid voor JWT-token (sessionStorage).
+
+### Technisch
+- `AppState.builderMeetings` wordt niet langer gereset bij teamfilter-wijziging (meetings horen bij draft, niet bij filter).
+- `_teamMeetings` wordt nu altijd geschreven in alle 4 save-paden (auto-save, bestaand concept, nieuw concept, save-as), ook wanneer `{}`.
+- 129 backend tests — geen wijzigingen in backend.
 
 ---
 
