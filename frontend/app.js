@@ -8030,9 +8030,7 @@ async function autoSaveBuilderDraft() {
     if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
         updateData.grid._staffingRules = AppState.builderStaffingRulesByWeek;
     }
-    if (Object.keys(AppState.builderMeetings || {}).length > 0) {
-        updateData.grid._teamMeetings = AppState.builderMeetings;
-    }
+    updateData.grid._teamMeetings = AppState.builderMeetings || {};
 
     try {
         await updateScheduleDraft(AppState.builderLoadedDraftId, updateData);
@@ -8087,9 +8085,7 @@ async function saveBuilderDraft() {
                 updateData.grid._staffingRules = AppState.builderStaffingRulesByWeek;
             }
             // Save team meetings in draft
-            if (Object.keys(AppState.builderMeetings || {}).length > 0) {
-                updateData.grid._teamMeetings = AppState.builderMeetings;
-            }
+            updateData.grid._teamMeetings = AppState.builderMeetings || {};
             // Rotation is managed via Settings, not stored in draft
             const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
             if (cached) cached._previousGrid = JSON.parse(JSON.stringify(cached.grid || {}));
@@ -8137,9 +8133,7 @@ async function saveBuilderDraft() {
     if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
         draftGrid._staffingRules = AppState.builderStaffingRulesByWeek;
     }
-    if (Object.keys(AppState.builderMeetings || {}).length > 0) {
-        draftGrid._teamMeetings = AppState.builderMeetings;
-    }
+    draftGrid._teamMeetings = AppState.builderMeetings || {};
     // Rotation is managed via Settings, not stored in draft
     const draftData = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -8208,9 +8202,7 @@ async function saveBuilderDraftAs() {
     if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
         draftGrid._staffingRules = AppState.builderStaffingRulesByWeek;
     }
-    if (Object.keys(AppState.builderMeetings || {}).length > 0) {
-        draftGrid._teamMeetings = AppState.builderMeetings;
-    }
+    draftGrid._teamMeetings = AppState.builderMeetings || {};
     // Rotation is managed via Settings, not stored in draft
     const draftData = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -9573,7 +9565,6 @@ function attachBuilderEventListeners(container) {
             AppState.builderGridByWeek = {};
             AppState.builderStaffingRules = {};
             AppState.builderStaffingRulesByWeek = {};
-            AppState.builderMeetings = {};
             AppState.builderIsDirty = false;
             renderBuilder();
         });
