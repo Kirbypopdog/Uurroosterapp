@@ -1,6 +1,6 @@
 'use strict';
 
-const { getMonday, formatDateYYYYMMDD, parseLocalDate } = require('../src/utils');
+const { getMonday, formatDateYYYYMMDD, parseLocalDate, getEasterDate, getBelgianPublicHolidays } = require('../src/utils');
 
 // ===== getMonday =====
 
@@ -148,5 +148,102 @@ describe('parseLocalDate', () => {
     expect(d.getFullYear()).toBe(2026);
     expect(d.getMonth()).toBe(11);
     expect(d.getDate()).toBe(31);
+  });
+});
+
+// ===== getEasterDate =====
+
+describe('getEasterDate', () => {
+  test('returns a Date object', () => {
+    expect(getEasterDate(2026)).toBeInstanceOf(Date);
+  });
+
+  test('2024: 31 maart', () => {
+    const d = getEasterDate(2024);
+    expect(d.getFullYear()).toBe(2024);
+    expect(d.getMonth()).toBe(2); // maart = index 2
+    expect(d.getDate()).toBe(31);
+  });
+
+  test('2025: 20 april', () => {
+    const d = getEasterDate(2025);
+    expect(d.getFullYear()).toBe(2025);
+    expect(d.getMonth()).toBe(3); // april = index 3
+    expect(d.getDate()).toBe(20);
+  });
+
+  test('2026: 5 april', () => {
+    const d = getEasterDate(2026);
+    expect(d.getFullYear()).toBe(2026);
+    expect(d.getMonth()).toBe(3);
+    expect(d.getDate()).toBe(5);
+  });
+
+  test('2000: 23 april (Y2K regressie)', () => {
+    const d = getEasterDate(2000);
+    expect(d.getFullYear()).toBe(2000);
+    expect(d.getMonth()).toBe(3);
+    expect(d.getDate()).toBe(23);
+  });
+
+  test('2030: 21 april', () => {
+    const d = getEasterDate(2030);
+    expect(d.getFullYear()).toBe(2030);
+    expect(d.getMonth()).toBe(3);
+    expect(d.getDate()).toBe(21);
+  });
+});
+
+// ===== getBelgianPublicHolidays =====
+
+describe('getBelgianPublicHolidays', () => {
+  test('retourneert precies 10 feestdagen', () => {
+    expect(getBelgianPublicHolidays(2026)).toHaveLength(10);
+    expect(getBelgianPublicHolidays(2025)).toHaveLength(10);
+  });
+
+  test('elk object heeft date (YYYY-MM-DD) en name velden', () => {
+    const holidays = getBelgianPublicHolidays(2026);
+    for (const h of holidays) {
+      expect(h).toHaveProperty('date');
+      expect(h).toHaveProperty('name');
+      expect(h.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(typeof h.name).toBe('string');
+    }
+  });
+
+  test('2026 vaste feestdagen correct', () => {
+    const holidays = getBelgianPublicHolidays(2026);
+    const byDate = Object.fromEntries(holidays.map(h => [h.date, h.name]));
+    expect(byDate['2026-01-01']).toBe('Nieuwjaar');
+    expect(byDate['2026-05-01']).toBe('Dag van de Arbeid');
+    expect(byDate['2026-07-21']).toBe('Nationale Feestdag');
+    expect(byDate['2026-08-15']).toBe('O.L.V. Hemelvaart');
+    expect(byDate['2026-11-01']).toBe('Allerheiligen');
+    expect(byDate['2026-11-11']).toBe('Wapenstilstand');
+    expect(byDate['2026-12-25']).toBe('Kerstmis');
+  });
+
+  test('2026 Pasen-relatieve feestdagen correct (Pasen = 5 april)', () => {
+    const holidays = getBelgianPublicHolidays(2026);
+    const byDate = Object.fromEntries(holidays.map(h => [h.date, h.name]));
+    expect(byDate['2026-04-06']).toBe('Paasmaandag');    // Pasen+1
+    expect(byDate['2026-05-14']).toBe('Hemelvaartsdag'); // Pasen+39
+    expect(byDate['2026-05-25']).toBe('Pinkstermaandag'); // Pasen+50
+  });
+
+  test('geen dubbele datums', () => {
+    const holidays = getBelgianPublicHolidays(2026);
+    const dates = holidays.map(h => h.date);
+    const unique = new Set(dates);
+    expect(unique.size).toBe(dates.length);
+  });
+
+  test('2025 Pasen-relatieve feestdagen correct (Pasen = 20 april)', () => {
+    const holidays = getBelgianPublicHolidays(2025);
+    const byDate = Object.fromEntries(holidays.map(h => [h.date, h.name]));
+    expect(byDate['2025-04-21']).toBe('Paasmaandag');
+    expect(byDate['2025-05-29']).toBe('Hemelvaartsdag');
+    expect(byDate['2025-06-09']).toBe('Pinkstermaandag');
   });
 });

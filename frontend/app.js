@@ -315,7 +315,8 @@ const ICONS = {
     undo: 'undo-2',
     redo: 'redo-2',
     lock: 'lock',
-    meeting: 'users-round'
+    meeting: 'users-round',
+    feestdag: 'calendar-check'
 };
 
 const IconHelper = {
@@ -2458,6 +2459,17 @@ function renderPlanning() {
     if (!AppState.currentWeekStart) {
         setCurrentWeek(new Date());
     }
+
+    // Lazy-fetch public holidays for visible year if not yet cached
+    const visibleDate = AppState.viewMode === 'month' && AppState.currentMonthStart
+        ? AppState.currentMonthStart
+        : AppState.currentWeekStart || new Date();
+    const visibleYear = visibleDate.getFullYear();
+    if (!DataStore._publicHolidaysCache[visibleYear] && !DataStore._publicHolidaysFetching.has(visibleYear)) {
+        fetchPublicHolidays(visibleYear).then(() => renderCalendar());
+        return;
+    }
+
     updatePeriodDisplay();
     updateMobileDayDisplay();
     renderTeamToggles();
@@ -2980,18 +2992,24 @@ function renderTimelineView() {
         const isClosed = isDayClosed(date);
         const isHoliday = isHolidayPeriod(date);
         const holidayInfo = isHoliday ? getHolidayPeriod(date) : null;
+        const feestdag = getPublicHoliday(date);
+        const closedDateInfo = getClosedDateInfo(date);
 
         let headerClass = 'timeline-day-header';
         if (isWeekend) headerClass += ' weekend';
         if (isClosed) headerClass += ' closed';
         if (isHoliday) headerClass += ' holiday';
+        if (feestdag) headerClass += ' feestdag';
+        if (closedDateInfo) headerClass += ' manually-closed';
 
         const holidayLabel = escapeHtml(holidayInfo?.name || 'Vakantie');
         const holidayBadge = isHoliday ? `<span class="holiday-badge" data-tooltip="${holidayLabel}">${IconHelper.html(ICONS.holiday, 'xs')}</span>` : '';
+        const feestdagBadge = feestdag ? `<span class="feestdag-badge" data-tooltip="${escapeHtml(feestdag.name)}">${IconHelper.html(ICONS.feestdag, 'xs')}</span>` : '';
+        const closedBadge = closedDateInfo ? `<span class="closed-date-badge" data-tooltip="${escapeHtml(closedDateInfo.reason || 'Manueel gesloten')}">${IconHelper.html(ICONS.lock, 'xs')}</span>` : '';
 
-        html += `<div class="${headerClass}">
+        html += `<div class="${headerClass}" data-date="${date}">
             <span class="day-name">${dayName}</span>
-            <span class="day-num">${dateNum}${holidayBadge}</span>
+            <span class="day-num">${dateNum}${holidayBadge}${feestdagBadge}${closedBadge}</span>
         </div>`;
     });
     html += '</div>';
@@ -3454,6 +3472,8 @@ function renderMonthView() {
             const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
             const isClosed = isDayClosed(date);
             const isHoliday = isHolidayPeriod(date);
+            const feestdag = getPublicHoliday(date);
+            const closedDateInfo = getClosedDateInfo(date);
 
             // Highlight dates outside current month
             const currentMonth = monthStart.getMonth();
@@ -3463,11 +3483,16 @@ function renderMonthView() {
             if (isWeekend) headerClass += ' weekend';
             if (isClosed) headerClass += ' closed';
             if (isHoliday) headerClass += ' holiday';
+            if (feestdag) headerClass += ' feestdag';
+            if (closedDateInfo) headerClass += ' manually-closed';
             if (!isCurrentMonth) headerClass += ' other-month';
 
-            html += `<div class="${headerClass}">
+            const feestdagBadge = feestdag ? `<span class="feestdag-badge" data-tooltip="${escapeHtml(feestdag.name)}">${IconHelper.html(ICONS.feestdag, 'xs')}</span>` : '';
+            const closedBadge = closedDateInfo ? `<span class="closed-date-badge" data-tooltip="${escapeHtml(closedDateInfo.reason || 'Manueel gesloten')}">${IconHelper.html(ICONS.lock, 'xs')}</span>` : '';
+
+            html += `<div class="${headerClass}" data-date="${date}">
                 <span class="day-name">${dayName}</span>
-                <span class="day-num">${dayNum}</span>
+                <span class="day-num">${dayNum}${feestdagBadge}${closedBadge}</span>
             </div>`;
         });
 
@@ -10400,6 +10425,68 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
 }
 
 // ===== SETTINGS TAB: PLANNING =====
+function renderClosedDatesList() {
+    const closedDates = DataStore.settings.closedDates || [];
+    if (closedDates.length === 0) {
+        return `<p class="empty-state-text" style="color:var(--text-secondary,#64748b);font-size:14px">Geen manueel gesloten datums ingesteld.</p>`;
+    }
+    return `<ul class="closed-dates-list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">
+        ${closedDates.map(cd => {
+            const d = parseDateOnly(cd.date);
+            const label = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+            return `<li style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--border-color,#e2e8f0);border-radius:6px;font-size:14px">
+                <span>${IconHelper.html(ICONS.lock,'xs')} <strong>${escapeHtml(label)}</strong>${cd.reason ? ` — ${escapeHtml(cd.reason)}` : ''}</span>
+                <button class="btn btn-sm btn-danger" onclick="handleRemoveClosedDate('${cd.date}')" title="Verwijder">
+                    ${IconHelper.html(ICONS.delete,'xs')}
+                </button>
+            </li>`;
+        }).join('')}
+    </ul>`;
+}
+
+async function openAddClosedDateDialog() {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `
+        <div style="background:var(--bg-card,#fff);border-radius:12px;padding:24px;min-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+            <div style="font-weight:600;font-size:16px;margin-bottom:16px">Datum toevoegen</div>
+            <div class="form-group">
+                <label style="font-size:14px;font-weight:500">Datum</label>
+                <input type="date" id="_cd-date" class="form-input" style="margin-top:4px;width:100%;box-sizing:border-box">
+            </div>
+            <div class="form-group" style="margin-top:12px">
+                <label style="font-size:14px;font-weight:500">Reden (optioneel)</label>
+                <input type="text" id="_cd-reason" class="form-input" placeholder="bijv. Brugdag" maxlength="80"
+                    style="margin-top:4px;width:100%;box-sizing:border-box">
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+                <button id="_cd-cancel" class="btn btn-secondary">Annuleer</button>
+                <button id="_cd-ok" class="btn btn-primary">Toevoegen</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    const dateInput = overlay.querySelector('#_cd-date');
+    dateInput.focus();
+    overlay.querySelector('#_cd-cancel').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#_cd-ok').addEventListener('click', async () => {
+        const date = dateInput.value;
+        if (!date) { showToast('Kies een datum', 'warning'); return; }
+        const reason = overlay.querySelector('#_cd-reason').value.trim();
+        overlay.remove();
+        await addClosedDate(date, reason);
+        renderPlanning();
+        const listEl = document.getElementById('closed-dates-list');
+        if (listEl) { listEl.innerHTML = renderClosedDatesList(); IconHelper.init(listEl); }
+    });
+}
+
+async function handleRemoveClosedDate(dateStr) {
+    await removeClosedDate(dateStr);
+    renderPlanning();
+    const listEl = document.getElementById('closed-dates-list');
+    if (listEl) { listEl.innerHTML = renderClosedDatesList(); IconHelper.init(listEl); }
+}
+
 function renderSettingsPlanning(container) {
     const rules = DataStore.settings.rules;
 
@@ -10489,10 +10576,23 @@ function renderSettingsPlanning(container) {
             </div>
         </div>
 
-    `;
-}
+        <!-- Manueel gesloten datums -->
+        <div class="settings-card mt-lg" id="settings-closed-dates">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Manueel gesloten datums</h3>
+                    <p class="settings-card-subtitle">Brugdagen en uitzonderlijke sluitingen. Op deze datums kunnen geen nieuwe shifts worden aangemaakt.</p>
+                </div>
+                <div class="settings-card-actions">
+                    <button class="btn btn-sm btn-secondary" onclick="openAddClosedDateDialog()">+ Datum toevoegen</button>
+                </div>
+            </div>
+            <div class="settings-card-body" id="closed-dates-list">
+                ${renderClosedDatesList()}
+            </div>
+        </div>
 
-// ===== SETTINGS TAB: ROOSTER =====
+    `;
 async function saveSchedulePattern() {
     const cycleLengthInput = document.getElementById('schedule-cycle-length');
     const refDateInput = document.getElementById('schedule-reference-date');
@@ -12152,6 +12252,144 @@ function setupSettingsCollapsibles(scope = document) {
     });
 }
 
+// ===== DAG CONTEXT MENU (RECHTSKLIK SLUITEN/OPENEN) =====
+
+(function setupDayContextMenu() {
+    let activeMenu = null;
+
+    function closeDayContextMenu() {
+        if (activeMenu) {
+            activeMenu.remove();
+            activeMenu = null;
+        }
+    }
+
+    function showDayContextMenu(x, y, dateStr) {
+        closeDayContextMenu();
+        const isClosed = isDateManuallyClosed(dateStr);
+        const closedInfo = getClosedDateInfo(dateStr);
+
+        const menu = document.createElement('div');
+        menu.className = 'day-context-menu';
+
+        const d = parseDateOnly(dateStr);
+        const label = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' });
+
+        if (!isClosed) {
+            const closeBtn = document.createElement('button');
+            closeBtn.innerHTML = `${IconHelper.html(ICONS.lock, 'xs')} Dag sluiten`;
+            closeBtn.addEventListener('click', async () => {
+                closeDayContextMenu();
+                const shiftsOnDate = DataStore.shifts.filter(s => s.date === dateStr);
+                if (shiftsOnDate.length > 0) {
+                    const confirmed = await showConfirmDialog(
+                        `Er staan nog ${shiftsOnDate.length} shift(s) gepland op ${label}. Wil je deze ook verwijderen?`,
+                        'Sluiten + shifts verwijderen',
+                        'Sluiten, shifts behouden'
+                    );
+                    if (confirmed === null) return; // Annuleer
+                    if (confirmed === true) {
+                        for (const shift of shiftsOnDate) {
+                            await deleteShift(shift.id, true);
+                        }
+                    }
+                }
+                const reason = await promptReason('Reden (optioneel):');
+                if (reason === null) return; // Annuleer
+                await addClosedDate(dateStr, reason);
+                renderPlanning();
+            });
+            menu.appendChild(closeBtn);
+        } else {
+            const openBtn = document.createElement('button');
+            openBtn.innerHTML = `${IconHelper.html('lock-open', 'xs')} Dag heropenen`;
+            if (closedInfo?.reason) {
+                const reasonEl = document.createElement('div');
+                reasonEl.style.cssText = 'padding: 4px 14px; font-size: 12px; color: var(--text-secondary, #64748b);';
+                reasonEl.textContent = closedInfo.reason;
+                menu.appendChild(reasonEl);
+            }
+            openBtn.addEventListener('click', async () => {
+                closeDayContextMenu();
+                await removeClosedDate(dateStr);
+                renderPlanning();
+            });
+            menu.appendChild(openBtn);
+        }
+
+        document.body.appendChild(menu);
+        activeMenu = menu;
+
+        // Positie corrigeren als menu buiten viewport valt
+        const rect = menu.getBoundingClientRect();
+        const vw = window.innerWidth, vh = window.innerHeight;
+        menu.style.left = (x + rect.width > vw ? vw - rect.width - 8 : x) + 'px';
+        menu.style.top  = (y + rect.height > vh ? vh - rect.height - 8 : y) + 'px';
+    }
+
+    function promptReason(label) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
+            overlay.innerHTML = `
+                <div style="background:var(--bg-card,#fff);border-radius:12px;padding:24px;min-width:300px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+                    <div style="font-weight:600;margin-bottom:12px">Dag sluiten</div>
+                    <label style="font-size:14px;color:var(--text-secondary,#64748b)">${label}</label>
+                    <input id="_reason-input" type="text" placeholder="bijv. Brugdag Hemelvaartsdag" maxlength="80"
+                        style="display:block;width:100%;margin:8px 0 16px;padding:8px 10px;border:1px solid var(--border-color,#e2e8f0);border-radius:6px;font-size:14px;box-sizing:border-box">
+                    <div style="display:flex;gap:8px;justify-content:flex-end">
+                        <button id="_reason-cancel" style="padding:7px 16px;border-radius:6px;border:1px solid var(--border-color,#e2e8f0);background:none;cursor:pointer">Annuleer</button>
+                        <button id="_reason-ok" style="padding:7px 16px;border-radius:6px;background:#3b82f6;color:#fff;border:none;cursor:pointer">Sluiten</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            const input = overlay.querySelector('#_reason-input');
+            input.focus();
+            overlay.querySelector('#_reason-ok').addEventListener('click', () => { overlay.remove(); resolve(input.value.trim()); });
+            overlay.querySelector('#_reason-cancel').addEventListener('click', () => { overlay.remove(); resolve(null); });
+            input.addEventListener('keydown', e => { if (e.key === 'Enter') { overlay.remove(); resolve(input.value.trim()); } });
+        });
+    }
+
+    function showConfirmDialog(message, confirmLabel, altLabel) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
+            overlay.innerHTML = `
+                <div style="background:var(--bg-card,#fff);border-radius:12px;padding:24px;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+                    <div style="margin-bottom:16px;font-size:15px">${escapeHtml(message)}</div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+                        <button id="_conf-cancel" style="padding:7px 14px;border-radius:6px;border:1px solid var(--border-color,#e2e8f0);background:none;cursor:pointer">Annuleer</button>
+                        <button id="_conf-alt" style="padding:7px 14px;border-radius:6px;border:1px solid var(--border-color,#e2e8f0);background:none;cursor:pointer">${escapeHtml(altLabel)}</button>
+                        <button id="_conf-ok" style="padding:7px 14px;border-radius:6px;background:#dc2626;color:#fff;border:none;cursor:pointer">${escapeHtml(confirmLabel)}</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            overlay.querySelector('#_conf-ok').addEventListener('click', () => { overlay.remove(); resolve(true); });
+            overlay.querySelector('#_conf-alt').addEventListener('click', () => { overlay.remove(); resolve(false); });
+            overlay.querySelector('#_conf-cancel').addEventListener('click', () => { overlay.remove(); resolve(null); });
+        });
+    }
+
+    document.addEventListener('contextmenu', (e) => {
+        const header = e.target.closest('.timeline-day-header, .month-day-header');
+        if (!header) { closeDayContextMenu(); return; }
+        if (!hasPermission('MANAGE_SHIFTS')) { closeDayContextMenu(); return; }
+        const dateStr = header.dataset.date;
+        if (!dateStr) return;
+        e.preventDefault();
+        showDayContextMenu(e.clientX, e.clientY, dateStr);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (activeMenu && !activeMenu.contains(e.target)) closeDayContextMenu();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeDayContextMenu();
+    });
+})();
+
 // ===== AFWEZIGHEID MODAL =====
 
 function setupAvailabilityModal() {
@@ -12909,6 +13147,8 @@ window.openAvailabilityModal = openAvailabilityModal;
 window.closeAvailabilityModal = closeAvailabilityModal;
 window.handleAvailabilitySave = handleAvailabilitySave;
 window.handleRemoveAbsence = handleRemoveAbsence;
+window.handleRemoveClosedDate = handleRemoveClosedDate;
+window.openAddClosedDateDialog = openAddClosedDateDialog;
 
 document.addEventListener('DOMContentLoaded', () => {
     init();

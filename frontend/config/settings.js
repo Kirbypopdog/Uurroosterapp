@@ -61,6 +61,8 @@ window.DEFAULT_SETTINGS = {
     coverageTeams: ['vlot1', 'vlot2'],
     // Vakantieperiodes
     holidayPeriods: [],
+    // Manueel gesloten datums (brugdagen, uitzonderingen)
+    closedDates: [],
     // Vakantie regels (Vlot 1 + Vlot 2 worden samengevoegd)
     holidayRules: {
         minStaffingDay: 2,   // Minimum bezetting overdag tijdens vakantie (Vlot 1+2 samen)

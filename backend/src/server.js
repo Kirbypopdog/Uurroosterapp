@@ -51,7 +51,7 @@ app.use(globalLimiter);
 
 // ===== DATE HELPER FUNCTIONS =====
 // Used by apply-schedule endpoint (replicates frontend data.js logic)
-const { getMonday, formatDateYYYYMMDD, parseLocalDate } = require('./utils');
+const { getMonday, formatDateYYYYMMDD, parseLocalDate, getBelgianPublicHolidays } = require('./utils');
 
 // ===== AUTO-MIGRATION ON STARTUP =====
 // Ensures the database schema is up-to-date
@@ -639,6 +639,14 @@ async function logAudit(req, action, resourceType, resourceId, details = {}) {
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', ts: new Date().toISOString() });
+});
+
+app.get('/public-holidays', (req, res) => {
+  const year = parseInt(req.query.year, 10);
+  if (!year || year < 1900 || year > 2100) {
+    return res.status(400).json({ error: 'Geef een geldig jaar op (bijv. ?year=2026)' });
+  }
+  res.json({ year, holidays: getBelgianPublicHolidays(year) });
 });
 
 app.post('/auth/register', requireAuth, requireAdmin, async (req, res) => {
@@ -1503,6 +1511,13 @@ app.post('/shifts', requireAuth, async (req, res) => {
   const shiftSource = source === 'auto' ? 'auto' : 'manual';
 
   try {
+    // Check if the date is manually closed
+    const closedDatesResult = await pool.query("SELECT value FROM settings WHERE key = 'closedDates'");
+    const closedDates = (closedDatesResult.rows[0]?.value || []).map(d => d.date);
+    if (closedDates.includes(date)) {
+      return res.status(400).json({ error: 'Deze dag is manueel gesloten' });
+    }
+
     // Insert the new shift
     const result = await pool.query(`
       INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
@@ -3499,6 +3514,15 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
       const refDate = parseLocalDate(referenceDate);
       const refMonday = getMonday(refDate);
 
+      // Load manually closed dates to skip
+      let closedDatesSet = new Set();
+      try {
+        const cdResult = await client.query(`SELECT value FROM settings WHERE key = 'closedDates'`);
+        closedDatesSet = new Set((cdResult.rows[0]?.value || []).map(d => d.date));
+      } catch (e) {
+        console.log('Warning: could not load closedDates for draft apply:', e.message);
+      }
+
       // For non-vakantie drafts: load active vakantieperiode date ranges to skip
       // (vakantieconcepten mogen wel in vakantieperiodes schrijven, normale niet)
       const vakantieSkipRanges = [];
@@ -3575,6 +3599,9 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
 
           if (occupiedDates.has(dateStr)) continue;
           if (absenceDates.has(dateStr)) continue;
+
+          // Skip manually closed dates
+          if (closedDatesSet.has(dateStr)) continue;
 
           // Skip dates covered by active vakantieconcepten (non-vakantie drafts only)
           if (vakantieSkipRanges.some(r => dateStr >= r.start && dateStr <= r.end)) continue;
