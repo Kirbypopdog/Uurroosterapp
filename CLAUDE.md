@@ -30,13 +30,13 @@ open ../frontend/index.html
 ### Frontend (`frontend/`)
 | Bestand | Regels | Doel |
 |---------|--------|------|
-| `app.js` | ~12.700 | Hoofd UI: modals, event handlers, rendering, admin panel |
-| `data.js` | ~1.755 | DataStore, API fetch wrappers, data loading |
+| `app.js` | ~13.100 | Hoofd UI: modals, event handlers, rendering, admin panel |
+| `data.js` | ~1.840 | DataStore, API fetch wrappers, data loading |
 | `validation.js` | ~593 | Business rules: 11-uur regel, overlap, min bezetting |
 | `drag-handler.js` | ~1.201 | Drag & drop shifts tussen medewerkers |
-| `styles.css` | ~10.800 | Alle CSS inclusief responsive, themas |
+| `styles.css` | ~10.900 | Alle CSS inclusief responsive, themas |
 | `index.html` | ~800 | HTML markup: modals, formulieren, planning grid |
-| `config/settings.js` | ~60 | API URL auto-detect, shift templates, team kleuren |
+| `config/settings.js` | ~62 | API URL auto-detect, shift templates, team kleuren |
 
 ### Backend (`backend/`)
 | Bestand | Doel |
@@ -44,7 +44,7 @@ open ../frontend/index.html
 | `src/server.js` | Alle API endpoints + auto-migratie bij startup |
 | `src/db.js` | PostgreSQL connection pool |
 | `src/email.js` | Resend email service (9 notificatie types) |
-| `src/utils.js` | Pure datumhulpfuncties (`getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`) |
+| `src/utils.js` | Pure datumhulpfuncties (`getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`, `getEasterDate`, `getBelgianPublicHolidays`) |
 | `sql/schema.sql` | Database schema (bron van waarheid) |
 | `scripts/seed.js` | Seed teams + admin account |
 | `scripts/setup-db.js` | Voert schema.sql uit |
@@ -53,7 +53,7 @@ open ../frontend/index.html
 ### Tests (`backend/tests/`)
 | Bestand | Doel |
 |---------|------|
-| `utils.test.js` | Unit tests voor `src/utils.js` (25 tests) |
+| `utils.test.js` | Unit tests voor `src/utils.js` (33 tests) |
 | `email.test.js` | Unit tests voor email helpers: `escapeHtml`, `formatDate`, `formatTime`, `shiftDetailBox`, `baseTemplate` (31 tests) |
 | `api.test.js` | Integratietests voor API-endpoints — auth, shifts, teams, settings, swap-requests (46 tests) |
 | `validation.test.js` | Unit tests voor frontend pure functies in `validation.js` (15 tests) |
@@ -101,13 +101,14 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 
 ### Data
 - `GET /shifts?start=YYYY-MM-DD&end=YYYY-MM-DD` - Shifts ophalen
-- `POST /shifts` - Shift aanmaken
+- `POST /shifts` - Shift aanmaken (valideert ook manueel gesloten datums)
 - `PUT /shifts/:id` - Shift wijzigen
 - `DELETE /shifts/:id` - Shift verwijderen (maakt shift_block aan)
 - `GET /availability?start=&end=` - Beschikbaarheid ophalen
 - `POST /availability` - Beschikbaarheid instellen
 - `GET /settings` - App instellingen
 - `PUT /settings/:key` - Setting opslaan (admin/hoofd)
+- `GET /public-holidays?year=YYYY` - Belgische feestdagen voor een jaar (geen auth)
 
 ### Planning
 - `CRUD /shift-activities` - Activiteiten binnen shifts
@@ -134,6 +135,8 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 - **Modals**: `openShiftModal(shift, canEdit)` - view vs edit mode op basis van permissies
 - **Scroll preservation**: ScrollY wordt bewaard bij planner re-renders
 - **Validation**: `validation.js` draait client-side checks voor shift toewijzingen
+- **Feestdagen**: `DataStore._publicHolidaysCache` — lazy geladen via `fetchPublicHolidays(year)`. Gebruik `getPublicHoliday(date)` voor rendering. Let op: gebruik hier plain `fetch()`, niet `dataApiFetch()` (endpoint vereist geen auth)
+- **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 
 ## Deploy
 
@@ -143,14 +146,14 @@ Zie `DEPLOY.md` voor deployment instructies (Render platform).
 
 ```bash
 cd backend
-npm test           # Alle tests uitvoeren (117 tests, ~3 seconden)
+npm test           # Alle tests uitvoeren (129 tests, ~3 seconden)
 ```
 
 Testbestanden in `backend/tests/`:
 
 | Bestand | Dekking |
 |---------|---------|
-| `utils.test.js` | `getMonday`, `formatDateYYYYMMDD`, `parseLocalDate` |
+| `utils.test.js` | `getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`, `getEasterDate`, `getBelgianPublicHolidays` |
 | `email.test.js` | `escapeHtml`, `formatDate`, `formatTime`, `shiftDetailBox`, `baseTemplate` |
 | `api.test.js` | API-endpoints: auth, shifts, teams, settings, swap-requests |
 | `validation.test.js` | Frontend tijdfuncties: `parseDateTime`, `getShiftEndDateTime`, `getHoursBetweenShifts`, `shiftsOverlap` |
@@ -212,9 +215,8 @@ Controleer de open issues voor context bij het werken aan deze gebieden:
 
 | Issue | Beschrijving |
 |-------|--------------|
-| #25 | app.js splitsen — 12.700 regels, niet aanraken zonder plan |
-| #26 | Twee fetch-wrappers — gebruik dataApiFetch() |
-| #31 | Vergadering badges weg na refresh |
+| #25 | app.js splitsen — 13.100 regels, niet aanraken zonder plan |
+| #26 | Twee fetch-wrappers — gebruik dataApiFetch() (uitzondering: `fetchPublicHolidays` gebruikt plain fetch, want /public-holidays vereist geen auth) |
 
 ## Agent Aanbevelingen
 

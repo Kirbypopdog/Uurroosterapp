@@ -1,4 +1,4 @@
-# Het Vlot Roosterplanning — Features v1.0.1
+# Het Vlot Roosterplanning — Features v1.1.0
 
 ## Rooster & Planning
 
@@ -35,6 +35,15 @@
 - Vakantie-specifieke bezettingsnormen (Vlot 1+2 samengevoegd)
 - Vakantie-concepten apart van reguliere concepten
 - Quick-select knoppen voor Belgische schoolvakanties
+
+### Feestdagen & Sluitingsdagen
+- **Belgische feestdagen** automatisch berekend voor elk jaar (Gregoriaans Computus)
+- Feestdagen rood gemarkeerd in timeline- en maandweergave met tooltip en icoon
+- **Manuele sluitingsdagen**: rechtsklik op dag → "Dag sluiten" met optionele reden
+- Gesloten dagen blokkeren shift aanmaken en drag-drop
+- Bij sluiten dag met bestaande shifts: keuze om shifts mee te verwijderen of te behouden
+- Overzicht en beheer van sluitingsdagen in Instellingen → Planning
+- Basisrooster/concepten slaan manueel gesloten datums automatisch over
 
 ### Shift Templates
 - 4 standaard templates: Vroeg, Laat, Nacht, Lang
@@ -207,7 +216,12 @@
 
 ## Versie Historie
 
-### v1.0.1 — 2026-04-15 (huidige release)
+### v1.1.0 — 2026-04-22 (huidige release)
+- Belgische feestdagen automatisch berekend en visueel gemarkeerd
+- Manuele sluitingsdagen (brugdagen) met rechtsklik-contextmenu
+- Zie CHANGELOG.md voor volledig overzicht
+
+### v1.0.1 — 2026-04-15
 - Stabilisatie-patch: bugfixes, security hardening, email optioneel
 - Zie CHANGELOG.md voor volledig overzicht
 

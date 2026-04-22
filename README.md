@@ -1,4 +1,4 @@
-# Het Vlot Roosterplanning v1.0.1
+# Het Vlot Roosterplanning v1.1.0
 
 Webapplicatie voor shiftplanning bij Het Vlot. Medewerkers bekijken hun rooster, ruilen shifts en melden afwezigheid. Admins en roosterverantwoordelijken beheren het volledige rooster via een visuele builder.
 
@@ -13,6 +13,8 @@ Webapplicatie voor shiftplanning bij Het Vlot. Medewerkers bekijken hun rooster,
 - **Rooster Bouwen** — visuele drag & drop builder voor weekroosters
 - **Concepten (Drafts)** — roosters opslaan, vergelijken en toepassen op datumbereik
 - **Schooljaar-logica** — automatische weeknummering sept-aug, vakantieperiodes
+- **Belgische feestdagen** — automatisch berekend en rood gemarkeerd in de planning (10 officiële feestdagen)
+- **Manuele sluitingsdagen** — brugdagen en uitzonderingen instellen via rechtsklik op de dag
 - **Flexibel roosterpatroon** — configureerbaar: bi-weekly, tri-weekly, etc.
 - **Shift templates** — Vroeg/Laat/Nacht/Lang met custom tijden en iconen
 - **Drag & drop** shifts tussen medewerkers in de planningsweergave
