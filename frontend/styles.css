@@ -10055,6 +10055,16 @@ body[data-view-mode="day"] .timeline-day-cell {
     border-color: #3b82f6 !important;
     box-shadow: 0 0 0 1px #3b82f6;
 }
+.draft-badge-locked {
+    background: #fef3c7;
+    color: #92400e;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+.draft-locked {
+    opacity: 0.75;
+}
 
 /* Builder notification for activatable drafts */
 .builder-notification {

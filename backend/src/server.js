@@ -532,6 +532,15 @@ async function ensureSchema() {
       console.log(`  schedule_drafts vakantie columns: ${e.message}`);
     }
 
+    // Phase 6: Conceptvergrendeling — voorkomt gelijktijdige bewerking
+    try {
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS locked_by INTEGER`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS locked_by_name TEXT`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ`);
+    } catch (e) {
+      console.log(`  schedule_drafts lock columns: ${e.message}`);
+    }
+
     // Make users.email nullable (allow accounts without email address)
     try {
       await client.query(`ALTER TABLE users ALTER COLUMN email DROP NOT NULL`);
@@ -3026,6 +3035,7 @@ app.get('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoor
              valid_from::text as "validFrom", valid_until::text as "validUntil",
              updated_by_name as "updatedByName",
              type, holiday_period_id as "holidayPeriodId",
+             locked_by as "lockedBy", locked_by_name as "lockedByName", locked_at as "lockedAt",
              created_at as "createdAt", updated_at as "updatedAt"
       FROM schedule_drafts
       ORDER BY updated_at DESC
@@ -3072,6 +3082,19 @@ app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverant
   const { name, weekNumber, teamFilter, grid, lastAppliedAt, lastAppliedBy, validFrom, validUntil, type, holidayPeriodId } = req.body;
 
   try {
+    // Check if concept is locked by someone else
+    const lockCheck = await pool.query(
+      'SELECT locked_by, locked_by_name, locked_at FROM schedule_drafts WHERE id = $1',
+      [id]
+    );
+    if (lockCheck.rows.length > 0) {
+      const { locked_by, locked_by_name, locked_at } = lockCheck.rows[0];
+      const lockExpired = !locked_at || (Date.now() - new Date(locked_at).getTime()) > 30 * 60 * 1000;
+      if (locked_by && locked_by !== req.user.id && !lockExpired) {
+        return res.status(423).json({ error: `Concept is vergrendeld door ${locked_by_name}` });
+      }
+    }
+
     const setClauses = ['updated_at = NOW()'];
     const params = [];
     let paramIndex = 1;
@@ -3126,6 +3149,53 @@ app.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterver
     res.json({ ok: true });
   } catch (err) {
     console.error('Error deleting schedule draft:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== LOCK / UNLOCK SCHEDULE DRAFT =====
+const DRAFT_LOCK_TTL_MS = 30 * 60 * 1000; // 30 minuten
+
+app.post('/schedule-drafts/:id/lock', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  const { id } = req.params;
+  const { force = false } = req.body || {};
+  try {
+    const result = await pool.query(
+      'SELECT locked_by, locked_by_name, locked_at FROM schedule_drafts WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Concept niet gevonden' });
+
+    const { locked_by, locked_by_name, locked_at } = result.rows[0];
+    const expired = !locked_at || (Date.now() - new Date(locked_at).getTime()) > DRAFT_LOCK_TTL_MS;
+    const byOther = locked_by && locked_by !== req.user.id && !expired;
+
+    if (byOther && !force) {
+      return res.status(423).json({ error: 'locked', lockedByName: locked_by_name, lockedAt: locked_at });
+    }
+
+    await pool.query(
+      'UPDATE schedule_drafts SET locked_by = $1, locked_by_name = $2, locked_at = NOW() WHERE id = $3',
+      [req.user.id, req.user.name, id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error locking draft:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/schedule-drafts/:id/unlock', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query(
+      `UPDATE schedule_drafts SET locked_by = NULL, locked_by_name = NULL, locked_at = NULL
+       WHERE id = $1 AND (locked_by = $2 OR $3)`,
+      [id, req.user.id, req.user.role === 'admin']
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error unlocking draft:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
