@@ -530,7 +530,7 @@ describe('GET /swap-requests', () => {
   });
 });
 
-// ===== GET /settings (role restricted) =====
+// ===== GET /settings =====
 
 describe('GET /settings', () => {
   test('returns 401 without authentication', async () => {
@@ -538,13 +538,15 @@ describe('GET /settings', () => {
     expect(res.status).toBe(401);
   });
 
-  test('returns 403 for medewerker role', async () => {
+  test('returns settings for medewerker role', async () => {
     mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [] });
     const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'team1' });
     const res = await request(app)
       .get('/settings')
       .set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    expect(res.body.settings).toBeTruthy();
   });
 
   test('returns settings for admin', async () => {
