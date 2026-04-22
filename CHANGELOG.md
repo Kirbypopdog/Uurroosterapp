@@ -9,6 +9,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 
 ---
 
+## [1.1.1] — 2026-04-22
+
+### Gefixt
+- **Settings 403 voor medewerkers**: `GET /settings` was onterecht beperkt tot admin/roosterverantwoordelijke. Medewerkers kregen 403 waardoor team-kleuren en -namen niet laadden en op defaults bleven staan.
+
+### Verbeterd
+- **Fetch-wrappers geünificeerd** (issue #26): `apiFetch()` in `app.js` verwijderd, alle 16 aanroepen gemigreerd naar `dataApiFetch()` in `data.js`. Één bron van waarheid voor JWT-token (sessionStorage).
+
+---
+
 ## [1.1.0] — 2026-04-22
 
 ### Toegevoegd
