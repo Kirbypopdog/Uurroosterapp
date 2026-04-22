@@ -45,12 +45,15 @@ const DragHandler = {
         this._boundMouseMove = this.handleMouseMove.bind(this);
         this._boundMouseUp = this.handleMouseUp.bind(this);
         this._boundKeyDown = this.handleKeyDown.bind(this);
+        this._boundMobileClick = this.handleMobileClick.bind(this);
 
         // Attach event listeners using event delegation
         timeline.addEventListener('mousedown', this._boundMouseDown);
         document.addEventListener('mousemove', this._boundMouseMove);
         document.addEventListener('mouseup', this._boundMouseUp);
         document.addEventListener('keydown', this._boundKeyDown);
+        // Mobile tap handler (mousedown is disabled on mobile, so use click)
+        timeline.addEventListener('click', this._boundMobileClick);
 
         // Store references for cleanup
         this.state.timeline = timeline;
@@ -73,6 +76,7 @@ const DragHandler = {
         if (this._boundMouseMove) document.removeEventListener('mousemove', this._boundMouseMove);
         if (this._boundMouseUp) document.removeEventListener('mouseup', this._boundMouseUp);
         if (this._boundKeyDown) document.removeEventListener('keydown', this._boundKeyDown);
+        if (this._boundMobileClick && timeline) timeline.removeEventListener('click', this._boundMobileClick);
 
         // Reset state
         this.state.initialized = false;
@@ -580,6 +584,21 @@ const DragHandler = {
             showToast(`Fout bij aanpassen shift: ${error.message}`, 'error');
             // Re-sync from server to ensure UI matches DB
             try { await refreshShifts(); renderPlanning(); } catch (_) {}
+        }
+    },
+
+    // Handle tap/click on mobile (mousedown is disabled on ≤767px)
+    handleMobileClick(e) {
+        if (!window.matchMedia('(max-width: 767px)').matches) return;
+
+        const shiftBlock = e.target.closest('.timeline-block');
+        const dayCell = e.target.closest('.timeline-day-cell');
+
+        if (shiftBlock) {
+            const shiftId = parseInt(shiftBlock.dataset.shiftId, 10);
+            if (shiftId) openEditShiftModal(shiftId);
+        } else if (dayCell && !dayCell.classList.contains('closed')) {
+            this.handleCellClick(dayCell);
         }
     },
 
