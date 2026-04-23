@@ -58,7 +58,7 @@ function mockActiveUser() {
 
 describe('GET /health', () => {
   test('returns 200 with status ok', async () => {
-    const res = await request(app).get('/health');
+    const res = await request(app).get('/api/v1/health');
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
     expect(res.body.ts).toBeTruthy();
@@ -69,7 +69,7 @@ describe('GET /health', () => {
 
 describe('requireAuth middleware', () => {
   test('returns 401 when no Authorization header is provided', async () => {
-    const res = await request(app).get('/me');
+    const res = await request(app).get('/api/v1/me');
     expect(res.status).toBe(401);
     expect(res.body.error).toBe('Missing token');
   });
@@ -298,7 +298,7 @@ describe('POST /auth/register', () => {
 
 describe('GET /teams', () => {
   test('returns 401 without authentication', async () => {
-    const res = await request(app).get('/teams');
+    const res = await request(app).get('/api/v1/teams');
     expect(res.status).toBe(401);
   });
 
@@ -325,7 +325,7 @@ describe('GET /teams', () => {
 
 describe('GET /shifts', () => {
   test('returns 401 without authentication', async () => {
-    const res = await request(app).get('/shifts');
+    const res = await request(app).get('/api/v1/shifts');
     expect(res.status).toBe(401);
   });
 
@@ -486,7 +486,7 @@ describe('POST /shifts', () => {
 
 describe('DELETE /shifts/:id', () => {
   test('returns 401 without authentication', async () => {
-    const res = await request(app).delete('/shifts/1');
+    const res = await request(app).delete('/api/v1/shifts/1');
     expect(res.status).toBe(401);
   });
 });
@@ -495,7 +495,7 @@ describe('DELETE /shifts/:id', () => {
 
 describe('GET /availability', () => {
   test('returns 401 without authentication', async () => {
-    const res = await request(app).get('/availability');
+    const res = await request(app).get('/api/v1/availability');
     expect(res.status).toBe(401);
   });
 
@@ -514,7 +514,7 @@ describe('GET /availability', () => {
 
 describe('GET /swap-requests', () => {
   test('returns 401 without authentication', async () => {
-    const res = await request(app).get('/swap-requests');
+    const res = await request(app).get('/api/v1/swap-requests');
     expect(res.status).toBe(401);
   });
 
@@ -534,7 +534,7 @@ describe('GET /swap-requests', () => {
 
 describe('GET /settings', () => {
   test('returns 401 without authentication', async () => {
-    const res = await request(app).get('/settings');
+    const res = await request(app).get('/api/v1/settings');
     expect(res.status).toBe(401);
   });
 

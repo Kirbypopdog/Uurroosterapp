@@ -9,6 +9,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 
 ---
 
+## [1.2.0] — 2026-04-23
+
+### Toegevoegd
+- **API versioning** (issue #28): Alle 63 backend endpoints zijn nu bereikbaar via `/api/v1/<pad>`. Frontend gebruikt automatisch het nieuwe pad via `window.API_BASE` in `config/settings.js`.
+
+### Refactor
+- **app.js opsplitsing** (issue #25): `frontend/app.js` (13.136 regels) vervangen door 14 afzonderlijke modules. Geen ES6 modules of build stap — alle functies blijven globaal, laadvolgorde in `index.html` beheert dependencies.
+
+### Backward-compat
+- Oude routes zonder prefix (bijv. `/shifts`, `/auth/login`) blijven tijdelijk werken via een backward-compat alias. Deze alias wordt verwijderd in v1.3.
+
+### Technisch
+- `server.js`: alle routes verplaatst naar een `express.Router()` gemonteerd op `/api/v1/`. Middleware (helmet, cors, rate limiter) blijft op `app`-niveau.
+- `config/settings.js`: `window.API_BASE` bevat nu `/api/v1` suffix — nul andere frontend-wijzigingen nodig.
+- Alle 8 supertest-aanroepen in `api.test.js` bijgewerkt naar `/api/v1/` paden.
+- Nieuwe frontend-modules: `app-globals.js`, `app-permissions.js`, `app-ui.js`, `app-auth.js`, `app-nav.js`, `app-planner.js`, `app-shifts.js`, `app-swaps.js`, `app-employees.js`, `app-availability.js`, `app-builder.js`, `app-settings.js`, `app-admin.js`, `app-init.js`
+
+---
+
 ## [1.1.1] — 2026-04-22
 
 ### Gefixt

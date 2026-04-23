@@ -637,11 +637,14 @@ async function logAudit(req, action, resourceType, resourceId, details = {}) {
   }
 }
 
-app.get('/health', (req, res) => {
+// ===== API ROUTER =====
+const v1 = express.Router();
+
+v1.get('/health', (req, res) => {
   res.json({ status: 'ok', ts: new Date().toISOString() });
 });
 
-app.get('/public-holidays', (req, res) => {
+v1.get('/public-holidays', (req, res) => {
   const year = parseInt(req.query.year, 10);
   if (!year || year < 1900 || year > 2100) {
     return res.status(400).json({ error: 'Geef een geldig jaar op (bijv. ?year=2026)' });
@@ -649,7 +652,7 @@ app.get('/public-holidays', (req, res) => {
   res.json({ year, holidays: getBelgianPublicHolidays(year) });
 });
 
-app.post('/auth/register', requireAuth, requireAdmin, async (req, res) => {
+v1.post('/auth/register', requireAuth, requireAdmin, async (req, res) => {
   const { name, email, password } = req.body || {};
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Missing fields' });
@@ -691,7 +694,7 @@ const loginLimiter = rateLimit({
   legacyHeaders: false
 });
 
-app.post('/auth/login', loginLimiter, async (req, res) => {
+v1.post('/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
     return res.status(400).json({ error: 'Missing fields' });
@@ -737,7 +740,7 @@ app.post('/auth/login', loginLimiter, async (req, res) => {
 
 // ===== CURRENT USER (ME) API =====
 
-app.get('/me', requireAuth, async (req, res) => {
+v1.get('/me', requireAuth, async (req, res) => {
   try {
     let result;
     try {
@@ -771,7 +774,7 @@ app.get('/me', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/me', requireAuth, async (req, res) => {
+v1.put('/me', requireAuth, async (req, res) => {
   const { name, email, password, mainTeam, contractHours, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
   if (!name || !email) {
     return res.status(400).json({ error: 'Missing fields' });
@@ -821,7 +824,7 @@ app.put('/me', requireAuth, async (req, res) => {
 
 // ===== EMAIL PREFERENCES =====
 
-app.put('/me/email-preferences', requireAuth, async (req, res) => {
+v1.put('/me/email-preferences', requireAuth, async (req, res) => {
   const { emailNotificationsEnabled } = req.body || {};
   if (typeof emailNotificationsEnabled !== 'boolean') {
     return res.status(400).json({ error: 'emailNotificationsEnabled (boolean) is verplicht' });
@@ -841,7 +844,7 @@ app.put('/me/email-preferences', requireAuth, async (req, res) => {
 });
 
 // PUT /me/onboarding-flags - Update onboarding flags (merge)
-app.put('/me/onboarding-flags', requireAuth, async (req, res) => {
+v1.put('/me/onboarding-flags', requireAuth, async (req, res) => {
   const flags = req.body;
   if (!flags || typeof flags !== 'object') {
     return res.status(400).json({ error: 'Body moet een object zijn met flags' });
@@ -861,7 +864,7 @@ app.put('/me/onboarding-flags', requireAuth, async (req, res) => {
 
 // ===== TEAMS API =====
 
-app.get('/teams', requireAuth, async (req, res) => {
+v1.get('/teams', requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT id, name, color FROM teams ORDER BY name'
@@ -873,7 +876,7 @@ app.get('/teams', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/teams', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.post('/teams', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id, name, color } = req.body;
 
   if (!id || !name || !color) {
@@ -901,7 +904,7 @@ app.post('/teams', requireAuth, requireRole('admin', 'roosterverantwoordelijke')
   }
 });
 
-app.put('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.put('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
   const { name, color } = req.body;
 
@@ -931,7 +934,7 @@ app.put('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijk
   }
 });
 
-app.delete('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.delete('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -959,7 +962,7 @@ app.delete('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordel
 // ===== USERS API (replaces employees) =====
 
 // Get all users (with schedule data) - for planning views
-app.get('/users', requireAuth, async (req, res) => {
+v1.get('/users', requireAuth, async (req, res) => {
   try {
     const { role, team_id } = req.user;
 
@@ -996,7 +999,7 @@ app.get('/users', requireAuth, async (req, res) => {
 });
 
 // Get single user
-app.get('/users/:id', requireAuth, async (req, res) => {
+v1.get('/users/:id', requireAuth, async (req, res) => {
   const userId = Number(req.params.id);
   try {
     const result = await pool.query(
@@ -1022,7 +1025,7 @@ app.get('/users/:id', requireAuth, async (req, res) => {
 
 // ===== ADMIN USER MANAGEMENT =====
 
-app.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
+v1.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, name, email, role, team_id,
@@ -1042,7 +1045,7 @@ app.get('/admin/users', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Create new user (with optional schedule data)
-app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
+v1.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
   const { name, email, password, role, team_id, mainTeam, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
   if (!name || !role) {
     return res.status(400).json({ error: 'Naam en rol zijn verplicht' });
@@ -1104,7 +1107,7 @@ app.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Update user (role, team, and schedule data)
-app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+v1.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = Number(req.params.id);
   const { role, team_id, name, email, mainTeam, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules, emailNotificationsEnabled } = req.body || {};
   if (!userId || !role) {
@@ -1177,7 +1180,7 @@ app.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Update user schedule data (for non-admin users who can edit employee profiles)
-app.put('/users/:id', requireAuth, async (req, res) => {
+v1.put('/users/:id', requireAuth, async (req, res) => {
   const userId = Number(req.params.id);
   const { name, email, mainTeam, contractHours, active, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
 
@@ -1281,7 +1284,7 @@ app.put('/users/:id', requireAuth, async (req, res) => {
 });
 
 // Delete user (admin only) — explicit transaction with FOR UPDATE lock
-app.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+v1.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = Number(req.params.id);
   if (!userId) {
     return res.status(400).json({ error: 'ID is verplicht' });
@@ -1311,7 +1314,7 @@ app.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req, res) => {
+v1.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req, res) => {
   const userId = Number(req.params.id);
   if (!userId) {
     return res.status(400).json({ error: 'Missing user id' });
@@ -1337,7 +1340,7 @@ app.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (re
 
 // ===== REPLACE EMPLOYEE =====
 
-app.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) => {
+v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) => {
   const oldUserId = Number(req.params.id);
   const { replacementUserId, transferShiftsFrom } = req.body;
   const newUserId = Number(replacementUserId);
@@ -1471,7 +1474,7 @@ app.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res)
 
 // ===== SHIFTS API =====
 
-app.get('/shifts', requireAuth, async (req, res) => {
+v1.get('/shifts', requireAuth, async (req, res) => {
   const { startDate, endDate } = req.query;
 
   try {
@@ -1495,7 +1498,7 @@ app.get('/shifts', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/shifts', requireAuth, async (req, res) => {
+v1.post('/shifts', requireAuth, async (req, res) => {
   const { userId, team, date, startTime, endTime, notes, source } = req.body || {};
   if (!userId || !date || !startTime || !endTime) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
@@ -1545,7 +1548,7 @@ app.post('/shifts', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/shifts/:id', requireAuth, async (req, res) => {
+v1.put('/shifts/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   const { userId, team, date, startTime, endTime, notes, source } = req.body || {};
   if (!id) {
@@ -1597,7 +1600,7 @@ app.put('/shifts/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/shifts/:id', requireAuth, async (req, res) => {
+v1.delete('/shifts/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   if (!id) {
     return res.status(400).json({ error: 'ID is verplicht' });
@@ -1669,7 +1672,7 @@ app.delete('/shifts/:id', requireAuth, async (req, res) => {
 
 // Bulk delete shifts in date range
 // Only supervisors can do bulk delete
-app.delete('/shifts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.delete('/shifts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { startDate, endDate } = req.query;
   if (!startDate || !endDate) {
     return res.status(400).json({ error: 'startDate en endDate zijn verplicht' });
@@ -1688,7 +1691,7 @@ app.delete('/shifts', requireAuth, requireRole('admin', 'roosterverantwoordelijk
 });
 
 // Bulk create shifts (for schedule builder)
-app.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { shifts: shiftsToCreate, overwriteExisting } = req.body || {};
 
   if (!Array.isArray(shiftsToCreate) || shiftsToCreate.length === 0) {
@@ -1748,7 +1751,7 @@ app.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordel
 
 // ===== SHIFT ACTIVITIES API =====
 
-app.get('/shift-activities', requireAuth, async (req, res) => {
+v1.get('/shift-activities', requireAuth, async (req, res) => {
   const { startDate, endDate } = req.query;
   try {
     let query = `
@@ -1770,7 +1773,7 @@ app.get('/shift-activities', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/shift-activities', requireAuth, async (req, res) => {
+v1.post('/shift-activities', requireAuth, async (req, res) => {
   const { userId, date, startTime, endTime, type, description } = req.body || {};
   if (!userId || !date || !startTime || !endTime || !type) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken (userId, date, startTime, endTime, type)' });
@@ -1798,7 +1801,7 @@ app.post('/shift-activities', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/shift-activities/:id', requireAuth, async (req, res) => {
+v1.put('/shift-activities/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   const { startTime, endTime, type, description } = req.body || {};
 
@@ -1834,7 +1837,7 @@ app.put('/shift-activities/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/shift-activities/:id', requireAuth, async (req, res) => {
+v1.delete('/shift-activities/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
 
   // Permission check: medewerker can only delete own activities
@@ -1861,7 +1864,7 @@ app.delete('/shift-activities/:id', requireAuth, async (req, res) => {
 
 // ===== AVAILABILITY API =====
 
-app.get('/availability', requireAuth, async (req, res) => {
+v1.get('/availability', requireAuth, async (req, res) => {
   const { startDate, endDate, userId } = req.query;
   try {
     let query = `
@@ -1891,7 +1894,7 @@ app.get('/availability', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/availability', requireAuth, async (req, res) => {
+v1.post('/availability', requireAuth, async (req, res) => {
   const { userId, date, type, reason } = req.body || {};
   if (!userId || !date || !type) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
@@ -1921,7 +1924,7 @@ app.post('/availability', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/availability', requireAuth, async (req, res) => {
+v1.delete('/availability', requireAuth, async (req, res) => {
   const { userId, date } = req.query;
   if (!userId || !date) {
     return res.status(400).json({ error: 'userId en date zijn verplicht' });
@@ -1948,7 +1951,7 @@ app.delete('/availability', requireAuth, async (req, res) => {
 
 // ===== AVAILABILITY BULK WITH TAKEOVER (atomic transaction) =====
 
-app.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
+v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
   const { userId, startDate, endDate, type, reason, createTakeoverRequests } = req.body || {};
 
   if (!userId || !startDate || !endDate || !type) {
@@ -2088,7 +2091,7 @@ app.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
 
 // ===== SHIFT BLOCKS API =====
 
-app.get('/shift-blocks', requireAuth, async (req, res) => {
+v1.get('/shift-blocks', requireAuth, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT sb.id, sb.user_id, sb.date::text as date, sb.created_at, sb.created_by, sb.reason, u.name as created_by_name
@@ -2103,7 +2106,7 @@ app.get('/shift-blocks', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/shift-blocks', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.post('/shift-blocks', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const { user_id, date, reason } = req.body;
 
@@ -2130,7 +2133,7 @@ app.post('/shift-blocks', requireAuth, requireRole('admin', 'roosterverantwoorde
 });
 
 // Bulk delete shift blocks by date range (for schedule regeneration)
-app.delete('/shift-blocks/range', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.delete('/shift-blocks/range', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const { startDate, endDate, userId } = req.query;
     if (!startDate || !endDate) {
@@ -2154,7 +2157,7 @@ app.delete('/shift-blocks/range', requireAuth, requireRole('admin', 'roostervera
   }
 });
 
-app.delete('/shift-blocks/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.delete('/shift-blocks/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const blockId = parseInt(req.params.id, 10);
     if (!blockId) {
@@ -2172,7 +2175,7 @@ app.delete('/shift-blocks/:id', requireAuth, requireRole('admin', 'roosterverant
 
 // ===== SWAP REQUESTS API =====
 
-app.get('/swap-requests', requireAuth, async (req, res) => {
+v1.get('/swap-requests', requireAuth, async (req, res) => {
   const { role, team_id, id: currentUserId } = req.user;
 
   try {
@@ -2262,7 +2265,7 @@ app.get('/swap-requests', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/swap-requests', requireAuth, async (req, res) => {
+v1.post('/swap-requests', requireAuth, async (req, res) => {
   const { requesterShiftId, targetShiftId, message } = req.body;
   const currentUserId = req.user.id;
 
@@ -2347,7 +2350,7 @@ app.post('/swap-requests', requireAuth, async (req, res) => {
 });
 
 // Target approval endpoints
-app.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
+v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
   const swapId = req.params.id;
   const { responseNotes } = req.body;
   const { id: currentUserId } = req.user;
@@ -2461,7 +2464,7 @@ app.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
+v1.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
   const swapId = req.params.id;
   const { responseNotes } = req.body;
   const { id: currentUserId } = req.user;
@@ -2543,7 +2546,7 @@ app.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
 });
 
 // Takeover (open shift request) endpoints
-app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
+v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
   const { shiftId, message } = req.body;
   const currentUserId = req.user.id;
   const { role, team_id } = req.user;
@@ -2632,7 +2635,7 @@ app.post('/shift-requests/takeover', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
+v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
   const requestId = req.params.id;
   const { responseNotes } = req.body;
   const { id: currentUserId, team_id: acceptorTeam } = req.user;
@@ -2737,7 +2740,7 @@ app.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => 
 });
 
 // Lead approval endpoints (for future use)
-app.put('/swap-requests/:id/approve', requireAuth, async (req, res) => {
+v1.put('/swap-requests/:id/approve', requireAuth, async (req, res) => {
   const swapId = req.params.id;
   const { responseNotes } = req.body;
   const { role, team_id, id: currentUserId } = req.user;
@@ -2839,7 +2842,7 @@ app.put('/swap-requests/:id/approve', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
+v1.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
   const swapId = req.params.id;
   const { responseNotes } = req.body;
   const { role, team_id, id: currentUserId } = req.user;
@@ -2920,7 +2923,7 @@ app.put('/swap-requests/:id/reject', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
+v1.delete('/swap-requests/:id', requireAuth, async (req, res) => {
   const swapId = req.params.id;
   const currentUserId = req.user.id;
   const { role, team_id } = req.user;
@@ -2998,7 +3001,7 @@ app.delete('/swap-requests/:id', requireAuth, async (req, res) => {
 
 // ===== SETTINGS API =====
 
-app.get('/settings', requireAuth, async (req, res) => {
+v1.get('/settings', requireAuth, async (req, res) => {
   try {
     const result = await pool.query('SELECT key, value FROM settings');
     const settings = {};
@@ -3012,7 +3015,7 @@ app.get('/settings', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/settings/:key', requireAuth, async (req, res) => {
+v1.put('/settings/:key', requireAuth, async (req, res) => {
   const { key } = req.params;
   const { value } = req.body || {};
   if (!key || value === undefined) {
@@ -3040,7 +3043,7 @@ app.put('/settings/:key', requireAuth, async (req, res) => {
 
 // ===== SCHEDULE DRAFTS API =====
 
-app.get('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.get('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, name, week_number as "weekNumber", team_filter as "teamFilter",
@@ -3062,7 +3065,7 @@ app.get('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoor
   }
 });
 
-app.post('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.post('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id, name, weekNumber, teamFilter, grid, validFrom, validUntil, type, holidayPeriodId } = req.body;
   const draftId = id || `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const draftType = type || 'basis';
@@ -3092,7 +3095,7 @@ app.post('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoo
   }
 });
 
-app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
   const { name, weekNumber, teamFilter, grid, lastAppliedAt, lastAppliedBy, validFrom, validUntil, type, holidayPeriodId } = req.body;
 
@@ -3153,7 +3156,7 @@ app.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverant
   }
 });
 
-app.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query('DELETE FROM schedule_drafts WHERE id = $1 RETURNING name', [id]);
@@ -3171,7 +3174,7 @@ app.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterver
 // ===== LOCK / UNLOCK SCHEDULE DRAFT =====
 const DRAFT_LOCK_TTL_MS = 30 * 60 * 1000; // 30 minuten
 
-app.post('/schedule-drafts/:id/lock', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.post('/schedule-drafts/:id/lock', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
   const { force = false } = req.body || {};
   try {
@@ -3200,7 +3203,7 @@ app.post('/schedule-drafts/:id/lock', requireAuth, requireRole('admin', 'rooster
   }
 });
 
-app.post('/schedule-drafts/:id/unlock', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.post('/schedule-drafts/:id/unlock', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
   try {
     await pool.query(
@@ -3217,7 +3220,7 @@ app.post('/schedule-drafts/:id/unlock', requireAuth, requireRole('admin', 'roost
 
 // ===== DEACTIVATE SCHEDULE DRAFT =====
 
-app.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { endDate, deleteManual = false } = req.body || {};
   if (!endDate) return res.status(400).json({ error: 'endDate is vereist' });
 
@@ -3284,7 +3287,7 @@ app.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'r
 
 // ===== APPLY SCHEDULE DRAFT (atomic transaction for all employees) =====
 
-app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const draftId = req.params.id;
   const { clearBlocks = true, applyStartDate = null, applyEndDate = null } = req.body || {};
 
@@ -3813,7 +3816,7 @@ app.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooste
 
 // ===== AUDIT LOG API =====
 
-app.get('/audit-log', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.get('/audit-log', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { page = 1, limit = 50, actorId, action, resourceType, startDate, endDate } = req.query;
   const offset = (Number(page) - 1) * Number(limit);
 
@@ -3846,7 +3849,7 @@ app.get('/audit-log', requireAuth, requireRole('admin', 'roosterverantwoordelijk
 
 // ===== DATA IMPORT API =====
 
-app.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+v1.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { users, shifts, availability, settings } = req.body || {};
   const results = { imported: 0, skipped: 0, errors: [] };
 
@@ -3969,7 +3972,7 @@ app.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke'
 });
 
 // Reset all data (admin only)
-app.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
+v1.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
   const scope = req.query.scope || 'data';
   if (!['data', 'data_users', 'all'].includes(scope)) {
     return res.status(400).json({ error: 'Invalid scope. Use: data, data_users, or all' });
@@ -4028,7 +4031,7 @@ app.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
 // ===== MIGRATION ENDPOINTS =====
 
 // Run the merge-employees migration
-app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
+v1.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
   const results = { migrations: [], fixes: [] };
   const client = await pool.connect();
 
@@ -4209,7 +4212,7 @@ app.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Seed teams endpoint (admin only)
-app.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
+v1.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
   const teams = [
     { id: 'vlot1', name: 'Vlot 1 (Begeleiding)', color: '#3b82f6' },
     { id: 'vlot2', name: 'Vlot 2 (Begeleiding)', color: '#8b5cf6' },
@@ -4240,6 +4243,11 @@ app.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+
+// ===== ROUTER MOUNTS =====
+app.use('/api/v1', v1);
+// Backward-compat: oude routes zonder prefix blijven werken — verwijderen na v1.3
+app.use('/', v1);
 
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {

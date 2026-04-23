@@ -30,7 +30,20 @@ open ../frontend/index.html
 ### Frontend (`frontend/`)
 | Bestand | Regels | Doel |
 |---------|--------|------|
-| `app.js` | ~13.100 | Hoofd UI: modals, event handlers, rendering, admin panel |
+| `app-globals.js` | ~311 | AppState, constanten, UndoManager, DOM object, IconHelper |
+| `app-permissions.js` | ~77 | Rol-checks en permissiefuncties |
+| `app-ui.js` | ~479 | Toast, modals, FocusTrap, tooltips, overlays |
+| `app-auth.js` | ~231 | Login, logout, sessiecheck, rolevisibility |
+| `app-nav.js` | ~890 | Navigatie, switchView, renderHome, week/maand/dag helpers |
+| `app-planner.js` | ~1300 | renderPlanning, timeline, maand, heatmap, validatiemeldingen |
+| `app-shifts.js` | ~1105 | Shift modals, swap modals, shift CRUD, activiteiten |
+| `app-swaps.js` | ~512 | renderSwaps, swap- en overnamekaartenrendering |
+| `app-employees.js` | ~1010 | renderEmployees, profiel, medewerker CRUD, weekrooster |
+| `app-availability.js` | ~640 | renderAvailability, afwezigheidsmodal |
+| `app-builder.js` | ~3065 | Roosterbouwer: grid, concepten, vergaderingen, staffing |
+| `app-settings.js` | ~2697 | renderSettings, alle instellingstabs |
+| `app-admin.js` | ~380 | Export/import, debug, migratie, sanitize |
+| `app-init.js` | ~472 | initDOM, setupEventListeners, init(), DOMContentLoaded entry |
 | `data.js` | ~1.840 | DataStore, API fetch wrappers, data loading |
 | `validation.js` | ~593 | Business rules: 11-uur regel, overlap, min bezetting |
 | `drag-handler.js` | ~1.201 | Drag & drop shifts tussen medewerkers |
@@ -94,39 +107,41 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 
 ## API Endpoints (belangrijk)
 
+Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op root (`/<pad>`) blijft actief t/m v1.3.
+
 ### Auth
-- `POST /auth/login` - Login, retourneert JWT
-- `POST /auth/register` - Account aanmaken
-- `GET /me` - Huidige user info
+- `POST /api/v1/auth/login` - Login, retourneert JWT
+- `POST /api/v1/auth/register` - Account aanmaken
+- `GET /api/v1/me` - Huidige user info
 
 ### Data
-- `GET /shifts?start=YYYY-MM-DD&end=YYYY-MM-DD` - Shifts ophalen
-- `POST /shifts` - Shift aanmaken (valideert ook manueel gesloten datums)
-- `PUT /shifts/:id` - Shift wijzigen
-- `DELETE /shifts/:id` - Shift verwijderen (maakt shift_block aan)
-- `GET /availability?start=&end=` - Beschikbaarheid ophalen
-- `POST /availability` - Beschikbaarheid instellen
-- `GET /settings` - App instellingen
-- `PUT /settings/:key` - Setting opslaan (admin/hoofd)
-- `GET /public-holidays?year=YYYY` - Belgische feestdagen voor een jaar (geen auth)
+- `GET /api/v1/shifts?start=YYYY-MM-DD&end=YYYY-MM-DD` - Shifts ophalen
+- `POST /api/v1/shifts` - Shift aanmaken (valideert ook manueel gesloten datums)
+- `PUT /api/v1/shifts/:id` - Shift wijzigen
+- `DELETE /api/v1/shifts/:id` - Shift verwijderen (maakt shift_block aan)
+- `GET /api/v1/availability?start=&end=` - Beschikbaarheid ophalen
+- `POST /api/v1/availability` - Beschikbaarheid instellen
+- `GET /api/v1/settings` - App instellingen
+- `PUT /api/v1/settings/:key` - Setting opslaan (admin/hoofd)
+- `GET /api/v1/public-holidays?year=YYYY` - Belgische feestdagen voor een jaar (geen auth)
 
 ### Planning
-- `CRUD /shift-activities` - Activiteiten binnen shifts
-- `CRUD /schedule-drafts` - Roosterconcepten
-- `POST /schedule-drafts/:id/apply` - Concept toepassen op datumbereik
-- `POST /users/:id/apply-schedule` - Basisrooster toepassen (atomisch)
-- `POST /availability/sick-with-takeover` - Bulk ziekmelding + auto-takeover
+- `CRUD /api/v1/shift-activities` - Activiteiten binnen shifts
+- `CRUD /api/v1/schedule-drafts` - Roosterconcepten
+- `POST /api/v1/schedule-drafts/:id/apply` - Concept toepassen op datumbereik
+- `POST /api/v1/users/:id/apply-schedule` - Basisrooster toepassen (atomisch)
+- `POST /api/v1/availability/sick-with-takeover` - Bulk ziekmelding + auto-takeover
 
 ### Swap/Takeover
-- `POST /swap-requests` - Ruilverzoek aanmaken
-- `POST /shift-requests/takeover` - Overnameverzoek aanmaken
-- `PUT /swap-requests/:id/approve` - Lead keurt goed
-- `PUT /swap-requests/:id/reject` - Lead wijst af
+- `POST /api/v1/swap-requests` - Ruilverzoek aanmaken
+- `POST /api/v1/shift-requests/takeover` - Overnameverzoek aanmaken
+- `PUT /api/v1/swap-requests/:id/approve` - Lead keurt goed
+- `PUT /api/v1/swap-requests/:id/reject` - Lead wijst af
 
 ### Admin
-- `GET /audit-log` - Audit log met filters en paginatie
-- `POST /admin/users/:id/replace` - Medewerker vervangen
-- `PUT /me/email-preferences` - Email notificatie voorkeur
+- `GET /api/v1/audit-log` - Audit log met filters en paginatie
+- `POST /api/v1/admin/users/:id/replace` - Medewerker vervangen
+- `PUT /api/v1/me/email-preferences` - Email notificatie voorkeur
 
 ## Frontend Patronen
 
@@ -192,7 +207,7 @@ gh issue create --repo Kirbypopdog/Uurroosterapp \
 | Milestone | Focus |
 |-----------|-------|
 | v1.1 — Stabilisatie | Bugs fixen, UI stabiliseren, geen nieuwe features |
-| v1.2 — Refactor | app.js opsplitsen, tech debt, email config |
+| v1.2 — Refactor | app.js opsplitsen ✓, tech debt, email config |
 | v1.3 — Features | Overuren, seizoenen, setup wizard |
 
 ### Labels
@@ -215,7 +230,6 @@ Controleer de open issues voor context bij het werken aan deze gebieden:
 
 | Issue | Beschrijving |
 |-------|--------------|
-| #25 | app.js splitsen — ~13.000 regels, niet aanraken zonder plan |
 | #59 | Basisrooster koppelen aan actief concept (nu: één statisch veld per user) |
 | #60 | Afwezigheid-tab: medewerkers kunnen afwezigheid van teamgenoten invullen (mag niet) |
 
