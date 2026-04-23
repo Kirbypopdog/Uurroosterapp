@@ -9,6 +9,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 
 ---
 
+## [1.3.2] — 2026-04-23
+
+### Refactor
+- **Inline styles fase 3** (issue #39): Resterende statische inline styles in `app-builder.js`, `app-shifts.js` en `app-nav.js` gemigreerd naar CSS klassen. Dynamische waarden (berekende posities, teamkleuren, progress percentages) blijven inline — dat is de verwachte uitzondering.
+
+---
+
 ## [1.3.1] — 2026-04-23
 
 ### Toegevoegd

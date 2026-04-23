@@ -344,7 +344,7 @@ function renderHomeRequests(user, role) {
             `;
         });
         if (pendingRequests.length > 5) {
-            requestsHtml += `<div class="home-card-empty" style="padding:8px 0">+ ${pendingRequests.length - 5} meer...</div>`;
+            requestsHtml += `<div class="home-card-empty home-card-more">+ ${pendingRequests.length - 5} meer...</div>`;
         }
         requestsHtml += '</div>';
     }
