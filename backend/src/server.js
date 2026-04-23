@@ -548,6 +548,13 @@ async function ensureSchema() {
       // Already nullable or constraint doesn't exist
     }
 
+    // Normalize existing emails to lowercase (idempotent one-time migration)
+    try {
+      await client.query(`UPDATE users SET email = LOWER(email) WHERE email IS NOT NULL AND email != LOWER(email)`);
+    } catch (e) {
+      console.log(`  email lowercase migration: ${e.message}`);
+    }
+
     // Phase 4: school_year_start setting (default: 1 sept current school year)
     try {
       const syResult = await client.query(`SELECT 1 FROM settings WHERE key = 'school_year_start'`);
@@ -710,15 +717,15 @@ v1.post('/auth/login', loginLimiter, async (req, res) => {
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"
-         FROM users WHERE email = $1`,
-        [email.toLowerCase()]
+         FROM users WHERE LOWER(email) = LOWER($1)`,
+        [email.trim()]
       );
     } catch (schemaErr) {
       // Fallback to old schema (before migration)
       console.log('Using old schema for login (migration not yet run)');
       result = await pool.query(
-        'SELECT id, name, email, password_hash, role, team_id FROM users WHERE email = $1',
-        [email.toLowerCase()]
+        'SELECT id, name, email, password_hash, role, team_id FROM users WHERE LOWER(email) = LOWER($1)',
+        [email.trim()]
       );
     }
     const user = result.rows[0];
@@ -1214,7 +1221,7 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
                    week_schedule_week1 as "weekScheduleWeek1",
                    week_schedule_week2 as "weekScheduleWeek2",
                    week_schedules as "weekSchedules"`,
-        [name, email || null, userId]
+        [name, email ? email.trim().toLowerCase() : null, userId]
       );
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Gebruiker niet gevonden' });
@@ -1261,7 +1268,7 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"`,
-      [name, email || null, mainTeam || null, contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
+      [name, email ? email.trim().toLowerCase() : null, mainTeam || null, contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
     );
 
     if (result.rows.length === 0) {
@@ -3554,46 +3561,66 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
         }
       }
 
-      for (const emp of allEmployeesResult.rows) {
-        // Skip employees not in the draft grid — don't touch their shifts or blocks
-        const empInDraft = Object.values(gridByWeek).some(weekGrid =>
+      const startStr = formatDateYYYYMMDD(rangeStart);
+      const endStr = formatDateYYYYMMDD(rangeEnd);
+
+      // Split employees: in draft vs not in draft
+      const empsInDraft = allEmployeesResult.rows.filter(emp =>
+        Object.values(gridByWeek).some(weekGrid =>
           weekGrid && (weekGrid[String(emp.id)] || weekGrid[emp.id])
-        );
-        if (!empInDraft) continue;
+        )
+      );
+      const empsNotInDraft = allEmployeesResult.rows.filter(emp =>
+        !Object.values(gridByWeek).some(weekGrid =>
+          weekGrid && (weekGrid[String(emp.id)] || weekGrid[emp.id])
+        )
+      );
 
-        const startStr = formatDateYYYYMMDD(rangeStart);
-        const endStr = formatDateYYYYMMDD(rangeEnd);
-
-        // Delete shifts in range (excluding vakantie period dates for non-vakantie drafts)
-        // confirmOverwrite: true = delete all shifts (incl manual), false/null = only auto shifts
+      // ===== BULK DELETE: employees IN draft =====
+      if (empsInDraft.length > 0) {
+        const empIds = empsInDraft.map(e => e.id);
         const sourceFilter = effectiveConfirmOverwrite === true ? '' : ` AND source = 'auto'`;
-        let deleteQuery = `DELETE FROM shifts WHERE user_id = $1${sourceFilter} AND date >= $2::date AND date <= $3::date`;
-        const deleteParams = [emp.id, startStr, endStr];
+        let bulkDeleteQuery = `DELETE FROM shifts WHERE user_id = ANY($1::int[])${sourceFilter} AND date >= $2::date AND date <= $3::date`;
+        const bulkDeleteParams = [empIds, startStr, endStr];
         if (vakantieSkipRanges.length > 0) {
-          vakantieSkipRanges.forEach((r, i) => {
-            deleteQuery += ` AND NOT (date >= $${deleteParams.length + 1}::date AND date <= $${deleteParams.length + 2}::date)`;
-            deleteParams.push(r.start, r.end);
+          vakantieSkipRanges.forEach((r) => {
+            bulkDeleteQuery += ` AND NOT (date >= $${bulkDeleteParams.length + 1}::date AND date <= $${bulkDeleteParams.length + 2}::date)`;
+            bulkDeleteParams.push(r.start, r.end);
           });
         }
-        const deleteResult = await client.query(deleteQuery, deleteParams);
-        const deletedCount = deleteResult.rowCount;
+        const bulkDeleteResult = await client.query(bulkDeleteQuery, bulkDeleteParams);
+        totalDeleted += bulkDeleteResult.rowCount;
+      }
 
-        // Fetch skip-sets: manual shifts, absences, remaining blocks
-        const existingShifts = await client.query(
-          `SELECT date::text as date FROM shifts WHERE user_id = $1 AND date >= $2::date AND date <= $3::date`,
-          [emp.id, startStr, endStr]
+      // ===== BULK SELECT: occupied dates and absences for employees IN draft =====
+      const occupiedByEmp = {};
+      const absencesByEmp = {};
+      if (empsInDraft.length > 0) {
+        const empIds = empsInDraft.map(e => e.id);
+        const occupiedResult = await client.query(
+          `SELECT user_id, date::text as date FROM shifts WHERE user_id = ANY($1::int[]) AND date >= $2::date AND date <= $3::date`,
+          [empIds, startStr, endStr]
         );
-        const occupiedDates = new Set(existingShifts.rows.map(r => r.date));
-
-        const absences = await client.query(
-          `SELECT date::text as date FROM availability WHERE user_id = $1 AND date >= $2::date AND date <= $3::date AND type IS NOT NULL AND type != ''`,
-          [emp.id, startStr, endStr]
+        for (const row of occupiedResult.rows) {
+          if (!occupiedByEmp[row.user_id]) occupiedByEmp[row.user_id] = new Set();
+          occupiedByEmp[row.user_id].add(row.date);
+        }
+        const absencesResult = await client.query(
+          `SELECT user_id, date::text as date FROM availability WHERE user_id = ANY($1::int[]) AND date >= $2::date AND date <= $3::date AND type IS NOT NULL AND type != ''`,
+          [empIds, startStr, endStr]
         );
-        const absenceDates = new Set(absences.rows.map(r => r.date));
+        for (const row of absencesResult.rows) {
+          if (!absencesByEmp[row.user_id]) absencesByEmp[row.user_id] = new Set();
+          absencesByEmp[row.user_id].add(row.date);
+        }
+      }
 
-        // Generate shifts day-by-day from the DRAFT GRID
+      // ===== COMPUTE SHIFTS TO INSERT (pure JS, no DB calls) =====
+      const insertRows = [];
+      for (const emp of empsInDraft) {
+        const occupiedDates = occupiedByEmp[emp.id] || new Set();
+        const absenceDates = absencesByEmp[emp.id] || new Set();
         let createdCount = 0;
-        const datesWithNewShift = new Set();
 
         for (let d = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
              d <= rangeEnd;
@@ -3602,11 +3629,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
           if (occupiedDates.has(dateStr)) continue;
           if (absenceDates.has(dateStr)) continue;
-
-          // Skip manually closed dates
           if (closedDatesSet.has(dateStr)) continue;
-
-          // Skip dates covered by active vakantieconcepten (non-vakantie drafts only)
           if (vakantieSkipRanges.some(r => dateStr >= r.start && dateStr <= r.end)) continue;
 
           // Calculate cycle week number for this date
@@ -3616,18 +3639,11 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           const mod = diffWeeks % cycleLength;
           const weekNumber = (mod < 0 ? mod + cycleLength : mod) + 1;
 
-          // Look up this employee's entry in the draft grid for this cycle week
           const weekGrid = gridByWeek[weekNumber];
-          if (!weekGrid) {
-            // Draft doesn't have data for this cycle week → no shift, will get blocked below
-            continue;
-          }
+          if (!weekGrid) continue;
 
           const empGrid = weekGrid[String(emp.id)] || weekGrid[emp.id];
-          if (!empGrid) {
-            // Employee not in draft grid for this week → no shift, will get blocked below
-            continue;
-          }
+          if (!empGrid) continue;
 
           // Map JS dayOfWeek (0=Sun) to grid dayIndex (0=Mon..6=Sun)
           const jsDow = d.getDay();
@@ -3635,49 +3651,49 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           const assignment = empGrid[String(dayIndex)] || empGrid[dayIndex];
           if (!assignment) continue;
 
-          // Create shift from draft grid
-          await client.query(
-            `INSERT INTO shifts (user_id, date, start_time, end_time, team, source) VALUES ($1, $2, $3, $4, $5, 'auto')`,
-            [emp.id, dateStr, assignment.startTime, assignment.endTime, assignment.team || emp.mainTeam]
-          );
+          insertRows.push({
+            userId: emp.id,
+            date: dateStr,
+            startTime: assignment.startTime,
+            endTime: assignment.endTime,
+            team: assignment.team || emp.mainTeam
+          });
           createdCount++;
-          datesWithNewShift.add(dateStr);
         }
 
-        if (deletedCount > 0 || createdCount > 0) {
+        if (createdCount > 0) {
           appliedCount++;
           totalCreated += createdCount;
-          totalDeleted += deletedCount;
         }
       }
 
-      // Employees NOT in grid: delete their auto-shifts + create blocks
-      // Applies to ALL date-range drafts (not just vakantie) — if employee has no
-      // entry in the concept, their shifts should be cleared for this period.
-      const startStrClean = formatDateYYYYMMDD(rangeStart);
-      const endStrClean = formatDateYYYYMMDD(rangeEnd);
-
-      for (const emp of allEmployeesResult.rows) {
-        const empInDraft = Object.values(gridByWeek).some(weekGrid =>
-          weekGrid && (weekGrid[String(emp.id)] || weekGrid[emp.id])
+      // ===== BULK INSERT: alle shifts in één query =====
+      if (insertRows.length > 0) {
+        const values = insertRows.map((_, i) =>
+          `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, 'auto')`
+        ).join(', ');
+        const params = insertRows.flatMap(r => [r.userId, r.date, r.startTime, r.endTime, r.team]);
+        await client.query(
+          `INSERT INTO shifts (user_id, date, start_time, end_time, team, source) VALUES ${values}`,
+          params
         );
-        if (empInDraft) continue; // Already handled above
+      }
 
-        // Delete auto-shifts in range (excluding vakantie period dates)
-        let delQuery = `DELETE FROM shifts WHERE user_id = $1 AND source = 'auto' AND date >= $2::date AND date <= $3::date`;
-        const delParams = [emp.id, startStrClean, endStrClean];
+      // ===== BULK DELETE: employees NOT in draft (auto-shifts only) =====
+      // If an employee has no entry in the concept, clear their auto-shifts for this period.
+      if (empsNotInDraft.length > 0) {
+        const empIdsNotInDraft = empsNotInDraft.map(e => e.id);
+        let delNotInDraftQuery = `DELETE FROM shifts WHERE user_id = ANY($1::int[]) AND source = 'auto' AND date >= $2::date AND date <= $3::date`;
+        const delNotInDraftParams = [empIdsNotInDraft, startStr, endStr];
         if (vakantieSkipRanges.length > 0) {
           vakantieSkipRanges.forEach((r) => {
-            delQuery += ` AND NOT (date >= $${delParams.length + 1}::date AND date <= $${delParams.length + 2}::date)`;
-            delParams.push(r.start, r.end);
+            delNotInDraftQuery += ` AND NOT (date >= $${delNotInDraftParams.length + 1}::date AND date <= $${delNotInDraftParams.length + 2}::date)`;
+            delNotInDraftParams.push(r.start, r.end);
           });
         }
-        const delResult = await client.query(delQuery, delParams);
-        totalDeleted += delResult.rowCount;
-
-        // shift_blocks niet meer nodig — geen achtergrondregeneratie meer
-
-        if (delResult.rowCount > 0) appliedCount++;
+        const delNotInDraftResult = await client.query(delNotInDraftQuery, delNotInDraftParams);
+        totalDeleted += delNotInDraftResult.rowCount;
+        if (delNotInDraftResult.rowCount > 0) appliedCount++;
       }
 
     }

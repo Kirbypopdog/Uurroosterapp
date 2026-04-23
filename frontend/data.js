@@ -1891,5 +1891,50 @@ async function saveSchoolYearStart(date) {
     });
 }
 
+function getActiveBasisDraft() {
+    const today = formatDateYYYYMMDD(new Date());
+    const drafts = DataStore.settings.schedule_drafts || [];
+    return drafts.find(d =>
+        d.type !== 'vakantie' &&
+        d.lastAppliedFrom && d.lastAppliedUntil &&
+        d.lastAppliedFrom <= today &&
+        d.lastAppliedUntil >= today
+    ) || null;
+}
+
+function getWeekScheduleFromDraft(employee, weekNumber, draft) {
+    if (!draft || !draft.grid) return null;
+    const grid = draft.grid;
+    const isMultiWeek = !!grid._multiWeek;
+
+    let empGrid;
+    if (isMultiWeek) {
+        const weekGrid = grid[String(weekNumber)];
+        empGrid = weekGrid ? (weekGrid[String(employee.id)] || weekGrid[employee.id]) : null;
+    } else {
+        if (weekNumber !== 1) return null;
+        empGrid = grid[String(employee.id)] || grid[employee.id];
+    }
+
+    if (!empGrid) return null;
+
+    // Grid dayIndex 0=ma..6=zo → JS dayOfWeek 0=zo..6=za
+    const entries = [];
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const assignment = empGrid[String(dayIndex)] || empGrid[dayIndex];
+        if (assignment) {
+            const jsDayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
+            entries.push({
+                dayOfWeek: jsDayOfWeek,
+                enabled: true,
+                startTime: assignment.startTime,
+                endTime: assignment.endTime,
+                team: assignment.team
+            });
+        }
+    }
+    return entries.length > 0 ? entries : null;
+}
+
 // ===== INITIALISATIE =====
 // Data wordt geladen via loadDataFromAPI() na login in app.js

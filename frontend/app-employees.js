@@ -220,6 +220,7 @@ function renderProfile() {
             <div class="settings-card">
                 <div class="settings-card-header">
                     <h3><span class="settings-icon">${IconHelper.html(ICONS.calendar, 'md')}</span> Vast werkrooster</h3>
+                    <span id="profile-schedule-source" class="badge badge-info hidden" style="font-size:12px;"></span>
                 </div>
                 <div class="settings-card-body">
                     <div class="profile-week-toggle" id="profile-week-tabs">
@@ -503,11 +504,26 @@ function loadProfileWeekSchedule() {
     const empId = user.id || user.userId || user.employeeId;
     const emp = DataStore.users.find(u => u.id === empId) || user;
 
+    const activeDraft = getActiveBasisDraft();
     const cycleLen = getCycleLength();
+    let loadedFromDraft = false;
+
     for (let w = 1; w <= cycleLen; w++) {
-        const schedule = getEmployeeWeekSchedule(emp, w);
+        const draftSchedule = activeDraft ? getWeekScheduleFromDraft(emp, w, activeDraft) : null;
+        const schedule = draftSchedule || getEmployeeWeekSchedule(emp, w);
+        if (draftSchedule) loadedFromDraft = true;
         if (schedule && schedule.length > 0) {
             loadProfileWeekScheduleData(w, schedule);
+        }
+    }
+
+    const badge = document.getElementById('profile-schedule-source');
+    if (badge) {
+        if (loadedFromDraft && activeDraft) {
+            badge.textContent = `Actief concept: ${activeDraft.name}`;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
         }
     }
 }

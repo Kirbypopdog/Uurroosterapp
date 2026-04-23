@@ -6255,6 +6255,17 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-weight: 500;
 }
 
+.availability-cell-content.readonly-cell {
+    cursor: default;
+    pointer-events: none;
+    opacity: 0.85;
+}
+
+.availability-cell-content.readonly-cell:hover {
+    background: inherit;
+    border-color: inherit;
+}
+
 .availability-cell-content .status-label {
     font-size: 11px;
     font-weight: 600;

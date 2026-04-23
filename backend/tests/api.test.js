@@ -561,3 +561,81 @@ describe('GET /settings', () => {
   });
 });
 
+// ===== POST /schedule-drafts/:id/apply =====
+
+describe('POST /api/v1/schedule-drafts/:id/apply', () => {
+  test('returns 401 without authentication', async () => {
+    const res = await request(app).post('/api/v1/schedule-drafts/1/apply');
+    expect(res.status).toBe(401);
+  });
+
+  test('returns 403 for medewerker role', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'team1' });
+    const res = await request(app)
+      .post('/api/v1/schedule-drafts/1/apply')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ startDate: '2026-05-05', endDate: '2026-05-11' });
+    expect(res.status).toBe(403);
+  });
+
+  test('applies draft and creates shifts via bulk insert', async () => {
+    // All 7 days assigned — guarantees at least one shift regardless of weekday
+    const empId = 42;
+    const dayAssignment = { startTime: '08:00', endTime: '16:00', team: 'vlot1' };
+    const draftGrid = {
+      [String(empId)]: { '0': dayAssignment, '1': dayAssignment, '2': dayAssignment, '3': dayAssignment, '4': dayAssignment, '5': dayAssignment, '6': dayAssignment },
+      _pattern: { cycleLength: 1, referenceDate: '2026-05-04' }
+    };
+    const draft = {
+      id: 1, name: 'Testconcept', type: 'basis', team_filter: null,
+      week_number: 1, valid_from: null, valid_until: null, holiday_period_id: null,
+      grid: draftGrid
+    };
+    const employee = {
+      id: empId, name: 'Jan', email: 'jan@test.be', mainTeam: 'vlot1',
+      extraTeams: [], contractHours: 38, active: true,
+      weekSchedules: null, weekScheduleWeek1: null, weekScheduleWeek2: null
+    };
+
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+
+    // Transaction query sequence (in order of execution):
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                    // BEGIN
+      .mockResolvedValueOnce({ rows: [draft] })               // draft lookup FOR UPDATE
+      .mockResolvedValueOnce({ rows: [] })                    // overlap check
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })        // manual shifts count (step 2b)
+      .mockResolvedValueOnce({ rows: [employee] })            // employees
+      .mockResolvedValueOnce({ rows: [] })                    // closedDates
+      .mockResolvedValueOnce({ rows: [] })                    // vakantie skip ranges
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })       // bulk DELETE in-draft
+      .mockResolvedValueOnce({ rows: [] })                    // bulk SELECT occupied shifts
+      .mockResolvedValueOnce({ rows: [] })                    // bulk SELECT absences
+      .mockResolvedValueOnce({ rows: [], rowCount: 7 })       // bulk INSERT shifts (7 days)
+      .mockResolvedValueOnce({ rows: [] })                    // week_schedules UPDATE
+      .mockResolvedValueOnce({ rows: [] })                    // draft UPDATE (last_applied_at)
+      .mockResolvedValueOnce({ rows: [] });                   // COMMIT
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/api/v1/schedule-drafts/1/apply')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ applyStartDate: '2026-05-04', applyEndDate: '2026-05-10' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.draftName).toBe('Testconcept');
+    expect(typeof res.body.applied).toBe('number');
+    expect(typeof res.body.shifts).toBe('object');
+
+    // Verify one bulk INSERT was used (not per-row individual inserts)
+    const insertCalls = mockClient.query.mock.calls.filter(
+      call => typeof call[0] === 'string' && call[0].includes('INSERT INTO shifts')
+    );
+    expect(insertCalls).toHaveLength(1);
+    expect(insertCalls[0][0]).toMatch(/VALUES \(\$1/); // bulk VALUES syntax
+  });
+});
+
