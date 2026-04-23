@@ -9,6 +9,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 
 ---
 
+## [1.3.1] — 2026-04-23
+
+### Toegevoegd
+- **Email configuratie UI** (issue #37): Nieuw kaartje in de e-mailinstellingen toont of Resend correct is geconfigureerd (API-sleutel aanwezig), het afzendadres en een knop om een testmail te sturen naar het admin-account. Endpoint `GET /admin/email-status` en `POST /admin/test-email` toegevoegd.
+
+### Verbeterd
+- **Save-patroon consistentie** (issue #36): Instellingstabs tonen nu een *"● Niet opgeslagen"* badge naast de opslaan-knop zolang er niet-opgeslagen wijzigingen zijn. Teamkleur opslaan toont een succestoast na bewaren.
+- **Inline styles → CSS-klassen** (issue #39): 43 resterende inline stijlen in `app-settings.js` en `app-employees.js` vervangen door CSS-klassen (`settings-dirty-indicator`, `quick-dialog`, `contract-hours-input`, `closed-dates-list`, `closed-date-item`, `migration-zone`, e.a.).
+
+### Gefixt
+- **11-uur check over weekgrens** (issue #43): `getShiftEndDateTime()` vergeleek alleen het uur van de eindtijd met dat van de starttijd. Bij een zelfde uur maar vroeger minuut (bijv. 22:30 → 22:00) werd het einduur foutief op dezelfde dag gezet. Nu wordt de volledige datum+tijd vergeleken (`endDT < startDT`).
+
+---
+
 ## [1.3.0] — 2026-04-23
 
 ### Toegevoegd
