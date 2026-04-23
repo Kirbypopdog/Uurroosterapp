@@ -9,6 +9,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 
 ---
 
+## [1.3.0] — 2026-04-23
+
+### Refactor
+- **app.js opsplitsing** (issue #25): `frontend/app.js` (13.136 regels) vervangen door 14 afzonderlijke modules. Geen ES6 modules of build stap — alle functies blijven globaal, laadvolgorde in `index.html` beheert dependencies.
+
+### Nieuwe bestanden
+| Bestand | Doel |
+|---------|------|
+| `app-globals.js` | AppState, constanten, UndoManager, DOM object, IconHelper |
+| `app-permissions.js` | Rol-checks en permissiefuncties |
+| `app-ui.js` | Toast, modals, FocusTrap, tooltips, overlays |
+| `app-auth.js` | Login, logout, sessiecheck, rolevisibility |
+| `app-nav.js` | Navigatie, switchView, renderHome, week/maand/dag helpers |
+| `app-planner.js` | renderPlanning, timeline, maand, heatmap, validatiemeldingen |
+| `app-shifts.js` | Shift modals, swap modals, shift CRUD, activiteiten |
+| `app-swaps.js` | renderSwaps, swap- en overnamekaartenrendering |
+| `app-employees.js` | renderEmployees, profiel, medewerker CRUD, weekrooster |
+| `app-availability.js` | renderAvailability, afwezigheidsmodal |
+| `app-builder.js` | Roosterbouwer: grid, concepten, vergaderingen, staffing |
+| `app-settings.js` | renderSettings, alle instellingstabs |
+| `app-admin.js` | Export/import, debug, migratie, sanitize |
+| `app-init.js` | initDOM, setupEventListeners, init(), DOMContentLoaded entry |
+
+---
+
 ## [1.2.0] — 2026-04-23
 
 ### Toegevoegd

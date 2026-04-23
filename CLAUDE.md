@@ -30,7 +30,20 @@ open ../frontend/index.html
 ### Frontend (`frontend/`)
 | Bestand | Regels | Doel |
 |---------|--------|------|
-| `app.js` | ~13.100 | Hoofd UI: modals, event handlers, rendering, admin panel |
+| `app-globals.js` | ~311 | AppState, constanten, UndoManager, DOM object, IconHelper |
+| `app-permissions.js` | ~77 | Rol-checks en permissiefuncties |
+| `app-ui.js` | ~479 | Toast, modals, FocusTrap, tooltips, overlays |
+| `app-auth.js` | ~231 | Login, logout, sessiecheck, rolevisibility |
+| `app-nav.js` | ~890 | Navigatie, switchView, renderHome, week/maand/dag helpers |
+| `app-planner.js` | ~1300 | renderPlanning, timeline, maand, heatmap, validatiemeldingen |
+| `app-shifts.js` | ~1105 | Shift modals, swap modals, shift CRUD, activiteiten |
+| `app-swaps.js` | ~512 | renderSwaps, swap- en overnamekaartenrendering |
+| `app-employees.js` | ~1010 | renderEmployees, profiel, medewerker CRUD, weekrooster |
+| `app-availability.js` | ~640 | renderAvailability, afwezigheidsmodal |
+| `app-builder.js` | ~3065 | Roosterbouwer: grid, concepten, vergaderingen, staffing |
+| `app-settings.js` | ~2697 | renderSettings, alle instellingstabs |
+| `app-admin.js` | ~380 | Export/import, debug, migratie, sanitize |
+| `app-init.js` | ~472 | initDOM, setupEventListeners, init(), DOMContentLoaded entry |
 | `data.js` | ~1.840 | DataStore, API fetch wrappers, data loading |
 | `validation.js` | ~593 | Business rules: 11-uur regel, overlap, min bezetting |
 | `drag-handler.js` | ~1.201 | Drag & drop shifts tussen medewerkers |
@@ -194,7 +207,7 @@ gh issue create --repo Kirbypopdog/Uurroosterapp \
 | Milestone | Focus |
 |-----------|-------|
 | v1.1 — Stabilisatie | Bugs fixen, UI stabiliseren, geen nieuwe features |
-| v1.2 — Refactor | app.js opsplitsen, tech debt, email config |
+| v1.2 — Refactor | app.js opsplitsen ✓, tech debt, email config |
 | v1.3 — Features | Overuren, seizoenen, setup wizard |
 
 ### Labels
@@ -217,7 +230,6 @@ Controleer de open issues voor context bij het werken aan deze gebieden:
 
 | Issue | Beschrijving |
 |-------|--------------|
-| #25 | app.js splitsen — ~13.000 regels, niet aanraken zonder plan |
 | #59 | Basisrooster koppelen aan actief concept (nu: één statisch veld per user) |
 | #60 | Afwezigheid-tab: medewerkers kunnen afwezigheid van teamgenoten invullen (mag niet) |
 
