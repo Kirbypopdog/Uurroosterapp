@@ -1332,7 +1332,7 @@ function renderSettingsSystem(container) {
                 <div class="app-info">
                     <div class="app-logo">Het Vlot</div>
                     <p class="app-subtitle">Roosterplanning Applicatie</p>
-                    <div class="app-version">Versie 1.2.0</div>
+                    <div class="app-version">Versie 1.3.0</div>
                     <p class="app-description">
                         Een planning tool voor Het Vlot om diensten, medewerkers en beschikbaarheid te beheren.
                     </p>

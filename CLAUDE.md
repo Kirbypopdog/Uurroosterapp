@@ -230,8 +230,7 @@ Controleer de open issues voor context bij het werken aan deze gebieden:
 
 | Issue | Beschrijving |
 |-------|--------------|
-| #59 | Basisrooster koppelen aan actief concept (nu: één statisch veld per user) |
-| #60 | Afwezigheid-tab: medewerkers kunnen afwezigheid van teamgenoten invullen (mag niet) |
+| — | Geen kritieke of hoge-prioriteit problemen open |
 
 ## Agent Aanbevelingen
 

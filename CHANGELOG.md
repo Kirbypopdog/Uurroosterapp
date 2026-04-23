@@ -9,6 +9,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 
 ---
 
+## [1.3.0] — 2026-04-23
+
+### Toegevoegd
+- **Basisrooster profiel gekoppeld aan actief concept** (issue #59): Het profiel leest het basisrooster nu uit het actieve basisconcept (`lastAppliedFrom ≤ vandaag ≤ lastAppliedUntil`) in plaats van het statische `week_schedules`-veld. Bij een actief concept toont een badge de naam van het concept. Vakantieconcepten worden genegeerd. Fallback naar `week_schedules` als er geen actief concept is.
+
+### Gefixt
+- **Afwezigheid-tab permissie** (issue #60): Medewerkers konden afwezigheid van teamgenoten invullen. Cellen van andere medewerkers zijn nu niet klikbaar en gestyled als `readonly-cell`. Backend-check bestond al.
+- **Email hoofdlettergevoeligheid**: Login, accountbeheer en profielbewerking behandelden e-mailadressen als hoofdlettergevoelig. E-mailadressen worden nu altijd als kleine letters opgeslagen en vergeleken. Bestaande hoofdlettervarianten worden genormaliseerd bij de eerstvolgende serverstart via een idempotente migratie.
+
+### Performance
+- **N+1 query in `applyDraft` opgelost** (issue #27): Het toepassen van een concept deed voorheen ~260 DB-queries (DELETE + 2× SELECT + INSERT per medewerker). Nu 4 queries ongeacht het aantal medewerkers: bulk DELETE, bulk SELECT shifts, bulk SELECT afwezigheid, bulk INSERT.
+
+---
+
 ## [1.2.0] — 2026-04-23
 
 ### Toegevoegd
