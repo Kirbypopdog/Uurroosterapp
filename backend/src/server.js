@@ -548,6 +548,13 @@ async function ensureSchema() {
       // Already nullable or constraint doesn't exist
     }
 
+    // Normalize existing emails to lowercase (idempotent one-time migration)
+    try {
+      await client.query(`UPDATE users SET email = LOWER(email) WHERE email IS NOT NULL AND email != LOWER(email)`);
+    } catch (e) {
+      console.log(`  email lowercase migration: ${e.message}`);
+    }
+
     // Phase 4: school_year_start setting (default: 1 sept current school year)
     try {
       const syResult = await client.query(`SELECT 1 FROM settings WHERE key = 'school_year_start'`);
@@ -710,15 +717,15 @@ v1.post('/auth/login', loginLimiter, async (req, res) => {
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"
-         FROM users WHERE email = $1`,
-        [email.toLowerCase()]
+         FROM users WHERE LOWER(email) = LOWER($1)`,
+        [email.trim()]
       );
     } catch (schemaErr) {
       // Fallback to old schema (before migration)
       console.log('Using old schema for login (migration not yet run)');
       result = await pool.query(
-        'SELECT id, name, email, password_hash, role, team_id FROM users WHERE email = $1',
-        [email.toLowerCase()]
+        'SELECT id, name, email, password_hash, role, team_id FROM users WHERE LOWER(email) = LOWER($1)',
+        [email.trim()]
       );
     }
     const user = result.rows[0];
@@ -1214,7 +1221,7 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
                    week_schedule_week1 as "weekScheduleWeek1",
                    week_schedule_week2 as "weekScheduleWeek2",
                    week_schedules as "weekSchedules"`,
-        [name, email || null, userId]
+        [name, email ? email.trim().toLowerCase() : null, userId]
       );
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Gebruiker niet gevonden' });
@@ -1261,7 +1268,7 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"`,
-      [name, email || null, mainTeam || null, contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
+      [name, email ? email.trim().toLowerCase() : null, mainTeam || null, contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
     );
 
     if (result.rows.length === 0) {
