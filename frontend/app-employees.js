@@ -165,7 +165,7 @@ function renderProfile() {
                     <div class="progress-fill" style="width:${monthPct}%;background:${monthClr}"></div>
                 </div>
                 ${(overtimeWeek > 0 || overtimeMonth > 0) ? `
-                    <div class="d-flex gap-sm mt-sm" style="flex-wrap:wrap">
+                    <div class="d-flex gap-sm mt-sm flex-wrap">
                         ${overtimeWeek > 0 ? `<span class="overtime-chip-sm">+${overtimeWeek.toFixed(1)}u overuren week</span>` : ''}
                         ${overtimeMonth > 0 ? `<span class="overtime-chip-sm">+${overtimeMonth.toFixed(1)}u overuren maand</span>` : ''}
                     </div>
@@ -220,7 +220,7 @@ function renderProfile() {
             <div class="settings-card">
                 <div class="settings-card-header">
                     <h3><span class="settings-icon">${IconHelper.html(ICONS.calendar, 'md')}</span> Vast werkrooster</h3>
-                    <span id="profile-schedule-source" class="badge badge-info hidden" style="font-size:12px;"></span>
+                    <span id="profile-schedule-source" class="badge badge-info hidden"></span>
                 </div>
                 <div class="settings-card-body">
                     <div class="profile-week-toggle" id="profile-week-tabs">
@@ -315,7 +315,7 @@ function renderProfile() {
             const cell = document.getElementById('profile-contract-cell');
             if (!cell) return;
             const currentVal = contractHours || '';
-            cell.innerHTML = `<input type="number" id="profile-contract-input" class="form-input" style="width:80px;display:inline-block" value="${currentVal}" min="0" max="60" step="0.5"> u/week
+            cell.innerHTML = `<input type="number" id="profile-contract-input" class="form-input contract-hours-input" value="${currentVal}" min="0" max="60" step="0.5"> u/week
                 <button type="button" class="btn btn-primary btn-xs ml-sm" id="profile-contract-save">Opslaan</button>
                 <button type="button" class="btn btn-secondary btn-xs ml-sm" id="profile-contract-cancel">Annuleren</button>`;
             document.getElementById('profile-contract-input')?.focus();
@@ -701,7 +701,7 @@ function generateReadOnlyWeekScheduleHTML(employee) {
     if (!container) return;
 
     let html = '<div class="read-only-schedule">';
-    html += '<p class="form-hint" style="margin:0 0 12px;color:var(--text-secondary)">Het basisrooster wordt beheerd via Rooster Bouwen.</p>';
+    html += '<p class="form-hint mb-sm">Het basisrooster wordt beheerd via Rooster Bouwen.</p>';
 
     for (let w = 1; w <= cycleLen; w++) {
         const schedule = getEmployeeWeekSchedule(employee, w) || [];

@@ -108,16 +108,19 @@ function getRoleDescription(role) {
 
 function trackSettingsDirty(container) {
     AppState.settingsDirty = false;
-    container.addEventListener('input', () => { AppState.settingsDirty = true; }, true);
+    const markDirty = () => {
+        AppState.settingsDirty = true;
+        container.querySelectorAll('.settings-dirty-indicator').forEach(el => el.classList.remove('hidden'));
+    };
+    container.addEventListener('input', markDirty, true);
     container.addEventListener('change', (e) => {
-        if (e.target.tagName === 'SELECT' || e.target.type === 'checkbox') {
-            AppState.settingsDirty = true;
-        }
+        if (e.target.tagName === 'SELECT' || e.target.type === 'checkbox') markDirty();
     }, true);
 }
 
 function markSettingsSaved() {
     AppState.settingsDirty = false;
+    document.querySelectorAll('.settings-dirty-indicator').forEach(el => el.classList.add('hidden'));
 }
 
 // ===== SETTINGS TAB: ACCOUNTS =====
@@ -398,7 +401,7 @@ function showEditAccountModal(user, teams, onSave) {
                 <h2>Account bewerken</h2>
                 <button class="modal-close" onclick="document.getElementById('edit-account-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
-            <div class="modal-body" style="padding: 12px 16px;">
+            <div class="modal-body modal-body-sm">
                 <form id="edit-account-form">
                     <div class="form-row d-flex gap-10">
                         <div class="form-group flex-1">
@@ -418,7 +421,7 @@ function showEditAccountModal(user, teams, onSave) {
                                 <option value="roosterverantwoordelijke" ${user.role === 'roosterverantwoordelijke' ? 'selected' : ''}>Roosterverantw.</option>
                                 <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
                             </select>
-                            <span class="form-hint role-hint" id="edit-user-role-hint" style="font-size: 11px;">${getRoleDescription(user.role)}</span>
+                            <span class="form-hint role-hint text-xs" id="edit-user-role-hint">${getRoleDescription(user.role)}</span>
                         </div>
                         <div class="form-group flex-1">
                             <label for="edit-user-team">Team</label>
@@ -577,7 +580,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 <button class="modal-close" onclick="document.getElementById('replace-employee-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
-                <div class="info-box neutral" style="margin-bottom: 16px;">
+                <div class="info-box neutral mb-md">
                     <p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster wordt gekopieerd naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>
                 </div>
                 <form id="replace-employee-form">
@@ -595,11 +598,11 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                         </label>
                         <label for="replace-transfer-shifts" class="cursor-pointer">Toekomstige diensten overnemen</label>
                     </div>
-                    <div class="form-group" id="replace-date-group" style="display: none;">
+                    <div class="form-group hidden" id="replace-date-group">
                         <label for="replace-from-date">Overnemen vanaf *</label>
                         <input type="date" id="replace-from-date" class="form-input" value="${today}" min="${today}" />
                     </div>
-                    <div id="replace-summary" style="display: none; margin-top: 12px;"></div>
+                    <div id="replace-summary" class="hidden mt-sm"></div>
                     <div class="modal-actions">
                         <button type="button" class="btn btn-secondary" onclick="document.getElementById('replace-employee-modal').remove()">Annuleren</button>
                         <button type="submit" class="btn btn-primary">Vervangen</button>
@@ -636,7 +639,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             return;
         }
 
-        let summaryHtml = '<div class="info-box warning"><strong>Samenvatting:</strong><ul style="margin: 8px 0 0 0; padding-left: 20px;">';
+        let summaryHtml = '<div class="info-box warning"><strong>Samenvatting:</strong><ul class="summary-list">';
         summaryHtml += `<li>Basisrooster van <strong>${escapeHtml(departingUser.name)}</strong> wordt gekopieerd naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
 
         if (transfer && fromDate) {
@@ -730,38 +733,37 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
 function renderClosedDatesList() {
     const closedDates = DataStore.settings.closedDates || [];
     if (closedDates.length === 0) {
-        return '<p class="empty-state-text" style="color:var(--text-secondary,#64748b);font-size:14px">Geen manueel gesloten datums ingesteld.</p>';
+        return '<p class="empty-state-text text-sm text-muted">Geen manueel gesloten datums ingesteld.</p>';
     }
     const items = closedDates.map(cd => {
         const d = parseDateOnly(cd.date);
         const label = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         const reasonHtml = cd.reason ? ' — ' + escapeHtml(cd.reason) : '';
-        return `<li style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--border-color,#e2e8f0);border-radius:6px;font-size:14px">
+        return `<li class="closed-date-item">
             <span>${IconHelper.html(ICONS.lock,'xs')} <strong>${escapeHtml(label)}</strong>${reasonHtml}</span>
             <button class="btn btn-sm btn-danger" onclick="handleRemoveClosedDate('${cd.date}')" title="Verwijder">
                 ${IconHelper.html(ICONS.delete,'xs')}
             </button>
         </li>`;
     }).join('');
-    return `<ul class="closed-dates-list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">${items}</ul>`;
+    return `<ul class="closed-dates-list">${items}</ul>`;
 }
 
 async function openAddClosedDateDialog() {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
     overlay.innerHTML = `
-        <div style="background:var(--bg-card,#fff);border-radius:12px;padding:24px;min-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
-            <div style="font-weight:600;font-size:16px;margin-bottom:16px">Datum toevoegen</div>
+        <div class="quick-dialog">
+            <div class="quick-dialog-title">Datum toevoegen</div>
             <div class="form-group">
-                <label style="font-size:14px;font-weight:500">Datum</label>
-                <input type="date" id="_cd-date" class="form-input" style="margin-top:4px;width:100%;box-sizing:border-box">
+                <label class="quick-dialog-label">Datum</label>
+                <input type="date" id="_cd-date" class="form-input quick-dialog-input">
             </div>
-            <div class="form-group" style="margin-top:12px">
-                <label style="font-size:14px;font-weight:500">Reden (optioneel)</label>
-                <input type="text" id="_cd-reason" class="form-input" placeholder="bijv. Brugdag" maxlength="80"
-                    style="margin-top:4px;width:100%;box-sizing:border-box">
+            <div class="form-group mt-sm">
+                <label class="quick-dialog-label">Reden (optioneel)</label>
+                <input type="text" id="_cd-reason" class="form-input quick-dialog-input" placeholder="bijv. Brugdag" maxlength="80">
             </div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+            <div class="quick-dialog-actions">
                 <button id="_cd-cancel" class="btn btn-secondary">Annuleer</button>
                 <button id="_cd-ok" class="btn btn-primary">Toevoegen</button>
             </div>
@@ -849,7 +851,10 @@ function renderSettingsPlanning(container) {
                     </div>
                     <span class="form-hint">Waarschuwing bij overschrijding in planning</span>
                 </div>
-                <button class="btn btn-primary" onclick="saveRules()">Regels opslaan</button>
+                <div class="d-flex align-items-center gap-sm">
+                    <button class="btn btn-primary" onclick="saveRules()">Regels opslaan</button>
+                    <span class="settings-dirty-indicator hidden">● Niet opgeslagen</span>
+                </div>
             </div>
         </div>
 
@@ -1005,8 +1010,8 @@ function renderSettingsTeams(container) {
                 <div class="rotation-form">
                     ${renderRotationSettingsCompact()}
                 </div>
-                <div class="upcoming-section" style="margin-top:20px">
-                    <h4 style="font-size:14px;margin:0 0 10px">Komende open weekenden</h4>
+                <div class="upcoming-section mt-lg">
+                    <h4 class="upcoming-section-title">Komende open weekenden</h4>
                     <div class="upcoming-responsibles">
                         ${renderUpcomingResponsibles()}
                     </div>
@@ -1211,12 +1216,37 @@ function renderSettingsEmail(container) {
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
-                <hr class="my-sm" style="border:none;border-top:1px solid var(--border-color)" />
+                <hr class="my-sm settings-divider" />
                 ${typeToggles}
-                <div class="form-actions mt-md">
+                <div class="form-actions mt-md d-flex align-items-center gap-sm">
                     <button type="button" class="btn btn-primary" id="email-settings-save-btn">Opslaan</button>
+                    <span class="settings-dirty-indicator hidden">● Niet opgeslagen</span>
                 </div>
-                <div id="email-settings-message" class="form-message" style="display: none; margin-top: 8px;"></div>
+                <div id="email-settings-message" class="form-message hidden mt-sm"></div>
+            </div>
+        </div>
+
+        <div class="settings-card mt-lg">
+            <div class="settings-card-header">
+                <div class="settings-card-title">
+                    <h3>Email configuratie</h3>
+                    <p class="settings-card-subtitle">Status van de e-mailservice en verificatie.</p>
+                </div>
+            </div>
+            <div class="settings-card-body">
+                <div class="d-flex align-items-center gap-sm mb-md">
+                    <span class="text-sm text-muted">Status:</span>
+                    <span id="email-status-badge" class="email-status-badge">Laden...</span>
+                </div>
+                <div class="form-group mb-md">
+                    <label class="form-label">Afzenderadres</label>
+                    <input type="text" id="email-from-display" class="form-input" readonly />
+                    <span class="form-hint">Stel in via de <code>EMAIL_FROM</code> omgevingsvariabele op de server.</span>
+                </div>
+                <div class="d-flex align-items-center gap-sm">
+                    <button type="button" class="btn btn-secondary" id="email-test-btn">Stuur testmail naar mij</button>
+                    <span id="email-test-message" class="text-sm hidden"></span>
+                </div>
             </div>
         </div>
     `;
@@ -1229,6 +1259,45 @@ function renderSettingsEmail(container) {
         typeCheckboxes.forEach(cb => {
             cb.disabled = !globalToggle.checked;
         });
+    });
+
+    // Load email status
+    dataApiFetch('/admin/email-status').then(data => {
+        const badge = container.querySelector('#email-status-badge');
+        const fromInput = container.querySelector('#email-from-display');
+        const testBtn = container.querySelector('#email-test-btn');
+        if (badge) {
+            badge.textContent = data.configured ? '✓ Geconfigureerd' : '✗ Niet geconfigureerd';
+            badge.className = `email-status-badge ${data.configured ? 'configured' : 'not-configured'}`;
+        }
+        if (fromInput) fromInput.value = data.from || '';
+        if (testBtn) testBtn.disabled = !data.configured;
+    }).catch(() => {});
+
+    // Test email button
+    container.querySelector('#email-test-btn')?.addEventListener('click', async () => {
+        const btn = container.querySelector('#email-test-btn');
+        const msg = container.querySelector('#email-test-message');
+        btn.disabled = true;
+        btn.textContent = 'Versturen...';
+        if (msg) { msg.className = 'text-sm hidden'; }
+        try {
+            const result = await dataApiFetch('/admin/test-email', { method: 'POST' });
+            if (msg) {
+                msg.textContent = `✓ Testmail verstuurd naar ${result.sentTo}`;
+                msg.className = 'text-sm text-success';
+                msg.classList.remove('hidden');
+            }
+        } catch (err) {
+            if (msg) {
+                msg.textContent = '✗ ' + (err.message || 'Versturen mislukt');
+                msg.className = 'text-sm text-danger';
+                msg.classList.remove('hidden');
+            }
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Stuur testmail naar mij';
+        }
     });
 
     // Save button
@@ -1299,10 +1368,10 @@ function renderSettingsSystem(container) {
                 <div class="button-group">
                     <button class="btn btn-secondary" onclick="exportData()">Exporteer</button>
                     <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeer</button>
-                    <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importData(event)">
+                    <input type="file" id="import-file" accept=".json" class="hidden" onchange="importData(event)">
                 </div>
                 ${isAdmin && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:') ? `
-                <div class="migration-zone" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                <div class="migration-zone">
                     <h4>Database migratie (dev)</h4>
                     <p>Voer database migraties uit om data te repareren (bijv. weekroosters fixen).</p>
                     <button class="btn btn-secondary" onclick="runMigration()">Database migreren</button>
@@ -1383,7 +1452,7 @@ function renderSettingsBeheer(container) {
                 <div class="button-group">
                     <button class="btn btn-secondary" onclick="exportData()">Exporteer</button>
                     <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeer</button>
-                    <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importData(event)">
+                    <input type="file" id="import-file" accept=".json" class="hidden" onchange="importData(event)">
                 </div>
             </div>
         </div>
@@ -1832,6 +1901,7 @@ async function updateTeamColor(teamId, color) {
         // Save to backend
         try {
             await saveSettings('teams', DataStore.settings.teams);
+            showToast('Teamkleur opgeslagen', 'success');
         } catch (error) {
             console.error('Error saving team color to backend:', error);
             showToast('Kleur is lokaal opgeslagen maar backend sync mislukt. Vernieuw de pagina om te synchroniseren.', 'warning');
@@ -2447,8 +2517,8 @@ function showWeekendResponsiblePicker(mondayKey) {
                 <h3>Weekendverantwoordelijke</h3>
                 <span class="modal-close" id="weekend-picker-close">&times;</span>
             </div>
-            <div class="modal-body" style="padding: 16px;">
-                <p style="margin: 0 0 16px; color: var(--text-secondary); font-size: 14px;">${dateLabel}</p>
+            <div class="modal-body modal-body-md">
+                <p class="text-sm text-muted mb-md">${dateLabel}</p>
                 <div class="weekend-picker-options">
                     <label class="weekend-picker-option ${!currentAssignment ? 'selected' : ''}" data-value="auto">
                         <input type="radio" name="weekend-responsible" value="auto" ${!currentAssignment ? 'checked' : ''}>
@@ -2470,7 +2540,7 @@ function showWeekendResponsiblePicker(mondayKey) {
                             const teamColor = teamInfo.color || '#6b7280';
                             const teamName = teamInfo.name || teamId;
                             return `<div class="weekend-picker-team-group">
-                                <div class="weekend-picker-team-header" style="border-left: 3px solid ${teamColor}; padding-left: 8px; font-size: 12px; color: var(--text-secondary); font-weight: 600; margin: 8px 0 4px;">${escapeHtml(teamName)}</div>
+                                <div class="weekend-picker-team-header" style="border-left: 3px solid ${teamColor}">${escapeHtml(teamName)}</div>
                                 ${emps.map(emp => {
                                     const isSelected = currentAssignment === String(emp.id);
                                     return `<label class="weekend-picker-option ${isSelected ? 'selected' : ''}" data-value="${emp.id}">
@@ -2637,14 +2707,13 @@ function setupSettingsCollapsibles(scope = document) {
             const overlay = document.createElement('div');
             overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
             overlay.innerHTML = `
-                <div style="background:var(--bg-card,#fff);border-radius:12px;padding:24px;min-width:300px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
-                    <div style="font-weight:600;margin-bottom:12px">Dag sluiten</div>
-                    <label style="font-size:14px;color:var(--text-secondary,#64748b)">${label}</label>
-                    <input id="_reason-input" type="text" placeholder="bijv. Brugdag Hemelvaartsdag" maxlength="80"
-                        style="display:block;width:100%;margin:8px 0 16px;padding:8px 10px;border:1px solid var(--border-color,#e2e8f0);border-radius:6px;font-size:14px;box-sizing:border-box">
-                    <div style="display:flex;gap:8px;justify-content:flex-end">
-                        <button id="_reason-cancel" style="padding:7px 16px;border-radius:6px;border:1px solid var(--border-color,#e2e8f0);background:none;cursor:pointer">Annuleer</button>
-                        <button id="_reason-ok" style="padding:7px 16px;border-radius:6px;background:#3b82f6;color:#fff;border:none;cursor:pointer">Sluiten</button>
+                <div class="quick-dialog">
+                    <div class="quick-dialog-title">Dag sluiten</div>
+                    <label class="quick-dialog-label text-muted">${label}</label>
+                    <input id="_reason-input" type="text" class="form-input quick-dialog-input" placeholder="bijv. Brugdag Hemelvaartsdag" maxlength="80">
+                    <div class="quick-dialog-actions">
+                        <button id="_reason-cancel" class="btn btn-secondary">Annuleer</button>
+                        <button id="_reason-ok" class="btn btn-primary">Sluiten</button>
                     </div>
                 </div>`;
             document.body.appendChild(overlay);
@@ -2661,12 +2730,12 @@ function setupSettingsCollapsibles(scope = document) {
             const overlay = document.createElement('div');
             overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
             overlay.innerHTML = `
-                <div style="background:var(--bg-card,#fff);border-radius:12px;padding:24px;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
-                    <div style="margin-bottom:16px;font-size:15px">${escapeHtml(message)}</div>
-                    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-                        <button id="_conf-cancel" style="padding:7px 14px;border-radius:6px;border:1px solid var(--border-color,#e2e8f0);background:none;cursor:pointer">Annuleer</button>
-                        <button id="_conf-alt" style="padding:7px 14px;border-radius:6px;border:1px solid var(--border-color,#e2e8f0);background:none;cursor:pointer">${escapeHtml(altLabel)}</button>
-                        <button id="_conf-ok" style="padding:7px 14px;border-radius:6px;background:#dc2626;color:#fff;border:none;cursor:pointer">${escapeHtml(confirmLabel)}</button>
+                <div class="quick-dialog quick-dialog-confirm">
+                    <div class="mb-md">${escapeHtml(message)}</div>
+                    <div class="quick-dialog-actions flex-wrap">
+                        <button id="_conf-cancel" class="btn btn-secondary">Annuleer</button>
+                        <button id="_conf-alt" class="btn btn-secondary">${escapeHtml(altLabel)}</button>
+                        <button id="_conf-ok" class="btn btn-danger">${escapeHtml(confirmLabel)}</button>
                     </div>
                 </div>`;
             document.body.appendChild(overlay);

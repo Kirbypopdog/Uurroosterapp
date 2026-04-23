@@ -1479,6 +1479,31 @@ v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) 
 // Shifts worden nu ALLEEN aangemaakt via concept toepassen (POST /schedule-drafts/:id/apply).
 // Het concept is de enige bron van waarheid — geen achtergrondregeneratie meer.
 
+// ===== EMAIL BEHEER =====
+
+v1.get('/admin/email-status', requireAuth, requireAdmin, async (req, res) => {
+  const configured = !!process.env.RESEND_API_KEY;
+  const from = process.env.EMAIL_FROM || 'Het Vlot Rooster <onboarding@resend.dev>';
+  res.json({ configured, from });
+});
+
+v1.post('/admin/test-email', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const userResult = await pool.query('SELECT email, name FROM users WHERE id = $1', [req.user.id]);
+    const user = userResult.rows[0];
+    if (!user || !user.email) {
+      return res.status(400).json({ error: 'Je account heeft geen e-mailadres. Voeg er eerst een toe via je profiel.' });
+    }
+    if (!process.env.RESEND_API_KEY) {
+      return res.status(503).json({ error: 'RESEND_API_KEY is niet geconfigureerd op de server.' });
+    }
+    await emailService.notifyTestEmail(user);
+    res.json({ success: true, sentTo: user.email });
+  } catch (err) {
+    res.status(500).json({ error: 'Testmail versturen mislukt: ' + (err.message || 'Onbekende fout') });
+  }
+});
+
 // ===== SHIFTS API =====
 
 v1.get('/shifts', requireAuth, async (req, res) => {

@@ -10977,3 +10977,140 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-size: 12px;
     color: var(--text-secondary, #666);
 }
+
+/* ===== ISSUE #36: SETTINGS DIRTY INDICATOR ===== */
+.settings-dirty-indicator {
+    font-size: 12px;
+    color: var(--color-warning, #f59e0b);
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+/* ===== ISSUE #39: INLINE STYLE REPLACEMENTS ===== */
+
+/* HR-separator in settings cards */
+.settings-divider {
+    border: none;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Gesloten datums lijst */
+.closed-dates-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.closed-date-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+/* Migratiezone scheidingslijn */
+.migration-zone {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Samenvatting-lijst in info-box */
+.summary-list {
+    margin: 8px 0 0 0;
+    padding-left: 20px;
+}
+
+/* Quick inline dialogen (datum toevoegen, dag sluiten, bevestigen) */
+.quick-dialog {
+    background: var(--bg-card, #fff);
+    border-radius: 12px;
+    padding: 24px;
+    min-width: 300px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+.quick-dialog-title {
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 16px;
+}
+.quick-dialog-label {
+    font-size: 14px;
+    font-weight: 500;
+}
+.quick-dialog-input {
+    margin-top: 4px;
+    margin-bottom: 16px;
+    width: 100%;
+    box-sizing: border-box;
+}
+.quick-dialog-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+/* Upcoming weekenden sectietitel */
+.upcoming-section-title {
+    font-size: 14px;
+    margin: 0 0 10px;
+}
+
+/* Modal body varianten */
+.modal-body-sm {
+    padding: 12px 16px;
+}
+.modal-body-md {
+    padding: 16px;
+}
+
+/* Weekend picker team header */
+.weekend-picker-team-header {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    margin: 8px 0 4px;
+    padding-left: 8px;
+}
+
+/* Profile schedule badge */
+#profile-schedule-source {
+    font-size: 12px;
+}
+
+/* Confirm quick-dialog variant */
+.quick-dialog-confirm {
+    max-width: 380px;
+}
+
+/* Contracturen input in profiel */
+.contract-hours-input {
+    width: 80px;
+    display: inline-block;
+}
+
+/* Email status badge in Communicatie-tab */
+.email-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+}
+.email-status-badge.configured {
+    background: var(--color-success-bg, #dcfce7);
+    color: var(--color-success, #16a34a);
+}
+.email-status-badge.not-configured {
+    background: var(--color-danger-bg, #fee2e2);
+    color: var(--color-danger, #dc2626);
+}

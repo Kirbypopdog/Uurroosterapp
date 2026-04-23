@@ -313,6 +313,19 @@ async function notifyPasswordReset(user) {
   sendEmailAsync(user.email, 'Wachtwoord gereset — Het Vlot Rooster', html);
 }
 
+/**
+ * Test email — stuur een verificatiemails naar de beheerder
+ */
+async function notifyTestEmail(user) {
+  const html = baseTemplate('Testmail', `
+    <h2>Testmail</h2>
+    <p>Dag ${escapeHtml(user.name)},</p>
+    <p>Dit is een testmail vanuit Het Vlot Roosterplanning. Als je dit bericht ontvangt, werkt de e-mailconfiguratie correct.</p>
+    <p style="color:#666;font-size:13px">Verstuurd op: ${new Date().toLocaleString('nl-NL')}</p>
+  `);
+  return sendEmail(user.email, 'Testmail — Het Vlot Roosterplanning', html);
+}
+
 module.exports = {
   sendEmail,
   sendEmailAsync,
@@ -325,6 +338,7 @@ module.exports = {
   notifyRequestCancelled,
   notifyWelcome,
   notifyPasswordReset,
+  notifyTestEmail,
   // Exported for unit testing only
   _helpers: { escapeHtml, formatDate, formatTime, shiftDetailBox, baseTemplate }
 };
