@@ -75,8 +75,16 @@ describe('getShiftEndDateTime', () => {
   test('same start and end time → same day (no overnight detection)', () => {
     const shift = { date: '2026-04-15', startTime: '08:00', endTime: '08:00' };
     const end = getShiftEndDateTime(shift);
-    // endHours (8) is NOT less than startHours (8), so same day
     expect(end.getDate()).toBe(15);
+  });
+
+  test('same hour but earlier minute → next day (edge case)', () => {
+    // 22:30 → 22:00: eindtijd vóór starttijd, ook al is het uur gelijk
+    const shift = { date: '2026-04-26', startTime: '22:30', endTime: '22:00' };
+    const end = getShiftEndDateTime(shift);
+    expect(end.getDate()).toBe(27); // maandag
+    expect(end.getHours()).toBe(22);
+    expect(end.getMinutes()).toBe(0);
   });
 });
 
@@ -129,6 +137,34 @@ describe('getHoursBetweenShifts', () => {
     // Night shift ends at 06:00 on 16th, next starts 18:00 on 16th → 12 hour gap
     const hours = getHoursBetweenShifts(night, next);
     expect(hours).toBeCloseTo(12, 1);
+  });
+
+  test('zondag nachtdienst → maandag ochtend: minder dan 11 uur gedetecteerd', () => {
+    // Zondag 22:00 → maandag 06:00, dan maandag 08:00 shift → slechts 2 uur rust
+    const sunday = { date: '2026-04-26', startTime: '22:00', endTime: '06:00' };
+    const monday = { date: '2026-04-27', startTime: '08:00', endTime: '16:00' };
+    const hours = getHoursBetweenShifts(sunday, monday);
+    expect(hours).toBeCloseTo(2, 1);
+    expect(hours).toBeLessThan(11);
+  });
+
+  test('zondag nachtdienst → maandag middag: meer dan 11 uur, geen overtreding', () => {
+    // Zondag 22:00 → maandag 06:00, dan maandag 18:00 shift → 12 uur rust
+    const sunday = { date: '2026-04-26', startTime: '22:00', endTime: '06:00' };
+    const monday = { date: '2026-04-27', startTime: '18:00', endTime: '22:00' };
+    const hours = getHoursBetweenShifts(sunday, monday);
+    expect(hours).toBeCloseTo(12, 1);
+    expect(hours).toBeGreaterThanOrEqual(11);
+  });
+
+  test('nachtdienst met zelfde-uur-edge-case over weekgrens', () => {
+    // Zondag 22:30 → maandag 22:00 (edge case: zelfde uur, vroeger minuut)
+    const sunday = { date: '2026-04-26', startTime: '22:30', endTime: '22:00' };
+    const monday = { date: '2026-04-27', startTime: '23:30', endTime: '07:00' };
+    // sunday eindigt maandag 22:00, monday start 23:30 → 1,5 uur rust
+    const hours = getHoursBetweenShifts(sunday, monday);
+    expect(hours).toBeCloseTo(1.5, 1);
+    expect(hours).toBeLessThan(11);
   });
 });
 
