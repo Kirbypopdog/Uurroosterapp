@@ -158,13 +158,14 @@ function renderAvailability() {
                     } else {
                         statusClass = 'available';
                         statusText = '';
-                        tooltipText = 'Beschikbaar - klik om afwezigheid te registreren';
+                        tooltipText = canManageAvailability(emp.id) ? 'Beschikbaar - klik om afwezigheid te registreren' : '';
                     }
                 }
 
                 const conflictIcon = hasConflict ? `<span class="conflict-icon">${IconHelper.html(ICONS.warning, 'xs')}</span>` : '';
+                const canEdit = canManageAvailability(emp.id);
                 const cellContent = !isClosed ? `
-                    <div class="availability-cell-content ${statusClass}"
+                    <div class="availability-cell-content ${statusClass}${canEdit ? '' : ' readonly-cell'}"
                          data-employee-id="${emp.id}"
                          data-date="${date}"
                          title="${escapeHtml(tooltipText)}">
@@ -250,6 +251,7 @@ function renderAvailability() {
         cell.addEventListener('click', () => {
             const empId = Number(cell.dataset.employeeId);
             const date = cell.dataset.date;
+            if (!canManageAvailability(empId)) return;
             openAvailabilityModal(empId, date);
         });
     });
