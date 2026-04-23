@@ -18,13 +18,10 @@ function parseDateTime(date, time) {
 
 function getShiftEndDateTime(shift) {
     const startDT = parseDateTime(shift.date, shift.startTime);
-    const [endHours] = shift.endTime.split(':').map(Number);
-    const [startHours] = shift.startTime.split(':').map(Number);
-
     const endDT = parseDateTime(shift.date, shift.endTime);
 
-    // Als eindtijd kleiner is dan starttijd, is het de volgende dag
-    if (endHours < startHours) {
+    // Als eindtijd vóór starttijd valt (ook bij zelfde uur maar vroeger minuut), eindigt de dienst de volgende dag
+    if (endDT < startDT) {
         endDT.setDate(endDT.getDate() + 1);
     }
 
