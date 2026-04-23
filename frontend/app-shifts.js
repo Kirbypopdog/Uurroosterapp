@@ -229,7 +229,7 @@ function openShiftModal(shift, canEdit) {
         activitiesListHtml = '<div class="shift-activities-section">';
         activitiesListHtml += `<div class="shift-activities-header"><strong>Activiteiten</strong>`;
         if (canEdit) {
-            activitiesListHtml += ` <button type="button" class="btn btn-sm add-activity-btn" data-user-id="${shift.employeeId}" data-date="${shift.date}" data-shift-start="${shift.startTime}" data-shift-end="${shift.endTime}" style="opacity:1;position:static;width:auto;height:auto;">+ Toevoegen</button>`;
+            activitiesListHtml += ` <button type="button" class="btn btn-sm add-activity-btn add-activity-btn--inline" data-user-id="${shift.employeeId}" data-date="${shift.date}" data-shift-start="${shift.startTime}" data-shift-end="${shift.endTime}">+ Toevoegen</button>`;
         }
         activitiesListHtml += '</div>';
         if (shiftActivities.length > 0) {
@@ -237,8 +237,8 @@ function openShiftModal(shift, canEdit) {
             shiftActivities.forEach(act => {
                 const label = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
                 const desc = act.description ? ` - ${escapeHtml(act.description)}` : '';
-                activitiesListHtml += `<div class="shift-activity-item activity-badge" data-activity-id="${act.id}" style="position:static;display:flex;cursor:pointer;padding:4px 8px;margin-bottom:4px;border-radius:4px;">
-                    <span class="activity-type-${escapeHtml(act.type)}" style="display:inline-block;width:4px;border-radius:2px;margin-right:8px;flex-shrink:0;"></span>
+                activitiesListHtml += `<div class="shift-activity-item activity-badge activity-badge--list" data-activity-id="${act.id}">
+                    <span class="activity-type-${escapeHtml(act.type)} activity-type-bar"></span>
                     <span><strong>${escapeHtml(label)}</strong> ${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}${desc}</span>
                 </div>`;
             });

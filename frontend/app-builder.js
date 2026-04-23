@@ -404,14 +404,14 @@ function renderBuilderGrid(role, userTeam) {
             `<option value="${e.id}" ${String(e.id) === currentRespId ? 'selected' : ''}>${escapeHtml(e.name)}</option>`
         ).join('');
         html += `<div class="builder-vakantie-bar">
-            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div class="builder-vakantie-bar-inner">
                 <div>
                     <strong>Vakantieconcept voor ${hpName}</strong>${hpDates ? ` <span>(${hpDates})</span>` : ''}
-                    <div style="font-size:12px;margin-top:4px;opacity:0.85">Medewerkers die niet in dit rooster staan krijgen geen shift tijdens deze vakantie.</div>
+                    <div class="builder-vakantie-note">Medewerkers die niet in dit rooster staan krijgen geen shift tijdens deze vakantie.</div>
                 </div>
                 <div class="builder-vakantie-responsible">
-                    <label style="font-size:0.8rem;font-weight:600;margin-right:6px">Verantw. week ${wn}:</label>
-                    <select class="form-input form-input-sm" id="builder-vakantie-responsible" data-week="${wn}" style="max-width:180px;font-size:0.8rem">
+                    <label class="builder-vakantie-label">Verantw. week ${wn}:</label>
+                    <select class="form-input form-input-sm builder-vakantie-select" id="builder-vakantie-responsible" data-week="${wn}">
                         <option value="">Geen</option>
                         ${respOptions}
                     </select>
@@ -825,7 +825,7 @@ function renderBuilderStaffingEditor() {
     const isOpen = AppState.builderShowStaffingEditor;
     const arrow = isOpen ? '▲' : '▼';
     let html = `<div class="builder-staffing-editor-wrapper">
-        <button class="btn btn-secondary btn-sm" id="builder-staffing-toggle" style="margin:8px 0 4px">
+        <button class="btn btn-secondary btn-sm builder-section-toggle" id="builder-staffing-toggle">
             ${IconHelper.html(ICONS.settings, 'xs')} Bezettingsregels ${arrow}
         </button>`;
 
@@ -885,7 +885,7 @@ function renderBuilderMeetingsEditor() {
     const isOpen = AppState.builderShowMeetingsEditor;
     const arrow = isOpen ? '▲' : '▼';
     let html = `<div class="builder-meetings-editor-wrapper">
-        <button class="btn btn-secondary btn-sm" id="builder-meetings-toggle" style="margin:4px 0 4px">
+        <button class="btn btn-secondary btn-sm builder-section-toggle builder-meetings-toggle-btn" id="builder-meetings-toggle">
             ${IconHelper.html(ICONS.employees, 'xs')} Teamvergaderingen ${arrow}
         </button>`;
 
@@ -1651,7 +1651,7 @@ function showNewConceptTypeModal() {
                 <h2>Nieuw concept</h2>
                 <span class="modal-close">&times;</span>
             </div>
-            <div class="modal-body" style="padding:20px">
+            <div class="modal-body modal-body-padded">
                 <p class="text-sm text-muted mb-md">Kies het type concept dat je wilt aanmaken.</p>
                 <div class="concept-type-options">
                     <label class="concept-type-option selected" data-value="basis">
@@ -1664,18 +1664,18 @@ function showNewConceptTypeModal() {
                     </label>
                     <label class="concept-type-option" data-value="vakantie">
                         <input type="radio" name="concept-type" value="vakantie">
-                        <div class="concept-type-icon" style="color:#f59e0b">${IconHelper.html(ICONS.holiday || ICONS.calendar, 'md')}</div>
+                        <div class="concept-type-icon concept-type-icon--holiday">${IconHelper.html(ICONS.holiday || ICONS.calendar, 'md')}</div>
                         <div class="concept-type-info">
                             <strong>Vakantieconcept</strong>
                             <span>Een apart rooster voor een vakantieperiode</span>
                         </div>
                     </label>
                 </div>
-                <div style="margin-top:16px">
+                <div class="mt-md">
                     <label class="form-label" for="concept-name-input">Naam:</label>
                     <input id="concept-name-input" type="text" class="form-input" placeholder="Basisrooster" value="Basisrooster">
                 </div>
-                <div id="vakantie-period-select" style="display:none;margin-top:16px">
+                <div id="vakantie-period-select" class="hidden mt-md">
                     <label class="form-label">Gekoppelde vakantieperiode:</label>
                     ${availablePeriods.length > 0 ? `
                         <select id="vakantie-period-id" class="form-input">
@@ -2077,16 +2077,16 @@ async function deactivateBuilderDraft(draftId) {
                     <span class="modal-close" id="deactivate-close"><i data-lucide="x"></i></span>
                 </div>
                 <div class="modal-body">
-                    <p style="margin:0 0 12px"><strong>${escapeHtml(draft.name)}</strong> deactiveren?</p>
+                    <p class="mb-sm"><strong>${escapeHtml(draft.name)}</strong> deactiveren?</p>
                     <div class="form-group">
                         <label>Einddatum (shifts na deze datum worden verwijderd)</label>
                         <input type="date" id="deactivate-end-date" class="form-input" value="${todayStr}">
                     </div>
-                    <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;cursor:pointer">
+                    <label class="checkbox-label-row">
                         <input type="checkbox" id="deactivate-delete-manual">
                         Verwijder ook handmatig aangemaakte shifts
                     </label>
-                    <span class="form-hint" style="display:block;margin-top:8px">Auto-gegenereerde shifts na de einddatum worden altijd verwijderd.</span>
+                    <span class="form-hint form-hint-block mt-sm">Auto-gegenereerde shifts na de einddatum worden altijd verwijderd.</span>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary btn-sm" id="deactivate-cancel">Annuleren</button>
@@ -2435,13 +2435,13 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                     <span class="modal-close" id="draft-apply-close"><i data-lucide="x"></i></span>
                 </div>
                 <div class="modal-body">
-                    <p style="margin:0 0 12px"><strong>${escapeHtml(draft.name)}</strong> toepassen als basisrooster ${weekLabel}?</p>
-                    <div class="apply-presets" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+                    <p class="mb-sm"><strong>${escapeHtml(draft.name)}</strong> toepassen als basisrooster ${weekLabel}?</p>
+                    <div class="apply-presets">
                         <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetSchoolStart}" data-end="${presetSchoolEnd}">Dit schooljaar (sep – aug)</button>
                         <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetTodayStr}" data-end="${presetSchoolEnd}">Vanaf nu tot aug</button>
                         <button class="btn btn-secondary btn-sm apply-preset" data-start="" data-end="">Aangepaste periode</button>
                     </div>
-                    <div class="form-row" style="gap:12px">
+                    <div class="form-row form-row-gap">
                         <div class="form-group flex-1">
                             <label>Van</label>
                             <input type="date" id="draft-apply-start-date" class="form-input" value="${defaultStart}" required>
@@ -2451,7 +2451,7 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                             <input type="date" id="draft-apply-end-date" class="form-input" value="${defaultEnd}" required>
                         </div>
                     </div>
-                    <span class="form-hint" style="display:block;margin-top:4px">Shifts worden alleen gegenereerd binnen deze periode. Bestaande shifts buiten deze periode blijven ongewijzigd.</span>
+                    <span class="form-hint form-hint-block mt-xs">Shifts worden alleen gegenereerd binnen deze periode. Bestaande shifts buiten deze periode blijven ongewijzigd.</span>
                     <div class="code-block">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
                 </div>
                 <div class="modal-footer">
@@ -2516,7 +2516,7 @@ function showReapplyAfterEditModal(draftName) {
                     <span class="modal-close" id="reapply-close"><i data-lucide="x"></i></span>
                 </div>
                 <div class="modal-body">
-                    <p style="margin:0 0 8px">Het concept <strong>"${escapeHtml(draftName)}"</strong> is momenteel actief.</p>
+                    <p class="mb-xs">Het concept <strong>"${escapeHtml(draftName)}"</strong> is momenteel actief.</p>
                     <p>Wil je de wijzigingen nu toepassen op het rooster?</p>
                 </div>
                 <div class="modal-footer">

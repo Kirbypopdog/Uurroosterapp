@@ -11114,3 +11114,93 @@ body[data-view-mode="day"] .timeline-day-cell {
     background: var(--color-danger-bg, #fee2e2);
     color: var(--color-danger, #dc2626);
 }
+
+/* ===== Issue #39: inline style migraties fase 3 ===== */
+
+/* Builder: vakantie bar */
+.builder-vakantie-bar-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.builder-vakantie-note {
+    font-size: 12px;
+    margin-top: 4px;
+    opacity: 0.85;
+}
+.builder-vakantie-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-right: 6px;
+}
+.builder-vakantie-select {
+    max-width: 180px;
+    font-size: 0.8rem;
+}
+
+/* Builder: sectie-toggle knoppen */
+.builder-section-toggle {
+    margin: 8px 0 4px;
+}
+.builder-meetings-toggle-btn {
+    margin-top: 4px;
+}
+
+/* Builder: nieuw concept modal */
+.modal-body-padded {
+    padding: 20px;
+}
+.concept-type-icon--holiday {
+    color: #f59e0b;
+}
+
+/* Builder: helpers */
+.checkbox-label-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 13px;
+    cursor: pointer;
+}
+.form-hint-block {
+    display: block;
+}
+.apply-presets {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+.form-row-gap {
+    gap: 12px;
+}
+.mt-xs { margin-top: 4px; }
+.mb-xs { margin-bottom: 8px; }
+.mb-sm { margin-bottom: 12px; }
+
+/* Shift activiteiten modal */
+.add-activity-btn--inline {
+    opacity: 1;
+    position: static;
+    width: auto;
+    height: auto;
+}
+.activity-badge--list {
+    position: static;
+    display: flex;
+    cursor: pointer;
+    padding: 4px 8px;
+    margin-bottom: 4px;
+    border-radius: 4px;
+}
+.activity-type-bar {
+    display: inline-block;
+    width: 4px;
+    border-radius: 2px;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+.home-card-more { padding: 8px 0; }
