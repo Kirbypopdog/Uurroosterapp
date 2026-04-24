@@ -519,7 +519,8 @@ const app = express();
 app.use(cors({
     origin: ['https://claude.ai', 'https://www.claude.ai'],
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'mcp-session-id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'mcp-session-id', 'Accept'],
+    exposedHeaders: ['mcp-session-id'],
     credentials: true
 }));
 app.use(express.json());
@@ -535,6 +536,16 @@ function checkAuth(req, res, next) {
 
 // Sessies bijhouden zodat follow-up requests dezelfde transport hergebruiken
 const sessions = new Map();
+
+app.delete('/mcp', checkAuth, (req, res) => {
+    const sessionId = req.headers['mcp-session-id'];
+    if (sessionId && sessions.has(sessionId)) {
+        sessions.delete(sessionId);
+        res.status(200).json({ terminated: true });
+    } else {
+        res.status(404).json({ error: 'Session not found' });
+    }
+});
 
 app.all('/mcp', checkAuth, async (req, res) => {
     try {
@@ -555,11 +566,6 @@ app.all('/mcp', checkAuth, async (req, res) => {
         }
 
         await transport.handleRequest(req, res, req.body);
-
-        res.on('close', () => {
-            const id = req.headers['mcp-session-id'];
-            if (id) sessions.delete(id);
-        });
     } catch (err) {
         console.error('MCP fout:', err.message);
         if (!res.headersSent) res.status(500).json({ error: err.message });
