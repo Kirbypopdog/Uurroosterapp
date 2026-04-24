@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import pg from 'pg';
 
@@ -588,6 +589,26 @@ app.all('/mcp', checkAuth, async (req, res) => {
         console.error('MCP fout:', err.message);
         if (!res.headersSent) res.status(500).json({ error: err.message });
     }
+});
+
+// ===== SSE TRANSPORT (voor Claude Code) =====
+
+const sseTransports = {};
+
+app.get('/sse', checkAuth, async (req, res) => {
+    const transport = new SSEServerTransport('/message', res);
+    sseTransports[transport.sessionId] = transport;
+    res.on('close', () => { delete sseTransports[transport.sessionId]; });
+    const server = createMcpServer();
+    await server.connect(transport);
+    await transport.start();
+});
+
+app.post('/message', checkAuth, async (req, res) => {
+    const sessionId = req.query.sessionId;
+    const transport = sseTransports[sessionId];
+    if (!transport) return res.status(404).json({ error: 'Session not found' });
+    await transport.handlePostMessage(req, res, req.body);
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'uurroosterapp-mcp', sessions: sessions.size }));
