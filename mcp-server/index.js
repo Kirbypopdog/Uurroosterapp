@@ -537,7 +537,9 @@ app.get('/sse', checkAuth, async (req, res) => {
     res.on('close', () => transports.delete(transport.sessionId));
 });
 
-app.post('/messages', checkAuth, async (req, res) => {
+// /messages heeft geen aparte auth nodig — de sessionId is alleen bekend
+// na een succesvolle geauthenticeerde SSE-verbinding
+app.post('/messages', async (req, res) => {
     const transport = transports.get(req.query.sessionId);
     if (!transport) return res.status(404).json({ error: 'Sessie niet gevonden' });
     await transport.handlePostMessage(req, res);
