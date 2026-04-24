@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import cors from 'cors';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -515,6 +516,12 @@ function createMcpServer() {
 // ===== EXPRESS / STREAMABLE HTTP =====
 
 const app = express();
+app.use(cors({
+    origin: ['https://claude.ai', 'https://www.claude.ai'],
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'mcp-session-id'],
+    credentials: true
+}));
 app.use(express.json());
 
 const MCP_API_KEY = process.env.MCP_API_KEY;
