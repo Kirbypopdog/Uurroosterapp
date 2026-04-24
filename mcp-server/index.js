@@ -474,15 +474,33 @@ async function handleTool(name, args) {
         }
 
         case 'get_api_health': {
+            const lines = [`API_URL: ${API_URL}`];
+            // Test bereikbaarheid
             try {
                 const start = Date.now();
-                const res = await fetch(`${API_URL.replace('/api/v1', '')}/api/v1/health`);
+                const res = await fetch(`${API_URL}/health`);
                 const ms = Date.now() - start;
-                const data = await res.json().catch(() => ({}));
-                return `API status: ${res.status} ${res.ok ? '✓' : '✗'} | Reactietijd: ${ms}ms | ${JSON.stringify(data)}`;
+                lines.push(`Bereikbaar: ${res.status} ${res.ok ? '✓' : '✗'} (${ms}ms)`);
             } catch (err) {
-                return `API niet bereikbaar: ${err.message}`;
+                lines.push(`Bereikbaar: NEEN — ${err.message}`);
             }
+            // Test login
+            try {
+                cachedToken = null;
+                await getToken();
+                lines.push(`Login: OK ✓`);
+            } catch (err) {
+                lines.push(`Login: MISLUKT — ${err.message}`);
+            }
+            // Test users endpoint
+            try {
+                const { ok, status, data } = await apiFetch('/users');
+                const count = (data.users || []).length;
+                lines.push(`/users: ${status} ${ok ? `✓ (${count} medewerkers)` : `✗ — ${JSON.stringify(data)}`}`);
+            } catch (err) {
+                lines.push(`/users: FOUT — ${err.message}`);
+            }
+            return lines.join('\n');
         }
 
         default:
