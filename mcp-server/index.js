@@ -1,6 +1,7 @@
 import 'dotenv/config';
+import express from 'express';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import pg from 'pg';
 
@@ -488,24 +489,65 @@ async function handleTool(name, args) {
     }
 }
 
-// ===== SERVER =====
+// ===== SERVER FACTORY =====
 
-const server = new Server(
-    { name: 'uurroosterapp', version: '1.0.0' },
-    { capabilities: { tools: {} } }
-);
+function createMcpServer() {
+    const server = new Server(
+        { name: 'uurroosterapp', version: '1.0.0' },
+        { capabilities: { tools: {} } }
+    );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-    try {
-        const result = await handleTool(name, args || {});
-        return { content: [{ type: 'text', text: String(result) }] };
-    } catch (err) {
-        return { content: [{ type: 'text', text: `Fout: ${err.message}` }], isError: true };
-    }
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+        const { name, arguments: args } = request.params;
+        try {
+            const result = await handleTool(name, args || {});
+            return { content: [{ type: 'text', text: String(result) }] };
+        } catch (err) {
+            return { content: [{ type: 'text', text: `Fout: ${err.message}` }], isError: true };
+        }
+    });
+
+    return server;
+}
+
+// ===== EXPRESS / SSE =====
+
+const app = express();
+app.use(express.json());
+
+const MCP_API_KEY = process.env.MCP_API_KEY;
+
+// Eenvoudige auth middleware — optioneel als MCP_API_KEY is ingesteld
+function checkAuth(req, res, next) {
+    if (!MCP_API_KEY) return next();
+    const auth = req.headers['authorization'] || req.query.api_key;
+    if (auth === `Bearer ${MCP_API_KEY}` || auth === MCP_API_KEY) return next();
+    res.status(401).json({ error: 'Unauthorized' });
+}
+
+const transports = new Map();
+
+app.get('/sse', checkAuth, async (req, res) => {
+    const transport = new SSEServerTransport('/messages', res);
+    const server = createMcpServer();
+    await server.connect(transport);
+    transports.set(transport.sessionId, transport);
+    res.on('close', () => transports.delete(transport.sessionId));
 });
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+app.post('/messages', checkAuth, async (req, res) => {
+    const transport = transports.get(req.query.sessionId);
+    if (!transport) return res.status(404).json({ error: 'Sessie niet gevonden' });
+    await transport.handlePostMessage(req, res);
+});
+
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'uurroosterapp-mcp' }));
+
+const PORT = process.env.PORT || 3002;
+app.listen(PORT, () => {
+    console.log(`Uurroosterapp MCP server draait op poort ${PORT}`);
+    console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
+    if (!MCP_API_KEY) console.warn('Waarschuwing: MCP_API_KEY niet ingesteld — endpoint is openbaar');
+});
