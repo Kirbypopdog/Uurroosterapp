@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import pg from 'pg';
 
@@ -512,14 +512,13 @@ function createMcpServer() {
     return server;
 }
 
-// ===== EXPRESS / SSE =====
+// ===== EXPRESS / STREAMABLE HTTP =====
 
 const app = express();
 app.use(express.json());
 
 const MCP_API_KEY = process.env.MCP_API_KEY;
 
-// Eenvoudige auth middleware — optioneel als MCP_API_KEY is ingesteld
 function checkAuth(req, res, next) {
     if (!MCP_API_KEY) return next();
     const auth = req.headers['authorization'] || req.query.api_key;
@@ -527,22 +526,14 @@ function checkAuth(req, res, next) {
     res.status(401).json({ error: 'Unauthorized' });
 }
 
-const transports = new Map();
-
-app.get('/sse', checkAuth, async (req, res) => {
-    const transport = new SSEServerTransport('/messages', res);
+// Streamable HTTP: alle MCP-communicatie via één /mcp endpoint
+app.all('/mcp', checkAuth, async (req, res) => {
+    const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => crypto.randomUUID(),
+    });
     const server = createMcpServer();
     await server.connect(transport);
-    transports.set(transport.sessionId, transport);
-    res.on('close', () => transports.delete(transport.sessionId));
-});
-
-// /messages heeft geen aparte auth nodig — de sessionId is alleen bekend
-// na een succesvolle geauthenticeerde SSE-verbinding
-app.post('/messages', async (req, res) => {
-    const transport = transports.get(req.query.sessionId);
-    if (!transport) return res.status(404).json({ error: 'Sessie niet gevonden' });
-    await transport.handlePostMessage(req, res);
+    await transport.handleRequest(req, res);
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'uurroosterapp-mcp' }));
@@ -550,6 +541,6 @@ app.get('/health', (req, res) => res.json({ status: 'ok', service: 'uurroosterap
 const PORT = process.env.PORT || 3002;
 app.listen(PORT, () => {
     console.log(`Uurroosterapp MCP server draait op poort ${PORT}`);
-    console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
+    console.log(`MCP endpoint: http://localhost:${PORT}/mcp`);
     if (!MCP_API_KEY) console.warn('Waarschuwing: MCP_API_KEY niet ingesteld — endpoint is openbaar');
 });
