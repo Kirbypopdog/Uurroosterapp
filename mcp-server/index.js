@@ -526,17 +526,40 @@ function checkAuth(req, res, next) {
     res.status(401).json({ error: 'Unauthorized' });
 }
 
-// Streamable HTTP: alle MCP-communicatie via één /mcp endpoint
+// Sessies bijhouden zodat follow-up requests dezelfde transport hergebruiken
+const sessions = new Map();
+
 app.all('/mcp', checkAuth, async (req, res) => {
-    const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => crypto.randomUUID(),
-    });
-    const server = createMcpServer();
-    await server.connect(transport);
-    await transport.handleRequest(req, res);
+    try {
+        const sessionId = req.headers['mcp-session-id'];
+        let transport;
+
+        if (sessionId && sessions.has(sessionId)) {
+            transport = sessions.get(sessionId);
+        } else {
+            transport = new StreamableHTTPServerTransport({
+                sessionIdGenerator: () => crypto.randomUUID(),
+                onsessioninitialized: (id) => {
+                    sessions.set(id, transport);
+                }
+            });
+            const server = createMcpServer();
+            await server.connect(transport);
+        }
+
+        await transport.handleRequest(req, res, req.body);
+
+        res.on('close', () => {
+            const id = req.headers['mcp-session-id'];
+            if (id) sessions.delete(id);
+        });
+    } catch (err) {
+        console.error('MCP fout:', err.message);
+        if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'uurroosterapp-mcp' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'uurroosterapp-mcp', sessions: sessions.size }));
 
 const PORT = process.env.PORT || 3002;
 app.listen(PORT, () => {
