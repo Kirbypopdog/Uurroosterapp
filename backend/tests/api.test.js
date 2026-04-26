@@ -468,6 +468,7 @@ describe('POST /shifts', () => {
     const newShift = { id: 10, userId: 5, employeeId: 5, team: null, date: '2026-04-15', startTime: '09:00', endTime: '17:00', notes: '', source: 'manual' };
     pool.query
       .mockResolvedValueOnce({ rows: [] })         // closedDates check
+      .mockResolvedValueOnce({ rows: [] })         // validateShiftRules: geen conflicten
       .mockResolvedValueOnce({ rows: [newShift] }) // INSERT
       .mockResolvedValueOnce({ rows: [] })         // DELETE shift_blocks
       .mockResolvedValueOnce({ rows: [] });         // logAudit
@@ -479,6 +480,37 @@ describe('POST /shifts', () => {
     expect(res.status).toBe(201);
     expect(res.body.shift).toBeTruthy();
     expect(res.body.shift.source).toBe('manual');
+  });
+
+  test('returns 422 when new shift overlaps an existing shift', async () => {
+    mockActiveUser();
+    const conflictShift = { id: 1, date: '2026-04-15', start_time: '08:00', end_time: '14:00' };
+    pool.query
+      .mockResolvedValueOnce({ rows: [] })               // closedDates check
+      .mockResolvedValueOnce({ rows: [conflictShift] }); // validateShiftRules: overlap
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'team1' });
+    const res = await request(app)
+      .post('/shifts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, date: '2026-04-15', startTime: '10:00', endTime: '17:00' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toContain('Overlap');
+  });
+
+  test('returns 422 when 11-hour rest rule is violated', async () => {
+    mockActiveUser();
+    // Shift eindigde om 22:00 de dag ervoor → slechts 9u rust voor 07:00 shift
+    const prevShift = { id: 2, date: '2026-04-14', start_time: '14:00', end_time: '22:00' };
+    pool.query
+      .mockResolvedValueOnce({ rows: [] })              // closedDates check
+      .mockResolvedValueOnce({ rows: [prevShift] });    // validateShiftRules: te weinig rust
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'team1' });
+    const res = await request(app)
+      .post('/shifts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, date: '2026-04-15', startTime: '07:00', endTime: '15:00' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toContain('11-uur');
   });
 });
 

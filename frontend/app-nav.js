@@ -77,7 +77,21 @@ function updateShiftRefreshRange() {
     viewEnd.setDate(viewEnd.getDate() + 21); // current week + 2 weeks buffer
     const end = new Date(Math.max(schoolYearEnd.getTime(), viewEnd.getTime()));
     end.setDate(end.getDate() + 14); // extra buffer
-    setActiveShiftRange(formatDateYYYYMMDD(start), formatDateYYYYMMDD(end));
+    const startStr = formatDateYYYYMMDD(start);
+    const endStr   = formatDateYYYYMMDD(end);
+    setActiveShiftRange(startStr, endStr);
+
+    // Laad shifts bij als de huidige week niet in de geladen data zit
+    if (typeof DataStore !== 'undefined' && typeof refreshShifts === 'function') {
+        const weekStart = formatDateYYYYMMDD(AppState.currentWeekStart);
+        const weekEnd   = new Date(AppState.currentWeekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const weekEndStr = formatDateYYYYMMDD(weekEnd);
+        const hasData = DataStore.shifts && DataStore.shifts.some(s => s.date >= weekStart && s.date <= weekEndStr);
+        if (!hasData) {
+            refreshShifts({ startDate: startStr, endDate: endStr, merge: true });
+        }
+    }
 }
 
 

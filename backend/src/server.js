@@ -51,7 +51,7 @@ app.use(globalLimiter);
 
 // ===== DATE HELPER FUNCTIONS =====
 // Used by apply-schedule endpoint (replicates frontend data.js logic)
-const { getMonday, formatDateYYYYMMDD, parseLocalDate, getBelgianPublicHolidays } = require('./utils');
+const { getMonday, formatDateYYYYMMDD, parseLocalDate, getBelgianPublicHolidays, shiftsOverlapCheck, hoursBetweenShifts } = require('./utils');
 
 // ===== AUTO-MIGRATION ON STARTUP =====
 // Ensures the database schema is up-to-date
@@ -642,6 +642,48 @@ async function logAudit(req, action, resourceType, resourceId, details = {}) {
   } catch (err) {
     console.error('Audit log error:', err.message);
   }
+}
+
+// ===== SHIFT VALIDATIE =====
+
+/**
+ * Controleert overlap en 11-uur rust voor een nieuwe/gewijzigde shift.
+ * @param {object} db - pool (of mock in tests)
+ * @param {number} userId
+ * @param {{ date: string, start_time: string, end_time: string }} newShift
+ * @param {number|null} excludeId - shift-id uitsluiten bij PUT
+ * @returns {Promise<{ valid: boolean, message?: string }>}
+ */
+async function validateShiftRules(db, userId, newShift, excludeId = null) {
+  const MIN_REST = 11;
+  const rangeStart = new Date(newShift.date);
+  rangeStart.setDate(rangeStart.getDate() - 2);
+  const rangeEnd = new Date(newShift.date);
+  rangeEnd.setDate(rangeEnd.getDate() + 2);
+
+  const params = [userId, formatDateYYYYMMDD(rangeStart), formatDateYYYYMMDD(rangeEnd)];
+  const excludeClause = excludeId ? `AND id != $4` : '';
+  if (excludeId) params.push(excludeId);
+
+  const { rows } = await db.query(
+    `SELECT id, date::text as date, start_time, end_time FROM shifts
+     WHERE user_id = $1 AND date BETWEEN $2 AND $3 ${excludeClause}`,
+    params
+  );
+
+  for (const existing of rows) {
+    if (shiftsOverlapCheck(existing, newShift)) {
+      return { valid: false, message: 'Overlap: medewerker heeft al een shift op dit tijdstip.' };
+    }
+    const hours = hoursBetweenShifts(existing, newShift);
+    if (hours >= 0 && hours < MIN_REST) {
+      return {
+        valid: false,
+        message: `11-uur regel: slechts ${hours.toFixed(1)}u rust tussen shifts (minimum ${MIN_REST}u).`
+      };
+    }
+  }
+  return { valid: true };
 }
 
 // ===== API ROUTER =====
@@ -1553,6 +1595,10 @@ v1.post('/shifts', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Deze dag is manueel gesloten' });
     }
 
+    // Valideer 11-uur regel en overlap
+    const validation = await validateShiftRules(pool, userId, { date, start_time: startTime, end_time: endTime });
+    if (!validation.valid) return res.status(422).json({ error: validation.message });
+
     // Insert the new shift
     const result = await pool.query(`
       INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
@@ -1606,6 +1652,18 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
       [id]
     );
     const oldShift = oldResult.rows[0] || null;
+
+    // Valideer 11-uur regel en overlap (gebruik bestaande waarden als veld niet meegegeven)
+    const updatedShift = {
+      date:       date       || oldShift?.date,
+      start_time: startTime  || oldShift?.startTime,
+      end_time:   endTime    || oldShift?.endTime
+    };
+    if (updatedShift.date && updatedShift.start_time && updatedShift.end_time) {
+      const targetUserId = userId || oldShift?.userId;
+      const validation = await validateShiftRules(pool, targetUserId, updatedShift, id);
+      if (!validation.valid) return res.status(422).json({ error: validation.message });
+    }
 
     const result = await pool.query(`
       UPDATE shifts

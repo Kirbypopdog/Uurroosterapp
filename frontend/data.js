@@ -182,13 +182,21 @@ async function dataApiFetch(path, options = {}) {
 
 // ===== LOAD DATA FROM API =====
 
+// Initieel datumvenster: 3 maanden terug t/m 3 maanden vooruit
+function _getInitialWindowStart() {
+    const d = new Date(); d.setMonth(d.getMonth() - 3); return formatDateYYYYMMDD(d);
+}
+function _getInitialWindowEnd() {
+    const d = new Date(); d.setMonth(d.getMonth() + 3); return formatDateYYYYMMDD(d);
+}
+
 async function loadDataFromAPI() {
     try {
         // Load all data in parallel - users now includes employee/schedule data
         const loadErrors = [];
         const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData] = await Promise.all([
             dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
-            dataApiFetch('/shifts').catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
+            dataApiFetch(`/shifts?startDate=${_getInitialWindowStart()}&endDate=${_getInitialWindowEnd()}`).catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
             dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
             dataApiFetch('/shift-blocks').catch(err => { loadErrors.push('shift-blocks'); console.error('[LoadData] Failed to load shift-blocks:', err); return []; }),
             dataApiFetch('/settings').catch(err => { loadErrors.push('settings'); console.error('[LoadData] Failed to load settings:', err); return { settings: {} }; }),

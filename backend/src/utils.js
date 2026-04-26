@@ -80,4 +80,63 @@ function getBelgianPublicHolidays(year) {
   ].map(h => ({ date: formatDateYYYYMMDD(h.date), name: h.name }));
 }
 
-module.exports = { getMonday, formatDateYYYYMMDD, parseLocalDate, getEasterDate, getBelgianPublicHolidays };
+// ===== SHIFT TIJDSVALIDATIE =====
+// Geport vanuit frontend/validation.js voor server-side gebruik.
+
+/**
+ * Parst een datum + tijdstring naar een lokaal Date object.
+ * @param {string} dateStr  'YYYY-MM-DD'
+ * @param {string} timeStr  'HH:MM'
+ * @returns {Date}
+ */
+function parseShiftDateTime(dateStr, timeStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [h, min] = timeStr.split(':').map(Number);
+  return new Date(y, m - 1, d, h, min, 0, 0);
+}
+
+/**
+ * Geeft het eindtijdstip van een shift terug.
+ * Corrigeert automatisch voor nachtshifts (eindtijd < starttijd).
+ * @param {{ date: string, start_time: string, end_time: string }} shift
+ * @returns {Date}
+ */
+function getShiftEndDT(shift) {
+  const start = parseShiftDateTime(shift.date, shift.start_time);
+  const end   = parseShiftDateTime(shift.date, shift.end_time);
+  if (end <= start) end.setDate(end.getDate() + 1);
+  return end;
+}
+
+/**
+ * Berekent het aantal uren rust tussen twee shifts.
+ * Negatief = overlap.
+ * @param {{ date: string, start_time: string, end_time: string }} a
+ * @param {{ date: string, start_time: string, end_time: string }} b
+ * @returns {number}
+ */
+function hoursBetweenShifts(a, b) {
+  const startA = parseShiftDateTime(a.date, a.start_time);
+  const endA   = getShiftEndDT(a);
+  const startB = parseShiftDateTime(b.date, b.start_time);
+  const endB   = getShiftEndDT(b);
+  const restMs = startA <= startB ? (startB - endA) : (startA - endB);
+  return restMs / 3_600_000;
+}
+
+/**
+ * Controleert of twee shifts overlappen.
+ * @param {{ date: string, start_time: string, end_time: string }} a
+ * @param {{ date: string, start_time: string, end_time: string }} b
+ * @returns {boolean}
+ */
+function shiftsOverlapCheck(a, b) {
+  const s1 = parseShiftDateTime(a.date, a.start_time), e1 = getShiftEndDT(a);
+  const s2 = parseShiftDateTime(b.date, b.start_time), e2 = getShiftEndDT(b);
+  return s1 < e2 && s2 < e1;
+}
+
+module.exports = {
+  getMonday, formatDateYYYYMMDD, parseLocalDate, getEasterDate, getBelgianPublicHolidays,
+  parseShiftDateTime, getShiftEndDT, hoursBetweenShifts, shiftsOverlapCheck
+};
