@@ -61,7 +61,7 @@ async function apiFetch(path, options = {}) {
 let dbPool = null;
 function getDb() {
     if (!dbPool && process.env.DATABASE_URL) {
-        dbPool = new Pool({ connectionString: process.env.DATABASE_URL });
+        dbPool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
     }
     return dbPool;
 }

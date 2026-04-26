@@ -153,6 +153,41 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - **Feestdagen**: `DataStore._publicHolidaysCache` — lazy geladen via `fetchPublicHolidays(year)`. Gebruik `getPublicHoliday(date)` voor rendering. Let op: gebruik hier plain `fetch()`, niet `dataApiFetch()` (endpoint vereist geen auth)
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 
+## MCP Server
+
+De MCP server is actief en verbonden met de productie-API. Dit laat Claude toe om live data te lezen tijdens development, debugging en feature-bouw.
+
+**API URL**: `https://uurrooster-app.onrender.com/api/v1`
+
+### Beschikbare tools
+
+| Tool | Doel |
+|------|------|
+| `get_api_health` | API bereikbaarheid checken |
+| `get_employees` | Medewerkers ophalen (filter op team, actief) |
+| `get_shifts` | Shifts ophalen voor een datumbereik |
+| `get_availability` | Beschikbaarheid/afwezigheid opvragen |
+| `get_staffing_overview` | Bezetting per dag/team bekijken |
+| `find_available_employees` | Beschikbare medewerkers voor een shift zoeken |
+| `get_swap_requests` | Ruilverzoeken opvragen |
+| `get_schedule_drafts` | Roosterconcepten opvragen |
+| `get_hours_report` | Uren rapport per medewerker |
+| `get_audit_log` | Audit log met filters |
+| `query_database` | Directe SQL query op de database |
+| `create_shift` | ⚠️ Shift aanmaken (zie veiligheidsregel) |
+| `update_shift` | ⚠️ Shift wijzigen (zie veiligheidsregel) |
+| `delete_shift` | ⚠️ Shift verwijderen (zie veiligheidsregel) |
+
+### Veiligheidsregel MCP
+
+> ⚠️ **Schrijf-tools** (`create_shift`, `update_shift`, `delete_shift`) raken de **productiedatabase**. Deze tools NOOIT gebruiken zonder expliciete bevestiging van Victor — ook niet als de vraag dit impliciet suggereert. Altijd eerst de actie beschrijven en wachten op "ja, doe het".
+
+### Gebruik tijdens development
+
+- Lees live data om edge cases en echte datastructuren te begrijpen
+- Valideer API-gedrag na een bugfix rechtstreeks via MCP
+- Gebruik `query_database` voor complexe lookups die de standaard tools niet dekken
+
 ## Deploy
 
 Zie `DEPLOY.md` voor deployment instructies (Render platform).
