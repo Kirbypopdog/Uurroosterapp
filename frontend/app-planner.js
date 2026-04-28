@@ -596,8 +596,8 @@ function renderTimelineView() {
                 const employeeName = escapeHtml(emp.name);
                 const empContractH = emp.contractHours || emp.contract_hours || 0;
                 const empWeekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
-                const empMonthH = getEmployeeHoursThisMonth(emp.id, startDateStr);
-                const empMonthContract = empContractH > 0 ? Math.round(empContractH * 4.33) : 0;
+                const empMonthH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
+                const empMonthContract = empContractH > 0 ? empContractH * 4 : 0;
                 const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
                 const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
                 const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(1)}/${empContractH}u` : `${empWeekH.toFixed(1)}u`;
@@ -795,8 +795,8 @@ function renderTimelineView() {
                 const employeeName = escapeHtml(emp.name);
                 const empContractH = emp.contractHours || emp.contract_hours || 0;
                 const empWeekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
-                const empMonthH = getEmployeeHoursThisMonth(emp.id, startDateStr);
-                const empMonthContract = empContractH > 0 ? Math.round(empContractH * 4.33) : 0;
+                const empMonthH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
+                const empMonthContract = empContractH > 0 ? empContractH * 4 : 0;
                 const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
                 const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
                 const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(1)}/${empContractH}u` : `${empWeekH.toFixed(1)}u`;
@@ -1094,8 +1094,8 @@ function renderMonthView() {
 
                 const employeeName = escapeHtml(emp.name);
                 const empContractH = emp.contractHours || emp.contract_hours || 0;
-                const empMonthH = getEmployeeHoursThisMonth(emp.id, formatDateYYYYMMDD(monthStart));
-                const monthContract = empContractH > 0 ? Math.round(empContractH * 4.33) : 0;
+                const empMonthH = getEmployeeHoursThisPeriod(emp.id, formatDateYYYYMMDD(monthStart));
+                const monthContract = empContractH > 0 ? empContractH * 4 : 0;
                 const empMonthOverClass = monthContract > 0 ? (empMonthH > monthContract ? ' over-hours' : ' under-hours') : '';
                 const empMonthLabel = monthContract > 0 ? `${empMonthH.toFixed(1)}/${monthContract}u` : `${empMonthH.toFixed(1)}u`;
                 html += `<div class="month-employee-cell">
@@ -1179,8 +1179,8 @@ function renderMonthView() {
 
                 const employeeName = escapeHtml(emp.name);
                 const empContractH = emp.contractHours || emp.contract_hours || 0;
-                const empMonthH = getEmployeeHoursThisMonth(emp.id, formatDateYYYYMMDD(monthStart));
-                const monthContract = empContractH > 0 ? Math.round(empContractH * 4.33) : 0;
+                const empMonthH = getEmployeeHoursThisPeriod(emp.id, formatDateYYYYMMDD(monthStart));
+                const monthContract = empContractH > 0 ? empContractH * 4 : 0;
                 const empMonthOverClass = monthContract > 0 ? (empMonthH > monthContract ? ' over-hours' : ' under-hours') : '';
                 const empMonthLabel = monthContract > 0 ? `${empMonthH.toFixed(1)}/${monthContract}u` : `${empMonthH.toFixed(1)}u`;
                 html += `<div class="month-employee-cell">

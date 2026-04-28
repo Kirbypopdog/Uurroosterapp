@@ -1144,6 +1144,41 @@ function getEmployeeHoursThisMonth(employeeId, date) {
     return getEmployeeHoursInPeriod(employeeId, startDate, endDate);
 }
 
+function getFourWeekPeriodDates(date) {
+    const schoolWeek = getSchoolWeekNumber(date);
+    if (schoolWeek === null) return null;
+    const periodIndex = Math.floor((schoolWeek - 1) / 4); // 0-based
+
+    const syStart = getSchoolYearStart();
+    const syDate = parseDateOnly(syStart);
+    const d = parseDateOnly(date);
+    let syYear = d.getFullYear();
+    let thisYearStart = new Date(syYear, syDate.getMonth(), syDate.getDate());
+    thisYearStart.setHours(0, 0, 0, 0);
+    if (d < thisYearStart) {
+        syYear--;
+        thisYearStart = new Date(syYear, syDate.getMonth(), syDate.getDate());
+        thisYearStart.setHours(0, 0, 0, 0);
+    }
+    const startMonday = getMonday(thisYearStart);
+
+    const periodStart = new Date(startMonday);
+    periodStart.setDate(periodStart.getDate() + periodIndex * 28);
+    const periodEnd = new Date(periodStart);
+    periodEnd.setDate(periodEnd.getDate() + 27);
+
+    return {
+        startDate: formatDateYYYYMMDD(periodStart),
+        endDate: formatDateYYYYMMDD(periodEnd)
+    };
+}
+
+function getEmployeeHoursThisPeriod(employeeId, date) {
+    const period = getFourWeekPeriodDates(date);
+    if (!period) return 0;
+    return getEmployeeHoursInPeriod(employeeId, period.startDate, period.endDate);
+}
+
 // ===== STAFFING VALIDATIE =====
 
 function getStaffingForTimeSlot(date, startHour, endHour) {
