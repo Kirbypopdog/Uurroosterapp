@@ -35,7 +35,7 @@ open ../frontend/index.html
 | `app-ui.js` | ~479 | Toast, modals, FocusTrap, tooltips, overlays |
 | `app-auth.js` | ~231 | Login, logout, sessiecheck, rolevisibility |
 | `app-nav.js` | ~890 | Navigatie, switchView, renderHome, week/maand/dag helpers |
-| `app-planner.js` | ~1300 | renderPlanning, timeline, maand, heatmap, validatiemeldingen |
+| `app-planner.js` | ~1330 | renderPlanning, timeline, maand, heatmap, validatiemeldingen, uren-per-naam |
 | `app-shifts.js` | ~1105 | Shift modals, swap modals, shift CRUD, activiteiten |
 | `app-swaps.js` | ~512 | renderSwaps, swap- en overnamekaartenrendering |
 | `app-employees.js` | ~1010 | renderEmployees, profiel, medewerker CRUD, weekrooster |
@@ -47,7 +47,7 @@ open ../frontend/index.html
 | `data.js` | ~1.840 | DataStore, API fetch wrappers, data loading |
 | `validation.js` | ~593 | Business rules: 11-uur regel, overlap, min bezetting |
 | `drag-handler.js` | ~1.201 | Drag & drop shifts tussen medewerkers |
-| `styles.css` | ~10.900 | Alle CSS inclusief responsive, themas |
+| `styles.css` | ~11.250 | Alle CSS inclusief responsive, themas |
 | `index.html` | ~800 | HTML markup: modals, formulieren, planning grid |
 | `config/settings.js` | ~62 | API URL auto-detect, shift templates, team kleuren |
 
@@ -152,6 +152,7 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - **Validation**: `validation.js` draait client-side checks voor shift toewijzingen
 - **Feestdagen**: `DataStore._publicHolidaysCache` — lazy geladen via `fetchPublicHolidays(year)`. Gebruik `getPublicHoliday(date)` voor rendering. Let op: gebruik hier plain `fetch()`, niet `dataApiFetch()` (endpoint vereist geen auth)
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
+- **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en maandtotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisMonth(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Contractnorm per maand = `contractHours × 4.33`.
 
 ## MCP Server
 
