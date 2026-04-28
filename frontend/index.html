@@ -67,6 +67,7 @@
                 <div class="nav-group-admin">
                     <button class="nav-btn" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
                     <button class="nav-btn" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster Bouwen</button>
+                    <button class="nav-btn" data-view="settings"><i data-lucide="settings" class="nav-icon"></i> Instellingen</button>
                 </div>
             </div>
             <div class="nav-right">
@@ -79,22 +80,13 @@
                     </select>
                 </div>
                 <div class="user-menu" id="user-menu">
-                    <button class="user-menu-trigger" id="user-menu-trigger" aria-expanded="false" aria-haspopup="true">
+                    <button class="user-menu-trigger" id="user-menu-trigger" aria-label="Ga naar profiel">
                         <span class="avatar-circle" id="avatar-circle"></span>
                         <span class="user-menu-name" id="user-menu-name"></span>
-                        <i data-lucide="chevron-down" class="lucide-sm user-menu-chevron"></i>
                     </button>
-                    <div class="user-menu-dropdown" id="user-menu-dropdown">
-                        <div class="user-menu-header">
-                            <span class="user-menu-header-name" id="dropdown-user-name"></span>
-                            <span class="user-menu-header-role" id="dropdown-user-role"></span>
-                        </div>
-                        <div class="user-menu-divider"></div>
-                        <button class="user-menu-item" data-view="profile"><i data-lucide="user" class="lucide-sm"></i> Profiel</button>
-                        <button class="user-menu-item" data-view="settings" id="dropdown-settings-item"><i data-lucide="settings" class="lucide-sm"></i> Instellingen</button>
-                        <div class="user-menu-divider"></div>
-                        <button class="user-menu-item user-menu-item-danger" id="logout-btn"><i data-lucide="log-out" class="lucide-sm"></i> Uitloggen</button>
-                    </div>
+                    <button class="nav-logout-btn" id="logout-btn" aria-label="Uitloggen" title="Uitloggen">
+                        <i data-lucide="log-out" class="lucide-sm"></i>
+                    </button>
                 </div>
             </div>
         </nav>

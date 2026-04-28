@@ -127,38 +127,10 @@ function setupEventListeners() {
         });
     }
 
-    // User menu (avatar dropdown) toggle
-    const userMenu = document.getElementById('user-menu');
+    // Avatar trigger → navigeer direct naar profiel
     const userMenuTrigger = document.getElementById('user-menu-trigger');
-    if (userMenu && userMenuTrigger) {
-        userMenuTrigger.addEventListener('click', (e) => {
-            e.stopPropagation();
-            userMenu.classList.toggle('open');
-            userMenuTrigger.setAttribute('aria-expanded', userMenu.classList.contains('open'));
-        });
-        // Close on click outside
-        document.addEventListener('click', (e) => {
-            if (!userMenu.contains(e.target)) {
-                userMenu.classList.remove('open');
-                userMenuTrigger.setAttribute('aria-expanded', 'false');
-            }
-        });
-        // Close on Escape
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && userMenu.classList.contains('open')) {
-                userMenu.classList.remove('open');
-                userMenuTrigger.setAttribute('aria-expanded', 'false');
-                userMenuTrigger.focus();
-            }
-        });
-        // Dropdown nav items (profile, settings)
-        userMenu.querySelectorAll('.user-menu-item[data-view]').forEach(item => {
-            item.addEventListener('click', () => {
-                userMenu.classList.remove('open');
-                userMenuTrigger.setAttribute('aria-expanded', 'false');
-                switchView(item.dataset.view);
-            });
-        });
+    if (userMenuTrigger) {
+        userMenuTrigger.addEventListener('click', () => switchView('profile'));
     }
 
     DOM.navButtons.forEach(btn => {
