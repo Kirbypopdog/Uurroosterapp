@@ -89,7 +89,9 @@ function updateShiftRefreshRange() {
         const weekEndStr = formatDateYYYYMMDD(weekEnd);
         const hasData = DataStore.shifts && DataStore.shifts.some(s => s.date >= weekStart && s.date <= weekEndStr);
         if (!hasData) {
-            refreshShifts({ startDate: startStr, endDate: endStr, merge: true });
+            refreshShifts({ startDate: startStr, endDate: endStr, merge: true })
+                .then(() => { if (AppState.currentView === 'planning') renderPlanning(); })
+                .catch(() => {});
         }
     }
 }
