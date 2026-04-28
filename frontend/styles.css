@@ -3193,6 +3193,11 @@ body[data-view-mode="day"] .timeline-header {
     font-weight: 600;
 }
 
+.timeline-employee-cell .emp-hours.under-hours {
+    color: #f59e0b;
+    font-weight: 600;
+}
+
 /* Weekend verantwoordelijke highlighting */
 .timeline-employee-cell.is-responsible {
     background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
@@ -3661,6 +3666,11 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .month-employee-cell .emp-hours.over-hours {
     color: var(--color-danger, #ef4444);
+    font-weight: 600;
+}
+
+.month-employee-cell .emp-hours.under-hours {
+    color: #f59e0b;
     font-weight: 600;
 }
 
