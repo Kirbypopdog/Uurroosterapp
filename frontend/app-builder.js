@@ -1706,7 +1706,7 @@ function showNewConceptTypeModal() {
             opt.querySelector('input').checked = true;
             const periodSelect = overlay.querySelector('#vakantie-period-select');
             const isVakantie = opt.dataset.value === 'vakantie';
-            periodSelect.style.display = isVakantie ? 'block' : 'none';
+            periodSelect.classList.toggle('hidden', !isVakantie);
             const nameInput = overlay.querySelector('#concept-name-input');
             if (!isVakantie) nameInput.value = 'Basisrooster';
         });

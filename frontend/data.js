@@ -1604,9 +1604,9 @@ function getOrCalculateResponsible(weekStartDate) {
     const startIndex = eligible.findIndex(e => String(e.id) === startEmployeeId);
     if (startIndex === -1) return eligible[0];
 
-    const startDate = new Date(activeRotation.rotationStart);
+    const startDate = parseDateOnly(activeRotation.rotationStart);
     startDate.setHours(0, 0, 0, 0);
-    const targetDate = new Date(weekStartDate);
+    const targetDate = parseDateOnly(weekStartDate);
     targetDate.setHours(0, 0, 0, 0);
 
     if (targetDate < startDate) return null;
