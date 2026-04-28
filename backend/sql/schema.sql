@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS schedule_drafts (
 CREATE TABLE IF NOT EXISTS shift_activities (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
   date DATE NOT NULL,
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,

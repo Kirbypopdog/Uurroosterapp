@@ -486,8 +486,24 @@ async function ensureSchema() {
       console.log(`  shift_swap_requests FK fix: ${e.message}`);
     }
 
-    // Fix shift_activities FK: add ON DELETE CASCADE via shift cleanup (no shift_id column)
-    // Ensure shift_activities are removed when parent shift is deleted (handled in DELETE endpoint)
+    // Add shift_id FK to shift_activities for correct cascade deletion
+    try {
+      await client.query(`ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE`);
+      // Backfill: match existing activities to shifts via user_id + date + closest start_time
+      await client.query(`
+        UPDATE shift_activities sa
+        SET shift_id = (
+          SELECT s.id FROM shifts s
+          WHERE s.user_id = sa.user_id AND s.date = sa.date
+          ORDER BY ABS(EXTRACT(EPOCH FROM (s.start_time - sa.start_time)))
+          LIMIT 1
+        )
+        WHERE sa.shift_id IS NULL
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id)`);
+    } catch (e) {
+      console.log(`  shift_activities shift_id migration: ${e.message}`);
+    }
 
     // Missing indexes for frequently filtered columns
     try {
@@ -1732,13 +1748,7 @@ v1.delete('/shifts/:id', requireAuth, async (req, res) => {
       }
     }
 
-    // Delete related activities (shift_activities links via user_id + date, no shift_id FK)
-    await client.query(
-      'DELETE FROM shift_activities WHERE user_id = $1 AND date = $2',
-      [shift.user_id, shift.date]
-    );
-
-    // Delete the shift
+    // Delete the shift (CASCADE handles shift_activities with shift_id set)
     await client.query('DELETE FROM shifts WHERE id = $1', [id]);
     await logAudit(req, 'DELETE', 'shift', id, { shift: { id: shift.id, user_id: shift.user_id, team: shift.team, date: shift.date, source: shift.source } });
 
@@ -1845,7 +1855,7 @@ v1.get('/shift-activities', requireAuth, async (req, res) => {
   const { startDate, endDate } = req.query;
   try {
     let query = `
-      SELECT id, user_id as "userId", date::text as "date", start_time as "startTime",
+      SELECT id, user_id as "userId", shift_id as "shiftId", date::text as "date", start_time as "startTime",
              end_time as "endTime", type, description, created_at as "createdAt"
       FROM shift_activities
     `;
@@ -1864,7 +1874,7 @@ v1.get('/shift-activities', requireAuth, async (req, res) => {
 });
 
 v1.post('/shift-activities', requireAuth, async (req, res) => {
-  const { userId, date, startTime, endTime, type, description } = req.body || {};
+  const { userId, shiftId, date, startTime, endTime, type, description } = req.body || {};
   if (!userId || !date || !startTime || !endTime || !type) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken (userId, date, startTime, endTime, type)' });
   }
@@ -1877,11 +1887,11 @@ v1.post('/shift-activities', requireAuth, async (req, res) => {
 
   try {
     const result = await pool.query(`
-      INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, user_id as "userId", date::text as "date", start_time as "startTime",
+      INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, user_id as "userId", shift_id as "shiftId", date::text as "date", start_time as "startTime",
                 end_time as "endTime", type, description, created_at as "createdAt"
-    `, [userId, date, startTime, endTime, type, description || '']);
+    `, [userId, shiftId || null, date, startTime, endTime, type, description || '']);
 
     await logAudit(req, 'CREATE', 'shift_activity', result.rows[0].id, { activity: result.rows[0] });
     res.status(201).json({ activity: result.rows[0] });
@@ -3824,7 +3834,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
       // Find all auto-shifts just created in this range
       const newShiftsResult = await client.query(
-        `SELECT s.user_id, s.date::text as date, s.start_time, s.end_time, u.main_team
+        `SELECT s.id, s.user_id, s.date::text as date, s.start_time, s.end_time, u.main_team
          FROM shifts s JOIN users u ON s.user_id = u.id
          WHERE s.source = 'auto' AND s.date >= $1::date AND s.date <= $2::date`,
         [effectiveStartDate, effectiveEndDate]
@@ -3867,9 +3877,9 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
             const toTime = `${String(toH).padStart(2, '0')}:${String(toM).padStart(2, '0')}`;
 
             await client.query(
-              `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description)
-               VALUES ($1, $2, $3, $4, 'vergadering', 'Teamvergadering')`,
-              [shift.user_id, shift.date, fromTime, toTime]
+              `INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description)
+               VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering')`,
+              [shift.user_id, shift.id, shift.date, fromTime, toTime]
             );
           }
         }

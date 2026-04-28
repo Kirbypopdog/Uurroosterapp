@@ -229,7 +229,7 @@ function openShiftModal(shift, canEdit) {
         activitiesListHtml = '<div class="shift-activities-section">';
         activitiesListHtml += `<div class="shift-activities-header"><strong>Activiteiten</strong>`;
         if (canEdit) {
-            activitiesListHtml += ` <button type="button" class="btn btn-sm add-activity-btn add-activity-btn--inline" data-user-id="${shift.employeeId}" data-date="${shift.date}" data-shift-start="${shift.startTime}" data-shift-end="${shift.endTime}">+ Toevoegen</button>`;
+            activitiesListHtml += ` <button type="button" class="btn btn-sm add-activity-btn add-activity-btn--inline" data-user-id="${shift.employeeId}" data-date="${shift.date}" data-shift-start="${shift.startTime}" data-shift-end="${shift.endTime}" data-shift-id="${shift.id}">+ Toevoegen</button>`;
         }
         activitiesListHtml += '</div>';
         if (shiftActivities.length > 0) {
@@ -982,10 +982,11 @@ function applySuggestion(btn) {
 
 // ===== ACTIVITY MODAL =====
 
-function openAddActivityModal(userId, date, shiftStart, shiftEnd) {
+function openAddActivityModal(userId, date, shiftStart, shiftEnd, shiftId) {
     document.getElementById('activity-modal-title').textContent = 'Activiteit toevoegen';
     document.getElementById('activity-id').value = '';
     document.getElementById('activity-user-id').value = userId;
+    document.getElementById('activity-shift-id').value = shiftId || '';
     document.getElementById('activity-date').value = date;
     document.getElementById('activity-shift-start').value = shiftStart || '';
     document.getElementById('activity-shift-end').value = shiftEnd || '';
@@ -1002,13 +1003,14 @@ function openEditActivityModal(activityId) {
     const activity = DataStore.activities.find(a => a.id === activityId);
     if (!activity) return;
 
-    // Find the shift for this activity to get shift hours
-    const shift = DataStore.shifts.find(s =>
-        String(s.employeeId) === String(activity.userId) && s.date === activity.date
-    );
+    // Find the shift for this activity using shiftId if available, fallback to user+date match
+    const shift = activity.shiftId
+        ? DataStore.shifts.find(s => s.id === activity.shiftId)
+        : DataStore.shifts.find(s => String(s.employeeId) === String(activity.userId) && s.date === activity.date);
     document.getElementById('activity-modal-title').textContent = 'Activiteit bewerken';
     document.getElementById('activity-id').value = activity.id;
     document.getElementById('activity-user-id').value = activity.userId;
+    document.getElementById('activity-shift-id').value = activity.shiftId || '';
     document.getElementById('activity-date').value = activity.date;
     document.getElementById('activity-shift-start').value = shift ? shift.startTime : '';
     document.getElementById('activity-shift-end').value = shift ? shift.endTime : '';
@@ -1029,6 +1031,7 @@ async function handleActivitySubmit(e) {
     e.preventDefault();
     const id = document.getElementById('activity-id').value;
     const userId = document.getElementById('activity-user-id').value;
+    const shiftId = document.getElementById('activity-shift-id').value;
     const date = document.getElementById('activity-date').value;
     const type = document.getElementById('activity-type').value;
     const startTime = document.getElementById('activity-start').value;
@@ -1060,7 +1063,7 @@ async function handleActivitySubmit(e) {
         if (id) {
             await updateActivity(parseInt(id, 10), { startTime, endTime, type, description });
         } else {
-            await addActivity({ userId: parseInt(userId, 10), date, startTime, endTime, type, description });
+            await addActivity({ userId: parseInt(userId, 10), shiftId: shiftId ? parseInt(shiftId, 10) : null, date, startTime, endTime, type, description });
         }
         closeActivityModal();
         renderPlanning();

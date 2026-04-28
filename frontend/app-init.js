@@ -453,8 +453,8 @@ function setupEventListeners() {
         const addActivityBtn = e.target.closest('.add-activity-btn');
         if (addActivityBtn) {
             e.stopPropagation();
-            const { userId, date, shiftStart, shiftEnd } = addActivityBtn.dataset;
-            if (userId && date) openAddActivityModal(parseInt(userId, 10), date, shiftStart, shiftEnd);
+            const { userId, date, shiftStart, shiftEnd, shiftId } = addActivityBtn.dataset;
+            if (userId && date) openAddActivityModal(parseInt(userId, 10), date, shiftStart, shiftEnd, shiftId ? parseInt(shiftId, 10) : null);
         }
     });
 }
