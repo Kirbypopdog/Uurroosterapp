@@ -1160,7 +1160,7 @@ function getFourWeekPeriodDates(date) {
         thisYearStart = new Date(syYear, syDate.getMonth(), syDate.getDate());
         thisYearStart.setHours(0, 0, 0, 0);
     }
-    const startMonday = getMonday(thisYearStart);
+    const startMonday = getSchoolAnchorMonday(thisYearStart);
 
     const periodStart = new Date(startMonday);
     periodStart.setDate(periodStart.getDate() + periodIndex * 28);
@@ -1902,6 +1902,17 @@ function getSchoolYearStart() {
     return raw;
 }
 
+// Returns the Monday that anchors the school year:
+// - weekday (Mon–Fri): Monday of that same week
+// - weekend (Sat/Sun): the following Monday (school doesn't start mid-weekend)
+function getSchoolAnchorMonday(date) {
+    const d = parseDateOnly(date);
+    const day = d.getDay();
+    if (day === 6) d.setDate(d.getDate() + 2); // Sat → Mon
+    else if (day === 0) d.setDate(d.getDate() + 1); // Sun → Mon
+    return getMonday(d);
+}
+
 function getSchoolWeekNumber(date) {
     const start = getSchoolYearStart();
     if (!start) return null;
@@ -1919,7 +1930,7 @@ function getSchoolWeekNumber(date) {
         thisYearStart = new Date(syYear, syMonth, syDay);
         thisYearStart.setHours(0, 0, 0, 0);
     }
-    const startMonday = getMonday(thisYearStart);
+    const startMonday = getSchoolAnchorMonday(thisYearStart);
     startMonday.setHours(0, 0, 0, 0);
     const diffWeeks = Math.round((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
     return diffWeeks + 1; // 1-based
