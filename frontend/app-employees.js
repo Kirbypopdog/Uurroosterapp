@@ -638,10 +638,12 @@ function openEditEmployeeModal(employeeId) {
     DOM.employeeModalTitle.textContent = employee.name;
 
     const canEdit = ['admin', 'roosterverantwoordelijke'].includes(getEffectiveRole());
+    const canEditEmail = getEffectiveRole() === 'admin';
 
     // Profile fields
     DOM.employeeName.value = employee.name;
     DOM.employeeEmail.value = employee.email || '';
+    DOM.employeeEmail.disabled = !canEditEmail;
     DOM.employeeContract.value = employee.contractHours || '';
     DOM.employeeActive.value = employee.active !== false ? 'true' : 'false';
 

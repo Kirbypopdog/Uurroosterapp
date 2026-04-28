@@ -1304,9 +1304,12 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
       ? JSON.stringify(weekSchedules)
       : JSON.stringify([weekScheduleWeek1 || [], weekScheduleWeek2 || []]);
 
-    // Get old email before updating (for syncing with employees table)
+    // Get old email before updating
     const oldUserResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
     const oldEmail = oldUserResult.rows.length > 0 ? oldUserResult.rows[0].email : null;
+
+    // Only admins may change email; roosterverantwoordelijke cannot
+    const newEmail = role === 'admin' && email ? email.trim().toLowerCase() : oldEmail;
 
     const result = await pool.query(
       `UPDATE users
@@ -1326,7 +1329,7 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"`,
-      [name, email ? email.trim().toLowerCase() : null, mainTeam || null, contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
+      [name, newEmail, mainTeam || null, contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
     );
 
     if (result.rows.length === 0) {
@@ -1335,8 +1338,7 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
 
     await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
 
-    // Welkomst-email als email voor het eerst wordt ingesteld (fire-and-forget)
-    const newEmail = email ? email.trim().toLowerCase() : null;
+    // Welkomst-email als email voor het eerst wordt ingesteld (fire-and-forget, admin only)
     if (!oldEmail && newEmail) {
       emailService.notifyWelcome({ name: result.rows[0].name, email: newEmail });
     }
