@@ -705,13 +705,22 @@ function generateReadOnlyWeekScheduleHTML(employee) {
     let html = '<div class="read-only-schedule">';
     html += '<p class="form-hint mb-sm">Het basisrooster wordt beheerd via Rooster Bouwen.</p>';
 
+    const dayOrder = [1, 2, 3, 4, 5, 6, 0];
+    const prevDayMap = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
+
     for (let w = 1; w <= cycleLen; w++) {
         const schedule = getEmployeeWeekSchedule(employee, w) || [];
         const activeDays = schedule.filter(s => s.enabled);
+        const nachtForfait = (DataStore.settings && DataStore.settings.nachtForfait) ?? 5.25;
         const totalHours = activeDays.reduce((sum, s) => {
             const [sh, sm] = s.startTime.split(':').map(Number);
             const [eh, em] = s.endTime.split(':').map(Number);
-            return sum + (eh + em/60) - (sh + sm/60);
+            const startDec = sh + sm / 60;
+            const endDec = eh + em / 60;
+            if (endDec > startDec) return sum + (endDec - startDec);
+            // Night shift — use nachtforfait if crossing sleep window (ends >= 07:00)
+            if (eh >= 7) return sum + Math.max(0, 23 - startDec) + Math.max(0, endDec - 7) + nachtForfait;
+            return sum + (24 - startDec) + endDec;
         }, 0);
 
         html += `<div class="ro-week-block">`;
@@ -720,12 +729,25 @@ function generateReadOnlyWeekScheduleHTML(employee) {
         html += `<span class="ro-week-hours">${totalHours.toFixed(1)}u</span>`;
         html += `</div>`;
         html += '<div class="ro-week-grid">';
-        [1, 2, 3, 4, 5, 6, 0].forEach(dayNum => {
+        dayOrder.forEach(dayNum => {
             const entry = schedule.find(s => s.dayOfWeek === dayNum && s.enabled);
+            const prevDay = prevDayMap[dayNum];
+            const prevEntry = schedule.find(s => s.dayOfWeek === prevDay && s.enabled);
+            const prevIsNight = prevEntry && (() => {
+                const [ph, pm] = prevEntry.startTime.split(':').map(Number);
+                const [eh2, em2] = prevEntry.endTime.split(':').map(Number);
+                return (eh2 + em2/60) < (ph + pm/60);
+            })();
+
             if (entry) {
                 html += `<div class="ro-day-row">
                     <span class="ro-day-name">${dayNames[dayNum]}</span>
                     <span class="ro-day-time">${entry.startTime} – ${entry.endTime}</span>
+                </div>`;
+            } else if (prevIsNight) {
+                html += `<div class="ro-day-row ro-day-overnight">
+                    <span class="ro-day-name">${dayNames[dayNum]}</span>
+                    <span class="ro-day-time">→ ${prevEntry.endTime}</span>
                 </div>`;
             } else {
                 html += `<div class="ro-day-row ro-day-off">

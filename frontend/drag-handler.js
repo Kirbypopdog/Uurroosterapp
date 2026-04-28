@@ -205,8 +205,11 @@ const DragHandler = {
             if (this.state.dragType === 'create') {
                 this.handleCellClick(this.state.targetElement);
             } else if (this.state.shiftId) {
-                // Click on shift block - open edit modal
-                openEditShiftModal(this.state.shiftId);
+                // Click on shift block - only open if user has permission
+                const shift = getShift(this.state.shiftId);
+                if (shift && canUserEditShift(shift)) {
+                    openEditShiftModal(this.state.shiftId);
+                }
             }
             this.reset();
         } else if (this.state.isDragging) {
@@ -596,7 +599,8 @@ const DragHandler = {
 
         if (shiftBlock) {
             const shiftId = parseInt(shiftBlock.dataset.shiftId, 10);
-            if (shiftId) openEditShiftModal(shiftId);
+            const shift = shiftId ? getShift(shiftId) : null;
+            if (shift && canUserEditShift(shift)) openEditShiftModal(shiftId);
         } else if (dayCell && !dayCell.classList.contains('closed')) {
             this.handleCellClick(dayCell);
         }

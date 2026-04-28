@@ -1671,6 +1671,16 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
     );
     const oldShift = oldResult.rows[0] || null;
 
+    // Blokeer verplaatsing naar manueel gesloten datum
+    const effectiveDate = date || oldShift?.date;
+    if (date && date !== oldShift?.date) {
+      const cdResult = await pool.query("SELECT value FROM settings WHERE key = 'closedDates'");
+      const closedDates = (cdResult.rows[0]?.value || []).map(d => d.date);
+      if (closedDates.includes(date)) {
+        return res.status(400).json({ error: 'Deze dag is manueel gesloten' });
+      }
+    }
+
     // Valideer 11-uur regel en overlap (gebruik bestaande waarden als veld niet meegegeven)
     const updatedShift = {
       date:       date       || oldShift?.date,
@@ -1812,7 +1822,12 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
   try {
     await client.query('BEGIN');
 
+    // Load closed dates once for the whole bulk operation
+    const cdResult = await client.query("SELECT value FROM settings WHERE key = 'closedDates'");
+    const closedDates = new Set((cdResult.rows[0]?.value || []).map(d => d.date));
+
     const createdShifts = [];
+    const skipped = [];
 
     if (overwriteExisting) {
       // Delete existing shifts for each unique user_id + date pair
@@ -1825,6 +1840,21 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
 
     for (const shift of shiftsToCreate) {
       if (!shift.userId || !shift.date || !shift.startTime || !shift.endTime) continue;
+
+      // Skip manually closed dates
+      if (closedDates.has(shift.date)) {
+        skipped.push({ date: shift.date, reason: 'closed' });
+        continue;
+      }
+
+      // Validate 11-hour rule and overlap
+      const validation = await validateShiftRules(client, shift.userId, {
+        date: shift.date, start_time: shift.startTime, end_time: shift.endTime
+      });
+      if (!validation.valid) {
+        skipped.push({ date: shift.date, userId: shift.userId, reason: validation.message });
+        continue;
+      }
 
       const result = await client.query(`
         INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
@@ -1840,8 +1870,8 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
     }
 
     await client.query('COMMIT');
-    await logAudit(req, 'CREATE', 'shift', '', { action: 'bulk_create', count: createdShifts.length, overwriteExisting: !!overwriteExisting });
-    res.status(201).json({ shifts: createdShifts, count: createdShifts.length });
+    await logAudit(req, 'CREATE', 'shift', '', { action: 'bulk_create', count: createdShifts.length, skipped: skipped.length, overwriteExisting: !!overwriteExisting });
+    res.status(201).json({ shifts: createdShifts, count: createdShifts.length, skipped });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('POST /shifts/bulk error:', err);

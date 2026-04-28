@@ -10559,6 +10559,15 @@ body[data-view-mode="day"] .timeline-day-cell {
 .ro-day-off .ro-day-time {
     color: #d1d5db;
 }
+.ro-day-overnight .ro-day-name {
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+.ro-day-overnight .ro-day-time {
+    color: var(--text-secondary);
+    font-style: italic;
+    font-size: 12px;
+}
 
 /* Profile hours section */
 .profile-hours-section {
