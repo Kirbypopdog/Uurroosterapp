@@ -3156,13 +3156,21 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .timeline-employee-cell {
-    padding: 8px 10px;
+    padding: 6px 10px;
     display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 6px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
     border-right: 1px solid var(--border-color);
     background: #f8fafc;
+}
+
+.timeline-employee-cell .emp-name-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
 }
 
 .timeline-employee-cell .emp-name {
@@ -3172,6 +3180,17 @@ body[data-view-mode="day"] .timeline-header {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.timeline-employee-cell .emp-hours {
+    font-size: 10px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.timeline-employee-cell .emp-hours.over-hours {
+    color: var(--color-danger, #ef4444);
+    font-weight: 600;
 }
 
 /* Weekend verantwoordelijke highlighting */
@@ -3620,16 +3639,29 @@ body[data-view-mode="day"] .timeline-day-cell {
 .month-employee-cell {
     width: 160px;
     min-width: 160px;
-    padding: 12px;
+    padding: 10px 12px;
     border-right: 2px solid var(--border-color);
     font-weight: 500;
     font-size: 13px;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
     position: sticky;
     left: 0;
     background: inherit;
     z-index: 5;
+}
+
+.month-employee-cell .emp-hours {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+.month-employee-cell .emp-hours.over-hours {
+    color: var(--color-danger, #ef4444);
+    font-weight: 600;
 }
 
 .month-week-cells {
@@ -7762,9 +7794,10 @@ body[data-view-mode="day"] .timeline-day-cell {
     /* Employee name column */
     .timeline-employee-cell {
         font-size: 11px;
-        padding: 8px 6px;
+        padding: 6px 6px;
         display: flex !important;
-        align-items: center;
+        flex-direction: column !important;
+        align-items: flex-start !important;
         overflow: hidden !important;
     }
 
@@ -7774,6 +7807,10 @@ body[data-view-mode="day"] .timeline-day-cell {
         text-overflow: ellipsis !important;
         display: block !important;
         max-width: 70px !important;
+    }
+
+    .timeline-employee-cell .emp-hours {
+        font-size: 9px !important;
     }
 
     /* Timeline blocks (shifts) - keep absolute positioning for time-based layout */
