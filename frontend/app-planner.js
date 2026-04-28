@@ -594,8 +594,18 @@ function renderTimelineView() {
                 const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
 
                 const employeeName = escapeHtml(emp.name);
+                const empContractH = emp.contractHours || emp.contract_hours || 0;
+                const empWeekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
+                const empMonthH = getEmployeeHoursThisMonth(emp.id, startDateStr);
+                const empMonthContract = empContractH > 0 ? Math.round(empContractH * 4.33) : 0;
+                const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
+                const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
+                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(1)}/${empContractH}u` : `${empWeekH.toFixed(1)}u`;
+                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(0)}/${empMonthContract}u` : `${empMonthH.toFixed(0)}u`;
                 html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
-                    ${responsibleBadge}<span class="emp-name">${employeeName}</span>
+                    <div class="emp-name-row">${responsibleBadge}<span class="emp-name">${employeeName}</span></div>
+                    <span class="emp-hours${empWeekClass}">${empWeekLabel}</span>
+                    <span class="emp-hours${empMonthClass}">${empMonthLabel}</span>
                 </div>`;
 
                 // Day cells with time blocks
@@ -783,8 +793,18 @@ function renderTimelineView() {
                 const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
 
                 const employeeName = escapeHtml(emp.name);
+                const empContractH = emp.contractHours || emp.contract_hours || 0;
+                const empWeekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
+                const empMonthH = getEmployeeHoursThisMonth(emp.id, startDateStr);
+                const empMonthContract = empContractH > 0 ? Math.round(empContractH * 4.33) : 0;
+                const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
+                const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
+                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(1)}/${empContractH}u` : `${empWeekH.toFixed(1)}u`;
+                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(0)}/${empMonthContract}u` : `${empMonthH.toFixed(0)}u`;
                 html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
-                    ${responsibleBadge}<span class="emp-name">${employeeName}</span>
+                    <div class="emp-name-row">${responsibleBadge}<span class="emp-name">${employeeName}</span></div>
+                    <span class="emp-hours${empWeekClass}">${empWeekLabel}</span>
+                    <span class="emp-hours${empMonthClass}">${empMonthLabel}</span>
                 </div>`;
 
                 weekDates.forEach(date => {
@@ -1073,8 +1093,14 @@ function renderMonthView() {
                 html += `<div class="month-row ${isAlt ? 'alt' : ''}">`;
 
                 const employeeName = escapeHtml(emp.name);
+                const empContractH = emp.contractHours || emp.contract_hours || 0;
+                const empMonthH = getEmployeeHoursThisMonth(emp.id, formatDateYYYYMMDD(monthStart));
+                const monthContract = empContractH > 0 ? Math.round(empContractH * 4.33) : 0;
+                const empMonthOverClass = monthContract > 0 ? (empMonthH > monthContract ? ' over-hours' : ' under-hours') : '';
+                const empMonthLabel = monthContract > 0 ? `${empMonthH.toFixed(1)}/${monthContract}u` : `${empMonthH.toFixed(1)}u`;
                 html += `<div class="month-employee-cell">
                     <span class="emp-name">${employeeName}</span>
+                    <span class="emp-hours${empMonthOverClass}">${empMonthLabel}</span>
                 </div>`;
 
                 // Week columns
@@ -1152,8 +1178,14 @@ function renderMonthView() {
                 html += `<div class="month-row ${isAlt ? 'alt' : ''}">`;
 
                 const employeeName = escapeHtml(emp.name);
+                const empContractH = emp.contractHours || emp.contract_hours || 0;
+                const empMonthH = getEmployeeHoursThisMonth(emp.id, formatDateYYYYMMDD(monthStart));
+                const monthContract = empContractH > 0 ? Math.round(empContractH * 4.33) : 0;
+                const empMonthOverClass = monthContract > 0 ? (empMonthH > monthContract ? ' over-hours' : ' under-hours') : '';
+                const empMonthLabel = monthContract > 0 ? `${empMonthH.toFixed(1)}/${monthContract}u` : `${empMonthH.toFixed(1)}u`;
                 html += `<div class="month-employee-cell">
                     <span class="emp-name">${employeeName}</span>
+                    <span class="emp-hours${empMonthOverClass}">${empMonthLabel}</span>
                 </div>`;
 
                 weeks.forEach(weekStart => {
