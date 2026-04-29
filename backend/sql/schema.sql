@@ -171,3 +171,10 @@ CREATE INDEX IF NOT EXISTS idx_availability_type ON availability(type);
 CREATE INDEX IF NOT EXISTS idx_swap_requests_type ON shift_swap_requests(request_type);
 CREATE INDEX IF NOT EXISTS idx_schedule_drafts_type ON schedule_drafts(type);
 CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id);
+
+-- Migration tracking table (used by runMigrations() in server.js)
+CREATE TABLE IF NOT EXISTS migrations (
+  id SERIAL PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  applied_at TIMESTAMP DEFAULT NOW()
+);
