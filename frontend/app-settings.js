@@ -1027,6 +1027,7 @@ function renderSettingsTeams(container) {
     requestAnimationFrame(() => {
         const upcomingContainer = container.querySelector('.upcoming-responsibles');
         if (upcomingContainer) attachUpcomingWeekendListeners(upcomingContainer);
+        initTeamDragSort();
     });
 }
 
@@ -1121,7 +1122,9 @@ async function openAddTeamModal() {
 
     try {
         // Update settings (primary source of truth for frontend)
-        DataStore.settings.teams[teamId] = { name, color };
+        const existingOrders = Object.values(DataStore.settings.teams).map(t => t.sort_order ?? 0);
+        const nextOrder = existingOrders.length ? Math.max(...existingOrders) + 1 : 0;
+        DataStore.settings.teams[teamId] = { name, color, sort_order: nextOrder };
         await saveSettings('teams', DataStore.settings.teams);
 
         // Auto-add to coverage teams
@@ -1801,14 +1804,16 @@ async function ensureTeamsLoaded() {
 function renderTeamsConfig() {
     const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
     const eligibleTeams = DataStore.settings.responsibleRotation?.eligibleTeams || [];
+    const sortedTeamIds = getTeamOrder();
     let html = '';
-    Object.keys(DataStore.settings.teams).forEach(teamId => {
+    sortedTeamIds.forEach(teamId => {
         const team = DataStore.settings.teams[teamId];
         const teamName = escapeHtml(team.name);
         const inCoverage = coverageTeams.includes(teamId);
         const inWeekend = eligibleTeams.includes(teamId);
         html += `
-        <div class="team-config-item" data-team-id="${teamId}">
+        <div class="team-config-item" data-team-id="${teamId}" draggable="true">
+            <span class="team-drag-handle" title="Versleep om volgorde te wijzigen">&#8942;</span>
             <div class="team-color-dot" style="background: ${team.color}"></div>
             <div class="team-info">
                 <span class="team-name">${teamName}</span>
@@ -1832,6 +1837,57 @@ function renderTeamsConfig() {
         </div>`;
     });
     return html;
+}
+
+function initTeamDragSort() {
+    const list = document.getElementById('teams-config');
+    if (!list) return;
+    let dragSrc = null;
+
+    list.querySelectorAll('.team-config-item[draggable]').forEach(item => {
+        item.addEventListener('dragstart', e => {
+            dragSrc = item;
+            item.classList.add('team-dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        item.addEventListener('dragend', () => {
+            dragSrc = null;
+            list.querySelectorAll('.team-config-item').forEach(i => i.classList.remove('team-dragging', 'team-drag-over'));
+        });
+        item.addEventListener('dragover', e => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (item !== dragSrc) {
+                list.querySelectorAll('.team-config-item').forEach(i => i.classList.remove('team-drag-over'));
+                item.classList.add('team-drag-over');
+            }
+        });
+        item.addEventListener('dragleave', () => item.classList.remove('team-drag-over'));
+        item.addEventListener('drop', async e => {
+            e.preventDefault();
+            if (!dragSrc || dragSrc === item) return;
+            item.classList.remove('team-drag-over');
+
+            // Reorder DOM
+            const items = [...list.querySelectorAll('.team-config-item')];
+            const srcIdx = items.indexOf(dragSrc);
+            const tgtIdx = items.indexOf(item);
+            if (srcIdx < tgtIdx) list.insertBefore(dragSrc, item.nextSibling);
+            else list.insertBefore(dragSrc, item);
+
+            // Persist new sort_order
+            const newOrder = [...list.querySelectorAll('.team-config-item')].map(i => i.dataset.teamId);
+            newOrder.forEach((id, idx) => {
+                if (DataStore.settings.teams[id]) DataStore.settings.teams[id].sort_order = idx;
+            });
+            try {
+                await saveSettings('teams', DataStore.settings.teams);
+                showToast('Teamvolgorde opgeslagen', 'success');
+            } catch (_) {
+                showToast('Fout bij opslaan volgorde', 'error');
+            }
+        });
+    });
 }
 
 function renderTemplatesConfig() {

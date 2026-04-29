@@ -59,7 +59,12 @@ const AppState = {
 
 // ===== TEAM HELPERS =====
 function getTeamOrder() {
-    return Object.keys(DataStore.settings.teams || {});
+    const teams = DataStore.settings.teams || {};
+    return Object.keys(teams).sort((a, b) => {
+        const oa = teams[a]?.sort_order ?? 9999;
+        const ob = teams[b]?.sort_order ?? 9999;
+        return oa !== ob ? oa - ob : (teams[a]?.name || '').localeCompare(teams[b]?.name || '');
+    });
 }
 
 function syncTeamFilters() {

@@ -5418,6 +5418,26 @@ body[data-view-mode="day"] .timeline-day-cell {
     background: #f8fafc;
     border-radius: var(--radius-md);
     border: 1px solid var(--border-color);
+    transition: box-shadow 0.15s, opacity 0.15s;
+}
+.team-drag-handle {
+    cursor: grab;
+    color: var(--text-tertiary, #94a3b8);
+    font-size: 18px;
+    line-height: 1;
+    flex-shrink: 0;
+    user-select: none;
+    padding: 0 2px;
+}
+.team-drag-handle:active { cursor: grabbing; }
+.team-config-item.team-dragging {
+    opacity: 0.4;
+    box-shadow: none;
+}
+.team-config-item.team-drag-over {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.2);
+    background: var(--primary-light, #eff6ff);
 }
 
 .team-color-dot {
@@ -9464,6 +9484,11 @@ body[data-view-mode="day"] .timeline-day-cell {
 .builder-cell.drop-target-valid {
     border-color: var(--success-color) !important;
     background: rgba(16, 185, 129, 0.1) !important;
+}
+
+.builder-cell.drop-target-warning {
+    border-color: #f59e0b !important;
+    background: rgba(245, 158, 11, 0.1) !important;
 }
 
 .builder-cell.drop-target-invalid {
