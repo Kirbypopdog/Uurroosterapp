@@ -390,6 +390,13 @@ const MIGRATIONS = [
         );
       }
     }
+  },
+  {
+    name: '029_shifts_archived_column',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false`);
+    }
   }
 ];
 
@@ -429,6 +436,18 @@ async function runMigrations() {
 
 runMigrations().catch(console.error);
 
+async function archiveOldShifts() {
+  try {
+    const result = await pool.query(
+      `UPDATE shifts SET archived = true
+       WHERE archived = false AND date < CURRENT_DATE - INTERVAL '12 months'`
+    );
+    if (result.rowCount > 0) console.log(`[archive] ${result.rowCount} shifts gearchiveerd`);
+  } catch (err) {
+    console.error('[archive] Fout bij archiveren:', err.message);
+  }
+}
+archiveOldShifts().catch(console.error);
 
 function signToken(user) {
   return jwt.sign(
@@ -1406,10 +1425,11 @@ v1.get('/shifts', requireAuth, async (req, res) => {
       SELECT id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
              end_time as "endTime", notes, source, created_at as "createdAt"
       FROM shifts
+      WHERE archived = false
     `;
     const params = [];
     if (startDate && endDate) {
-      query += ' WHERE date >= $1 AND date <= $2';
+      query += ' AND date >= $1 AND date <= $2';
       params.push(startDate, endDate);
     }
     query += ' ORDER BY date, start_time';
@@ -3788,6 +3808,26 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 });
 
 // ===== AUDIT LOG API =====
+
+v1.get('/shifts/archived', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  const { userId, startDate, endDate } = req.query;
+  try {
+    const params = [];
+    let where = 'WHERE archived = true';
+    if (userId) { params.push(userId); where += ` AND user_id = $${params.length}`; }
+    if (startDate) { params.push(startDate); where += ` AND date >= $${params.length}`; }
+    if (endDate) { params.push(endDate); where += ` AND date <= $${params.length}`; }
+    const result = await pool.query(
+      `SELECT id, user_id as "userId", team, date::text, start_time as "startTime", end_time as "endTime", notes, source
+       FROM shifts ${where} ORDER BY date DESC LIMIT 500`,
+      params
+    );
+    res.json({ shifts: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 v1.get('/audit-log', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { page = 1, limit = 50, actorId, action, resourceType, startDate, endDate } = req.query;

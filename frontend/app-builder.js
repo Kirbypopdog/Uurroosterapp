@@ -1147,7 +1147,10 @@ function renderBuilderDrafts() {
     return `
         <div class="builder-drafts">
             ${notificationHtml}
-            <h3>Opgeslagen concepten</h3>
+            <div class="builder-drafts-header">
+                <h3>Opgeslagen concepten</h3>
+                ${drafts.length >= 2 ? '<button class="btn btn-sm btn-secondary" id="builder-compare-btn">Vergelijk concepten</button>' : ''}
+            </div>
             <div class="builder-drafts-list">
                 ${sorted.map(draft => {
                     const date = new Date(draft.updatedAt || draft.createdAt);
@@ -3031,6 +3034,9 @@ function attachBuilderEventListeners(container) {
             deleteBuilderDraft(btn.dataset.draftId);
         });
     });
+
+    const compareBtn = container.querySelector('#builder-compare-btn');
+    if (compareBtn) compareBtn.addEventListener('click', openDraftDiffModal);
 }
 
 function switchBuilderWeek(weekNumber) {
@@ -3138,6 +3144,117 @@ function executeCopyWeek() {
     document.getElementById('copy-week-modal').classList.add('hidden');
     renderBuilder();
     showToast(`Week ${sourceWeek} gekopieerd naar week ${targetWeek}`, 'success');
+}
+
+// ===== CONCEPT VERGELIJKER =====
+
+function openDraftDiffModal() {
+    const drafts = DataStore.settings.schedule_drafts || [];
+    const selA = document.getElementById('draft-diff-a');
+    const selB = document.getElementById('draft-diff-b');
+    if (!selA || !selB) return;
+
+    const options = drafts.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('');
+    selA.innerHTML = options;
+    selB.innerHTML = options;
+    if (drafts.length >= 2) selB.selectedIndex = 1;
+
+    document.getElementById('draft-diff-result').innerHTML = '';
+    document.getElementById('draft-diff-modal').classList.remove('hidden');
+}
+
+function diffDrafts(draftA, draftB) {
+    const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+    const results = [];
+
+    const getWeeks = grid => grid?._multiWeek
+        ? Object.keys(grid).filter(k => !k.startsWith('_')).map(Number).sort((a, b) => a - b)
+        : [1];
+
+    const getWeekGrid = (grid, week) => grid?._multiWeek ? (grid[week] || {}) : (grid || {});
+
+    const weeksA = getWeeks(draftA.grid);
+    const weeksB = getWeeks(draftB.grid);
+    const allWeeks = [...new Set([...weeksA, ...weeksB])].sort((a, b) => a - b);
+
+    const allEmpIds = new Set();
+    allWeeks.forEach(w => {
+        Object.keys(getWeekGrid(draftA.grid, w)).forEach(id => allEmpIds.add(Number(id)));
+        Object.keys(getWeekGrid(draftB.grid, w)).forEach(id => allEmpIds.add(Number(id)));
+    });
+
+    allEmpIds.forEach(empId => {
+        const emp = getEmployee(empId);
+        const empName = emp ? emp.name : `Medewerker ${empId}`;
+        const changes = [];
+
+        allWeeks.forEach(week => {
+            const gridA = getWeekGrid(draftA.grid, week);
+            const gridB = getWeekGrid(draftB.grid, week);
+            const daysA = gridA[empId] || {};
+            const daysB = gridB[empId] || {};
+            const allDays = new Set([...Object.keys(daysA), ...Object.keys(daysB)].map(Number));
+
+            allDays.forEach(day => {
+                const a = daysA[day];
+                const b = daysB[day];
+                const label = allWeeks.length > 1 ? `W${week} ${dayNames[day]}` : dayNames[day];
+
+                if (!a && b) {
+                    changes.push({ label, type: 'new', text: `${b.startTime}–${b.endTime}` });
+                } else if (a && !b) {
+                    changes.push({ label, type: 'removed', text: `${a.startTime}–${a.endTime}` });
+                } else if (a && b && (a.startTime !== b.startTime || a.endTime !== b.endTime)) {
+                    changes.push({ label, type: 'changed', textA: `${a.startTime}–${a.endTime}`, textB: `${b.startTime}–${b.endTime}` });
+                }
+            });
+        });
+
+        results.push({ empName, changes });
+    });
+
+    return results;
+}
+
+function runDraftDiff() {
+    const selA = document.getElementById('draft-diff-a');
+    const selB = document.getElementById('draft-diff-b');
+    const resultEl = document.getElementById('draft-diff-result');
+    if (!selA || !selB || !resultEl) return;
+
+    const drafts = DataStore.settings.schedule_drafts || [];
+    const draftA = drafts.find(d => d.id === selA.value);
+    const draftB = drafts.find(d => d.id === selB.value);
+
+    if (!draftA || !draftB) { resultEl.innerHTML = '<p class="text-warning">Selecteer twee verschillende concepten.</p>'; return; }
+    if (draftA.id === draftB.id) { resultEl.innerHTML = '<p class="text-warning">Kies twee verschillende concepten.</p>'; return; }
+
+    const diff = diffDrafts(draftA, draftB);
+    const changed = diff.filter(r => r.changes.length > 0);
+
+    if (changed.length === 0) {
+        resultEl.innerHTML = '<p class="text-success mt-md">Geen verschillen gevonden.</p>';
+        return;
+    }
+
+    const html = changed.map(({ empName, changes }) => `
+        <div class="diff-emp-block">
+            <div class="diff-emp-name">${escapeHtml(empName)}</div>
+            <div class="diff-changes">
+                ${changes.map(c => {
+                    if (c.type === 'new') return `<div class="diff-row diff-new"><span class="diff-day">${escapeHtml(c.label)}</span><span>— → <strong>${escapeHtml(c.text)}</strong></span></div>`;
+                    if (c.type === 'removed') return `<div class="diff-row diff-removed"><span class="diff-day">${escapeHtml(c.label)}</span><span><strong>${escapeHtml(c.text)}</strong> → —</span></div>`;
+                    return `<div class="diff-row diff-changed"><span class="diff-day">${escapeHtml(c.label)}</span><span>${escapeHtml(c.textA)} → <strong>${escapeHtml(c.textB)}</strong></span></div>`;
+                }).join('')}
+            </div>
+        </div>
+    `).join('');
+
+    resultEl.innerHTML = `<div class="diff-legend mb-sm">
+        <span class="diff-badge diff-new">Nieuw</span>
+        <span class="diff-badge diff-removed">Vervalt</span>
+        <span class="diff-badge diff-changed">Gewijzigd</span>
+    </div><div class="diff-results">${html}</div>`;
 }
 
 // ===== END ROOSTERBOUWER =====

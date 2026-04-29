@@ -9950,11 +9950,55 @@ body[data-view-mode="day"] .timeline-day-cell {
     border-top: 1px solid var(--border-color, #e0e0e0);
 }
 
+.builder-drafts-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.builder-drafts-header h3 {
+    font-size: 1rem;
+    margin: 0;
+    color: var(--text-primary, #333);
+}
 .builder-drafts h3 {
     font-size: 1rem;
     margin: 0 0 12px 0;
     color: var(--text-primary, #333);
 }
+.diff-emp-block {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.diff-emp-block:last-child { border-bottom: none; }
+.diff-emp-name {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 6px;
+}
+.diff-changes { display: flex; flex-direction: column; gap: 4px; }
+.diff-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    padding: 3px 8px;
+    border-radius: 4px;
+}
+.diff-day { min-width: 50px; font-weight: 500; color: var(--text-secondary); }
+.diff-new { background: #ecfdf5; color: #065f46; }
+.diff-removed { background: #fef2f2; color: #991b1b; }
+.diff-changed { background: #fffbeb; color: #92400e; }
+.diff-legend { display: flex; gap: 8px; }
+.diff-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 500;
+}
+.diff-badge.diff-new { background: #ecfdf5; color: #065f46; }
+.diff-badge.diff-removed { background: #fef2f2; color: #991b1b; }
+.diff-badge.diff-changed { background: #fffbeb; color: #92400e; }
 
 .builder-drafts-empty {
     color: var(--text-secondary, #888);

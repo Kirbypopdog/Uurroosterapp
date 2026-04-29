@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS shifts (
   end_time TEXT NOT NULL,
   notes TEXT DEFAULT '',
   source TEXT DEFAULT 'manual' CHECK (source IN ('auto', 'manual')),
+  archived BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMP DEFAULT NOW()
 );
 

@@ -761,6 +761,36 @@
         </div>
     </div>
 
+    <!-- Draft diff modal -->
+    <div id="draft-diff-modal" class="modal hidden">
+        <div class="modal-content modal-content--lg">
+            <div class="modal-header">
+                <h2>Concepten vergelijken</h2>
+                <span class="modal-close" id="draft-diff-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <div class="form-row mb-md">
+                    <div class="form-group">
+                        <label class="form-label">Concept A</label>
+                        <select id="draft-diff-a" class="form-input"></select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Concept B</label>
+                        <select id="draft-diff-b" class="form-input"></select>
+                    </div>
+                    <div class="form-group" style="flex:0">
+                        <label class="form-label">&nbsp;</label>
+                        <button type="button" class="btn btn-primary" id="draft-diff-run">Vergelijk</button>
+                    </div>
+                </div>
+                <div id="draft-diff-result"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="draft-diff-close">Sluiten</button>
+            </div>
+        </div>
+    </div>
+
     <script src="config/settings.js"></script>
     <script src="data.js"></script>
     <script src="validation.js"></script>

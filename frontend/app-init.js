@@ -386,6 +386,13 @@ function setupEventListeners() {
     document.getElementById('copy-week-source')?.addEventListener('change', updateCopyWeekConflictWarning);
     document.getElementById('copy-week-target')?.addEventListener('change', updateCopyWeekConflictWarning);
 
+    // Draft diff modal
+    const closeDiff = () => document.getElementById('draft-diff-modal')?.classList.add('hidden');
+    document.getElementById('draft-diff-modal-close')?.addEventListener('click', closeDiff);
+    document.getElementById('draft-diff-close')?.addEventListener('click', closeDiff);
+    document.getElementById('draft-diff-modal')?.addEventListener('click', (e) => { if (e.target.id === 'draft-diff-modal') closeDiff(); });
+    document.getElementById('draft-diff-run')?.addEventListener('click', runDraftDiff);
+
     // Undo/Redo buttons
     document.getElementById('undo-btn')?.addEventListener('click', () => UndoManager.undo());
     document.getElementById('redo-btn')?.addEventListener('click', () => UndoManager.redo());
