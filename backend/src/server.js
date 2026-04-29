@@ -434,8 +434,6 @@ async function runMigrations() {
   }
 }
 
-runMigrations().catch(console.error);
-
 async function archiveOldShifts() {
   try {
     const result = await pool.query(
@@ -447,7 +445,6 @@ async function archiveOldShifts() {
     console.error('[archive] Fout bij archiveren:', err.message);
   }
 }
-archiveOldShifts().catch(console.error);
 
 function signToken(user) {
   return jwt.sign(
@@ -1420,23 +1417,37 @@ v1.post('/admin/test-email', requireAuth, requireAdmin, async (req, res) => {
 v1.get('/shifts', requireAuth, async (req, res) => {
   const { startDate, endDate } = req.query;
 
-  try {
-    let query = `
+  const buildQuery = (withArchivedFilter) => {
+    const baseSelect = `
       SELECT id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
              end_time as "endTime", notes, source, created_at as "createdAt"
       FROM shifts
-      WHERE archived = false
     `;
     const params = [];
+    let where = withArchivedFilter ? 'WHERE archived = false' : 'WHERE true';
     if (startDate && endDate) {
-      query += ' AND date >= $1 AND date <= $2';
+      where += ' AND date >= $1 AND date <= $2';
       params.push(startDate, endDate);
     }
-    query += ' ORDER BY date, start_time';
+    return { query: baseSelect + where + ' ORDER BY date, start_time', params };
+  };
 
+  try {
+    const { query, params } = buildQuery(true);
     const result = await pool.query(query, params);
     res.json({ shifts: result.rows });
   } catch (err) {
+    if (err.code === '42703') {
+      // column "archived" does not exist — migration hasn't run yet, fall back
+      try {
+        const { query, params } = buildQuery(false);
+        const result = await pool.query(query, params);
+        return res.json({ shifts: result.rows });
+      } catch (err2) {
+        console.error(err2);
+        return res.status(500).json({ error: 'Server error' });
+      }
+    }
     console.error(err);
     res.status(500).json({ error: 'Server error' });
   }
@@ -4263,9 +4274,12 @@ app.use('/api/v1', v1);
 app.use('/', v1);
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`API running on :${PORT}`);
-  });
+  runMigrations()
+    .then(() => archiveOldShifts())
+    .catch(err => console.error('[startup] Migratie mislukt:', err.message))
+    .finally(() => {
+      app.listen(PORT, () => console.log(`API running on :${PORT}`));
+    });
 }
 
 module.exports = app;
