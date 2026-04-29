@@ -357,6 +357,7 @@ function renderBuilderControls(role, userTeam) {
                 <div class="builder-load-options">
                     <button class="btn btn-secondary btn-sm" id="builder-load-base">Huidig basisrooster laden</button>
                     <button class="btn btn-secondary btn-sm" id="builder-load-blank">Leeg beginnen</button>
+                    ${getBuilderCycleLength() > 1 ? `<button class="btn btn-secondary btn-sm" id="builder-copy-week"><i data-lucide="copy" class="lucide-xs"></i> Kopieer week</button>` : ''}
                 </div>
                 ${AppState.builderLoadedDraftName ? `
                     <div class="builder-loaded-draft">
@@ -2967,6 +2968,9 @@ function attachBuilderEventListeners(container) {
     const loadBase = document.getElementById('builder-load-base');
     if (loadBase) loadBase.addEventListener('click', loadBuilderFromBaseSchedules);
 
+    const copyWeekBtn = document.getElementById('builder-copy-week');
+    if (copyWeekBtn) copyWeekBtn.addEventListener('click', openCopyWeekModal);
+
     const loadBlank = document.getElementById('builder-load-blank');
     if (loadBlank) loadBlank.addEventListener('click', () => {
         AppState.builderGrid = {};
@@ -3050,6 +3054,90 @@ function switchBuilderWeek(weekNumber) {
         : {};
 
     renderBuilder();
+}
+
+// ===== WEEK KOPIËREN =====
+
+function openCopyWeekModal() {
+    const cycleLength = getBuilderCycleLength();
+    if (cycleLength < 2) {
+        showToast('Voeg meer weken toe om weken te kunnen kopiëren', 'warning');
+        return;
+    }
+
+    const sourceSelect = document.getElementById('copy-week-source');
+    const targetSelect = document.getElementById('copy-week-target');
+    if (!sourceSelect || !targetSelect) return;
+
+    const options = Array.from({ length: cycleLength }, (_, i) => i + 1)
+        .map(w => `<option value="${w}">Week ${w}${w === AppState.builderWeekNumber ? ' (huidig)' : ''}</option>`)
+        .join('');
+    sourceSelect.innerHTML = options;
+    targetSelect.innerHTML = options;
+
+    sourceSelect.value = AppState.builderWeekNumber;
+    targetSelect.value = AppState.builderWeekNumber === cycleLength ? 1 : AppState.builderWeekNumber + 1;
+
+    updateCopyWeekConflictWarning();
+    document.getElementById('copy-week-modal').classList.remove('hidden');
+}
+
+function updateCopyWeekConflictWarning() {
+    const targetWeek = Number(document.getElementById('copy-week-target')?.value);
+    const conflictRow = document.getElementById('copy-week-conflict-row');
+    const conflictInfo = document.getElementById('copy-week-conflict-info');
+    if (!conflictRow || !conflictInfo) return;
+
+    AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+    const targetGrid = AppState.builderGridByWeek[targetWeek] || {};
+    const shiftCount = Object.values(targetGrid).reduce((n, d) => n + Object.keys(d).length, 0);
+
+    if (shiftCount > 0) {
+        conflictInfo.textContent = `Week ${targetWeek} heeft al ${shiftCount} toewijzing${shiftCount !== 1 ? 'en' : ''}.`;
+        conflictRow.classList.remove('hidden');
+    } else {
+        conflictRow.classList.add('hidden');
+    }
+}
+
+function executeCopyWeek() {
+    const sourceWeek = Number(document.getElementById('copy-week-source').value);
+    const targetWeek = Number(document.getElementById('copy-week-target').value);
+    const mode = document.querySelector('input[name="copy-mode"]:checked')?.value || 'replace';
+
+    if (sourceWeek === targetWeek) {
+        showToast('Bron- en doelweek mogen niet dezelfde zijn', 'warning');
+        return;
+    }
+
+    AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+
+    const sourceGrid = JSON.parse(JSON.stringify(AppState.builderGridByWeek[sourceWeek] || {}));
+    const targetGrid = AppState.builderGridByWeek[targetWeek] || {};
+
+    let newTargetGrid;
+    if (mode === 'replace') {
+        newTargetGrid = sourceGrid;
+    } else {
+        newTargetGrid = JSON.parse(JSON.stringify(targetGrid));
+        for (const [empId, days] of Object.entries(sourceGrid)) {
+            if (!newTargetGrid[empId]) newTargetGrid[empId] = {};
+            for (const [dayIndex, shift] of Object.entries(days)) {
+                if (!newTargetGrid[empId][dayIndex]) {
+                    newTargetGrid[empId][dayIndex] = shift;
+                }
+            }
+        }
+    }
+
+    AppState.builderGridByWeek[targetWeek] = newTargetGrid;
+    AppState.builderWeekNumber = targetWeek;
+    AppState.builderGrid = JSON.parse(JSON.stringify(newTargetGrid));
+    AppState.builderIsDirty = true;
+
+    document.getElementById('copy-week-modal').classList.add('hidden');
+    renderBuilder();
+    showToast(`Week ${sourceWeek} gekopieerd naar week ${targetWeek}`, 'success');
 }
 
 // ===== END ROOSTERBOUWER =====

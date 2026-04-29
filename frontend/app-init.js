@@ -375,6 +375,17 @@ function setupEventListeners() {
         if (e.target.id === 'activity-modal') closeActivityModal();
     });
 
+    // Copy-week modal (builder)
+    const closeModal = () => document.getElementById('copy-week-modal')?.classList.add('hidden');
+    document.getElementById('copy-week-modal-close')?.addEventListener('click', closeModal);
+    document.getElementById('copy-week-cancel')?.addEventListener('click', closeModal);
+    document.getElementById('copy-week-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'copy-week-modal') closeModal();
+    });
+    document.getElementById('copy-week-confirm')?.addEventListener('click', executeCopyWeek);
+    document.getElementById('copy-week-source')?.addEventListener('change', updateCopyWeekConflictWarning);
+    document.getElementById('copy-week-target')?.addEventListener('change', updateCopyWeekConflictWarning);
+
     // Undo/Redo buttons
     document.getElementById('undo-btn')?.addEventListener('click', () => UndoManager.undo());
     document.getElementById('redo-btn')?.addEventListener('click', () => UndoManager.redo());

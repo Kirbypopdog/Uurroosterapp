@@ -728,6 +728,39 @@
         </div>
     </div>
 
+    <!-- Week kopiëren modal (builder) -->
+    <div id="copy-week-modal" class="modal hidden">
+        <div class="modal-content modal-content--sm">
+            <div class="modal-header">
+                <h2>Week kopiëren</h2>
+                <span class="modal-close" id="copy-week-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="copy-week-source">Van (bron)</label>
+                        <select id="copy-week-source" class="form-input"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="copy-week-target">Naar (doel)</label>
+                        <select id="copy-week-target" class="form-input"></select>
+                    </div>
+                </div>
+                <div id="copy-week-conflict-row" class="hidden">
+                    <p id="copy-week-conflict-info" class="text-warning mb-sm"></p>
+                    <div class="form-group">
+                        <label class="radio-label"><input type="radio" name="copy-mode" value="replace" checked> Bestaande toewijzingen verwijderen en vervangen</label>
+                        <label class="radio-label"><input type="radio" name="copy-mode" value="fill"> Alleen lege dagen invullen</label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="copy-week-cancel">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="copy-week-confirm">Kopiëren</button>
+            </div>
+        </div>
+    </div>
+
     <script src="config/settings.js"></script>
     <script src="data.js"></script>
     <script src="validation.js"></script>
