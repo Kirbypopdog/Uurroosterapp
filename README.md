@@ -1,4 +1,4 @@
-# Het Vlot Roosterplanning v1.1.0
+# Het Vlot Roosterplanning v1.4.0
 
 Webapplicatie voor shiftplanning bij Het Vlot. Medewerkers bekijken hun rooster, ruilen shifts en melden afwezigheid. Admins en roosterverantwoordelijken beheren het volledige rooster via een visuele builder.
 
@@ -11,7 +11,7 @@ Webapplicatie voor shiftplanning bij Het Vlot. Medewerkers bekijken hun rooster,
 ### Rooster & Planning
 - **Weekoverzicht** met timeline-weergave per medewerker
 - **Rooster Bouwen** — visuele drag & drop builder voor weekroosters
-- **Concepten (Drafts)** — roosters opslaan, vergelijken en toepassen op datumbereik
+- **Concepten (Drafts)** — roosters opslaan, toepassen op datumbereik en naast elkaar vergelijken (diff-view)
 - **Schooljaar-logica** — automatische weeknummering sept-aug, vakantieperiodes
 - **Belgische feestdagen** — automatisch berekend en rood gemarkeerd in de planning (10 officiële feestdagen)
 - **Manuele sluitingsdagen** — brugdagen en uitzonderingen instellen via rechtsklik op de dag
@@ -23,7 +23,7 @@ Webapplicatie voor shiftplanning bij Het Vlot. Medewerkers bekijken hun rooster,
 ### Medewerkers & Teams
 - **5 teams**: Vlot 1, Vlot 2, Cargo, Overkoepelend, Jobstudenten
 - **Hoofd- en extra teams** per medewerker
-- **Contracturen** met week/maand voortgangsbalk in profiel
+- **Contracturen** met week/periode voortgangsbalk in profiel (4-weken-periodes, schooljaaranker)
 - **Medewerker vervangen** — kopieer basisrooster naar nieuwe medewerker, deactiveer oude
 
 ### Afwezigheid & Ruilen
@@ -111,19 +111,34 @@ open frontend/index.html
 ```
 ├── frontend/                   # Statische web app (vanilla JS)
 │   ├── index.html              # HTML markup: modals, formulieren, grid
-│   ├── app.js                  # UI logica, rendering, event handlers (~12.500 regels)
+│   ├── app-globals.js          # AppState, constanten, UndoManager, DOM
+│   ├── app-permissions.js      # Rol-checks en permissiefuncties
+│   ├── app-ui.js               # Toast, modals, FocusTrap, tooltips
+│   ├── app-auth.js             # Login, logout, sessiecheck
+│   ├── app-nav.js              # Navigatie, switchView, week/maand helpers
+│   ├── app-planner.js          # Planningsweergave, timeline, heatmap
+│   ├── app-shifts.js           # Shift modals, CRUD, activiteiten
+│   ├── app-swaps.js            # Ruilverzoeken en overnames
+│   ├── app-employees.js        # Medewerkers, profiel, urendashboard
+│   ├── app-availability.js     # Beschikbaarheid en afwezigheid
+│   ├── app-builder.js          # Roosterbouwer: kernlogica en grid
+│   ├── app-builder-editors.js  # Staffing, vergaderingen, waarschuwingen
+│   ├── app-builder-drafts.js   # Concept-CRUD, vergelijking (diff-view)
+│   ├── app-settings.js         # Alle instellingstabs
+│   ├── app-admin.js            # Export/import, debug, migratie
+│   ├── app-init.js             # DOM-init, event listeners, entry point
 │   ├── data.js                 # DataStore, API calls, data loading
 │   ├── validation.js           # Business rules (11-uur, overlap, bezetting)
-│   ├── drag-handler.js         # Drag & drop shifts
-│   ├── styles.css              # Volledige styling incl. responsive + design tokens
+│   ├── drag-handler.js         # Drag & drop shifts (planner + builder)
+│   ├── styles.css              # Volledige styling incl. responsive + tokens
 │   └── config/settings.js      # API URL auto-detect, defaults
 │
 ├── backend/                    # Node.js API
-│   ├── src/server.js           # Alle endpoints + auto-migratie (ensureSchema)
+│   ├── src/server.js           # Alle endpoints + geversioned migratiesysteem
 │   ├── src/db.js               # PostgreSQL connection pool
 │   ├── src/email.js            # Resend email service (9 notificatie types)
 │   ├── src/utils.js            # Pure datumhulpfuncties
-│   ├── tests/                  # Jest test suite (117 tests)
+│   ├── tests/                  # Jest test suite (194 tests)
 │   ├── sql/schema.sql          # Database schema (bron van waarheid)
 │   ├── scripts/                # Setup & seed scripts
 │   └── import-backup.js        # CLI backup import tool

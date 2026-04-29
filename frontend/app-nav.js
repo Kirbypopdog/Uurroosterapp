@@ -256,11 +256,13 @@ function renderHomeAlerts(role) {
         </div>`).join('');
 
     return `
-        <div class="home-alerts mb-md">
-            <div class="home-alerts-header">
+        <div class="home-alerts home-alerts--collapsed mb-md">
+            <button class="home-alerts-header" onclick="this.closest('.home-alerts').classList.toggle('home-alerts--collapsed')" aria-expanded="false">
                 <i data-lucide="bell" class="lucide-sm"></i>
                 <strong>Attentiepunten</strong>
-            </div>
+                <span class="home-alerts-count">${warnings.length}</span>
+                <i data-lucide="chevron-down" class="lucide-sm home-alerts-chevron"></i>
+            </button>
             <div class="home-alerts-body">${items}</div>
         </div>`;
 }

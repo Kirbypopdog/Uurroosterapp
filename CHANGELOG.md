@@ -9,6 +9,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 
 ---
 
+## [1.4.0] — 2026-04-29
+
+### Toegevoegd
+- **Urendashboard voor medewerkers** (issue #75): Eigen profiel toont nu week- en periodeuren als voortgangsbalk met kleurcodering (rood = boven norm, oranje = onder norm). Periodeberekening op basis van vaste 4-weken-periodes verankerd aan het schooljaar.
+- **Proactieve waarschuwingen op dashboard** (issue #80): De homepagina toont nu contextgevoelige alerts — medewerkers zien openstaande ruilverzoeken en komende shiften, beheerders zien onderbezette dagen en aflopende periodes.
+- **Week kopiëren in roosterbouwer** (issue #71): Knop om een ingevulde week te dupliceren naar een volgende week binnen een multi-week concept. Conflicten worden gedetecteerd en getoond voor de kopie wordt uitgevoerd.
+- **Live validatie tijdens slepen in builder** (issue #70): Terwijl een shift gesleept wordt in de roosterbouwer verschijnt de doelcel rood (11-uur schending), oranje (waarschuwing) of groen (ok). Bij neerleggen toont een toast de reden — de plaatsing wordt nooit geblokkeerd.
+- **Teamvolgorde drag-and-drop** (issue #101): Teams in de instellingentab zijn nu herordend met drag-and-drop. Volgorde wordt opgeslagen en doorgestuurd naar alle weergaven die `getTeamOrder()` gebruiken.
+- **Concept-vergelijking (diff-view)** (issue #72): Twee roosterconcepten naast elkaar vergelijken via "Vergelijk concepten"-knop in het conceptenoverzicht. Gewijzigde, nieuwe en verwijderde diensten worden visueel onderscheiden.
+- **Data-archivering** (issue #66): Shifts ouder dan 12 maanden worden automatisch gearchiveerd bij serverstart (`archived = true`). De planning laadt enkel actieve shifts. Beheerders kunnen gearchiveerde shifts raadplegen via `GET /shifts/archived`.
+
+### Verbeterd
+- **Genummerd migratiesysteem** (issue #88): `ensureSchema()` vervangen door een geversioned migratiesysteem met een `migrations`-tabel in de database. 29 genummerde migraties (000–028 + 029 voor archivering). Idempotent, transactioneel, terugwaarts compatibel.
+- **Testdekking uitgebreid** (issue #65 + #83): Van 138 naar 194 tests. Nieuwe tests voor concept-toepassen, beschikbaarheid, ruilverzoeken en 15 edge cases voor frontend tijdvalidatie.
+- **app-builder.js opgesplitst** (issue #67): Het bestand van 3065 regels is opgesplitst in drie bestanden: `app-builder.js` (~1575 regels, kernlogica), `app-builder-editors.js` (~298 regels, staffing/vergaderingen/waarschuwingen), `app-builder-drafts.js` (~1403 regels, concept-CRUD en vergelijking).
+- **Informatieteksten herzien** (issue #98): Diverse labels, placeholders en foutmeldingen in de UI gelijkgetrokken: "Ongeldige datum range" → "Ongeldig datumbereik", "Bijv:" → "Bijv.", undo/redo knoppen vertaald naar "Ongedaan"/"Opnieuw", swap-placeholder verduidelijkt.
+
+### Gefixt
+- **shift_activities cascade** (issue #86): Activiteiten van een shift werden ook verwijderd bij verwijderen van een andere shift. Opgelost via expliciete `shift_id` FK-constraint met `ON DELETE CASCADE`.
+- **Email wijzigen beperkt tot admin** (issue #94): Roosterverantwoordelijken konden het eigen e-mailadres aanpassen. Alleen admins mogen e-mailadressen van andere accounts wijzigen.
+- **Medewerkers kunnen shifts van anderen bewerken** (issue #92 + #93): Frontend-check aangescherpt — shift-klikken en bewerkmodals zijn nu volledig geblokkeerd voor shifts die niet van de ingelogde medewerker zijn.
+- **Shifts niet zichtbaar na reload** (issue #91): Bij herlogin of harde refresh bleven shifts weg tot de eerste navigatieactie. Opgelost door de initialisatievolgorde aan te passen.
+- **POST /shifts/bulk validatie** (issue #90): Bulk shift aanmaken riep `validateShiftRules()` niet aan. Validatie nu ook actief op het bulk-endpoint.
+- **PUT /shifts sluitingsdagencheck** (issue #87): Shift wijzigen controleerde niet of de doeldatum manueel gesloten was. Check toegevoegd.
+- **Basisrooster urentotaal** (issue #96): Periodeuren berekend met factor 4.33 (maanden) in plaats van 4 (vaste 4-weken-periodes). Gecorrigeerd naar `contractHours × 4` consistent met de schooljaar-logica.
+- **Nachtshift basisrooster** (issue #97): Nachtshift in het basisrooster eindigde op dezelfde dag i.p.v. de volgende. Datum-rollover nu correct toegepast.
+
+### UX
+- **Maanduren verborgen op mobiel** (issue #95): Het uren-totaal per periode werd ook op kleine schermen getoond en veroorzaakte layout-problemen. Nu enkel zichtbaar vanaf `min-width: 600px`.
+- **Navigatie opgeschoond** (issue #99): Onnodige scheidingslijn in de navigatiebalk verwijderd, uitlijning gelijkgetrokken.
+- **Instellingen in hoofdmenu** (issue #100): Instellingen verplaatst van het avatar-dropdown naar het hoofdmenu. Avatar-dropdown toont nu "Profiel" als primaire actie.
+
+---
+
 ## [1.3.2] — 2026-04-23
 
 ### Refactor
