@@ -1,4 +1,4 @@
-# Het Vlot Roosterplanning — Features v1.1.0
+# Het Vlot Roosterplanning — Features v1.4.0
 
 ## Rooster & Planning
 
@@ -28,6 +28,8 @@
 - Handmatige shifts behouden of overschrijven
 - Status tracking: Actief / Ingepland / Verlopen / Overschreven
 - Concept exporteren als JSON
+- **Week kopiëren** binnen een multi-week concept (conflicten worden gedetecteerd)
+- **Diff-view**: twee concepten naast elkaar vergelijken — nieuwe, verwijderde en gewijzigde diensten visueel gemarkeerd
 
 ### Schooljaar & Vakantie
 - Automatische weeknummering sept-aug (week 1-52/53)
@@ -56,6 +58,7 @@
 - Visuele feedback tijdens slepen
 - Validatie bij drop (11-uur, overlap, team)
 - Shift block aangemaakt bij verwijdering
+- **Live validatie in builder**: doelcel kleurt rood/oranje/groen tijdens het slepen op basis van 11-uur regel
 
 ---
 
@@ -64,6 +67,7 @@
 ### Teams
 - 5 teams: Vlot 1, Vlot 2, Cargo, Overkoepelend, Jobstudenten
 - Configureerbare teamkleuren (doorwerking in hele app)
+- **Teamvolgorde drag-and-drop** in instellingen — volgorde doorgestuurd naar alle weergaven
 - Flexibel roosterpatroon per team (bi-weekly, etc.)
 - Gesloten dagen per week instelbaar
 
@@ -75,6 +79,7 @@
 - Medewerker vervangen: kopieer basisrooster + optioneel shifts/blocks/activities
 - Accounts aanmaken zonder e-mail: rooster bouwen, e-mail later toevoegen
 - "Geen email" badge op medewerkerkaart als herinnering
+- **Urendashboard**: week- en periodeuren als voortgangsbalk in profiel (4-weken-periodes, schooljaaranker). Rood = boven norm, oranje = onder norm
 
 ### Rollen & Permissies
 | Rol | Planning | Medewerkers | Settings | Accounts |
@@ -152,6 +157,10 @@
 
 ## Admin & Instellingen
 
+### Dashboard (Home)
+- **Proactieve waarschuwingen**: ingeklapte attentiekaart met teller — onderbezette dagen, max. opeenvolgende dagen, openstaande ruilverzoeken
+- Standaard gesloten, klikbaar om uit te klappen
+
 ### Audit Log
 - Volledige history: wie heeft wat wanneer gewijzigd
 - Filter op actie type, resource type, persoon
@@ -216,22 +225,30 @@
 
 ## Versie Historie
 
-### v1.1.0 — 2026-04-22 (huidige release)
+### v1.4.0 — 2026-04-29 (huidige release)
+- 35 issues opgelost: security, stabiliteit, UX, tech-debt en features
+- Urendashboard, proactieve waarschuwingen, concept-vergelijking, live builder-validatie
+- Genummerd migratiesysteem, data-archivering, testdekking 194 tests
+- Zie CHANGELOG.md voor volledig overzicht
+
+### v1.3.x — 2026-04-23
+- Basisrooster gekoppeld aan actief concept, N+1 query-fix, API versioning cleanup
+- Email configuratie UI, save-patroon consistentie, inline styles opgeruimd
+
+### v1.2.0 — 2026-04-23
+- API versioning (`/api/v1/`), app.js opgesplitst in 14 modules
+
+### v1.1.0 — 2026-04-22
 - Belgische feestdagen automatisch berekend en visueel gemarkeerd
 - Manuele sluitingsdagen (brugdagen) met rechtsklik-contextmenu
-- Zie CHANGELOG.md voor volledig overzicht
 
 ### v1.0.1 — 2026-04-15
 - Stabilisatie-patch: bugfixes, security hardening, email optioneel
-- Zie CHANGELOG.md voor volledig overzicht
 
 ### v1.0 — 2026-03-21
 - Volledige roosterplanning applicatie
-- 208 commits, 10 database tabellen
-- Deep-dive security audit: 25 fixes doorgevoerd
-- Productie deployment op Render
+- 10 database tabellen, deep-dive security audit, productie deployment op Render
 
 ### Ontwikkeling
 - Gestart: januari 2025
 - Ontwikkeld met AI-assistentie (Claude Code)
-- 6 feature fases: Quick wins → Activiteiten → Vervang medewerker → Schooljaar/Drafts → Vakantie → Regels/Builder UI
