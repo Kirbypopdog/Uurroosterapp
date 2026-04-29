@@ -399,11 +399,59 @@ const MIGRATIONS = [
     }
   },
   {
-    // Veiligheidsnet: als 020 of 029 faalden door productie-data, voeg kolommen alsnog toe
-    name: '030_ensure_shift_id_and_archived',
+    // Veiligheidsnet: als migratie 020 faalde, stopt de keten bij 020 en missen
+    // alle volgende migraties (021-029). Dit voegt alle kritieke kolommen toe
+    // met IF NOT EXISTS zodat het veilig is ook als ze al bestaan.
+    name: '030_ensure_schema_020_to_029',
     up: async (client) => {
+      // --- 020: shift_activities.shift_id ---
       await client.query(`ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id)`);
+
+      // --- 021: performance indexes (idempotent) ---
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_source ON shifts(source)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_availability_type ON availability(type)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_swap_requests_type ON shift_swap_requests(request_type)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id)`);
+
+      // --- 022: schedule_drafts date columns ---
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS valid_from DATE`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS valid_until DATE`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS last_applied_from DATE`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS last_applied_until DATE`);
+
+      // --- 023: schedule_drafts updated_by ---
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS updated_by INTEGER`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS updated_by_name TEXT`);
+
+      // --- 024: schedule_drafts type & holiday ---
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'basis'`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS holiday_period_id TEXT`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_schedule_drafts_type ON schedule_drafts(type)`);
+
+      // --- 025: schedule_drafts lock columns ---
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS locked_by INTEGER`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS locked_by_name TEXT`);
+      await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ`);
+
+      // --- 026: users.email nullable ---
+      await client.query(`ALTER TABLE users ALTER COLUMN email DROP NOT NULL`);
+
+      // --- 027: emails lowercase ---
+      await client.query(`UPDATE users SET email = LOWER(email) WHERE email IS NOT NULL AND email != LOWER(email)`);
+
+      // --- 028: school_year_start setting ---
+      const existing = await client.query(`SELECT 1 FROM settings WHERE key = 'school_year_start'`);
+      if (existing.rows.length === 0) {
+        const now = new Date();
+        const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+        await client.query(
+          `INSERT INTO settings (key, value) VALUES ('school_year_start', $1)`,
+          [JSON.stringify({ date: `${startYear}-09-01` })]
+        );
+      }
+
+      // --- 029: shifts.archived ---
       await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false`);
     }
