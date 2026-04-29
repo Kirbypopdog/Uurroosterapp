@@ -701,8 +701,8 @@ const DragHandler = {
         }
 
         // Remove drop target highlights
-        document.querySelectorAll('.drop-target-valid, .drop-target-invalid').forEach(cell => {
-            cell.classList.remove('drop-target-valid', 'drop-target-invalid');
+        document.querySelectorAll('.drop-target-valid, .drop-target-warning, .drop-target-invalid').forEach(cell => {
+            cell.classList.remove('drop-target-valid', 'drop-target-warning', 'drop-target-invalid');
         });
 
         // Reset cursor
@@ -720,6 +720,8 @@ const DragHandler = {
         this.state.originalData = {};
         this.state.ghostElement = null;
         this.state.targetElement = null;
+        this._lastValidationTime = null;
+        this._lastValidationResult = null;
     },
 
     // Helper: Get day cell from mouse coordinates

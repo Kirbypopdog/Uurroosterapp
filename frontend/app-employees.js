@@ -175,7 +175,7 @@ function renderProfile() {
 
     let hoursCardContent = '';
     if (contractHours > 0) {
-        const monthContract = contractHours * 4.33;
+        const monthContract = contractHours * 4;
         const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
         const monthPct = Math.min((hoursMonth / monthContract) * 100, 100);
         const weekClr = hoursColor(hoursWeek, contractHours);
@@ -622,7 +622,7 @@ function renderEmployeeCard(emp) {
     const hoursMonth = getEmployeeHoursThisMonth(emp.id, weekDates[0]);
     let hoursHtml = '';
     if (contractHours > 0) {
-        const monthContract = contractHours * 4.33;
+        const monthContract = contractHours * 4;
         const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
         const weekClr = hoursWeek >= contractHours * 0.9 ? '#10b981' : hoursWeek >= contractHours * 0.6 ? '#f59e0b' : '#ef4444';
         hoursHtml = `
