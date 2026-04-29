@@ -175,7 +175,9 @@ async function dataApiFetch(path, options = {}) {
 
     if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || `HTTP ${response.status}`);
+        const msg = data.error || `HTTP ${response.status}`;
+        const detail = data.detail ? ` (${data.detail})` : '';
+        throw new Error(msg + detail);
     }
 
     return response.json();

@@ -3886,7 +3886,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('POST /schedule-drafts/:id/apply error:', err);
-    res.status(500).json({ error: 'Server error bij concept toepassen' });
+    res.status(500).json({ error: 'Server error bij concept toepassen', detail: err.message, code: err.code });
   } finally {
     client.release();
   }
