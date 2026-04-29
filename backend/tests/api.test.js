@@ -593,6 +593,641 @@ describe('GET /settings', () => {
   });
 });
 
+// ===== GET /shift-activities =====
+
+describe('GET /shift-activities', () => {
+  test('returns 401 without authentication', async () => {
+    const res = await request(app).get('/api/v1/shift-activities');
+    expect(res.status).toBe(401);
+  });
+
+  test('returns activities array when authenticated', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const token = makeToken({ id: 1, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .get('/shift-activities')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.activities)).toBe(true);
+  });
+
+  test('returns activities filtered by date range', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: 1, userId: 5, shiftId: 10, date: '2026-05-01', startTime: '09:00', endTime: '10:00', type: 'vergadering', description: 'Teamoverleg' }]
+    });
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .get('/shift-activities?startDate=2026-05-01&endDate=2026-05-07')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.activities).toHaveLength(1);
+    expect(res.body.activities[0].type).toBe('vergadering');
+  });
+});
+
+// ===== POST /shift-activities =====
+
+describe('POST /shift-activities', () => {
+  test('returns 400 when required fields are missing', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/shift-activities')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 1, date: '2026-05-01' }); // missing startTime, endTime, type
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Verplichte velden');
+  });
+
+  test('returns 403 when medewerker creates activity for another user', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/shift-activities')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 99, date: '2026-05-01', startTime: '09:00', endTime: '10:00', type: 'vergadering' });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('jezelf');
+  });
+
+  test('creates activity for own user (medewerker)', async () => {
+    mockActiveUser();
+    const newActivity = { id: 1, userId: 5, shiftId: null, date: '2026-05-01', startTime: '09:00', endTime: '10:00', type: 'vergadering', description: '' };
+    pool.query
+      .mockResolvedValueOnce({ rows: [newActivity] }) // INSERT
+      .mockResolvedValueOnce({ rows: [] });            // logAudit
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/shift-activities')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, date: '2026-05-01', startTime: '09:00', endTime: '10:00', type: 'vergadering' });
+    expect(res.status).toBe(201);
+    expect(res.body.activity).toBeTruthy();
+    expect(res.body.activity.type).toBe('vergadering');
+  });
+
+  test('admin can create activity for any user', async () => {
+    mockActiveUser();
+    const newActivity = { id: 2, userId: 10, shiftId: 5, date: '2026-05-02', startTime: '10:00', endTime: '11:00', type: 'opleiding', description: 'Training' };
+    pool.query
+      .mockResolvedValueOnce({ rows: [newActivity] })
+      .mockResolvedValueOnce({ rows: [] });
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/shift-activities')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 10, shiftId: 5, date: '2026-05-02', startTime: '10:00', endTime: '11:00', type: 'opleiding', description: 'Training' });
+    expect(res.status).toBe(201);
+    expect(res.body.activity.userId).toBe(10);
+  });
+});
+
+// ===== DELETE /shift-activities/:id =====
+
+describe('DELETE /shift-activities/:id', () => {
+  test('returns 403 when medewerker deletes another user\'s activity', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ user_id: 99 }] }); // ownership check
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .delete('/shift-activities/42')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('returns 404 when activity does not exist', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [] })  // ownership check: no row → allow admin path
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }); // DELETE returns nothing
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .delete('/shift-activities/999')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  test('deletes own activity (medewerker)', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ user_id: 5 }] })  // ownership check
+      .mockResolvedValueOnce({ rows: [{ id: 7 }] })        // DELETE RETURNING
+      .mockResolvedValueOnce({ rows: [] });                  // logAudit
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .delete('/shift-activities/7')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+// ===== POST /availability =====
+
+describe('POST /availability', () => {
+  test('returns 401 without authentication', async () => {
+    const res = await request(app)
+      .post('/api/v1/availability')
+      .send({ userId: 1, date: '2026-05-01', type: 'beschikbaar' });
+    expect(res.status).toBe(401);
+  });
+
+  test('returns 400 when required fields are missing', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/availability')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 1, date: '2026-05-01' }); // missing type
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Verplichte velden');
+  });
+
+  test('returns 403 when medewerker sets availability for another user', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/availability')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 99, date: '2026-05-01', type: 'beschikbaar' });
+    expect(res.status).toBe(403);
+  });
+
+  test('upserts availability for own user (201)', async () => {
+    mockActiveUser();
+    const avail = { id: 1, userId: 5, date: '2026-05-01', type: 'beschikbaar', reason: '', updatedAt: new Date().toISOString() };
+    pool.query
+      .mockResolvedValueOnce({ rows: [avail] }) // INSERT ON CONFLICT
+      .mockResolvedValueOnce({ rows: [] });      // logAudit
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/availability')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, date: '2026-05-01', type: 'beschikbaar' });
+    expect(res.status).toBe(201);
+    expect(res.body.availability.type).toBe('beschikbaar');
+  });
+});
+
+// ===== DELETE /availability =====
+
+describe('DELETE /availability', () => {
+  test('returns 403 when medewerker deletes another user\'s availability', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .delete('/availability?userId=99&date=2026-05-01')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('deletes own availability (medewerker)', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [] }) // DELETE
+      .mockResolvedValueOnce({ rows: [] }); // logAudit
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .delete('/availability?userId=5&date=2026-05-01')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+});
+
+// ===== POST /swap-requests =====
+
+describe('POST /swap-requests', () => {
+  test('returns 401 without authentication', async () => {
+    const res = await request(app).post('/api/v1/swap-requests').send({});
+    expect(res.status).toBe(401);
+  });
+
+  test('returns 400 when required fields are missing', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/swap-requests')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ requesterShiftId: 1 }); // missing targetShiftId
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('verplicht');
+  });
+
+  test('returns 404 when one of the shifts is not found', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 1, user_id: 5, date: '2026-06-01' }] }); // only 1 of 2 shifts
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/swap-requests')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ requesterShiftId: 1, targetShiftId: 999 });
+    expect(res.status).toBe(404);
+  });
+
+  test('returns 403 when requester does not own the requester shift', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        { id: 1, user_id: 99, date: '2026-06-01' }, // belongs to user 99, not user 5
+        { id: 2, user_id: 10, date: '2026-06-02' }
+      ]
+    });
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/swap-requests')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ requesterShiftId: 1, targetShiftId: 2 });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('eigen shifts');
+  });
+
+  test('returns 400 when trying to swap with yourself', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        { id: 1, user_id: 5, date: '2026-06-01' },
+        { id: 2, user_id: 5, date: '2026-06-02' } // same user
+      ]
+    });
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/swap-requests')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ requesterShiftId: 1, targetShiftId: 2 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('jezelf');
+  });
+
+  test('creates swap request successfully', async () => {
+    mockActiveUser();
+    const swapRow = { id: 10, requester_user_id: 5, target_user_id: 20, requester_shift_id: 1, target_shift_id: 2, status: 'pending', message: null };
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 1, user_id: 5, date: '2026-06-01' }, { id: 2, user_id: 20, date: '2026-06-02' }] }) // shifts check
+      .mockResolvedValueOnce({ rows: [swapRow] })  // INSERT
+      .mockResolvedValueOnce({ rows: [] });          // logAudit
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/swap-requests')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ requesterShiftId: 1, targetShiftId: 2 });
+    expect(res.status).toBe(201);
+    expect(res.body.swapRequest.status).toBe('pending');
+  });
+});
+
+// ===== PUT /swap-requests/:id/reject (lead) =====
+
+describe('PUT /swap-requests/:id/reject', () => {
+  test('returns 400 when responseNotes is missing', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .put('/swap-requests/1/reject')
+      .set('Authorization', `Bearer ${token}`)
+      .send({}); // no responseNotes
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('verplicht');
+  });
+
+  test('returns 403 for medewerker role', async () => {
+    mockActiveUser();
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    const swapRow = {
+      id: 1, status: 'pending', requester_user_id: 10, target_user_id: 20,
+      requester_shift_id: 101, target_shift_id: 102,
+      requester_date: '2026-06-01', target_date: '2026-06-02',
+      request_type: 'swap'
+    };
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })         // BEGIN
+      .mockResolvedValueOnce({ rows: [swapRow] })  // swap fetch
+      .mockResolvedValueOnce({ rows: [] });         // ROLLBACK
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/swap-requests/1/reject')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ responseNotes: 'niet beschikbaar' });
+    expect(res.status).toBe(403);
+  });
+
+  test('rejects swap successfully', async () => {
+    mockActiveUser();
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    const swapRow = {
+      id: 1, status: 'pending', requester_user_id: 10, target_user_id: 20,
+      requester_shift_id: 101, target_shift_id: 102,
+      requester_date: '2099-06-01', target_date: '2099-06-02',
+      request_type: 'swap'
+    };
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })         // BEGIN
+      .mockResolvedValueOnce({ rows: [swapRow] })  // swap fetch
+      .mockResolvedValueOnce({ rows: [] })          // UPDATE swap status
+      .mockResolvedValueOnce({ rows: [] });         // COMMIT
+    pool.query.mockResolvedValueOnce({ rows: [] }); // logAudit
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .put('/swap-requests/1/reject')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ responseNotes: 'personeel onvoldoende' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+});
+
+// ===== PUT /swap-requests/:id/approve (lead) =====
+
+describe('PUT /swap-requests/:id/approve', () => {
+  test('returns 401 without authentication', async () => {
+    const res = await request(app).put('/api/v1/swap-requests/1/approve');
+    expect(res.status).toBe(401);
+  });
+
+  test('returns 403 for medewerker role', async () => {
+    mockActiveUser();
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    const swapRow = {
+      id: 1, status: 'pending', requester_user_id: 10, target_user_id: 20,
+      requester_shift_id: 101, target_shift_id: 102,
+      requester_current_user: 10, target_current_user: 20,
+      requester_date: '2099-06-01', target_date: '2099-06-02',
+      request_type: 'swap'
+    };
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })         // BEGIN
+      .mockResolvedValueOnce({ rows: [swapRow] })  // swap fetch
+      .mockResolvedValueOnce({ rows: [] });         // ROLLBACK
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/swap-requests/1/approve')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+    expect(res.status).toBe(403);
+  });
+
+  test('approves swap and swaps user_ids atomically', async () => {
+    mockActiveUser();
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    const swapRow = {
+      id: 1, status: 'pending', requester_user_id: 10, target_user_id: 20,
+      requester_shift_id: 101, target_shift_id: 102,
+      requester_current_user: 10, target_current_user: 20,
+      requester_date: '2099-06-01', target_date: '2099-06-02',
+      request_type: 'swap'
+    };
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })         // BEGIN
+      .mockResolvedValueOnce({ rows: [swapRow] })  // swap fetch
+      .mockResolvedValueOnce({ rows: [] })          // UPDATE shifts (requester)
+      .mockResolvedValueOnce({ rows: [] })          // UPDATE shifts (target)
+      .mockResolvedValueOnce({ rows: [] })          // UPDATE swap status
+      .mockResolvedValueOnce({ rows: [] });         // COMMIT
+    pool.query.mockResolvedValueOnce({ rows: [] }); // logAudit
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .put('/swap-requests/1/approve')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    // Verify two shift UPDATE calls were made
+    const updateCalls = mockClient.query.mock.calls.filter(
+      call => typeof call[0] === 'string' && call[0].includes('UPDATE shifts')
+    );
+    expect(updateCalls).toHaveLength(2);
+  });
+});
+
+// ===== GET /schedule-drafts =====
+
+describe('GET /schedule-drafts', () => {
+  test('returns 401 without authentication', async () => {
+    const res = await request(app).get('/api/v1/schedule-drafts');
+    expect(res.status).toBe(401);
+  });
+
+  test('returns 403 for medewerker role', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .get('/schedule-drafts')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('returns drafts array for admin', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: 'draft_1', name: 'Basisrooster', type: 'basis', weekNumber: 1 }]
+    });
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .get('/schedule-drafts')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.drafts)).toBe(true);
+    expect(res.body.drafts).toHaveLength(1);
+  });
+
+  test('returns drafts for roosterverantwoordelijke role', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const token = makeToken({ id: 3, role: 'roosterverantwoordelijke', name: 'Lead', team_id: 'vlot1' });
+    const res = await request(app)
+      .get('/schedule-drafts')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+  });
+});
+
+// ===== POST /schedule-drafts =====
+
+describe('POST /schedule-drafts', () => {
+  test('returns 403 for medewerker role', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/schedule-drafts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Test', type: 'basis' });
+    expect(res.status).toBe(403);
+  });
+
+  test('returns 400 for vakantie type without holidayPeriodId', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/schedule-drafts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Zomervakantie', type: 'vakantie' }); // missing holidayPeriodId
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('vakantieperiode');
+  });
+
+  test('creates a basis draft successfully', async () => {
+    mockActiveUser();
+    const newDraft = { id: 'draft_abc', name: 'Nieuw rooster', type: 'basis', weekNumber: 1, grid: {} };
+    pool.query
+      .mockResolvedValueOnce({ rows: [newDraft] }) // INSERT
+      .mockResolvedValueOnce({ rows: [] });          // logAudit
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/schedule-drafts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Nieuw rooster', type: 'basis', grid: {} });
+    expect(res.status).toBe(200);
+    expect(res.body.draft.name).toBe('Nieuw rooster');
+  });
+});
+
+// ===== POST /admin/users =====
+
+describe('POST /admin/users', () => {
+  function adminToken() {
+    return makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+  }
+
+  test('returns 400 when name is missing', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .post('/admin/users')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ role: 'medewerker' }); // missing name
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('verplicht');
+  });
+
+  test('returns 400 when email already exists', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 99 }] }); // existing email check
+    const res = await request(app)
+      .post('/admin/users')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ name: 'Test', email: 'exists@example.com', role: 'medewerker' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Email bestaat al');
+  });
+
+  test('creates user without email (no email check query)', async () => {
+    mockActiveUser();
+    const newUser = { id: 5, name: 'Piet', email: null, role: 'medewerker', team_id: null, mainTeam: null, extraTeams: null, contractHours: 0, active: true, weekScheduleWeek1: [], weekScheduleWeek2: [], weekSchedules: [] };
+    pool.query
+      .mockResolvedValueOnce({ rows: [newUser] }) // INSERT
+      .mockResolvedValueOnce({ rows: [] });         // logAudit
+    const res = await request(app)
+      .post('/admin/users')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ name: 'Piet', role: 'medewerker' }); // no email
+    expect(res.status).toBe(201);
+    expect(res.body.user.name).toBe('Piet');
+    expect(res.body.user.email).toBeNull();
+  });
+
+  test('creates user with email (normalises to lowercase)', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [] }); // no existing email
+    const newUser = { id: 6, name: 'Mieke', email: 'mieke@example.com', role: 'medewerker', team_id: 'vlot1', mainTeam: 'vlot1', extraTeams: null, contractHours: 36, active: true, weekScheduleWeek1: [], weekScheduleWeek2: [], weekSchedules: [] };
+    pool.query
+      .mockResolvedValueOnce({ rows: [newUser] }) // INSERT
+      .mockResolvedValueOnce({ rows: [] });         // logAudit
+    const res = await request(app)
+      .post('/admin/users')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ name: 'Mieke', email: 'MIEKE@EXAMPLE.COM', role: 'medewerker', mainTeam: 'vlot1', contractHours: 36 });
+    expect(res.status).toBe(201);
+    expect(res.body.user.name).toBe('Mieke');
+  });
+});
+
+// ===== POST /admin/users/:id/reset-password =====
+
+describe('POST /admin/users/:id/reset-password', () => {
+  test('returns 401 without authentication', async () => {
+    const res = await request(app).post('/api/v1/admin/users/1/reset-password');
+    expect(res.status).toBe(401);
+  });
+
+  test('returns 403 for non-admin user', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/admin/users/1/reset-password')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('resets password and returns new password', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [] })                          // UPDATE password_hash
+      .mockResolvedValueOnce({ rows: [] })                          // logAudit
+      .mockResolvedValueOnce({ rows: [{ name: 'Jan', email: 'jan@test.be' }] }); // user fetch for email
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/admin/users/5/reset-password')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.newPassword).toBeTruthy();
+  });
+});
+
+// ===== PATCH /admin/users/:id =====
+
+describe('PATCH /admin/users/:id', () => {
+  test('returns 400 when role is missing', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .patch('/admin/users/5')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Updated Name' }); // missing role
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Missing fields');
+  });
+
+  test('updates user data successfully', async () => {
+    mockActiveUser();
+    const oldUser = { email: 'old@example.com' };
+    const updatedUser = { id: 5, name: 'Updated', email: 'old@example.com', role: 'medewerker', team_id: 'vlot1', active: true, mainTeam: 'vlot1', extraTeams: null, contractHours: 38, weekScheduleWeek1: [], weekScheduleWeek2: [], weekSchedules: [], emailNotificationsEnabled: true };
+    pool.query
+      .mockResolvedValueOnce({ rows: [oldUser] })     // SELECT old email
+      .mockResolvedValueOnce({ rows: [updatedUser] }) // UPDATE users
+      .mockResolvedValueOnce({ rows: [] });             // logAudit
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .patch('/admin/users/5')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ role: 'medewerker', name: 'Updated', contractHours: 38, active: true });
+    expect(res.status).toBe(200);
+    expect(res.body.user).toBeTruthy();
+  });
+
+  test('deactivating a user sets active to false', async () => {
+    mockActiveUser();
+    const oldUser = { email: 'jan@example.com' };
+    const deactivatedUser = { id: 5, name: 'Jan', email: 'jan@example.com', role: 'medewerker', team_id: 'vlot1', active: false, mainTeam: 'vlot1', extraTeams: null, contractHours: 36, weekScheduleWeek1: [], weekScheduleWeek2: [], weekSchedules: [], emailNotificationsEnabled: true };
+    pool.query
+      .mockResolvedValueOnce({ rows: [oldUser] })
+      .mockResolvedValueOnce({ rows: [deactivatedUser] })
+      .mockResolvedValueOnce({ rows: [] });
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .patch('/admin/users/5')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ role: 'medewerker', active: false });
+    expect(res.status).toBe(200);
+    expect(res.body.user.active).toBe(false);
+  });
+});
+
 // ===== POST /schedule-drafts/:id/apply =====
 
 describe('POST /api/v1/schedule-drafts/:id/apply', () => {
