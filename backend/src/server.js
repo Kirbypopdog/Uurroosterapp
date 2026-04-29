@@ -1389,13 +1389,13 @@ v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) 
 
 // ===== EMAIL BEHEER =====
 
-v1.get('/admin/email-status', requireAuth, requireAdmin, async (req, res) => {
+v1.get('/admin/email-status', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const configured = !!process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM || 'Het Vlot Rooster <onboarding@resend.dev>';
   res.json({ configured, from });
 });
 
-v1.post('/admin/test-email', requireAuth, requireAdmin, async (req, res) => {
+v1.post('/admin/test-email', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
     const userResult = await pool.query('SELECT email, name FROM users WHERE id = $1', [req.user.id]);
     const user = userResult.rows[0];
