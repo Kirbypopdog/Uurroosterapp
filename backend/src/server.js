@@ -3801,6 +3801,13 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
         [effectiveStartDate, effectiveEndDate]
       );
 
+      // Check once if shift_id column exists (migration 020 might not have run yet)
+      const shiftIdCheck = await client.query(
+        `SELECT 1 FROM information_schema.columns
+         WHERE table_name = 'shift_activities' AND column_name = 'shift_id'`
+      );
+      const shiftIdExists = shiftIdCheck.rows.length > 0;
+
       // Find all auto-shifts just created in this range
       const newShiftsResult = await client.query(
         `SELECT s.id, s.user_id, s.date::text as date, s.start_time, s.end_time, u.main_team
@@ -3845,11 +3852,19 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
             const fromTime = `${String(fromH).padStart(2, '0')}:${String(fromM).padStart(2, '0')}`;
             const toTime = `${String(toH).padStart(2, '0')}:${String(toM).padStart(2, '0')}`;
 
-            await client.query(
-              `INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description)
-               VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering')`,
-              [shift.user_id, shift.id, shift.date, fromTime, toTime]
-            );
+            if (shiftIdExists) {
+              await client.query(
+                `INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description)
+                 VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering')`,
+                [shift.user_id, shift.id, shift.date, fromTime, toTime]
+              );
+            } else {
+              await client.query(
+                `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description)
+                 VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering')`,
+                [shift.user_id, shift.date, fromTime, toTime]
+              );
+            }
           }
         }
       }
