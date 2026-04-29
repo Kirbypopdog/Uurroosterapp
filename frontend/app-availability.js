@@ -542,7 +542,7 @@ async function handleRemoveAbsence() {
     const end = parseDateOnly(endDate);
 
     if (end < start) {
-        showToast('Ongeldige datum range', 'warning');
+        showToast('Ongeldig datumbereik', 'warning');
         return;
     }
 

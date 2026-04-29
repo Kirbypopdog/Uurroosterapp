@@ -102,8 +102,8 @@
                 <h2>Roosterplanning</h2>
                 <div class="header-actions">
                     <div class="undo-redo-controls">
-                        <button id="undo-btn" class="btn btn-sm btn-secondary" disabled title="Ongedaan maken (Ctrl+Z)"><i data-lucide="undo-2" class="lucide-sm"></i> Undo</button>
-                        <button id="redo-btn" class="btn btn-sm btn-secondary" disabled title="Opnieuw (Ctrl+Y)">Redo <i data-lucide="redo-2" class="lucide-sm"></i></button>
+                        <button id="undo-btn" class="btn btn-sm btn-secondary" disabled title="Ongedaan maken (Ctrl+Z)"><i data-lucide="undo-2" class="lucide-sm"></i> Ongedaan</button>
+                        <button id="redo-btn" class="btn btn-sm btn-secondary" disabled title="Opnieuw (Ctrl+Y)">Opnieuw <i data-lucide="redo-2" class="lucide-sm"></i></button>
                     </div>
                     <button id="add-shift-btn" class="btn btn-primary btn-primary-lg"><i data-lucide="plus" class="lucide-sm"></i> Dienst toevoegen</button>
                 </div>
@@ -133,7 +133,7 @@
                     </div>
                     <div class="planning-filter-buttons">
                         <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
-                        <label class="toggle-switch-label" title="Verberg medewerkers zonder dienst">
+                        <label class="toggle-switch-label" title="Verberg medewerkers zonder diensten">
                             <input type="checkbox" id="filter-shifts-toggle" class="toggle-switch-input">
                             <span class="toggle-switch-slider"></span>
                             <span class="toggle-switch-text">Verberg lege rijen</span>
@@ -405,7 +405,7 @@
                         </div>
                         <div class="form-group">
                             <label for="employee-email">E-mail</label>
-                            <input type="email" id="employee-email" class="form-input" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen">
+                            <input type="email" id="employee-email" class="form-input" placeholder="Optioneel — welkomstmail wordt verzonden zodra e-mail ingevuld is">
                         </div>
                     </div>
                     <div class="form-row">
@@ -539,7 +539,7 @@
                 <!-- Message -->
                 <div class="form-group">
                     <label for="swap-message">Bericht (optioneel)</label>
-                    <textarea id="swap-message" class="form-control" rows="3" placeholder="Bijv: Graag ruilen, familiebezoek"></textarea>
+                    <textarea id="swap-message" class="form-control" rows="3" placeholder="Bijv. Graag ruilen, familiebezoek"></textarea>
                 </div>
 
                 <!-- Validation Display -->
@@ -591,7 +591,7 @@
                 <!-- Response Notes -->
                 <div class="form-group">
                     <label for="swap-response-notes">Reactie <span id="swap-response-notes-required" class="text-danger hidden">*</span></label>
-                    <textarea id="swap-response-notes" class="form-control" rows="3" placeholder="Optionele toelichting bij goedkeuring of verplicht bij afwijzing"></textarea>
+                    <textarea id="swap-response-notes" class="form-control" rows="3" placeholder="Toelichting (optioneel bij goedkeuring, verplicht bij afwijzing)"></textarea>
                 </div>
             </div>
             <div class="modal-actions">
@@ -806,6 +806,8 @@
     <script src="app-employees.js"></script>
     <script src="app-availability.js"></script>
     <script src="app-builder.js"></script>
+    <script src="app-builder-editors.js"></script>
+    <script src="app-builder-drafts.js"></script>
     <script src="app-settings.js"></script>
     <script src="app-admin.js"></script>
     <script src="app-init.js"></script>
