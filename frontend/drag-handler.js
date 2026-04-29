@@ -1071,13 +1071,8 @@ const BuilderDragHandler = {
             return;
         }
 
-        // Live validation: block hard violations
+        // Live validation: warn but always allow placement
         const validation = this.validateBuilderPlacement(targetEmpId, targetDay, assignment);
-        if (validation.level === 'error') {
-            showToast(validation.message, 'error');
-            renderBuilder();
-            return;
-        }
 
         // Remove from original position
         if (AppState.builderGrid[origEmpId]) {
@@ -1090,7 +1085,7 @@ const BuilderDragHandler = {
 
         AppState.builderIsDirty = true;
         renderBuilder();
-        if (validation.level === 'warning') showToast(validation.message, 'warning');
+        if (validation.level !== 'ok') showToast(validation.message, 'warning');
         else showToast('Dienst verplaatst', 'success');
     },
 
