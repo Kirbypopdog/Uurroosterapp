@@ -3861,7 +3861,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
             } else {
               await client.query(
                 `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description)
-                 VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering')`,
+                 VALUES ($1, $2, $3, $4, 'vergadering', 'Teamvergadering')`,
                 [shift.user_id, shift.date, fromTime, toTime]
               );
             }
