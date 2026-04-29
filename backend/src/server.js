@@ -397,6 +397,16 @@ const MIGRATIONS = [
       await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false`);
     }
+  },
+  {
+    // Veiligheidsnet: als 020 of 029 faalden door productie-data, voeg kolommen alsnog toe
+    name: '030_ensure_shift_id_and_archived',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id)`);
+      await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false`);
+    }
   }
 ];
 
@@ -1748,21 +1758,37 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
 
 v1.get('/shift-activities', requireAuth, async (req, res) => {
   const { startDate, endDate } = req.query;
-  try {
-    let query = `
-      SELECT id, user_id as "userId", shift_id as "shiftId", date::text as "date", start_time as "startTime",
-             end_time as "endTime", type, description, created_at as "createdAt"
-      FROM shift_activities
-    `;
+
+  const buildActivitiesQuery = (withShiftId) => {
+    const shiftIdCol = withShiftId ? 'shift_id as "shiftId"' : 'NULL as "shiftId"';
     const params = [];
+    let q = `SELECT id, user_id as "userId", ${shiftIdCol}, date::text as "date", start_time as "startTime",
+             end_time as "endTime", type, description, created_at as "createdAt"
+             FROM shift_activities`;
     if (startDate && endDate) {
-      query += ' WHERE date >= $1 AND date <= $2';
+      q += ' WHERE date >= $1 AND date <= $2';
       params.push(startDate, endDate);
     }
-    query += ' ORDER BY date, start_time';
+    q += ' ORDER BY date, start_time';
+    return { query: q, params };
+  };
+
+  try {
+    const { query, params } = buildActivitiesQuery(true);
     const result = await pool.query(query, params);
     res.json({ activities: result.rows });
   } catch (err) {
+    if (err.code === '42703') {
+      // shift_id kolom bestaat nog niet — fallback zonder shift_id
+      try {
+        const { query, params } = buildActivitiesQuery(false);
+        const result = await pool.query(query, params);
+        return res.json({ activities: result.rows });
+      } catch (err2) {
+        console.error('GET /shift-activities error (fallback):', err2);
+        return res.status(500).json({ error: 'Server error' });
+      }
+    }
     console.error('GET /shift-activities error:', err);
     res.status(500).json({ error: 'Server error' });
   }
