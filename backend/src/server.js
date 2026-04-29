@@ -53,401 +53,230 @@ app.use(globalLimiter);
 // Used by apply-schedule endpoint (replicates frontend data.js logic)
 const { getMonday, formatDateYYYYMMDD, parseLocalDate, getBelgianPublicHolidays, shiftsOverlapCheck, hoursBetweenShifts } = require('./utils');
 
-// ===== AUTO-MIGRATION ON STARTUP =====
-// Ensures the database schema is up-to-date
-async function ensureSchema() {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    // Check if new columns exist in users table
-    const colCheck = await client.query(`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'users' AND column_name = 'main_team'
-    `);
+// ===== VERSIONED MIGRATIONS =====
+// Each entry runs exactly once, tracked in the `migrations` table.
+// All DDL uses IF NOT EXISTS so migrations are safe to re-run on existing DBs.
 
-    if (colCheck.rows.length === 0) {
-      console.log('Running auto-migration: adding employee columns to users table...');
-
-      // Add new columns
-      const columnsToAdd = [
-        { name: 'main_team', def: 'TEXT REFERENCES teams(id)' },
-        { name: 'extra_teams', def: "TEXT[] DEFAULT '{}'" },
-        { name: 'contract_hours', def: 'NUMERIC DEFAULT 0' },
-        { name: 'active', def: 'BOOLEAN DEFAULT true' },
-        { name: 'week_schedule_week1', def: "JSONB DEFAULT '[]'" },
-        { name: 'week_schedule_week2', def: "JSONB DEFAULT '[]'" },
-        { name: 'week_schedules', def: "JSONB DEFAULT NULL" }
-      ];
-
-      for (const col of columnsToAdd) {
-        try {
-          await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${col.name} ${col.def}`);
-          console.log(`  Added column: ${col.name}`);
-        } catch (e) {
-          // Column might already exist with different constraints
-          console.log(`  Column ${col.name}: ${e.message}`);
-        }
-      }
-
-      console.log('Auto-migration complete. Run /admin/migrate for full data migration.');
-    }
-
-    // Ensure week_schedules column exists (separate migration for existing installations)
-    try {
+const MIGRATIONS = [
+  {
+    name: '001_user_employee_columns',
+    up: async (client) => {
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS main_team TEXT REFERENCES teams(id)`);
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_teams TEXT[] DEFAULT '{}'`);
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS contract_hours NUMERIC DEFAULT 0`);
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS week_schedule_week1 JSONB DEFAULT '[]'`);
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS week_schedule_week2 JSONB DEFAULT '[]'`);
       await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS week_schedules JSONB DEFAULT NULL`);
-    } catch (e) { /* already exists */ }
-
-    // Populate week_schedules from old columns where NULL
-    await client.query(`
-      UPDATE users SET week_schedules = jsonb_build_array(
-        COALESCE(week_schedule_week1, '[]'::jsonb),
-        COALESCE(week_schedule_week2, '[]'::jsonb)
-      ) WHERE week_schedules IS NULL
-    `);
-
-    // Check if source column exists in shifts table
-    const sourceColCheck = await client.query(`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'shifts' AND column_name = 'source'
-    `);
-
-    if (sourceColCheck.rows.length === 0) {
-      console.log('Adding source column to shifts table...');
-      try {
-        await client.query(`
-          ALTER TABLE shifts
-          ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'
-          CHECK (source IN ('auto', 'manual'))
-        `);
-        console.log('  Added column: source');
-      } catch (e) {
-        console.log(`  Column source: ${e.message}`);
-      }
     }
-
-    // Check if shift_swap_requests table exists
-    const swapTableCheck = await client.query(`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'shift_swap_requests'
-    `);
-
-    if (swapTableCheck.rows.length === 0) {
-      console.log('Creating shift_swap_requests table...');
-      try {
-        await client.query(`
-          CREATE TABLE shift_swap_requests (
-            id SERIAL PRIMARY KEY,
-            requester_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            requester_shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
-            target_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            target_shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
-            request_type TEXT NOT NULL DEFAULT 'swap' CHECK (request_type IN ('swap', 'takeover')),
-            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead')),
-            message TEXT,
-            response_notes TEXT,
-            target_approved BOOLEAN DEFAULT NULL,
-            target_response_notes TEXT,
-            target_responded_at TIMESTAMP,
-            lead_approved BOOLEAN DEFAULT NULL,
-            lead_response_notes TEXT,
-            lead_responded_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT NOW(),
-            responded_at TIMESTAMP,
-            responded_by INTEGER REFERENCES users(id)
-          );
-        `);
-        console.log('  Created table: shift_swap_requests');
-
-        // Create indexes for better query performance
-        await client.query(`
-          CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON shift_swap_requests(status);
-        `);
-        await client.query(`
-          CREATE INDEX IF NOT EXISTS idx_swap_requests_requester ON shift_swap_requests(requester_user_id);
-        `);
-        await client.query(`
-          CREATE INDEX IF NOT EXISTS idx_swap_requests_target ON shift_swap_requests(target_user_id);
-        `);
-        console.log('  Created indexes for shift_swap_requests');
-      } catch (e) {
-        console.log(`  Error creating shift_swap_requests table: ${e.message}`);
-      }
-    } else {
-      // Migration: Add target and lead approval columns if they don't exist
-      console.log('Checking for target/lead approval columns...');
-      try {
-        // Check if target_approved column exists
-        const targetApprovedCheck = await client.query(`
-          SELECT column_name FROM information_schema.columns
-          WHERE table_name = 'shift_swap_requests' AND column_name = 'target_approved'
-        `);
-
-        if (targetApprovedCheck.rows.length === 0) {
-          console.log('  Adding target/lead approval columns...');
-          await client.query(`
-            ALTER TABLE shift_swap_requests
-            ADD COLUMN target_approved BOOLEAN DEFAULT NULL,
-            ADD COLUMN target_response_notes TEXT,
-            ADD COLUMN target_responded_at TIMESTAMP,
-            ADD COLUMN lead_approved BOOLEAN DEFAULT NULL,
-            ADD COLUMN lead_response_notes TEXT,
-            ADD COLUMN lead_responded_at TIMESTAMP;
-          `);
-          console.log('  Added target/lead approval columns');
-
-          // Update CHECK constraint to include new status
-          await client.query(`
-            ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS shift_swap_requests_status_check;
-          `);
-          await client.query(`
-            ALTER TABLE shift_swap_requests
-            ADD CONSTRAINT shift_swap_requests_status_check
-            CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead'));
-          `);
-          console.log('  Updated status constraint');
-        }
-
-        // Check if request_type column exists
-        const requestTypeCheck = await client.query(`
-          SELECT column_name FROM information_schema.columns
-          WHERE table_name = 'shift_swap_requests' AND column_name = 'request_type'
-        `);
-
-        if (requestTypeCheck.rows.length === 0) {
-          console.log('  Adding request_type column...');
-          await client.query(`
-            ALTER TABLE shift_swap_requests
-            ADD COLUMN request_type TEXT DEFAULT 'swap' CHECK (request_type IN ('swap', 'takeover'));
-          `);
-
-          // Make target columns nullable for takeover requests
-          await client.query(`
-            ALTER TABLE shift_swap_requests
-            ALTER COLUMN target_user_id DROP NOT NULL,
-            ALTER COLUMN target_shift_id DROP NOT NULL;
-          `);
-
-          // Drop constraints that don't apply to takeover requests
-          await client.query(`
-            ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS different_shifts;
-          `);
-          await client.query(`
-            ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS different_users;
-          `);
-
-          // Add conditional constraints (only for swap requests)
-          // Note: PostgreSQL doesn't support conditional CHECK constraints easily,
-          // so we'll validate in the application layer
-
-          console.log('  Added request_type column and updated constraints');
-        }
-      } catch (e) {
-        console.log(`  Error adding columns: ${e.message}`);
-      }
+  },
+  {
+    name: '002_populate_week_schedules',
+    up: async (client) => {
+      await client.query(`
+        UPDATE users SET week_schedules = jsonb_build_array(
+          COALESCE(week_schedule_week1, '[]'::jsonb),
+          COALESCE(week_schedule_week2, '[]'::jsonb)
+        ) WHERE week_schedules IS NULL
+      `);
     }
-
-    // Check if shift_blocks table exists
-    const blocksTableCheck = await client.query(`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'shift_blocks'
-    `);
-
-    if (blocksTableCheck.rows.length === 0) {
-      console.log('Creating shift_blocks table...');
-      try {
-        await client.query(`
-          CREATE TABLE shift_blocks (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            date DATE NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            created_by INTEGER REFERENCES users(id),
-            reason TEXT,
-            UNIQUE(user_id, date)
-          );
-        `);
-        console.log('  Created table: shift_blocks');
-
-        // Create index for better query performance
-        await client.query(`
-          CREATE INDEX IF NOT EXISTS idx_shift_blocks_user_date ON shift_blocks(user_id, date);
-        `);
-        console.log('  Created index: idx_shift_blocks_user_date');
-      } catch (e) {
-        console.log(`  Error creating shift_blocks table: ${e.message}`);
-      }
+  },
+  {
+    name: '003_shifts_source_column',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual' CHECK (source IN ('auto', 'manual'))`);
     }
-
-    // Check if settings table exists
-    const settingsTableCheck = await client.query(`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'settings'
-    `);
-
-    if (settingsTableCheck.rows.length === 0) {
-      console.log('Creating settings table...');
-      try {
-        await client.query(`
-          CREATE TABLE settings (
-            key TEXT PRIMARY KEY,
-            value JSONB NOT NULL,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-          );
-        `);
-        console.log('  Created table: settings');
-      } catch (e) {
-        console.log(`  Error creating settings table: ${e.message}`);
-      }
+  },
+  {
+    name: '004_create_shift_swap_requests',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS shift_swap_requests (
+          id SERIAL PRIMARY KEY,
+          requester_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          requester_shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+          target_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          target_shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
+          request_type TEXT NOT NULL DEFAULT 'swap' CHECK (request_type IN ('swap', 'takeover')),
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead', 'expired')),
+          message TEXT,
+          response_notes TEXT,
+          target_approved BOOLEAN DEFAULT NULL,
+          target_response_notes TEXT,
+          target_responded_at TIMESTAMP,
+          lead_approved BOOLEAN DEFAULT NULL,
+          lead_response_notes TEXT,
+          lead_responded_at TIMESTAMP,
+          created_at TIMESTAMP DEFAULT NOW(),
+          responded_at TIMESTAMP,
+          responded_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON shift_swap_requests(status)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_swap_requests_requester ON shift_swap_requests(requester_user_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_swap_requests_target ON shift_swap_requests(target_user_id)`);
     }
-    // Check if audit_log table exists
-    const auditTableCheck = await client.query(`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'audit_log'
-    `);
-
-    if (auditTableCheck.rows.length === 0) {
-      console.log('Creating audit_log table...');
-      try {
-        await client.query(`
-          CREATE TABLE audit_log (
-            id SERIAL PRIMARY KEY,
-            actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-            actor_name TEXT NOT NULL,
-            action TEXT NOT NULL CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'CANCEL', 'LOGIN')),
-            resource_type TEXT NOT NULL CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings')),
-            resource_id TEXT,
-            details JSONB DEFAULT '{}',
-            created_at TIMESTAMP DEFAULT NOW()
-          );
-          CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_id);
-          CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log(resource_type);
-          CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
-        `);
-        console.log('  Created table: audit_log');
-      } catch (e) {
-        console.log(`  Error creating audit_log table: ${e.message}`);
-      }
+  },
+  {
+    name: '005_swap_request_approval_columns',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shift_swap_requests ADD COLUMN IF NOT EXISTS target_approved BOOLEAN DEFAULT NULL`);
+      await client.query(`ALTER TABLE shift_swap_requests ADD COLUMN IF NOT EXISTS target_response_notes TEXT`);
+      await client.query(`ALTER TABLE shift_swap_requests ADD COLUMN IF NOT EXISTS target_responded_at TIMESTAMP`);
+      await client.query(`ALTER TABLE shift_swap_requests ADD COLUMN IF NOT EXISTS lead_approved BOOLEAN DEFAULT NULL`);
+      await client.query(`ALTER TABLE shift_swap_requests ADD COLUMN IF NOT EXISTS lead_response_notes TEXT`);
+      await client.query(`ALTER TABLE shift_swap_requests ADD COLUMN IF NOT EXISTS lead_responded_at TIMESTAMP`);
     }
-
-    // Update audit_log CHECK constraints to include REPLACE/IMPORT/MIGRATE and system/shift_activity/shift_block
-    try {
+  },
+  {
+    name: '006_swap_request_type_and_nullable_targets',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shift_swap_requests ADD COLUMN IF NOT EXISTS request_type TEXT DEFAULT 'swap' CHECK (request_type IN ('swap', 'takeover'))`);
+      await client.query(`ALTER TABLE shift_swap_requests ALTER COLUMN target_user_id DROP NOT NULL`);
+      await client.query(`ALTER TABLE shift_swap_requests ALTER COLUMN target_shift_id DROP NOT NULL`);
+      await client.query(`ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS different_shifts`);
+      await client.query(`ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS different_users`);
+    }
+  },
+  {
+    name: '007_create_shift_blocks',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS shift_blocks (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          date DATE NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          reason TEXT,
+          UNIQUE(user_id, date)
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shift_blocks_user_date ON shift_blocks(user_id, date)`);
+    }
+  },
+  {
+    name: '008_create_settings',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value JSONB NOT NULL,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    }
+  },
+  {
+    name: '009_create_audit_log',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS audit_log (
+          id SERIAL PRIMARY KEY,
+          actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          actor_name TEXT NOT NULL,
+          action TEXT NOT NULL,
+          resource_type TEXT NOT NULL,
+          resource_id TEXT,
+          details JSONB DEFAULT '{}',
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log(resource_type)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC)`);
+    }
+  },
+  {
+    name: '010_audit_log_constraints',
+    up: async (client) => {
       await client.query(`ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check`);
       await client.query(`ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'CANCEL', 'LOGIN', 'REPLACE', 'IMPORT', 'MIGRATE'))`);
       await client.query(`ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_resource_type_check`);
       await client.query(`ALTER TABLE audit_log ADD CONSTRAINT audit_log_resource_type_check CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings', 'system', 'shift_activity', 'shift_block'))`);
-    } catch (e) {
-      console.log(`  Audit log constraint update: ${e.message}`);
     }
-
-    // Check if schedule_drafts table exists
-    const draftsTableCheck = await client.query(`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'schedule_drafts'
-    `);
-
-    if (draftsTableCheck.rows.length === 0) {
-      console.log('Creating schedule_drafts table...');
-      try {
-        await client.query(`
-          CREATE TABLE schedule_drafts (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            week_number INTEGER NOT NULL DEFAULT 1,
-            team_filter TEXT,
-            grid JSONB NOT NULL DEFAULT '{}',
-            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-            created_by_name TEXT,
-            last_applied_at TIMESTAMP,
-            last_applied_by TEXT,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-          );
-          CREATE INDEX IF NOT EXISTS idx_schedule_drafts_created ON schedule_drafts(created_at DESC);
-        `);
-        console.log('  Created table: schedule_drafts');
-
-        // Migrate existing drafts from settings table
-        const settingsDrafts = await client.query(
-          `SELECT value FROM settings WHERE key = 'schedule_drafts'`
-        );
-        if (settingsDrafts.rows.length > 0) {
-          const drafts = settingsDrafts.rows[0].value;
-          if (Array.isArray(drafts) && drafts.length > 0) {
-            console.log(`  Migrating ${drafts.length} drafts from settings...`);
-            for (const draft of drafts) {
-              try {
-                await client.query(
-                  `INSERT INTO schedule_drafts (id, name, week_number, team_filter, grid, created_by_name, last_applied_at, last_applied_by, created_at, updated_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                   ON CONFLICT (id) DO NOTHING`,
-                  [
-                    draft.id || `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                    draft.name || 'Naamloos',
-                    draft.weekNumber || 1,
-                    draft.teamFilter || null,
-                    JSON.stringify(draft.grid || {}),
-                    draft.createdByName || null,
-                    draft.lastAppliedAt || null,
-                    draft.lastAppliedBy || null,
-                    draft.createdAt || new Date().toISOString(),
-                    draft.updatedAt || draft.createdAt || new Date().toISOString()
-                  ]
-                );
-              } catch (migErr) {
-                console.log(`  Error migrating draft: ${migErr.message}`);
-              }
-            }
-            console.log('  Draft migration complete');
+  },
+  {
+    name: '011_create_schedule_drafts',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS schedule_drafts (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          week_number INTEGER NOT NULL DEFAULT 1,
+          team_filter TEXT,
+          grid JSONB NOT NULL DEFAULT '{}',
+          created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          created_by_name TEXT,
+          last_applied_at TIMESTAMP,
+          last_applied_by TEXT,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_schedule_drafts_created ON schedule_drafts(created_at DESC)`);
+    }
+  },
+  {
+    name: '012_migrate_drafts_from_settings',
+    up: async (client) => {
+      const settingsDrafts = await client.query(`SELECT value FROM settings WHERE key = 'schedule_drafts'`);
+      if (settingsDrafts.rows.length > 0) {
+        const drafts = settingsDrafts.rows[0].value;
+        if (Array.isArray(drafts) && drafts.length > 0) {
+          for (const draft of drafts) {
+            await client.query(
+              `INSERT INTO schedule_drafts (id, name, week_number, team_filter, grid, created_by_name, last_applied_at, last_applied_by, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+               ON CONFLICT (id) DO NOTHING`,
+              [
+                draft.id || `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                draft.name || 'Naamloos',
+                draft.weekNumber || 1,
+                draft.teamFilter || null,
+                JSON.stringify(draft.grid || {}),
+                draft.createdByName || null,
+                draft.lastAppliedAt || null,
+                draft.lastAppliedBy || null,
+                draft.createdAt || new Date().toISOString(),
+                draft.updatedAt || draft.createdAt || new Date().toISOString()
+              ]
+            );
           }
         }
-      } catch (e) {
-        console.log(`  Error creating schedule_drafts table: ${e.message}`);
       }
     }
-
-    // Migrate old roles to new 3-role system
-    // Must drop constraint FIRST, then update, then re-add
-    try {
+  },
+  {
+    name: '013_migrate_roles_and_add_constraint',
+    up: async (client) => {
       await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
-    } catch (e) { /* constraint may not exist */ }
-
-    const oldRolesCheck = await client.query(
-      `SELECT COUNT(*) FROM users WHERE role IN ('hoofdverantwoordelijke', 'teamverantwoordelijke')`
-    );
-    if (parseInt(oldRolesCheck.rows[0].count) > 0) {
-      console.log('Migrating old roles to roosterverantwoordelijke...');
-      const result = await client.query(
-        `UPDATE users SET role = 'roosterverantwoordelijke' WHERE role IN ('hoofdverantwoordelijke', 'teamverantwoordelijke')`
-      );
-      console.log(`  Migrated ${result.rowCount} users to roosterverantwoordelijke`);
-    }
-
-    try {
+      await client.query(`UPDATE users SET role = 'roosterverantwoordelijke' WHERE role IN ('hoofdverantwoordelijke', 'teamverantwoordelijke')`);
       await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'roosterverantwoordelijke', 'medewerker'))`);
-    } catch (e) {
-      // Constraint may already exist with correct values
     }
-
-    // Email notifications preference column
-    try {
+  },
+  {
+    name: '014_users_email_notifications',
+    up: async (client) => {
       await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notifications_enabled BOOLEAN DEFAULT true`);
-    } catch (e) { /* already exists */ }
-
-    // Onboarding flags (per-user JSON flags for checklist state)
-    try {
+    }
+  },
+  {
+    name: '015_users_onboarding_flags',
+    up: async (client) => {
       await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_flags JSONB DEFAULT '{}'`);
-    } catch (e) { /* already exists */ }
-
-    // Add 'expired' to swap request status constraint
-    try {
+    }
+  },
+  {
+    name: '016_swap_expired_status',
+    up: async (client) => {
       await client.query(`ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS shift_swap_requests_status_check`);
       await client.query(`ALTER TABLE shift_swap_requests ADD CONSTRAINT shift_swap_requests_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead', 'expired'))`);
-    } catch (e) {
-      console.log(`  Status constraint update: ${e.message}`);
     }
-
-    // Create shift_activities table for activities within shifts (e.g. meetings, training)
-    try {
+  },
+  {
+    name: '017_create_shift_activities',
+    up: async (client) => {
       await client.query(`
         CREATE TABLE IF NOT EXISTS shift_activities (
           id SERIAL PRIMARY KEY,
@@ -460,127 +289,165 @@ async function ensureSchema() {
           created_at TIMESTAMP DEFAULT NOW()
         )
       `);
-    } catch (e) {
-      console.log(`  shift_activities table: ${e.message}`);
     }
-
-    // Indexes for shift_activities and schedule_drafts
-    try {
+  },
+  {
+    name: '018_shift_activity_and_shifts_indexes',
+    up: async (client) => {
       await client.query(`CREATE INDEX IF NOT EXISTS idx_shift_activities_user_date ON shift_activities(user_id, date)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date)`);
-    } catch (e) {
-      console.log(`  extra indexes: ${e.message}`);
     }
-
-    // Fix FK constraints: ON DELETE SET NULL for nullable user references
-    try {
+  },
+  {
+    name: '019_fk_cascade_fixes',
+    up: async (client) => {
       await client.query(`ALTER TABLE shift_blocks DROP CONSTRAINT IF EXISTS shift_blocks_created_by_fkey`);
       await client.query(`ALTER TABLE shift_blocks ADD CONSTRAINT shift_blocks_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL`);
-    } catch (e) {
-      console.log(`  shift_blocks FK fix: ${e.message}`);
-    }
-    try {
       await client.query(`ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS shift_swap_requests_responded_by_fkey`);
       await client.query(`ALTER TABLE shift_swap_requests ADD CONSTRAINT shift_swap_requests_responded_by_fkey FOREIGN KEY (responded_by) REFERENCES users(id) ON DELETE SET NULL`);
-    } catch (e) {
-      console.log(`  shift_swap_requests FK fix: ${e.message}`);
     }
-
-    // Fix shift_activities FK: add ON DELETE CASCADE via shift cleanup (no shift_id column)
-    // Ensure shift_activities are removed when parent shift is deleted (handled in DELETE endpoint)
-
-    // Missing indexes for frequently filtered columns
-    try {
+  },
+  {
+    name: '020_shift_activities_shift_id',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE`);
+      await client.query(`
+        UPDATE shift_activities sa
+        SET shift_id = (
+          SELECT s.id FROM shifts s
+          WHERE s.user_id = sa.user_id AND s.date = sa.date
+          ORDER BY ABS(EXTRACT(EPOCH FROM (s.start_time - sa.start_time)))
+          LIMIT 1
+        )
+        WHERE sa.shift_id IS NULL
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id)`);
+    }
+  },
+  {
+    name: '021_performance_indexes',
+    up: async (client) => {
       await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_source ON shifts(source)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_availability_type ON availability(type)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_swap_requests_type ON shift_swap_requests(request_type)`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_schedule_drafts_type ON schedule_drafts(type)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id)`);
-    } catch (e) {
-      console.log(`  missing indexes: ${e.message}`);
     }
-
-    // Phase 4: Add valid_from/valid_until to schedule_drafts for school year scheduling
-    try {
+  },
+  {
+    name: '022_schedule_drafts_date_columns',
+    up: async (client) => {
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS valid_from DATE`);
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS valid_until DATE`);
-    } catch (e) {
-      console.log(`  schedule_drafts date columns: ${e.message}`);
-    }
-
-    // Phase 4b: Add last_applied_from/until to schedule_drafts for tracking applied periods
-    try {
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS last_applied_from DATE`);
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS last_applied_until DATE`);
-    } catch (e) {
-      console.log(`  schedule_drafts applied date columns: ${e.message}`);
     }
-
-    // Phase 5: Add updated_by tracking to schedule_drafts
-    try {
+  },
+  {
+    name: '023_schedule_drafts_updated_by',
+    up: async (client) => {
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS updated_by INTEGER`);
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS updated_by_name TEXT`);
-    } catch (e) {
-      console.log(`  schedule_drafts updated_by columns: ${e.message}`);
     }
-
-    // Phase 5b: Vakantieconcepten — type + holiday_period_id op schedule_drafts
-    try {
+  },
+  {
+    name: '024_schedule_drafts_type_and_holiday',
+    up: async (client) => {
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'basis'`);
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS holiday_period_id TEXT`);
-    } catch (e) {
-      console.log(`  schedule_drafts vakantie columns: ${e.message}`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_schedule_drafts_type ON schedule_drafts(type)`);
     }
-
-    // Phase 6: Conceptvergrendeling — voorkomt gelijktijdige bewerking
-    try {
+  },
+  {
+    name: '025_schedule_drafts_lock_columns',
+    up: async (client) => {
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS locked_by INTEGER`);
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS locked_by_name TEXT`);
       await client.query(`ALTER TABLE schedule_drafts ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ`);
-    } catch (e) {
-      console.log(`  schedule_drafts lock columns: ${e.message}`);
     }
-
-    // Make users.email nullable (allow accounts without email address)
-    try {
+  },
+  {
+    name: '026_users_email_nullable',
+    up: async (client) => {
       await client.query(`ALTER TABLE users ALTER COLUMN email DROP NOT NULL`);
-    } catch (e) {
-      // Already nullable or constraint doesn't exist
     }
-
-    // Normalize existing emails to lowercase (idempotent one-time migration)
-    try {
+  },
+  {
+    name: '027_normalize_emails_lowercase',
+    up: async (client) => {
       await client.query(`UPDATE users SET email = LOWER(email) WHERE email IS NOT NULL AND email != LOWER(email)`);
-    } catch (e) {
-      console.log(`  email lowercase migration: ${e.message}`);
     }
-
-    // Phase 4: school_year_start setting (default: 1 sept current school year)
-    try {
-      const syResult = await client.query(`SELECT 1 FROM settings WHERE key = 'school_year_start'`);
-      if (syResult.rows.length === 0) {
+  },
+  {
+    name: '028_school_year_start_setting',
+    up: async (client) => {
+      const existing = await client.query(`SELECT 1 FROM settings WHERE key = 'school_year_start'`);
+      if (existing.rows.length === 0) {
         const now = new Date();
         const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
         await client.query(
           `INSERT INTO settings (key, value) VALUES ('school_year_start', $1)`,
           [JSON.stringify({ date: `${startYear}-09-01` })]
         );
-        console.log(`  Created school_year_start setting: ${startYear}-09-01`);
       }
-    } catch (e) {
-      console.log(`  school_year_start setting: ${e.message}`);
     }
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    console.error('Schema check error:', err.message);
+  },
+  {
+    name: '029_shifts_archived_column',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false`);
+    }
+  }
+];
+
+async function runMigrations() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS migrations (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        applied_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    const applied = await client.query('SELECT name FROM migrations');
+    const appliedNames = new Set(applied.rows.map(r => r.name));
+
+    for (const migration of MIGRATIONS) {
+      if (appliedNames.has(migration.name)) continue;
+
+      console.log(`Migratie: ${migration.name}`);
+      await client.query('BEGIN');
+      try {
+        await migration.up(client);
+        await client.query('INSERT INTO migrations (name) VALUES ($1)', [migration.name]);
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error(`  Migratie mislukt (${migration.name}): ${err.message}`);
+        throw err;
+      }
+    }
   } finally {
     client.release();
   }
 }
 
-// Run schema check on startup
-ensureSchema().catch(console.error);
+runMigrations().catch(console.error);
+
+async function archiveOldShifts() {
+  try {
+    const result = await pool.query(
+      `UPDATE shifts SET archived = true
+       WHERE archived = false AND date < CURRENT_DATE - INTERVAL '12 months'`
+    );
+    if (result.rowCount > 0) console.log(`[archive] ${result.rowCount} shifts gearchiveerd`);
+  } catch (err) {
+    console.error('[archive] Fout bij archiveren:', err.message);
+  }
+}
+archiveOldShifts().catch(console.error);
 
 function signToken(user) {
   return jwt.sign(
@@ -1288,9 +1155,12 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
       ? JSON.stringify(weekSchedules)
       : JSON.stringify([weekScheduleWeek1 || [], weekScheduleWeek2 || []]);
 
-    // Get old email before updating (for syncing with employees table)
+    // Get old email before updating
     const oldUserResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
     const oldEmail = oldUserResult.rows.length > 0 ? oldUserResult.rows[0].email : null;
+
+    // Only admins may change email; roosterverantwoordelijke cannot
+    const newEmail = role === 'admin' && email ? email.trim().toLowerCase() : oldEmail;
 
     const result = await pool.query(
       `UPDATE users
@@ -1310,7 +1180,7 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"`,
-      [name, email ? email.trim().toLowerCase() : null, mainTeam || null, contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
+      [name, newEmail, mainTeam || null, contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
     );
 
     if (result.rows.length === 0) {
@@ -1319,8 +1189,7 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
 
     await logAudit(req, 'UPDATE', 'user', userId, { user: result.rows[0] });
 
-    // Welkomst-email als email voor het eerst wordt ingesteld (fire-and-forget)
-    const newEmail = email ? email.trim().toLowerCase() : null;
+    // Welkomst-email als email voor het eerst wordt ingesteld (fire-and-forget, admin only)
     if (!oldEmail && newEmail) {
       emailService.notifyWelcome({ name: result.rows[0].name, email: newEmail });
     }
@@ -1556,10 +1425,11 @@ v1.get('/shifts', requireAuth, async (req, res) => {
       SELECT id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
              end_time as "endTime", notes, source, created_at as "createdAt"
       FROM shifts
+      WHERE archived = false
     `;
     const params = [];
     if (startDate && endDate) {
-      query += ' WHERE date >= $1 AND date <= $2';
+      query += ' AND date >= $1 AND date <= $2';
       params.push(startDate, endDate);
     }
     query += ' ORDER BY date, start_time';
@@ -1653,6 +1523,16 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
     );
     const oldShift = oldResult.rows[0] || null;
 
+    // Blokeer verplaatsing naar manueel gesloten datum
+    const effectiveDate = date || oldShift?.date;
+    if (date && date !== oldShift?.date) {
+      const cdResult = await pool.query("SELECT value FROM settings WHERE key = 'closedDates'");
+      const closedDates = (cdResult.rows[0]?.value || []).map(d => d.date);
+      if (closedDates.includes(date)) {
+        return res.status(400).json({ error: 'Deze dag is manueel gesloten' });
+      }
+    }
+
     // Valideer 11-uur regel en overlap (gebruik bestaande waarden als veld niet meegegeven)
     const updatedShift = {
       date:       date       || oldShift?.date,
@@ -1732,13 +1612,7 @@ v1.delete('/shifts/:id', requireAuth, async (req, res) => {
       }
     }
 
-    // Delete related activities (shift_activities links via user_id + date, no shift_id FK)
-    await client.query(
-      'DELETE FROM shift_activities WHERE user_id = $1 AND date = $2',
-      [shift.user_id, shift.date]
-    );
-
-    // Delete the shift
+    // Delete the shift (CASCADE handles shift_activities with shift_id set)
     await client.query('DELETE FROM shifts WHERE id = $1', [id]);
     await logAudit(req, 'DELETE', 'shift', id, { shift: { id: shift.id, user_id: shift.user_id, team: shift.team, date: shift.date, source: shift.source } });
 
@@ -1800,7 +1674,12 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
   try {
     await client.query('BEGIN');
 
+    // Load closed dates once for the whole bulk operation
+    const cdResult = await client.query("SELECT value FROM settings WHERE key = 'closedDates'");
+    const closedDates = new Set((cdResult.rows[0]?.value || []).map(d => d.date));
+
     const createdShifts = [];
+    const skipped = [];
 
     if (overwriteExisting) {
       // Delete existing shifts for each unique user_id + date pair
@@ -1813,6 +1692,21 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
 
     for (const shift of shiftsToCreate) {
       if (!shift.userId || !shift.date || !shift.startTime || !shift.endTime) continue;
+
+      // Skip manually closed dates
+      if (closedDates.has(shift.date)) {
+        skipped.push({ date: shift.date, reason: 'closed' });
+        continue;
+      }
+
+      // Validate 11-hour rule and overlap
+      const validation = await validateShiftRules(client, shift.userId, {
+        date: shift.date, start_time: shift.startTime, end_time: shift.endTime
+      });
+      if (!validation.valid) {
+        skipped.push({ date: shift.date, userId: shift.userId, reason: validation.message });
+        continue;
+      }
 
       const result = await client.query(`
         INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
@@ -1828,8 +1722,8 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
     }
 
     await client.query('COMMIT');
-    await logAudit(req, 'CREATE', 'shift', '', { action: 'bulk_create', count: createdShifts.length, overwriteExisting: !!overwriteExisting });
-    res.status(201).json({ shifts: createdShifts, count: createdShifts.length });
+    await logAudit(req, 'CREATE', 'shift', '', { action: 'bulk_create', count: createdShifts.length, skipped: skipped.length, overwriteExisting: !!overwriteExisting });
+    res.status(201).json({ shifts: createdShifts, count: createdShifts.length, skipped });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('POST /shifts/bulk error:', err);
@@ -1845,7 +1739,7 @@ v1.get('/shift-activities', requireAuth, async (req, res) => {
   const { startDate, endDate } = req.query;
   try {
     let query = `
-      SELECT id, user_id as "userId", date::text as "date", start_time as "startTime",
+      SELECT id, user_id as "userId", shift_id as "shiftId", date::text as "date", start_time as "startTime",
              end_time as "endTime", type, description, created_at as "createdAt"
       FROM shift_activities
     `;
@@ -1864,7 +1758,7 @@ v1.get('/shift-activities', requireAuth, async (req, res) => {
 });
 
 v1.post('/shift-activities', requireAuth, async (req, res) => {
-  const { userId, date, startTime, endTime, type, description } = req.body || {};
+  const { userId, shiftId, date, startTime, endTime, type, description } = req.body || {};
   if (!userId || !date || !startTime || !endTime || !type) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken (userId, date, startTime, endTime, type)' });
   }
@@ -1877,11 +1771,11 @@ v1.post('/shift-activities', requireAuth, async (req, res) => {
 
   try {
     const result = await pool.query(`
-      INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, user_id as "userId", date::text as "date", start_time as "startTime",
+      INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, user_id as "userId", shift_id as "shiftId", date::text as "date", start_time as "startTime",
                 end_time as "endTime", type, description, created_at as "createdAt"
-    `, [userId, date, startTime, endTime, type, description || '']);
+    `, [userId, shiftId || null, date, startTime, endTime, type, description || '']);
 
     await logAudit(req, 'CREATE', 'shift_activity', result.rows[0].id, { activity: result.rows[0] });
     res.status(201).json({ activity: result.rows[0] });
@@ -3824,7 +3718,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
       // Find all auto-shifts just created in this range
       const newShiftsResult = await client.query(
-        `SELECT s.user_id, s.date::text as date, s.start_time, s.end_time, u.main_team
+        `SELECT s.id, s.user_id, s.date::text as date, s.start_time, s.end_time, u.main_team
          FROM shifts s JOIN users u ON s.user_id = u.id
          WHERE s.source = 'auto' AND s.date >= $1::date AND s.date <= $2::date`,
         [effectiveStartDate, effectiveEndDate]
@@ -3867,9 +3761,9 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
             const toTime = `${String(toH).padStart(2, '0')}:${String(toM).padStart(2, '0')}`;
 
             await client.query(
-              `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description)
-               VALUES ($1, $2, $3, $4, 'vergadering', 'Teamvergadering')`,
-              [shift.user_id, shift.date, fromTime, toTime]
+              `INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description)
+               VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering')`,
+              [shift.user_id, shift.id, shift.date, fromTime, toTime]
             );
           }
         }
@@ -3914,6 +3808,26 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 });
 
 // ===== AUDIT LOG API =====
+
+v1.get('/shifts/archived', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  const { userId, startDate, endDate } = req.query;
+  try {
+    const params = [];
+    let where = 'WHERE archived = true';
+    if (userId) { params.push(userId); where += ` AND user_id = $${params.length}`; }
+    if (startDate) { params.push(startDate); where += ` AND date >= $${params.length}`; }
+    if (endDate) { params.push(endDate); where += ` AND date <= $${params.length}`; }
+    const result = await pool.query(
+      `SELECT id, user_id as "userId", team, date::text, start_time as "startTime", end_time as "endTime", notes, source
+       FROM shifts ${where} ORDER BY date DESC LIMIT 500`,
+      params
+    );
+    res.json({ shifts: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 v1.get('/audit-log', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { page = 1, limit = 50, actorId, action, resourceType, startDate, endDate } = req.query;

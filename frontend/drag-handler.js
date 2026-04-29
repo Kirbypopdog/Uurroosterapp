@@ -205,8 +205,11 @@ const DragHandler = {
             if (this.state.dragType === 'create') {
                 this.handleCellClick(this.state.targetElement);
             } else if (this.state.shiftId) {
-                // Click on shift block - open edit modal
-                openEditShiftModal(this.state.shiftId);
+                // Click on shift block - only open if user has permission
+                const shift = getShift(this.state.shiftId);
+                if (shift && canUserEditShift(shift)) {
+                    openEditShiftModal(this.state.shiftId);
+                }
             }
             this.reset();
         } else if (this.state.isDragging) {
@@ -596,7 +599,8 @@ const DragHandler = {
 
         if (shiftBlock) {
             const shiftId = parseInt(shiftBlock.dataset.shiftId, 10);
-            if (shiftId) openEditShiftModal(shiftId);
+            const shift = shiftId ? getShift(shiftId) : null;
+            if (shift && canUserEditShift(shift)) openEditShiftModal(shiftId);
         } else if (dayCell && !dayCell.classList.contains('closed')) {
             this.handleCellClick(dayCell);
         }
@@ -697,8 +701,8 @@ const DragHandler = {
         }
 
         // Remove drop target highlights
-        document.querySelectorAll('.drop-target-valid, .drop-target-invalid').forEach(cell => {
-            cell.classList.remove('drop-target-valid', 'drop-target-invalid');
+        document.querySelectorAll('.drop-target-valid, .drop-target-warning, .drop-target-invalid').forEach(cell => {
+            cell.classList.remove('drop-target-valid', 'drop-target-warning', 'drop-target-invalid');
         });
 
         // Reset cursor
@@ -716,6 +720,8 @@ const DragHandler = {
         this.state.originalData = {};
         this.state.ghostElement = null;
         this.state.targetElement = null;
+        this._lastValidationTime = null;
+        this._lastValidationResult = null;
     },
 
     // Helper: Get day cell from mouse coordinates
@@ -1023,13 +1029,24 @@ const BuilderDragHandler = {
             this.state.targetElement.style.top = `${e.clientY - 15}px`;
         }
 
-        // Highlight drop targets
+        // Highlight drop targets with live validation (throttled 100ms)
         const cell = this.getCellFromPoint(e.clientX, e.clientY);
-        document.querySelectorAll('.builder-cell.drop-target-valid, .builder-cell.drop-target-invalid').forEach(c => {
-            c.classList.remove('drop-target-valid', 'drop-target-invalid');
+        document.querySelectorAll('.builder-cell.drop-target-valid, .builder-cell.drop-target-warning, .builder-cell.drop-target-invalid').forEach(c => {
+            c.classList.remove('drop-target-valid', 'drop-target-warning', 'drop-target-invalid');
         });
         if (cell && !cell.classList.contains('closed')) {
-            cell.classList.add('drop-target-valid');
+            const now = Date.now();
+            if (!this._lastValidationTime || now - this._lastValidationTime >= 100) {
+                this._lastValidationTime = now;
+                const targetEmpId = Number(cell.dataset.employeeId);
+                const targetDay = Number(cell.dataset.day);
+                const result = this.validateBuilderPlacement(targetEmpId, targetDay, this.state.originalAssignment);
+                this._lastValidationResult = result;
+            }
+            const result = this._lastValidationResult || { level: 'ok' };
+            if (result.level === 'error') cell.classList.add('drop-target-invalid');
+            else if (result.level === 'warning') cell.classList.add('drop-target-warning');
+            else cell.classList.add('drop-target-valid');
         }
     },
 
@@ -1056,6 +1073,9 @@ const BuilderDragHandler = {
             return;
         }
 
+        // Live validation: warn but always allow placement
+        const validation = this.validateBuilderPlacement(targetEmpId, targetDay, assignment);
+
         // Remove from original position
         if (AppState.builderGrid[origEmpId]) {
             delete AppState.builderGrid[origEmpId][origDay];
@@ -1067,7 +1087,39 @@ const BuilderDragHandler = {
 
         AppState.builderIsDirty = true;
         renderBuilder();
-        showToast('Dienst verplaatst', 'success');
+        if (validation.level !== 'ok') showToast(validation.message, 'warning');
+        else showToast('Dienst verplaatst', 'success');
+    },
+
+    validateBuilderPlacement(targetEmpId, targetDay, assignment) {
+        if (!assignment?.startTime || !assignment?.endTime) return { level: 'ok', message: '' };
+
+        const grid = AppState.builderGrid[targetEmpId] || {};
+        const toMin = t => { const [h, m] = (t || '00:00').split(':').map(Number); return h * 60 + m; };
+
+        const startMin = toMin(assignment.startTime);
+        const endMin = toMin(assignment.endTime);
+
+        const gapHours = (aEndMin, bStartMin) => {
+            const raw = bStartMin >= aEndMin ? bStartMin - aEndMin : 1440 - aEndMin + bStartMin;
+            return raw / 60;
+        };
+
+        // Check rest gap with previous day's assignment
+        const prev = grid[targetDay - 1];
+        if (prev?.endTime) {
+            const gap = gapHours(toMin(prev.endTime), startMin);
+            if (gap < 11) return { level: 'error', message: `Onvoldoende rust — ${gap.toFixed(1)}u na vorige dienst (min. 11u)` };
+        }
+
+        // Check rest gap with next day's assignment
+        const next = grid[targetDay + 1];
+        if (next?.startTime) {
+            const gap = gapHours(endMin, toMin(next.startTime));
+            if (gap < 11) return { level: 'error', message: `Onvoldoende rust — ${gap.toFixed(1)}u voor volgende dienst (min. 11u)` };
+        }
+
+        return { level: 'ok', message: '' };
     },
 
     // --- Resize drag ---

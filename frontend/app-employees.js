@@ -139,37 +139,64 @@ function renderProfile() {
     const canEditContract = ['admin', 'roosterverantwoordelijke'].includes(user.role);
 
     // Build hours card content
+    // Color: green = ≥90% contract (op schema), orange = 60–90% (licht onder), red = <60% (ver onder)
+    function hoursColor(actual, target) {
+        if (target <= 0) return '#10b981';
+        const pct = actual / target;
+        return pct >= 0.9 ? '#10b981' : pct >= 0.6 ? '#f59e0b' : '#ef4444';
+    }
+    function saldoLabel(actual, target) {
+        const diff = actual - target;
+        if (Math.abs(diff) < 0.1) return '';
+        return diff > 0
+            ? `<span class="hours-saldo positive">+${diff.toFixed(1)}u</span>`
+            : `<span class="hours-saldo negative">${diff.toFixed(1)}u t.o.v. contract</span>`;
+    }
+
+    // Current week's shifts (compact list)
+    const currentWeekShifts = DataStore.shifts
+        .filter(s => {
+            const d = (s.date || '').split('T')[0];
+            return Number(s.employeeId || s.userId) === resolvedId && d >= weekDates[0] && d <= weekDates[6];
+        })
+        .sort((a, b) => a.date.localeCompare(b.date));
+    const dayNamesNL = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
+    const weekShiftRows = currentWeekShifts.length === 0
+        ? '<p class="profile-no-shifts">Geen diensten deze week.</p>'
+        : currentWeekShifts.map(s => {
+            const dow = (new Date(s.date + 'T00:00:00').getDay() + 6) % 7;
+            const hrs = calculateShiftHours(s);
+            return `<div class="profile-shift-row">
+                <span class="profile-shift-day">${dayNamesNL[dow]}</span>
+                <span class="profile-shift-time">${s.startTime}–${s.endTime}</span>
+                <span class="profile-shift-hours">${hrs.toFixed(1)}u</span>
+            </div>`;
+        }).join('');
+
     let hoursCardContent = '';
     if (contractHours > 0) {
-        const monthContract = contractHours * 4.33;
+        const monthContract = contractHours * 4;
         const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
         const monthPct = Math.min((hoursMonth / monthContract) * 100, 100);
-        const weekClr = hoursWeek > contractHours ? '#ef4444' : hoursWeek > contractHours * 0.9 ? '#f59e0b' : '#10b981';
-        const monthClr = hoursMonth > monthContract ? '#ef4444' : hoursMonth > monthContract * 0.9 ? '#f59e0b' : '#10b981';
-        const overtimeWeek = Math.max(0, hoursWeek - contractHours);
-        const overtimeMonth = Math.max(0, hoursMonth - monthContract);
+        const weekClr = hoursColor(hoursWeek, contractHours);
+        const monthClr = hoursColor(hoursMonth, monthContract);
         hoursCardContent = `
             <div class="profile-hours-section">
                 <div class="profile-hours-row">
                     <span class="profile-hours-label">Deze week</span>
-                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u / ${contractHours}u</span>
+                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u / ${contractHours}u ${saldoLabel(hoursWeek, contractHours)}</span>
                 </div>
                 <div class="progress-bar mb-sm">
                     <div class="progress-fill" style="width:${weekPct}%;background:${weekClr}"></div>
                 </div>
                 <div class="profile-hours-row">
                     <span class="profile-hours-label">Deze maand</span>
-                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u / ${monthContract.toFixed(0)}u</span>
+                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u / ${monthContract.toFixed(0)}u ${saldoLabel(hoursMonth, monthContract)}</span>
                 </div>
-                <div class="progress-bar">
+                <div class="progress-bar mb-md">
                     <div class="progress-fill" style="width:${monthPct}%;background:${monthClr}"></div>
                 </div>
-                ${(overtimeWeek > 0 || overtimeMonth > 0) ? `
-                    <div class="d-flex gap-sm mt-sm flex-wrap">
-                        ${overtimeWeek > 0 ? `<span class="overtime-chip-sm">+${overtimeWeek.toFixed(1)}u overuren week</span>` : ''}
-                        ${overtimeMonth > 0 ? `<span class="overtime-chip-sm">+${overtimeMonth.toFixed(1)}u overuren maand</span>` : ''}
-                    </div>
-                ` : ''}
+                <div class="profile-week-shifts">${weekShiftRows}</div>
             </div>`;
     } else {
         hoursCardContent = `
@@ -178,10 +205,11 @@ function renderProfile() {
                     <span class="profile-hours-label">Deze week</span>
                     <span class="profile-hours-value">${hoursWeek.toFixed(1)}u</span>
                 </div>
-                <div class="profile-hours-row">
+                <div class="profile-hours-row mb-md">
                     <span class="profile-hours-label">Deze maand</span>
                     <span class="profile-hours-value">${hoursMonth.toFixed(1)}u</span>
                 </div>
+                <div class="profile-week-shifts">${weekShiftRows}</div>
                 <p class="form-hint mt-sm">Geen contracturen ingesteld.</p>
             </div>`;
     }
@@ -581,14 +609,35 @@ function renderEmployeeCard(emp) {
     const statusText = emp.active ? 'Actief' : 'Inactief';
     const mainTeam = DataStore.settings.teams?.[emp.mainTeam];
     const employeeName = escapeHtml(emp.name);
-    const employeeEmail = escapeHtml(emp.email || '');
     const mainTeamName = escapeHtml(mainTeam?.name || emp.mainTeam || 'Onbekend');
     const contractHours = emp.contractHours || 0;
-
     const teamName = (DataStore.settings.teams || {})[emp.mainTeam]?.name || emp.mainTeam || '';
     const teamColor = (DataStore.settings.teams || {})[emp.mainTeam]?.color || '#94a3b8';
-
     const noEmailBadge = !emp.email ? `<span class="employee-status no-email" title="Geen e-mail — voeg toe om welkomstmail te sturen">Geen email</span>` : '';
+
+    // Hours for admin/planner view
+    const weekStart = getEmployeeWeekStart(emp.id);
+    const weekDates = getWeekDates(weekStart);
+    const hoursWeek = getEmployeeHoursThisWeek(emp.id, weekDates[0]);
+    const hoursMonth = getEmployeeHoursThisMonth(emp.id, weekDates[0]);
+    let hoursHtml = '';
+    if (contractHours > 0) {
+        const monthContract = contractHours * 4;
+        const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
+        const weekClr = hoursWeek >= contractHours * 0.9 ? '#10b981' : hoursWeek >= contractHours * 0.6 ? '#f59e0b' : '#ef4444';
+        hoursHtml = `
+            <div class="emp-card-hours">
+                <div class="emp-card-hours-row">
+                    <span>${hoursWeek.toFixed(1)}u / ${contractHours}u week</span>
+                    <span class="emp-card-hours-month">${hoursMonth.toFixed(1)}u / ${monthContract.toFixed(0)}u maand</span>
+                </div>
+                <div class="progress-bar progress-bar--xs">
+                    <div class="progress-fill" style="width:${weekPct}%;background:${weekClr}"></div>
+                </div>
+            </div>`;
+    } else if (hoursWeek > 0) {
+        hoursHtml = `<div class="emp-card-hours"><span>${hoursWeek.toFixed(1)}u deze week</span></div>`;
+    }
 
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
@@ -598,6 +647,7 @@ function renderEmployeeCard(emp) {
                 ${noEmailBadge}
                 <span class="employee-status ${statusClass}">${statusText}</span>
             </div>
+            ${hoursHtml}
         </div>
     `;
 }
@@ -638,10 +688,12 @@ function openEditEmployeeModal(employeeId) {
     DOM.employeeModalTitle.textContent = employee.name;
 
     const canEdit = ['admin', 'roosterverantwoordelijke'].includes(getEffectiveRole());
+    const canEditEmail = getEffectiveRole() === 'admin';
 
     // Profile fields
     DOM.employeeName.value = employee.name;
     DOM.employeeEmail.value = employee.email || '';
+    DOM.employeeEmail.disabled = !canEditEmail;
     DOM.employeeContract.value = employee.contractHours || '';
     DOM.employeeActive.value = employee.active !== false ? 'true' : 'false';
 
@@ -703,13 +755,22 @@ function generateReadOnlyWeekScheduleHTML(employee) {
     let html = '<div class="read-only-schedule">';
     html += '<p class="form-hint mb-sm">Het basisrooster wordt beheerd via Rooster Bouwen.</p>';
 
+    const dayOrder = [1, 2, 3, 4, 5, 6, 0];
+    const prevDayMap = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
+
     for (let w = 1; w <= cycleLen; w++) {
         const schedule = getEmployeeWeekSchedule(employee, w) || [];
         const activeDays = schedule.filter(s => s.enabled);
+        const nachtForfait = (DataStore.settings && DataStore.settings.nachtForfait) ?? 5.25;
         const totalHours = activeDays.reduce((sum, s) => {
             const [sh, sm] = s.startTime.split(':').map(Number);
             const [eh, em] = s.endTime.split(':').map(Number);
-            return sum + (eh + em/60) - (sh + sm/60);
+            const startDec = sh + sm / 60;
+            const endDec = eh + em / 60;
+            if (endDec > startDec) return sum + (endDec - startDec);
+            // Night shift — use nachtforfait if crossing sleep window (ends >= 07:00)
+            if (eh >= 7) return sum + Math.max(0, 23 - startDec) + Math.max(0, endDec - 7) + nachtForfait;
+            return sum + (24 - startDec) + endDec;
         }, 0);
 
         html += `<div class="ro-week-block">`;
@@ -718,12 +779,25 @@ function generateReadOnlyWeekScheduleHTML(employee) {
         html += `<span class="ro-week-hours">${totalHours.toFixed(1)}u</span>`;
         html += `</div>`;
         html += '<div class="ro-week-grid">';
-        [1, 2, 3, 4, 5, 6, 0].forEach(dayNum => {
+        dayOrder.forEach(dayNum => {
             const entry = schedule.find(s => s.dayOfWeek === dayNum && s.enabled);
+            const prevDay = prevDayMap[dayNum];
+            const prevEntry = schedule.find(s => s.dayOfWeek === prevDay && s.enabled);
+            const prevIsNight = prevEntry && (() => {
+                const [ph, pm] = prevEntry.startTime.split(':').map(Number);
+                const [eh2, em2] = prevEntry.endTime.split(':').map(Number);
+                return (eh2 + em2/60) < (ph + pm/60);
+            })();
+
             if (entry) {
                 html += `<div class="ro-day-row">
                     <span class="ro-day-name">${dayNames[dayNum]}</span>
                     <span class="ro-day-time">${entry.startTime} – ${entry.endTime}</span>
+                </div>`;
+            } else if (prevIsNight) {
+                html += `<div class="ro-day-row ro-day-overnight">
+                    <span class="ro-day-name">${dayNames[dayNum]}</span>
+                    <span class="ro-day-time">→ ${prevEntry.endTime}</span>
                 </div>`;
             } else {
                 html += `<div class="ro-day-row ro-day-off">

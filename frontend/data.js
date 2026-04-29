@@ -131,7 +131,8 @@ function normalizeActivity(a) {
     return {
         ...a,
         date: typeof a.date === 'string' ? a.date.split('T')[0] : a.date,
-        userId: a.userId || a.user_id
+        userId: a.userId || a.user_id,
+        shiftId: a.shiftId || a.shift_id || null
     };
 }
 

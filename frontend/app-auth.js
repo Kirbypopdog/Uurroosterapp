@@ -120,12 +120,8 @@ function populateUserMenu() {
     if (!user) return;
     const avatar = document.getElementById('avatar-circle');
     const menuName = document.getElementById('user-menu-name');
-    const dropdownName = document.getElementById('dropdown-user-name');
-    const dropdownRole = document.getElementById('dropdown-user-role');
     if (avatar) avatar.textContent = getInitials(user.name);
     if (menuName) menuName.textContent = user.name;
-    if (dropdownName) dropdownName.textContent = user.name;
-    if (dropdownRole) dropdownRole.textContent = getRoleDescription(user.role);
 }
 
 function showApp() {
@@ -205,12 +201,6 @@ function applyRoleVisibility() {
     if (adminGroup) {
         const hasVisibleBtn = Array.from(adminGroup.querySelectorAll('.nav-btn')).some(b => !b.classList.contains('hidden'));
         adminGroup.classList.toggle('hidden', !hasVisibleBtn);
-    }
-
-    // Show/hide settings item in user dropdown
-    const dropdownSettings = document.getElementById('dropdown-settings-item');
-    if (dropdownSettings) {
-        dropdownSettings.classList.toggle('hidden', !allowedViews.has('settings'));
     }
 
     if (!allowedViews.has(AppState.currentView)) {

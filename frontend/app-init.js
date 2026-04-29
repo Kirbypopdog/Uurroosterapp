@@ -127,38 +127,10 @@ function setupEventListeners() {
         });
     }
 
-    // User menu (avatar dropdown) toggle
-    const userMenu = document.getElementById('user-menu');
+    // Avatar trigger → navigeer direct naar profiel
     const userMenuTrigger = document.getElementById('user-menu-trigger');
-    if (userMenu && userMenuTrigger) {
-        userMenuTrigger.addEventListener('click', (e) => {
-            e.stopPropagation();
-            userMenu.classList.toggle('open');
-            userMenuTrigger.setAttribute('aria-expanded', userMenu.classList.contains('open'));
-        });
-        // Close on click outside
-        document.addEventListener('click', (e) => {
-            if (!userMenu.contains(e.target)) {
-                userMenu.classList.remove('open');
-                userMenuTrigger.setAttribute('aria-expanded', 'false');
-            }
-        });
-        // Close on Escape
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && userMenu.classList.contains('open')) {
-                userMenu.classList.remove('open');
-                userMenuTrigger.setAttribute('aria-expanded', 'false');
-                userMenuTrigger.focus();
-            }
-        });
-        // Dropdown nav items (profile, settings)
-        userMenu.querySelectorAll('.user-menu-item[data-view]').forEach(item => {
-            item.addEventListener('click', () => {
-                userMenu.classList.remove('open');
-                userMenuTrigger.setAttribute('aria-expanded', 'false');
-                switchView(item.dataset.view);
-            });
-        });
+    if (userMenuTrigger) {
+        userMenuTrigger.addEventListener('click', () => switchView('profile'));
     }
 
     DOM.navButtons.forEach(btn => {
@@ -403,6 +375,24 @@ function setupEventListeners() {
         if (e.target.id === 'activity-modal') closeActivityModal();
     });
 
+    // Copy-week modal (builder)
+    const closeModal = () => document.getElementById('copy-week-modal')?.classList.add('hidden');
+    document.getElementById('copy-week-modal-close')?.addEventListener('click', closeModal);
+    document.getElementById('copy-week-cancel')?.addEventListener('click', closeModal);
+    document.getElementById('copy-week-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'copy-week-modal') closeModal();
+    });
+    document.getElementById('copy-week-confirm')?.addEventListener('click', executeCopyWeek);
+    document.getElementById('copy-week-source')?.addEventListener('change', updateCopyWeekConflictWarning);
+    document.getElementById('copy-week-target')?.addEventListener('change', updateCopyWeekConflictWarning);
+
+    // Draft diff modal
+    const closeDiff = () => document.getElementById('draft-diff-modal')?.classList.add('hidden');
+    document.getElementById('draft-diff-modal-close')?.addEventListener('click', closeDiff);
+    document.getElementById('draft-diff-close')?.addEventListener('click', closeDiff);
+    document.getElementById('draft-diff-modal')?.addEventListener('click', (e) => { if (e.target.id === 'draft-diff-modal') closeDiff(); });
+    document.getElementById('draft-diff-run')?.addEventListener('click', runDraftDiff);
+
     // Undo/Redo buttons
     document.getElementById('undo-btn')?.addEventListener('click', () => UndoManager.undo());
     document.getElementById('redo-btn')?.addEventListener('click', () => UndoManager.redo());
@@ -453,8 +443,8 @@ function setupEventListeners() {
         const addActivityBtn = e.target.closest('.add-activity-btn');
         if (addActivityBtn) {
             e.stopPropagation();
-            const { userId, date, shiftStart, shiftEnd } = addActivityBtn.dataset;
-            if (userId && date) openAddActivityModal(parseInt(userId, 10), date, shiftStart, shiftEnd);
+            const { userId, date, shiftStart, shiftEnd, shiftId } = addActivityBtn.dataset;
+            if (userId && date) openAddActivityModal(parseInt(userId, 10), date, shiftStart, shiftEnd, shiftId ? parseInt(shiftId, 10) : null);
         }
     });
 }

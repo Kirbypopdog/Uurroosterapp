@@ -67,6 +67,7 @@
                 <div class="nav-group-admin">
                     <button class="nav-btn" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
                     <button class="nav-btn" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster Bouwen</button>
+                    <button class="nav-btn" data-view="settings"><i data-lucide="settings" class="nav-icon"></i> Instellingen</button>
                 </div>
             </div>
             <div class="nav-right">
@@ -79,22 +80,13 @@
                     </select>
                 </div>
                 <div class="user-menu" id="user-menu">
-                    <button class="user-menu-trigger" id="user-menu-trigger" aria-expanded="false" aria-haspopup="true">
+                    <button class="user-menu-trigger" id="user-menu-trigger" aria-label="Ga naar profiel">
                         <span class="avatar-circle" id="avatar-circle"></span>
                         <span class="user-menu-name" id="user-menu-name"></span>
-                        <i data-lucide="chevron-down" class="lucide-sm user-menu-chevron"></i>
                     </button>
-                    <div class="user-menu-dropdown" id="user-menu-dropdown">
-                        <div class="user-menu-header">
-                            <span class="user-menu-header-name" id="dropdown-user-name"></span>
-                            <span class="user-menu-header-role" id="dropdown-user-role"></span>
-                        </div>
-                        <div class="user-menu-divider"></div>
-                        <button class="user-menu-item" data-view="profile"><i data-lucide="user" class="lucide-sm"></i> Profiel</button>
-                        <button class="user-menu-item" data-view="settings" id="dropdown-settings-item"><i data-lucide="settings" class="lucide-sm"></i> Instellingen</button>
-                        <div class="user-menu-divider"></div>
-                        <button class="user-menu-item user-menu-item-danger" id="logout-btn"><i data-lucide="log-out" class="lucide-sm"></i> Uitloggen</button>
-                    </div>
+                    <button class="nav-logout-btn" id="logout-btn" aria-label="Uitloggen" title="Uitloggen">
+                        <i data-lucide="log-out" class="lucide-sm"></i>
+                    </button>
                 </div>
             </div>
         </nav>
@@ -110,8 +102,8 @@
                 <h2>Roosterplanning</h2>
                 <div class="header-actions">
                     <div class="undo-redo-controls">
-                        <button id="undo-btn" class="btn btn-sm btn-secondary" disabled title="Ongedaan maken (Ctrl+Z)"><i data-lucide="undo-2" class="lucide-sm"></i> Undo</button>
-                        <button id="redo-btn" class="btn btn-sm btn-secondary" disabled title="Opnieuw (Ctrl+Y)">Redo <i data-lucide="redo-2" class="lucide-sm"></i></button>
+                        <button id="undo-btn" class="btn btn-sm btn-secondary" disabled title="Ongedaan maken (Ctrl+Z)"><i data-lucide="undo-2" class="lucide-sm"></i> Ongedaan</button>
+                        <button id="redo-btn" class="btn btn-sm btn-secondary" disabled title="Opnieuw (Ctrl+Y)">Opnieuw <i data-lucide="redo-2" class="lucide-sm"></i></button>
                     </div>
                     <button id="add-shift-btn" class="btn btn-primary btn-primary-lg"><i data-lucide="plus" class="lucide-sm"></i> Dienst toevoegen</button>
                 </div>
@@ -141,7 +133,7 @@
                     </div>
                     <div class="planning-filter-buttons">
                         <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
-                        <label class="toggle-switch-label" title="Verberg medewerkers zonder dienst">
+                        <label class="toggle-switch-label" title="Verberg medewerkers zonder diensten">
                             <input type="checkbox" id="filter-shifts-toggle" class="toggle-switch-input">
                             <span class="toggle-switch-slider"></span>
                             <span class="toggle-switch-text">Verberg lege rijen</span>
@@ -327,6 +319,7 @@
             <form id="activity-form">
                 <input type="hidden" id="activity-id">
                 <input type="hidden" id="activity-user-id">
+                <input type="hidden" id="activity-shift-id">
                 <input type="hidden" id="activity-date">
                 <input type="hidden" id="activity-shift-start">
                 <input type="hidden" id="activity-shift-end">
@@ -412,7 +405,7 @@
                         </div>
                         <div class="form-group">
                             <label for="employee-email">E-mail</label>
-                            <input type="email" id="employee-email" class="form-input" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen">
+                            <input type="email" id="employee-email" class="form-input" placeholder="Optioneel — welkomstmail wordt verzonden zodra e-mail ingevuld is">
                         </div>
                     </div>
                     <div class="form-row">
@@ -546,7 +539,7 @@
                 <!-- Message -->
                 <div class="form-group">
                     <label for="swap-message">Bericht (optioneel)</label>
-                    <textarea id="swap-message" class="form-control" rows="3" placeholder="Bijv: Graag ruilen, familiebezoek"></textarea>
+                    <textarea id="swap-message" class="form-control" rows="3" placeholder="Bijv. Graag ruilen, familiebezoek"></textarea>
                 </div>
 
                 <!-- Validation Display -->
@@ -598,7 +591,7 @@
                 <!-- Response Notes -->
                 <div class="form-group">
                     <label for="swap-response-notes">Reactie <span id="swap-response-notes-required" class="text-danger hidden">*</span></label>
-                    <textarea id="swap-response-notes" class="form-control" rows="3" placeholder="Optionele toelichting bij goedkeuring of verplicht bij afwijzing"></textarea>
+                    <textarea id="swap-response-notes" class="form-control" rows="3" placeholder="Toelichting (optioneel bij goedkeuring, verplicht bij afwijzing)"></textarea>
                 </div>
             </div>
             <div class="modal-actions">
@@ -735,6 +728,69 @@
         </div>
     </div>
 
+    <!-- Week kopiëren modal (builder) -->
+    <div id="copy-week-modal" class="modal hidden">
+        <div class="modal-content modal-content--sm">
+            <div class="modal-header">
+                <h2>Week kopiëren</h2>
+                <span class="modal-close" id="copy-week-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="copy-week-source">Van (bron)</label>
+                        <select id="copy-week-source" class="form-input"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="copy-week-target">Naar (doel)</label>
+                        <select id="copy-week-target" class="form-input"></select>
+                    </div>
+                </div>
+                <div id="copy-week-conflict-row" class="hidden">
+                    <p id="copy-week-conflict-info" class="text-warning mb-sm"></p>
+                    <div class="form-group">
+                        <label class="radio-label"><input type="radio" name="copy-mode" value="replace" checked> Bestaande toewijzingen verwijderen en vervangen</label>
+                        <label class="radio-label"><input type="radio" name="copy-mode" value="fill"> Alleen lege dagen invullen</label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="copy-week-cancel">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="copy-week-confirm">Kopiëren</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Draft diff modal -->
+    <div id="draft-diff-modal" class="modal hidden">
+        <div class="modal-content modal-content--lg">
+            <div class="modal-header">
+                <h2>Concepten vergelijken</h2>
+                <span class="modal-close" id="draft-diff-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <div class="form-row mb-md">
+                    <div class="form-group">
+                        <label class="form-label">Concept A</label>
+                        <select id="draft-diff-a" class="form-input"></select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Concept B</label>
+                        <select id="draft-diff-b" class="form-input"></select>
+                    </div>
+                    <div class="form-group" style="flex:0">
+                        <label class="form-label">&nbsp;</label>
+                        <button type="button" class="btn btn-primary" id="draft-diff-run">Vergelijk</button>
+                    </div>
+                </div>
+                <div id="draft-diff-result"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="draft-diff-close">Sluiten</button>
+            </div>
+        </div>
+    </div>
+
     <script src="config/settings.js"></script>
     <script src="data.js"></script>
     <script src="validation.js"></script>
@@ -750,6 +806,8 @@
     <script src="app-employees.js"></script>
     <script src="app-availability.js"></script>
     <script src="app-builder.js"></script>
+    <script src="app-builder-editors.js"></script>
+    <script src="app-builder-drafts.js"></script>
     <script src="app-settings.js"></script>
     <script src="app-admin.js"></script>
     <script src="app-init.js"></script>

@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS shifts (
   end_time TEXT NOT NULL,
   notes TEXT DEFAULT '',
   source TEXT DEFAULT 'manual' CHECK (source IN ('auto', 'manual')),
+  archived BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -127,6 +128,7 @@ CREATE TABLE IF NOT EXISTS schedule_drafts (
 CREATE TABLE IF NOT EXISTS shift_activities (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
   date DATE NOT NULL,
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
@@ -170,3 +172,10 @@ CREATE INDEX IF NOT EXISTS idx_availability_type ON availability(type);
 CREATE INDEX IF NOT EXISTS idx_swap_requests_type ON shift_swap_requests(request_type);
 CREATE INDEX IF NOT EXISTS idx_schedule_drafts_type ON schedule_drafts(type);
 CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id);
+
+-- Migration tracking table (used by runMigrations() in server.js)
+CREATE TABLE IF NOT EXISTS migrations (
+  id SERIAL PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  applied_at TIMESTAMP DEFAULT NOW()
+);

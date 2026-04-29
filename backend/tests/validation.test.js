@@ -218,4 +218,99 @@ describe('shiftsOverlap', () => {
     const shift2 = { date: '2026-04-15', startTime: '12:00', endTime: '18:00' };
     expect(shiftsOverlap(shift1, shift2)).toBe(shiftsOverlap(shift2, shift1));
   });
+
+  test('returns false for two overnight shifts on consecutive nights (no overlap)', () => {
+    // Night 1: 22:00 → 06:00 (day 16), Night 2: 22:00 → 06:00 (day 17)
+    const night1 = { date: '2026-04-15', startTime: '22:00', endTime: '06:00' };
+    const night2 = { date: '2026-04-16', startTime: '22:00', endTime: '06:00' };
+    expect(shiftsOverlap(night1, night2)).toBe(false);
+  });
+
+  test('returns true when overnight shift fully contains a short day shift', () => {
+    // 22:00 → 08:00 next day contains 02:00 → 05:00 on next day
+    const long = { date: '2026-04-15', startTime: '22:00', endTime: '08:00' };
+    const short = { date: '2026-04-16', startTime: '02:00', endTime: '05:00' };
+    expect(shiftsOverlap(long, short)).toBe(true);
+  });
+
+  test('adjacent overnight shifts do not overlap (end equals start of next)', () => {
+    // Shift 1 ends 06:00, shift 2 starts 06:00
+    const night = { date: '2026-04-15', startTime: '22:00', endTime: '06:00' };
+    const morning = { date: '2026-04-16', startTime: '06:00', endTime: '14:00' };
+    expect(shiftsOverlap(night, morning)).toBe(false);
+  });
+});
+
+// ===== getHoursBetweenShifts — extra grensgevallen =====
+
+describe('getHoursBetweenShifts — extra grensgevallen', () => {
+  test('exact 11-hour gap (boundary) is not a violation', () => {
+    // Shift ends 07:00, next starts 18:00 on same day → 11 hours
+    const shift1 = { date: '2026-04-15', startTime: '23:00', endTime: '07:00' };
+    const shift2 = { date: '2026-04-16', startTime: '18:00', endTime: '22:00' };
+    const hours = getHoursBetweenShifts(shift1, shift2);
+    expect(hours).toBeCloseTo(11, 1);
+  });
+
+  test('one-minute less than 11 hours is a violation', () => {
+    // Shift ends 07:00, next starts 17:59 → 10h 59min gap
+    const shift1 = { date: '2026-04-15', startTime: '23:00', endTime: '07:00' };
+    const shift2 = { date: '2026-04-16', startTime: '17:59', endTime: '22:00' };
+    const hours = getHoursBetweenShifts(shift1, shift2);
+    expect(hours).toBeLessThan(11);
+  });
+
+  test('multi-day gap returns correct large number', () => {
+    // Monday ends 16:00 → Thursday starts 08:00 = 64 hours gap
+    const monday = { date: '2026-04-13', startTime: '08:00', endTime: '16:00' };
+    const thursday = { date: '2026-04-16', startTime: '08:00', endTime: '16:00' };
+    const hours = getHoursBetweenShifts(monday, thursday);
+    expect(hours).toBeCloseTo(64, 0);
+    expect(hours).toBeGreaterThan(11);
+  });
+
+  test('back-to-back overnight shifts (negative overlap)', () => {
+    // Two shifts assigned same employee at same time → negative rest
+    const shift1 = { date: '2026-04-15', startTime: '08:00', endTime: '16:00' };
+    const shift2 = { date: '2026-04-15', startTime: '08:00', endTime: '16:00' };
+    const hours = getHoursBetweenShifts(shift1, shift2);
+    expect(hours).toBeLessThanOrEqual(0);
+  });
+});
+
+// ===== getShiftEndDateTime — extra grensgevallen =====
+
+describe('getShiftEndDateTime — extra grensgevallen', () => {
+  test('shift ending exactly at midnight (00:00) advances to next day', () => {
+    const shift = { date: '2026-04-15', startTime: '16:00', endTime: '00:00' };
+    const end = getShiftEndDateTime(shift);
+    expect(end.getDate()).toBe(16);
+    expect(end.getHours()).toBe(0);
+    expect(end.getMinutes()).toBe(0);
+  });
+
+  test('standard day shift: end date is same day', () => {
+    const shift = { date: '2026-04-30', startTime: '09:00', endTime: '17:30' };
+    const end = getShiftEndDateTime(shift);
+    expect(end.getMonth()).toBe(3); // April (0-indexed)
+    expect(end.getDate()).toBe(30);
+    expect(end.getHours()).toBe(17);
+    expect(end.getMinutes()).toBe(30);
+  });
+
+  test('overnight shift crossing month boundary', () => {
+    const shift = { date: '2026-04-30', startTime: '22:00', endTime: '06:00' };
+    const end = getShiftEndDateTime(shift);
+    expect(end.getMonth()).toBe(4); // May (0-indexed)
+    expect(end.getDate()).toBe(1);
+    expect(end.getHours()).toBe(6);
+  });
+
+  test('overnight shift crossing year boundary', () => {
+    const shift = { date: '2026-12-31', startTime: '23:00', endTime: '07:00' };
+    const end = getShiftEndDateTime(shift);
+    expect(end.getFullYear()).toBe(2027);
+    expect(end.getMonth()).toBe(0); // January
+    expect(end.getDate()).toBe(1);
+  });
 });
