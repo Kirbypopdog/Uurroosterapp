@@ -112,6 +112,7 @@ function renderHome() {
     let html = '';
     html += renderHomeWelcome(user, role);
     if (role === 'admin') html += renderHomeOnboarding();
+    html += renderHomeAlerts(role);
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
     html += renderHomeQuickActions(role);
@@ -166,6 +167,106 @@ function getOnboardingStatus() {
         { id: 'schedule', label: 'Basisrooster maken', done: DataStore.shifts.length > 0, view: 'builder' },
         { id: 'email', label: 'Email notificaties configureren', done: DataStore.settings.emailNotifications?.globalEnabled === true, view: 'settings', tab: 'communicatie' }
     ];
+}
+
+function renderHomeAlerts(role) {
+    if (!['admin', 'roosterverantwoordelijke'].includes(role)) return '';
+
+    const warnings = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayLabelsNL = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
+    const maxConsecutive = DataStore.settings?.rules?.maxConsecutiveDays ?? 6;
+    const teams = DataStore.settings?.teams || {};
+
+    // 1. Onderbezetting komende 7 dagen per team
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(today);
+        d.setDate(today.getDate() + i);
+        const dateStr = formatDateYYYYMMDD(d);
+        const dayLabel = dayLabelsNL[d.getDay()];
+
+        for (const [teamId, team] of Object.entries(teams)) {
+            const teamEmps = (DataStore.users || []).filter(u =>
+                u.active !== false && u.role === 'medewerker' &&
+                (u.mainTeam === teamId || u.team_id === teamId || u.main_team === teamId)
+            );
+            if (teamEmps.length === 0) continue;
+            const teamShifts = DataStore.shifts.filter(s =>
+                s.team === teamId && (s.date || '').split('T')[0] === dateStr
+            );
+            if (teamShifts.length === 0) {
+                warnings.push({ level: 'warning', text: `${dayLabel} ${formatDateShort(d)}: ${escapeHtml(team.name)} heeft geen diensten ingepland` });
+            }
+        }
+    }
+
+    // 2. Medewerkers die max opeenvolgende dagen naderen (>= maxConsecutive - 1)
+    const activeEmployees = (DataStore.users || []).filter(u => u.active !== false && u.role === 'medewerker');
+    for (const emp of activeEmployees) {
+        // Check a 21-day window centred on today
+        const windowStart = new Date(today);
+        windowStart.setDate(today.getDate() - 7);
+        const windowEnd = new Date(today);
+        windowEnd.setDate(today.getDate() + 13);
+        const startStr = formatDateYYYYMMDD(windowStart);
+        const endStr = formatDateYYYYMMDD(windowEnd);
+
+        const empShiftDates = new Set(
+            DataStore.shifts
+                .filter(s => Number(s.employeeId || s.userId) === emp.id &&
+                    (s.date || '').split('T')[0] >= startStr &&
+                    (s.date || '').split('T')[0] <= endStr)
+                .map(s => (s.date || '').split('T')[0])
+        );
+
+        // Find longest consecutive run touching today or future
+        let run = 0;
+        let maxRun = 0;
+        for (let i = -7; i <= 13; i++) {
+            const d = new Date(today);
+            d.setDate(today.getDate() + i);
+            if (empShiftDates.has(formatDateYYYYMMDD(d))) {
+                run++;
+                maxRun = Math.max(maxRun, run);
+            } else {
+                run = 0;
+            }
+        }
+        if (maxRun >= maxConsecutive) {
+            warnings.push({ level: 'warning', text: `${escapeHtml(emp.name)} werkt ${maxRun} dagen op rij (maximum: ${maxConsecutive})` });
+        }
+    }
+
+    // 3. Ruilverzoeken ouder dan 48u zonder reactie
+    const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const oldPending = (DataStore.swapRequests || []).filter(r =>
+        r.status === 'pending' && new Date(r.createdAt || r.created_at) < cutoff48h
+    );
+    if (oldPending.length > 0) {
+        warnings.push({ level: 'info', text: `${oldPending.length} ruilverzoek${oldPending.length !== 1 ? 'en' : ''} wacht${oldPending.length === 1 ? '' : 'en'} al meer dan 48u op goedkeuring` });
+    }
+
+    if (warnings.length === 0) return '';
+
+    const items = warnings.map(w => `
+        <div class="alert-item alert-item--${w.level}">
+            <i data-lucide="${w.level === 'info' ? 'info' : 'alert-triangle'}" class="lucide-xs"></i>
+            <span>${w.text}</span>
+        </div>`).join('');
+
+    return `
+        <div class="home-alerts mb-md">
+            <div class="home-alerts-header">
+                <i data-lucide="bell" class="lucide-sm"></i>
+                <strong>Attentiepunten</strong>
+            </div>
+            <div class="home-alerts-body">${items}</div>
+        </div>`;
+}
+
+function formatDateShort(date) {
+    return date.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
 }
 
 function renderHomeOnboarding() {
