@@ -1275,7 +1275,13 @@ function renderSettingsEmail(container) {
         }
         if (fromInput) fromInput.value = data.from || '';
         if (testBtn) testBtn.disabled = !data.configured;
-    }).catch(() => {});
+    }).catch(() => {
+        const badge = container.querySelector('#email-status-badge');
+        if (badge) {
+            badge.textContent = 'Niet beschikbaar';
+            badge.className = 'email-status-badge not-configured';
+        }
+    });
 
     // Test email button
     container.querySelector('#email-test-btn')?.addEventListener('click', async () => {
