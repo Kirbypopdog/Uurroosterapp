@@ -180,13 +180,17 @@ function renderHomeAlerts(role) {
     const teams = DataStore.settings?.teams || {};
 
     // 1. Onderbezetting komende 7 dagen per team
+    const coverageTeams = DataStore.settings?.coverageTeams || [];
     for (let i = 0; i < 7; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
         const dateStr = formatDateYYYYMMDD(d);
         const dayLabel = dayLabelsNL[d.getDay()];
 
+        if (isDayClosed(dateStr)) continue;
+
         for (const [teamId, team] of Object.entries(teams)) {
+            if (coverageTeams.length > 0 && !coverageTeams.includes(teamId)) continue;
             const teamEmps = (DataStore.users || []).filter(u =>
                 u.active !== false && u.role === 'medewerker' &&
                 (u.mainTeam === teamId || u.team_id === teamId || u.main_team === teamId)
@@ -515,16 +519,12 @@ function renderHomeTeamCoverage(role, user) {
         coverageHtml += `<div class="home-team-name"><span class="home-team-color-dot" style="background:${escapeHtml(teamColor)}"></span>${escapeHtml(team.name)}</div>`;
 
         weekDates.forEach((dateStr, i) => {
+            if (isDayClosed(dateStr)) return;
+
             // Count shifts for this team on this date
             const shiftsOnDate = DataStore.shifts.filter(s =>
                 s.team === teamId && s.date.split('T')[0] === dateStr
             ).length;
-
-            // Count absences for this team on this date
-            const absentOnDate = (DataStore.availability || []).filter(a => {
-                const emp = teamEmployees.find(e => Number(e.id) === Number(a.user_id || a.userId));
-                return emp && a.date.split('T')[0] === dateStr;
-            }).length;
 
             const presentCount = Math.min(shiftsOnDate, totalEmployees);
             const fillPercent = totalEmployees > 0 ? Math.round((presentCount / totalEmployees) * 100) : 0;
