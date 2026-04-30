@@ -779,6 +779,7 @@ async function openAddClosedDateDialog() {
         overlay.remove();
 
         const shiftsOnDate = (DataStore.shifts || []).filter(s => (s.date || '').split('T')[0] === date);
+        if (shiftsOnDate.length > 0) showToast(`${shiftsOnDate.length} shift(s) op ${new Date(date + 'T12:00:00').toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' })} worden verwijderd`, 'info');
         for (const shift of shiftsOnDate) {
             await deleteShift(shift.id);
         }
@@ -2724,6 +2725,7 @@ function setupSettingsCollapsibles(scope = document) {
             closeBtn.addEventListener('click', async () => {
                 closeDayContextMenu();
                 const shiftsOnDate = DataStore.shifts.filter(s => s.date === dateStr);
+                if (shiftsOnDate.length > 0) showToast(`${shiftsOnDate.length} shift(s) op ${label} worden verwijderd`, 'info');
                 for (const shift of shiftsOnDate) {
                     await deleteShift(shift.id, true);
                 }
