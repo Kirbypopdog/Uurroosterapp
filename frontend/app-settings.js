@@ -777,6 +777,21 @@ async function openAddClosedDateDialog() {
         if (!date) { showToast('Kies een datum', 'warning'); return; }
         const reason = overlay.querySelector('#_cd-reason').value.trim();
         overlay.remove();
+
+        const shiftsOnDate = (DataStore.shifts || []).filter(s => (s.date || '').split('T')[0] === date);
+        if (shiftsOnDate.length > 0) {
+            const label = new Date(date + 'T12:00:00').toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' });
+            const del = await showConfirm(
+                `Er staan nog ${shiftsOnDate.length} shift(s) ingepland op ${label}.\n\nDeze shifts worden meegeteld in de uren als ze niet worden verwijderd.\n\nShifts verwijderen?`,
+                'Shifts verwijderen'
+            );
+            if (del) {
+                for (const shift of shiftsOnDate) {
+                    await deleteShift(shift.id);
+                }
+            }
+        }
+
         await addClosedDate(date, reason);
         renderPlanning();
         const listEl = document.getElementById('closed-dates-list');
