@@ -9,6 +9,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/)
 
 ---
 
+## [1.4.1] — 2026-04-30
+
+### Gefixt
+- **Concept toepassen crashes (productie)**: `POST /schedule-drafts/:id/apply` gaf 500 wanneer de `shift_id`-kolom in `shift_activities` ontbrak door een mislukte migratie. De INSERT gebruikt nu een pre-check via `information_schema.columns` en valt terug op een INSERT zonder `shift_id` als de kolom nog niet bestaat.
+- **Placeholder-mismatch in fallback INSERT**: De fallback-INSERT voor shift_activities had nog `$5` staan terwijl `shift.id` verwijderd was uit de parameterlijst → "INSERT has more expressions than target columns". Gecorrigeerd naar `$1–$4`.
+- **`apiFetch` verwijderd in `saveSchoolYearStart`**: `data.js` riep de verwijderde `apiFetch()` aan → "Can't find variable: apiFetch" bij het toepassen van een concept. Vervangen door `dataApiFetch()`.
+- **NaN weeknummers in multi-week concept**: De loop over `draftGrid`-sleutels sloeg alleen `_multiWeek` over maar niet `_teamMeetings` en `_pattern`. Deze werden als `NaN` weeknummers opgenomen in de toast en sortering. Alle niet-numerieke sleutels worden nu overgeslagen.
+- **Homepage waarschuwingen voor gesloten dagen** (issue #102/#103): De "geen diensten ingepland"-alert werd ook getoond voor manueel gesloten dagen en teams die niet meedoen in de bezettingsberekening (bv. Overkoepelend). Gesloten dagen en niet-coverage-teams worden nu overgeslagen.
+- **Bezettingsbars tonen gesloten dagen** (issue #102): De "Team bezetting"-sectie op de homepage toonde coverage-bars voor gesloten dagen, ook als de shifts al verwijderd waren. Gesloten dagen worden nu overgeslagen in de weergave.
+- **Dag sluiten verwijdert shifts**: Bij het manueel sluiten van een dag via Instellingen → Sluitingsdagen werden bestaande shifts niet verwijderd en bleven ze meegeteld in de urenberekening. Nu toont de app een bevestigingsdialog als er shifts staan — shifts worden altijd verwijderd bij bevestiging, de actie kan geannuleerd worden.
+
+---
+
 ## [1.4.0] — 2026-04-29
 
 ### Toegevoegd

@@ -41,9 +41,10 @@
 ### Feestdagen & Sluitingsdagen
 - **Belgische feestdagen** automatisch berekend voor elk jaar (Gregoriaans Computus)
 - Feestdagen rood gemarkeerd in timeline- en maandweergave met tooltip en icoon
-- **Manuele sluitingsdagen**: rechtsklik op dag → "Dag sluiten" met optionele reden
+- **Manuele sluitingsdagen**: rechtsklik op dag → "Dag sluiten" met optionele reden, of via Instellingen → Planning
 - Gesloten dagen blokkeren shift aanmaken en drag-drop
-- Bij sluiten dag met bestaande shifts: keuze om shifts mee te verwijderen of te behouden
+- Bij sluiten dag met bestaande shifts: bevestigingsdialog — shifts worden verwijderd of actie geannuleerd
+- Gesloten dagen worden niet getoond in bezettingsbars en proactieve waarschuwingen
 - Overzicht en beheer van sluitingsdagen in Instellingen → Planning
 - Basisrooster/concepten slaan manueel gesloten datums automatisch over
 
@@ -225,7 +226,12 @@
 
 ## Versie Historie
 
-### v1.4.0 — 2026-04-29 (huidige release)
+### v1.4.1 — 2026-04-30 (huidige release)
+- Productie-hotfixes: concept toepassen, apiFetch, NaN weeknummers
+- Homepage waarschuwingen en bezettingsbars filteren nu gesloten dagen
+- Dag sluiten verwijdert shifts altijd (met bevestiging en annuleeroptie)
+
+### v1.4.0 — 2026-04-29
 - 35 issues opgelost: security, stabiliteit, UX, tech-debt en features
 - Urendashboard, proactieve waarschuwingen, concept-vergelijking, live builder-validatie
 - Genummerd migratiesysteem, data-archivering, testdekking 194 tests
