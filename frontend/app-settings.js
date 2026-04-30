@@ -779,17 +779,8 @@ async function openAddClosedDateDialog() {
         overlay.remove();
 
         const shiftsOnDate = (DataStore.shifts || []).filter(s => (s.date || '').split('T')[0] === date);
-        if (shiftsOnDate.length > 0) {
-            const label = new Date(date + 'T12:00:00').toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' });
-            const del = await showConfirm(
-                `Er staan nog ${shiftsOnDate.length} shift(s) ingepland op ${label}.\n\nDeze shifts worden meegeteld in de uren als ze niet worden verwijderd.\n\nShifts verwijderen?`,
-                'Shifts verwijderen'
-            );
-            if (del) {
-                for (const shift of shiftsOnDate) {
-                    await deleteShift(shift.id);
-                }
-            }
+        for (const shift of shiftsOnDate) {
+            await deleteShift(shift.id);
         }
 
         await addClosedDate(date, reason);
@@ -2733,18 +2724,8 @@ function setupSettingsCollapsibles(scope = document) {
             closeBtn.addEventListener('click', async () => {
                 closeDayContextMenu();
                 const shiftsOnDate = DataStore.shifts.filter(s => s.date === dateStr);
-                if (shiftsOnDate.length > 0) {
-                    const confirmed = await showConfirmDialog(
-                        `Er staan nog ${shiftsOnDate.length} shift(s) gepland op ${label}. Wil je deze ook verwijderen?`,
-                        'Sluiten + shifts verwijderen',
-                        'Sluiten, shifts behouden'
-                    );
-                    if (confirmed === null) return; // Annuleer
-                    if (confirmed === true) {
-                        for (const shift of shiftsOnDate) {
-                            await deleteShift(shift.id, true);
-                        }
-                    }
+                for (const shift of shiftsOnDate) {
+                    await deleteShift(shift.id, true);
                 }
                 const reason = await promptReason('Reden (optioneel):');
                 if (reason === null) return; // Annuleer
