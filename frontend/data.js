@@ -1942,7 +1942,7 @@ function getSchoolWeekNumber(date) {
 async function saveSchoolYearStart(date) {
     DataStore.settings.schoolYearStart = { date };
     saveToStorage();
-    await apiFetch('/settings/school_year_start', {
+    await dataApiFetch('/settings/school_year_start', {
         method: 'PUT',
         body: JSON.stringify({ value: { date } })
     });

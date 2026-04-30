@@ -773,7 +773,7 @@ async function applyBuilderDraft(draftId) {
     const weeksToApply = [];
     if (isMultiWeek) {
         for (const [key, weekGrid] of Object.entries(draftGrid)) {
-            if (key === '_multiWeek') continue;
+            if (isNaN(Number(key)) || Number(key) <= 0) continue;
             weeksToApply.push({ weekNumber: Number(key), grid: weekGrid });
         }
         weeksToApply.sort((a, b) => a.weekNumber - b.weekNumber);
