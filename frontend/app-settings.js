@@ -779,9 +779,16 @@ async function openAddClosedDateDialog() {
         overlay.remove();
 
         const shiftsOnDate = (DataStore.shifts || []).filter(s => (s.date || '').split('T')[0] === date);
-        if (shiftsOnDate.length > 0) showToast(`${shiftsOnDate.length} shift(s) op ${new Date(date + 'T12:00:00').toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' })} worden verwijderd`, 'info');
-        for (const shift of shiftsOnDate) {
-            await deleteShift(shift.id);
+        if (shiftsOnDate.length > 0) {
+            const dateLabel = new Date(date + 'T12:00:00').toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' });
+            const ok = await showConfirm(
+                `Er staan ${shiftsOnDate.length} shift(s) ingepland op ${dateLabel}. Deze worden verwijderd bij het sluiten.`,
+                'Dag sluiten'
+            );
+            if (!ok) return;
+            for (const shift of shiftsOnDate) {
+                await deleteShift(shift.id);
+            }
         }
 
         await addClosedDate(date, reason);
@@ -2725,12 +2732,18 @@ function setupSettingsCollapsibles(scope = document) {
             closeBtn.addEventListener('click', async () => {
                 closeDayContextMenu();
                 const shiftsOnDate = DataStore.shifts.filter(s => s.date === dateStr);
-                if (shiftsOnDate.length > 0) showToast(`${shiftsOnDate.length} shift(s) op ${label} worden verwijderd`, 'info');
-                for (const shift of shiftsOnDate) {
-                    await deleteShift(shift.id, true);
+                if (shiftsOnDate.length > 0) {
+                    const ok = await showConfirm(
+                        `Er staan ${shiftsOnDate.length} shift(s) ingepland op ${label}. Deze worden verwijderd bij het sluiten.`,
+                        'Dag sluiten'
+                    );
+                    if (!ok) return;
+                    for (const shift of shiftsOnDate) {
+                        await deleteShift(shift.id, true);
+                    }
                 }
                 const reason = await promptReason('Reden (optioneel):');
-                if (reason === null) return; // Annuleer
+                if (reason === null) return;
                 await addClosedDate(dateStr, reason);
                 renderPlanning();
             });
