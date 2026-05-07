@@ -600,8 +600,8 @@ function renderTimelineView() {
                 const empMonthContract = empContractH > 0 ? empContractH * 4 : 0;
                 const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
                 const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
-                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(1)}/${empContractH}u` : `${empWeekH.toFixed(1)}u`;
-                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(0)}/${empMonthContract}u` : `${empMonthH.toFixed(0)}u`;
+                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(2)}/${empContractH}u` : `${empWeekH.toFixed(2)}u`;
+                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(2)}/${empMonthContract}u` : `${empMonthH.toFixed(2)}u`;
                 html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
                     <div class="emp-name-row">${responsibleBadge}<span class="emp-name">${employeeName}</span></div>
                     <span class="emp-hours${empWeekClass}">${empWeekLabel}</span>
@@ -799,8 +799,8 @@ function renderTimelineView() {
                 const empMonthContract = empContractH > 0 ? empContractH * 4 : 0;
                 const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
                 const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
-                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(1)}/${empContractH}u` : `${empWeekH.toFixed(1)}u`;
-                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(0)}/${empMonthContract}u` : `${empMonthH.toFixed(0)}u`;
+                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(2)}/${empContractH}u` : `${empWeekH.toFixed(2)}u`;
+                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(2)}/${empMonthContract}u` : `${empMonthH.toFixed(2)}u`;
                 html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
                     <div class="emp-name-row">${responsibleBadge}<span class="emp-name">${employeeName}</span></div>
                     <span class="emp-hours${empWeekClass}">${empWeekLabel}</span>
@@ -1097,7 +1097,7 @@ function renderMonthView() {
                 const empMonthH = getEmployeeHoursThisPeriod(emp.id, formatDateYYYYMMDD(monthStart));
                 const monthContract = empContractH > 0 ? empContractH * 4 : 0;
                 const empMonthOverClass = monthContract > 0 ? (empMonthH > monthContract ? ' over-hours' : ' under-hours') : '';
-                const empMonthLabel = monthContract > 0 ? `${empMonthH.toFixed(1)}/${monthContract}u` : `${empMonthH.toFixed(1)}u`;
+                const empMonthLabel = monthContract > 0 ? `${empMonthH.toFixed(2)}/${monthContract}u` : `${empMonthH.toFixed(2)}u`;
                 html += `<div class="month-employee-cell">
                     <span class="emp-name">${employeeName}</span>
                     <span class="emp-hours${empMonthOverClass}">${empMonthLabel}</span>
@@ -1182,7 +1182,7 @@ function renderMonthView() {
                 const empMonthH = getEmployeeHoursThisPeriod(emp.id, formatDateYYYYMMDD(monthStart));
                 const monthContract = empContractH > 0 ? empContractH * 4 : 0;
                 const empMonthOverClass = monthContract > 0 ? (empMonthH > monthContract ? ' over-hours' : ' under-hours') : '';
-                const empMonthLabel = monthContract > 0 ? `${empMonthH.toFixed(1)}/${monthContract}u` : `${empMonthH.toFixed(1)}u`;
+                const empMonthLabel = monthContract > 0 ? `${empMonthH.toFixed(2)}/${monthContract}u` : `${empMonthH.toFixed(2)}u`;
                 html += `<div class="month-employee-cell">
                     <span class="emp-name">${employeeName}</span>
                     <span class="emp-hours${empMonthOverClass}">${empMonthLabel}</span>
