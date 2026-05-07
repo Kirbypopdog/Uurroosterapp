@@ -280,6 +280,7 @@ function resetShiftSubmitBtn() {
     DOM.shiftSubmitBtn.classList.remove('btn-warning');
     DOM.shiftSubmitBtn.classList.add('btn-primary');
     AppState._shiftForceOverride = false;
+    AppState._shiftBackendForce = false;
 }
 
 function closeShiftModal() {
@@ -873,10 +874,9 @@ async function handleShiftSubmit(e) {
         startTime: DOM.shiftStart.value,
         endTime: DOM.shiftEnd.value,
         notes: DOM.shiftNotes.value,
-        isReserve: document.getElementById('shift-is-reserve')?.checked || false
+        isReserve: document.getElementById('shift-is-reserve')?.checked || false,
+        ...(AppState._shiftBackendForce ? { force: true } : {})
     };
-
-    console.log('Shift data:', shiftData);
 
     try {
         const validation = validateShift(shiftData, AppState.editingShiftId);
@@ -948,8 +948,20 @@ async function handleShiftSubmit(e) {
             hideSectionLoading('planning-view');
         }
     } catch (error) {
-        console.error('Error in handleShiftSubmit:', error);
-        DOM.shiftValidationErrors.innerHTML = '<ul><li>Er is een fout opgetreden: ' + getUserFriendlyError(error) + '</li></ul>';
+        const msg = getUserFriendlyError(error);
+        // 422 = backend 11-uur validatie — geef "Toch opslaan" optie
+        if (error.status === 422 || (error.message && error.message.includes('11-uur'))) {
+            DOM.shiftValidationErrors.innerHTML =
+                `<div class="conflict-resolution"><div class="conflict-item"><div class="conflict-warning">${escapeHtml(msg)}</div></div></div>`;
+            IconHelper.init(DOM.shiftValidationErrors);
+            DOM.shiftSubmitBtn.textContent = 'Toch opslaan';
+            DOM.shiftSubmitBtn.classList.remove('btn-primary');
+            DOM.shiftSubmitBtn.classList.add('btn-warning');
+            AppState._shiftBackendForce = true;
+        } else {
+            AppState._shiftBackendForce = false;
+            DOM.shiftValidationErrors.innerHTML = '<ul><li>Er is een fout opgetreden: ' + escapeHtml(msg) + '</li></ul>';
+        }
     }
 }
 

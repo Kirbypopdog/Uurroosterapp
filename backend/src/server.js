@@ -582,7 +582,7 @@ async function logAudit(req, action, resourceType, resourceId, details = {}) {
  * @param {number|null} excludeId - shift-id uitsluiten bij PUT
  * @returns {Promise<{ valid: boolean, message?: string }>}
  */
-async function validateShiftRules(db, userId, newShift, excludeId = null) {
+async function validateShiftRules(db, userId, newShift, excludeId = null, skipRestCheck = false) {
   const MIN_REST = 11;
   const rangeStart = new Date(newShift.date);
   rangeStart.setDate(rangeStart.getDate() - 2);
@@ -603,12 +603,14 @@ async function validateShiftRules(db, userId, newShift, excludeId = null) {
     if (shiftsOverlapCheck(existing, newShift)) {
       return { valid: false, message: 'Overlap: medewerker heeft al een shift op dit tijdstip.' };
     }
-    const hours = hoursBetweenShifts(existing, newShift);
-    if (hours >= 0 && hours < MIN_REST) {
-      return {
-        valid: false,
-        message: `11-uur regel: slechts ${hours.toFixed(1)}u rust tussen shifts (minimum ${MIN_REST}u).`
-      };
+    if (!skipRestCheck) {
+      const hours = hoursBetweenShifts(existing, newShift);
+      if (hours >= 0 && hours < MIN_REST) {
+        return {
+          valid: false,
+          message: `11-uur regel: slechts ${hours.toFixed(1)}u rust tussen shifts (minimum ${MIN_REST}u).`
+        };
+      }
     }
   }
   return { valid: true };
@@ -1528,7 +1530,7 @@ v1.get('/shifts', requireAuth, async (req, res) => {
 });
 
 v1.post('/shifts', requireAuth, async (req, res) => {
-  const { userId, team, date, startTime, endTime, notes, source, isReserve } = req.body || {};
+  const { userId, team, date, startTime, endTime, notes, source, isReserve, force } = req.body || {};
   if (!userId || !date || !startTime || !endTime) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
@@ -1550,8 +1552,8 @@ v1.post('/shifts', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Deze dag is manueel gesloten' });
     }
 
-    // Valideer 11-uur regel en overlap
-    const validation = await validateShiftRules(pool, userId, { date, start_time: startTime, end_time: endTime });
+    // Valideer 11-uur regel en overlap (force=true slaat enkel rusttijd over, niet overlap)
+    const validation = await validateShiftRules(pool, userId, { date, start_time: startTime, end_time: endTime }, null, !!force);
     if (!validation.valid) return res.status(422).json({ error: validation.message });
 
     // Insert the new shift
@@ -1594,7 +1596,7 @@ v1.post('/shifts', requireAuth, async (req, res) => {
 
 v1.put('/shifts/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
-  const { userId, team, date, startTime, endTime, notes, source, isReserve } = req.body || {};
+  const { userId, team, date, startTime, endTime, notes, source, isReserve, force } = req.body || {};
   if (!id) {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
@@ -1629,7 +1631,7 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
       }
     }
 
-    // Valideer 11-uur regel en overlap (gebruik bestaande waarden als veld niet meegegeven)
+    // Valideer 11-uur regel en overlap (force=true slaat enkel rusttijd over, niet overlap)
     const updatedShift = {
       date:       date       || oldShift?.date,
       start_time: startTime  || oldShift?.startTime,
@@ -1637,7 +1639,7 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
     };
     if (updatedShift.date && updatedShift.start_time && updatedShift.end_time) {
       const targetUserId = userId || oldShift?.userId;
-      const validation = await validateShiftRules(pool, targetUserId, updatedShift, id);
+      const validation = await validateShiftRules(pool, targetUserId, updatedShift, id, !!force);
       if (!validation.valid) return res.status(422).json({ error: validation.message });
     }
 
