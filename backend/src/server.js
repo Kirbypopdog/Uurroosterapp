@@ -1481,10 +1481,11 @@ v1.post('/admin/test-email', requireAuth, requireRole('admin', 'roosterverantwoo
 v1.get('/shifts', requireAuth, async (req, res) => {
   const { startDate, endDate } = req.query;
 
-  const buildQuery = (withArchivedFilter) => {
+  const buildQuery = (withArchivedFilter, withIsReserve = true) => {
+    const reserveCol = withIsReserve ? ', is_reserve as "isReserve"' : ', false as "isReserve"';
     const baseSelect = `
       SELECT id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-             end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
+             end_time as "endTime", notes, source${reserveCol}, created_at as "createdAt"
       FROM shifts
 `;
     const params = [];
@@ -1497,17 +1498,26 @@ v1.get('/shifts', requireAuth, async (req, res) => {
   };
 
   try {
-    const { query, params } = buildQuery(true);
+    const { query, params } = buildQuery(true, true);
     const result = await pool.query(query, params);
     res.json({ shifts: result.rows });
   } catch (err) {
     if (err.code === '42703') {
-      // column "archived" does not exist — migration hasn't run yet, fall back
       try {
-        const { query, params } = buildQuery(false);
+        const { query, params } = buildQuery(false, true);
         const result = await pool.query(query, params);
         return res.json({ shifts: result.rows });
       } catch (err2) {
+        if (err2.code === '42703') {
+          try {
+            const { query, params } = buildQuery(false, false);
+            const result = await pool.query(query, params);
+            return res.json({ shifts: result.rows });
+          } catch (err3) {
+            console.error(err3);
+            return res.status(500).json({ error: 'Server error' });
+          }
+        }
         console.error(err2);
         return res.status(500).json({ error: 'Server error' });
       }
