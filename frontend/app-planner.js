@@ -443,9 +443,12 @@ function renderOvernightContinuation(empId, date, START_HOUR, TOTAL_HOURS) {
         const [pH, ] = prevShift.startTime.split(':').map(Number);
         const [eH, eM] = prevShift.endTime.split(':').map(Number);
         const prevIsOvernight = eH < pH;
-        if (prevIsOvernight && (eH + eM / 60) > START_HOUR) {
+        if (prevIsOvernight) {
             const endFrac = eH + eM / 60;
-            const w = ((endFrac - START_HOUR) / TOTAL_HOURS) * 100;
+            const w = endFrac > START_HOUR
+                ? ((endFrac - START_HOUR) / TOTAL_HOURS) * 100
+                : 2; // eindigt voor 7u: toon mini-indicator aan linkerrand
+            const reserveBadge = prevShift.isReserve ? '<span class="reserve-badge">R</span>' : '';
             html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation"
                          data-shift-id="${prevShift.id}"
                          data-employee-id="${prevShift.employeeId}"
@@ -454,7 +457,7 @@ function renderOvernightContinuation(empId, date, START_HOUR, TOTAL_HOURS) {
                          data-label="doorloop"
                          style="left: 0%; width: ${w}%; cursor: pointer; opacity: 0.7;"
                          data-tooltip="Doorloop van ${prevDateStr}: ${escapeHtml(prevShift.startTime + '-' + prevShift.endTime)}" data-tooltip-pos="bottom">
-                    <span class="block-time">→${prevShift.endTime}</span>
+                    ${reserveBadge}<span class="block-time">→${prevShift.endTime}</span>
                 </div>`;
         }
     });
