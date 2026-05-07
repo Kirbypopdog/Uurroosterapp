@@ -875,7 +875,8 @@ async function handleShiftSubmit(e) {
         endTime: DOM.shiftEnd.value,
         notes: DOM.shiftNotes.value,
         isReserve: document.getElementById('shift-is-reserve')?.checked || false,
-        ...(AppState._shiftBackendForce ? { force: true } : {})
+        // force=true zodra de gebruiker één keer "Toch opslaan" heeft bevestigd
+        ...((AppState._shiftForceOverride || AppState._shiftBackendForce) ? { force: true } : {})
     };
 
     try {
