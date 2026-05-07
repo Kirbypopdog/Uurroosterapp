@@ -451,6 +451,9 @@ function getValidationSummary(startDate, endDate) {
         dates: {}
     };
 
+    // Bijhouden van al gerapporteerde shift-paren om duplicaten te voorkomen
+    const seenPairs = new Set();
+
     dates.forEach(date => {
         const shiftsOnDate = getShiftsByDate(date);
         summary.totalShifts += shiftsOnDate.length;
@@ -464,13 +467,33 @@ function getValidationSummary(startDate, endDate) {
             const validation = validateShift(shift, shift.id);
 
             if (!validation.isValid) {
-                summary.shiftsWithErrors++;
-                dateIssues.errors.push(...validation.errors);
+                const uniqueErrors = validation.errors.filter(err => {
+                    if (err.shift1?.id != null && err.shift2?.id != null) {
+                        const key = [err.shift1.id, err.shift2.id].sort().join('-');
+                        if (seenPairs.has(key)) return false;
+                        seenPairs.add(key);
+                    }
+                    return true;
+                });
+                if (uniqueErrors.length > 0) {
+                    summary.shiftsWithErrors++;
+                    dateIssues.errors.push(...uniqueErrors);
+                }
             }
 
             if (validation.hasWarnings) {
-                summary.shiftsWithWarnings++;
-                dateIssues.warnings.push(...validation.warnings);
+                const uniqueWarnings = validation.warnings.filter(w => {
+                    if (w.shift1?.id != null && w.shift2?.id != null) {
+                        const key = [w.shift1.id, w.shift2.id].sort().join('-');
+                        if (seenPairs.has(key)) return false;
+                        seenPairs.add(key);
+                    }
+                    return true;
+                });
+                if (uniqueWarnings.length > 0) {
+                    summary.shiftsWithWarnings++;
+                    dateIssues.warnings.push(...uniqueWarnings);
+                }
             }
         });
 
