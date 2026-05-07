@@ -568,6 +568,27 @@ function renderBuilderEmployeeRow(employee) {
 
         html += `<div class="${cellClass}" data-employee-id="${employee.id}" data-day="${dayIndex}">`;
 
+        // Toon staart van nachtdienst van vorige week's zondag in maandag-cel
+        if (dayIndex === 0) {
+            const cycleLength = getBuilderCycleLength();
+            const prevWeekNum = AppState.builderWeekNumber > 1 ? AppState.builderWeekNumber - 1 : cycleLength;
+            const prevWeekGrid = prevWeekNum === AppState.builderWeekNumber
+                ? AppState.builderGrid
+                : (AppState.builderGridByWeek[prevWeekNum] || {});
+            const prevSunday = (prevWeekGrid[employee.id] || {})[6];
+            if (prevSunday) {
+                const prevPos = calcTimePosition(prevSunday.startTime, prevSunday.endTime);
+                if (prevPos.isOvernight && prevPos.overnightDay2Pct > 0) {
+                    const tc = prevSunday.team ? `team-${prevSunday.team}` : '';
+                    html += `<div class="builder-timeline-block ${tc} nacht"
+                        style="left:0%;width:${prevPos.overnightDay2Pct.toFixed(1)}%;opacity:0.6"
+                        data-start="${prevSunday.startTime}" data-end="${prevSunday.endTime}">
+                        <span class="btb-time">&hellip;${prevSunday.endTime}</span>
+                    </div>`;
+                }
+            }
+        }
+
         if (assignment) {
             const shiftHours = calculateBuilderShiftHours(assignment);
             totalHours += shiftHours;
