@@ -715,9 +715,11 @@ function renderTimelineView() {
                                 blockClass += ' warning';
                             }
                             if (isOvernight) blockClass += ' nacht';
+                            if (shift.isReserve) blockClass += ' shift-reserve';
 
                             // Build title with absence/error/warning info
                             let titleText = `${shift.startTime} - ${shift.endTime}`;
+                            if (shift.isReserve) titleText = `[Reserve] ${titleText}`;
                             if (isOvernight) {
                                 titleText += ' (nachtdienst)';
                             }
@@ -759,6 +761,7 @@ function renderTimelineView() {
                                          style="left: ${leftPercent}%; width: ${widthStyle}; ${cursorStyle}"
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
+                                ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 <span class="block-time">${shift.startTime}-${shift.endTime}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
@@ -894,9 +897,11 @@ function renderTimelineView() {
                                 blockClass += ' warning';
                             }
                             if (isOvernight) blockClass += ' nacht';
+                            if (shift.isReserve) blockClass += ' shift-reserve';
 
                             // Build title with absence/error/warning info
                             let titleText = `${shift.startTime} - ${shift.endTime}`;
+                            if (shift.isReserve) titleText = `[Reserve] ${titleText}`;
                             if (isOvernight) {
                                 titleText += ' (nachtdienst)';
                             }
@@ -937,6 +942,7 @@ function renderTimelineView() {
                                          style="left: ${leftPercent}%; width: ${widthStyle}; ${cursorStyle}"
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
+                                ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 <span class="block-time">${shift.startTime}-${shift.endTime}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}

@@ -455,6 +455,12 @@ const MIGRATIONS = [
       await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false`);
     }
+  },
+  {
+    name: '031_shifts_is_reserve',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS is_reserve BOOLEAN NOT NULL DEFAULT false`);
+    }
   }
 ];
 
@@ -1478,9 +1484,9 @@ v1.get('/shifts', requireAuth, async (req, res) => {
   const buildQuery = (withArchivedFilter) => {
     const baseSelect = `
       SELECT id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-             end_time as "endTime", notes, source, created_at as "createdAt"
+             end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
       FROM shifts
-    `;
+`;
     const params = [];
     let where = withArchivedFilter ? 'WHERE archived = false' : 'WHERE true';
     if (startDate && endDate) {
@@ -1512,7 +1518,7 @@ v1.get('/shifts', requireAuth, async (req, res) => {
 });
 
 v1.post('/shifts', requireAuth, async (req, res) => {
-  const { userId, team, date, startTime, endTime, notes, source } = req.body || {};
+  const { userId, team, date, startTime, endTime, notes, source, isReserve } = req.body || {};
   if (!userId || !date || !startTime || !endTime) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
@@ -1540,11 +1546,11 @@ v1.post('/shifts', requireAuth, async (req, res) => {
 
     // Insert the new shift
     const result = await pool.query(`
-      INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source, is_reserve)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-                end_time as "endTime", notes, source, created_at as "createdAt"
-    `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource]);
+                end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
+    `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource, isReserve ? true : false]);
 
     const newShift = result.rows[0];
 
@@ -1567,7 +1573,7 @@ v1.post('/shifts', requireAuth, async (req, res) => {
 
 v1.put('/shifts/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
-  const { userId, team, date, startTime, endTime, notes, source } = req.body || {};
+  const { userId, team, date, startTime, endTime, notes, source, isReserve } = req.body || {};
   if (!id) {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
@@ -1622,11 +1628,12 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
           start_time = COALESCE($4, start_time),
           end_time = COALESCE($5, end_time),
           notes = COALESCE($6, notes),
-          source = COALESCE($8, source, 'manual')
+          source = COALESCE($8, source, 'manual'),
+          is_reserve = COALESCE($9, is_reserve)
       WHERE id = $7
       RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-                end_time as "endTime", notes, source, created_at as "createdAt"
-    `, [userId, team, date, startTime, endTime, notes, id, shiftSource]);
+                end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
+    `, [userId, team, date, startTime, endTime, notes, id, shiftSource, isReserve !== undefined ? Boolean(isReserve) : null]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Dienst niet gevonden' });

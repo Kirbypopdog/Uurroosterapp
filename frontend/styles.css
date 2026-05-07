@@ -8363,6 +8363,33 @@ body[data-view-mode="day"] .timeline-day-cell {
     border-right: 3px solid #10b981; /* Green accent for manually edited */
 }
 
+.timeline-block.shift-reserve {
+    opacity: 0.75;
+    background-image: repeating-linear-gradient(
+        135deg,
+        transparent,
+        transparent 4px,
+        rgba(255,255,255,0.2) 4px,
+        rgba(255,255,255,0.2) 8px
+    );
+}
+
+.reserve-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.35);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    border-radius: 3px;
+    padding: 0 3px;
+    margin-right: 3px;
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+}
+
 /* Source indicator badge (optional, shown on hover) */
 .shift-source-badge {
     font-size: 0.7em;

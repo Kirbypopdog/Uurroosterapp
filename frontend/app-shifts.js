@@ -155,6 +155,8 @@ function openShiftModal(shift, canEdit) {
     DOM.shiftStart.value = shift.startTime;
     DOM.shiftEnd.value = shift.endTime;
     DOM.shiftNotes.value = shift.notes || '';
+    const reserveCheckbox = document.getElementById('shift-is-reserve');
+    if (reserveCheckbox) reserveCheckbox.checked = !!shift.isReserve;
 
     // Disable/enable form fields based on permissions
     const formFields = [
@@ -870,7 +872,8 @@ async function handleShiftSubmit(e) {
         date: DOM.shiftDate.value,
         startTime: DOM.shiftStart.value,
         endTime: DOM.shiftEnd.value,
-        notes: DOM.shiftNotes.value
+        notes: DOM.shiftNotes.value,
+        isReserve: document.getElementById('shift-is-reserve')?.checked || false
     };
 
     console.log('Shift data:', shiftData);
