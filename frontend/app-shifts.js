@@ -879,54 +879,56 @@ async function handleShiftSubmit(e) {
     };
 
     try {
-        const validation = validateShift(shiftData, AppState.editingShiftId);
-        console.log('Validation result:', validation);
+        // Als de gebruiker al een backend-override heeft bevestigd, sla frontend validatie over
+        if (!AppState._shiftBackendForce) {
+            const validation = validateShift(shiftData, AppState.editingShiftId);
 
-        if (!validation.isValid || validation.hasWarnings) {
-            // If user already confirmed (flag set), skip validation and proceed
-            if (AppState._shiftForceOverride) {
-                AppState._shiftForceOverride = false;
-                // Fall through to save
-            } else {
-                // Combine errors and warnings into one overview
-                let html = '<div class="conflict-resolution">';
+            if (!validation.isValid || validation.hasWarnings) {
+                // If user already confirmed (flag set), skip validation and proceed
+                if (AppState._shiftForceOverride) {
+                    AppState._shiftForceOverride = false;
+                    // Fall through to save
+                } else {
+                    // Combine errors and warnings into one overview
+                    let html = '<div class="conflict-resolution">';
 
-                // Show errors
-                validation.errors.forEach(error => {
-                    const suggestions = generateSuggestions(error, shiftData);
-                    html += `<div class="conflict-item">
-                        <div class="conflict-error">${escapeHtml(error.message)}</div>`;
-                    if (suggestions.length > 0) {
-                        html += '<div class="conflict-suggestions"><span class="suggestions-label">Suggesties:</span>';
-                        suggestions.forEach(s => {
-                            html += `<button type="button" class="btn btn-sm suggestion-btn"
-                                data-field="${escapeHtml(s.field)}"
-                                data-value="${s.value !== null ? escapeHtml(String(s.value)) : ''}"
-                                ${s.action ? `data-action="${escapeHtml(s.action)}"` : ''}
-                                onclick="applySuggestion(this)">${escapeHtml(s.label)}</button>`;
-                        });
+                    // Show errors
+                    validation.errors.forEach(error => {
+                        const suggestions = generateSuggestions(error, shiftData);
+                        html += `<div class="conflict-item">
+                            <div class="conflict-error">${escapeHtml(error.message)}</div>`;
+                        if (suggestions.length > 0) {
+                            html += '<div class="conflict-suggestions"><span class="suggestions-label">Suggesties:</span>';
+                            suggestions.forEach(s => {
+                                html += `<button type="button" class="btn btn-sm suggestion-btn"
+                                    data-field="${escapeHtml(s.field)}"
+                                    data-value="${s.value !== null ? escapeHtml(String(s.value)) : ''}"
+                                    ${s.action ? `data-action="${escapeHtml(s.action)}"` : ''}
+                                    onclick="applySuggestion(this)">${escapeHtml(s.label)}</button>`;
+                            });
+                            html += '</div>';
+                        }
                         html += '</div>';
-                    }
+                    });
+
+                    // Show warnings
+                    validation.warnings.forEach(warning => {
+                        html += `<div class="conflict-item">
+                            <div class="conflict-warning">${escapeHtml(warning.message)}</div>
+                        </div>`;
+                    });
+
                     html += '</div>';
-                });
+                    DOM.shiftValidationErrors.innerHTML = html;
+                    IconHelper.init(DOM.shiftValidationErrors);
 
-                // Show warnings
-                validation.warnings.forEach(warning => {
-                    html += `<div class="conflict-item">
-                        <div class="conflict-warning">${escapeHtml(warning.message)}</div>
-                    </div>`;
-                });
-
-                html += '</div>';
-                DOM.shiftValidationErrors.innerHTML = html;
-                IconHelper.init(DOM.shiftValidationErrors);
-
-                // Change submit button to indicate override
-                DOM.shiftSubmitBtn.textContent = 'Toch opslaan';
-                DOM.shiftSubmitBtn.classList.remove('btn-primary');
-                DOM.shiftSubmitBtn.classList.add('btn-warning');
-                AppState._shiftForceOverride = true;
-                return;
+                    // Change submit button to indicate override
+                    DOM.shiftSubmitBtn.textContent = 'Toch opslaan';
+                    DOM.shiftSubmitBtn.classList.remove('btn-primary');
+                    DOM.shiftSubmitBtn.classList.add('btn-warning');
+                    AppState._shiftForceOverride = true;
+                    return;
+                }
             }
         }
 
