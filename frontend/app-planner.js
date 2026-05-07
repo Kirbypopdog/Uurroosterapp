@@ -649,8 +649,10 @@ function renderTimelineView() {
 
                         const isDayView = AppState.viewMode === 'day';
 
-                        // Show overnight shifts from previous day (continuation) — always, not just in day view
-                        html += renderOvernightContinuation(emp.id, date, START_HOUR, TOTAL_HOURS);
+                        // Doorloop van nachtshift: enkel tonen op maandag (zondag→maandag weekgrens) of in dagweergave
+                        if (isDayView || dayOfWeek === 1) {
+                            html += renderOvernightContinuation(emp.id, date, START_HOUR, TOTAL_HOURS);
+                        }
 
                         // Render shifts that start on this day
                         shifts.forEach(shift => {
@@ -836,8 +838,10 @@ function renderTimelineView() {
 
                         const isDayView = AppState.viewMode === 'day';
 
-                        // Show overnight shifts from previous day (continuation) — always, not just in day view
-                        html += renderOvernightContinuation(emp.id, date, START_HOUR, TOTAL_HOURS);
+                        // Doorloop van nachtshift: enkel tonen op maandag (zondag→maandag weekgrens) of in dagweergave
+                        if (isDayView || dayOfWeek === 1) {
+                            html += renderOvernightContinuation(emp.id, date, START_HOUR, TOTAL_HOURS);
+                        }
 
                         // Render shifts that start on this day
                         shifts.forEach(shift => {
