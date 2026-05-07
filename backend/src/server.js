@@ -4412,7 +4412,10 @@ if (process.env.NODE_ENV !== 'test') {
   runMigrations()
     .then(() => archiveOldShifts())
     .catch(err => console.error('[startup] Migratie mislukt:', err.message))
-    .finally(() => {
+    .finally(async () => {
+      // Veiligheidsnet: kritieke kolommen altijd toevoegen, ook als migraties faalden
+      await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS is_reserve BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
+      await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
       app.listen(PORT, () => console.log(`API running on :${PORT}`));
     });
 }
