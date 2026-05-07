@@ -1555,12 +1555,23 @@ v1.post('/shifts', requireAuth, async (req, res) => {
     if (!validation.valid) return res.status(422).json({ error: validation.message });
 
     // Insert the new shift
-    const result = await pool.query(`
-      INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source, is_reserve)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-                end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
-    `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource, isReserve ? true : false]);
+    let result;
+    try {
+      result = await pool.query(`
+        INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source, is_reserve)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
+                  end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
+      `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource, isReserve ? true : false]);
+    } catch (insertErr) {
+      if (insertErr.code !== '42703') throw insertErr;
+      result = await pool.query(`
+        INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
+                  end_time as "endTime", notes, source, false as "isReserve", created_at as "createdAt"
+      `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource]);
+    }
 
     const newShift = result.rows[0];
 
@@ -1630,20 +1641,38 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
       if (!validation.valid) return res.status(422).json({ error: validation.message });
     }
 
-    const result = await pool.query(`
-      UPDATE shifts
-      SET user_id = COALESCE($1, user_id),
-          team = COALESCE($2, team),
-          date = COALESCE($3, date),
-          start_time = COALESCE($4, start_time),
-          end_time = COALESCE($5, end_time),
-          notes = COALESCE($6, notes),
-          source = COALESCE($8, source, 'manual'),
-          is_reserve = COALESCE($9, is_reserve)
-      WHERE id = $7
-      RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-                end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
-    `, [userId, team, date, startTime, endTime, notes, id, shiftSource, isReserve !== undefined ? Boolean(isReserve) : null]);
+    let result;
+    try {
+      result = await pool.query(`
+        UPDATE shifts
+        SET user_id = COALESCE($1, user_id),
+            team = COALESCE($2, team),
+            date = COALESCE($3, date),
+            start_time = COALESCE($4, start_time),
+            end_time = COALESCE($5, end_time),
+            notes = COALESCE($6, notes),
+            source = COALESCE($8, source, 'manual'),
+            is_reserve = COALESCE($9, is_reserve)
+        WHERE id = $7
+        RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
+                  end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
+      `, [userId, team, date, startTime, endTime, notes, id, shiftSource, isReserve !== undefined ? Boolean(isReserve) : null]);
+    } catch (updateErr) {
+      if (updateErr.code !== '42703') throw updateErr;
+      result = await pool.query(`
+        UPDATE shifts
+        SET user_id = COALESCE($1, user_id),
+            team = COALESCE($2, team),
+            date = COALESCE($3, date),
+            start_time = COALESCE($4, start_time),
+            end_time = COALESCE($5, end_time),
+            notes = COALESCE($6, notes),
+            source = COALESCE($8, source, 'manual')
+        WHERE id = $7
+        RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
+                  end_time as "endTime", notes, source, false as "isReserve", created_at as "createdAt"
+      `, [userId, team, date, startTime, endTime, notes, id, shiftSource]);
+    }
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Dienst niet gevonden' });
