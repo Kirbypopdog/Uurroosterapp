@@ -1117,12 +1117,40 @@ function calculateShiftHours(shift) {
     return Math.max(0, hours);
 }
 
+function _isOvernightWithAfterSleep(shift) {
+    const [startH] = shift.startTime.split(':').map(Number);
+    const [endH] = shift.endTime.split(':').map(Number);
+    return endH < startH && endH >= 7;
+}
+
+function _getAfterSleepHours(shift) {
+    const end = getShiftEndDateTime(shift);
+    const sleepEnd = parseDateTime(shift.date, '07:00');
+    sleepEnd.setDate(sleepEnd.getDate() + 1);
+    return Math.max(0, (end.getTime() - sleepEnd.getTime()) / (1000 * 60 * 60));
+}
+
 function getEmployeeHoursInPeriod(employeeId, startDate, endDate) {
     const shifts = getShiftsByEmployee(employeeId, startDate, endDate);
     let totalHours = 0;
 
     shifts.forEach(shift => {
-        totalHours += calculateShiftHours(shift);
+        let hours = calculateShiftHours(shift);
+        // Nachtshift op de laatste dag van de periode: uren na 07:00 horen bij de volgende periode
+        if (shift.date === endDate && _isOvernightWithAfterSleep(shift)) {
+            hours -= _getAfterSleepHours(shift);
+        }
+        totalHours += hours;
+    });
+
+    // Nachtshift op de dag vóór de startdatum: uren na 07:00 horen bij deze periode
+    const prevDay = new Date(startDate);
+    prevDay.setDate(prevDay.getDate() - 1);
+    const prevDayStr = formatDateYYYYMMDD(prevDay);
+    getShiftsByEmployee(employeeId, prevDayStr, prevDayStr).forEach(shift => {
+        if (_isOvernightWithAfterSleep(shift)) {
+            totalHours += _getAfterSleepHours(shift);
+        }
     });
 
     return totalHours;
