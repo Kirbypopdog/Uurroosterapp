@@ -192,34 +192,34 @@ function renderHomeAlerts(role) {
     const warnings = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const dayLabelsNL = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
     const maxConsecutive = DataStore.settings?.rules?.maxConsecutiveDays ?? 6;
-    const teams = DataStore.settings?.teams || {};
 
-    // 1. Onderbezetting komende 30 dagen per team
-    const coverageTeams = DataStore.settings?.coverageTeams || [];
+    // 1. Onderbezetting komende 30 dagen (op basis van bezettingsregels actief concept)
+    const understaffedDays = [];
     for (let i = 0; i < 30; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
         const dateStr = formatDateYYYYMMDD(d);
-        const dayLabel = dayLabelsNL[d.getDay()];
 
         if (isDayClosed(dateStr)) continue;
 
-        for (const [teamId, team] of Object.entries(teams)) {
-            if (coverageTeams.length > 0 && !coverageTeams.includes(teamId)) continue;
-            const teamEmps = (DataStore.users || []).filter(u =>
-                u.active !== false && u.role === 'medewerker' &&
-                (u.mainTeam === teamId || u.team_id === teamId || u.main_team === teamId)
-            );
-            if (teamEmps.length === 0) continue;
-            const teamShifts = DataStore.shifts.filter(s =>
-                s.team === teamId && (s.date || '').split('T')[0] === dateStr
-            );
-            if (teamShifts.length === 0) {
-                warnings.push({ level: 'warning', date: dateStr, text: `${dayLabel} ${formatDateShort(d)}: ${escapeHtml(team.name)} heeft geen diensten ingepland` });
+        const dayRules = typeof getStaffingRulesForDay === 'function' ? getStaffingRulesForDay(dateStr) : null;
+        if (!dayRules) continue;
+
+        let isUnderstaffed = false;
+        outer: for (const rule of dayRules) {
+            for (let h = rule.from; h < rule.to; h++) {
+                const { netto } = calcPlanningHourlyHeadcount(dateStr, h);
+                if (netto < rule.min) { isUnderstaffed = true; break outer; }
             }
         }
+        if (isUnderstaffed) understaffedDays.push(dateStr);
+    }
+    if (understaffedDays.length > 0) {
+        const label = understaffedDays.length === 1
+            ? '1 dag onderbezet in de komende 30 dagen'
+            : `${understaffedDays.length} dagen onderbezet in de komende 30 dagen`;
+        warnings.push({ level: 'warning', date: understaffedDays[0], text: label });
     }
 
     // 2. Medewerkers die max opeenvolgende dagen naderen (>= maxConsecutive - 1)
