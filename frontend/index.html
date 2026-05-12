@@ -4,9 +4,830 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Het Vlot - Roosterplanning</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232d6a4f'/><text x='16' y='23' font-size='20' text-anchor='middle' fill='white'>📋</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://unpkg.com/lucide@0.577.0" onerror="
+        var s=document.createElement('script');
+        s.src='https://cdn.jsdelivr.net/npm/lucide@0.577.0';
+        s.onerror=function(){document.documentElement.classList.add('no-lucide')};
+        document.head.appendChild(s);
+    "></script>
 </head>
 <body>
-    <div id="app">Loading...</div>
+    <!-- Login Scherm -->
+    <div id="login-container" class="container">
+        <div class="login-box">
+            <div class="logo">
+                <h1>Het Vlot</h1>
+                <p class="subtitle">Roosterplanning</p>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                <label for="username">Email</label>
+                <input type="email" id="username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Wachtwoord</label>
+                    <input type="password" id="password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary">Inloggen</button>
+            </form>
+            <p class="info-text">Gebruik je eigen accountgegevens om in te loggen</p>
+            <p class="info-text text-muted" style="font-size:12px;margin-top:8px">Wachtwoord vergeten? Neem contact op met je leidinggevende.</p>
+        </div>
+    </div>
+
+    <!-- Hoofdapplicatie -->
+    <div id="app-container" class="container hidden">
+        <!-- Sidebar toggle (CSS-only) -->
+        <input type="checkbox" id="sidebar-toggle" class="sidebar-toggle-input" aria-hidden="true">
+
+        <!-- Navigatie -->
+        <nav class="main-nav">
+            <div class="nav-left">
+                <label for="sidebar-toggle" class="sidebar-toggle-label" aria-label="Sidebar inklappen">
+                    <span class="sidebar-toggle-icon"></span>
+                </label>
+                <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu">
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                </button>
+                <h1 class="app-title">Het Vlot</h1>
+            </div>
+            <div class="nav-center" id="nav-menu">
+                <div class="nav-group-primary">
+                    <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i> Home</button>
+                    <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i> Planning</button>
+                    <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i> Afwezigheid</button>
+                    <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i> Ruilen</button>
+                </div>
+                <div class="nav-group-admin">
+                    <button class="nav-btn" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
+                    <button class="nav-btn" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster Bouwen</button>
+                    <button class="nav-btn" data-view="settings"><i data-lucide="settings" class="nav-icon"></i> Instellingen</button>
+                </div>
+            </div>
+            <div class="nav-right">
+                <div id="role-switcher" class="role-switcher hidden">
+                    <i data-lucide="flask-conical" class="lucide-sm role-switcher-icon"></i>
+                    <select id="role-switch-select">
+                        <option value="admin">Admin</option>
+                        <option value="roosterverantwoordelijke">Roosterverantwoordelijke</option>
+                        <option value="medewerker">Medewerker</option>
+                    </select>
+                </div>
+                <div class="user-menu" id="user-menu">
+                    <button class="user-menu-trigger" id="user-menu-trigger" aria-label="Ga naar profiel">
+                        <span class="avatar-circle" id="avatar-circle"></span>
+                        <span class="user-menu-name" id="user-menu-name"></span>
+                    </button>
+                    <button class="nav-logout-btn" id="logout-btn" aria-label="Uitloggen" title="Uitloggen">
+                        <i data-lucide="log-out" class="lucide-sm"></i>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Home View -->
+        <div id="home-view" class="view active">
+            <div id="home-content"></div>
+        </div>
+
+        <!-- Planning View -->
+        <div id="planning-view" class="view">
+            <div class="view-header">
+                <h2>Roosterplanning</h2>
+                <div class="header-actions">
+                    <div class="undo-redo-controls">
+                        <button id="undo-btn" class="btn btn-sm btn-secondary" disabled title="Ongedaan maken (Ctrl+Z)"><i data-lucide="undo-2" class="lucide-sm"></i> Ongedaan</button>
+                        <button id="redo-btn" class="btn btn-sm btn-secondary" disabled title="Opnieuw (Ctrl+Y)">Opnieuw <i data-lucide="redo-2" class="lucide-sm"></i></button>
+                    </div>
+                    <button id="add-shift-btn" class="btn btn-primary btn-primary-lg"><i data-lucide="plus" class="lucide-sm"></i> Dienst toevoegen</button>
+                </div>
+                <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
+            </div>
+
+            <div class="planning-controls" id="planning-controls-wrapper">
+                <div class="planning-controls-row">
+                    <div class="date-navigation">
+                        <button id="prev-week" class="btn" aria-label="Vorige week"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
+                        <button id="today-btn" class="btn">Vandaag</button>
+                        <button id="next-week" class="btn" aria-label="Volgende week"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+                    </div>
+                    <div id="current-period" class="period-display period-display--clickable" title="Klik om naar een datum te springen">
+                        <i data-lucide="calendar" class="lucide-xs period-calendar-icon"></i>
+                        <span id="current-period-text"></span>
+                        <input type="date" id="week-jump-input" class="week-jump-input" aria-label="Spring naar week">
+                    </div>
+                    <div class="view-toggle-controls">
+                        <button class="view-toggle-btn active" data-mode="week">Week</button>
+                        <button class="view-toggle-btn" data-mode="day">Dag</button>
+                    </div>
+                </div>
+                <div class="planning-controls-row hidden" id="planning-filters-row">
+                    <div class="team-toggles" id="team-toggles">
+                        <!-- Dynamisch gevuld via renderTeamToggles() -->
+                    </div>
+                    <div class="planning-filter-buttons">
+                        <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
+                        <label class="toggle-switch-label" title="Verberg medewerkers zonder diensten">
+                            <input type="checkbox" id="filter-shifts-toggle" class="toggle-switch-input">
+                            <span class="toggle-switch-slider"></span>
+                            <span class="toggle-switch-text">Verberg lege rijen</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div id="coverage-heatmap-container"></div>
+            <div id="validation-alerts" class="alerts-container"></div>
+
+            <!-- Mobile day navigation (alleen zichtbaar op mobiel) -->
+            <div id="mobile-day-nav" class="mobile-day-nav">
+                <button id="mobile-prev-day" class="btn btn-sm" aria-label="Vorige dag"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
+                <div id="mobile-day-display" class="mobile-day-display">
+                    <span class="mobile-day-name">Ma</span>
+                    <span class="mobile-day-date">1 jan</span>
+                    <input type="date" id="mobile-date-picker" class="mobile-date-picker">
+                </div>
+                <button id="mobile-next-day" class="btn btn-sm" aria-label="Volgende dag"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+            </div>
+
+            <div id="roster-calendar" class="calendar-container"></div>
+            <div class="section-loading-overlay hidden">
+                <div class="section-loading-spinner"></div>
+                <span class="section-loading-text"></span>
+            </div>
+        </div>
+
+        <!-- Medewerkers View -->
+        <div id="employees-view" class="view">
+            <div class="view-header">
+                <h2>Medewerkers</h2>
+                <button id="add-employee-btn" class="btn btn-primary">+ Medewerker toevoegen</button>
+            </div>
+            <div class="employees-filters">
+                <div class="team-toggles" id="employee-team-toggles">
+                    <!-- Dynamisch gevuld via renderEmployeeTeamToggles() -->
+                </div>
+            </div>
+            <div id="employees-list" class="employees-grid"></div>
+            <div class="section-loading-overlay hidden">
+                <div class="section-loading-spinner"></div>
+                <span class="section-loading-text"></span>
+            </div>
+        </div>
+
+        <!-- Profiel View -->
+        <div id="profile-view" class="view">
+            <div class="view-header">
+                <h2>Profiel</h2>
+            </div>
+            <div id="profile-content"></div>
+        </div>
+
+        <!-- Afwezigheid View -->
+        <div id="availability-view" class="view">
+            <div class="view-header">
+                <h2>Afwezigheid</h2>
+                <p class="view-description">Registreer verlof, ziekte en andere afwezigheden</p>
+            </div>
+            <div id="availability-content"></div>
+            <div class="section-loading-overlay hidden">
+                <div class="section-loading-spinner"></div>
+                <span class="section-loading-text"></span>
+            </div>
+        </div>
+
+        <!-- Roosterbouwer View -->
+        <div id="builder-view" class="view">
+            <div class="view-header">
+                <h2>Rooster Bouwen</h2>
+                <p class="view-description">Bouw het basisrooster (week 1 &amp; 2) voor je team</p>
+            </div>
+            <div id="builder-content"></div>
+        </div>
+
+        <!-- Dienstenruil View -->
+        <div id="swaps-view" class="view">
+            <div class="view-header">
+                <h2>Dienstenruil</h2>
+                <p class="view-description">Overzicht van dienstruilverzoeken tussen medewerkers</p>
+            </div>
+            <div id="swaps-list"></div>
+            <div class="section-loading-overlay hidden">
+                <div class="section-loading-spinner"></div>
+                <span class="section-loading-text"></span>
+            </div>
+        </div>
+
+        <!-- Instellingen View -->
+        <div id="settings-view" class="view">
+            <div class="view-header">
+                <h2>Instellingen</h2>
+            </div>
+            <div class="settings-tabs" id="settings-tabs">
+                <!-- Dynamically rendered based on role -->
+            </div>
+            <div class="settings-content" id="settings-tab-content">
+                <!-- Dynamically rendered based on active tab -->
+            </div>
+        </div>
+
+        <!-- Footer verwijderd in redesign -->
+    </div>
+
+    <!-- Modal: Dienst toevoegen/bewerken -->
+    <div id="shift-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="shift-modal-title">Dienst toevoegen</h2>
+                <span class="modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <form id="shift-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="shift-employee">Medewerker *</label>
+                        <select id="shift-employee" required></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="shift-team">Team *</label>
+                        <select id="shift-team" required>
+                            <option value="vlot1">Vlot 1</option>
+                            <option value="vlot2">Vlot 2</option>
+                            <option value="cargo">Cargo</option>
+                            <option value="overkoepelend">Overkoepelend</option>
+                            <option value="jobstudent">Jobstudenten/Stagiairs</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="shift-date">Datum *</label>
+                        <input type="date" id="shift-date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="shift-template">Template</label>
+                        <select id="shift-template">
+                            <option value="">-- Kies template --</option>
+                            <option value="vroeg">Vroege dienst (7:30-16:00)</option>
+                            <option value="laat">Late dienst (16:00-23:00)</option>
+                            <option value="nacht">Nachtdienst (23:00-9:00)</option>
+                            <option value="lang">Lange dienst (9:00-21:00)</option>
+                            <option value="custom">Aangepast</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="shift-start">Starttijd *</label>
+                        <input type="time" id="shift-start" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="shift-end">Eindtijd *</label>
+                        <input type="time" id="shift-end" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="shift-notes">Notities</label>
+                    <textarea id="shift-notes" rows="2" placeholder="Bijzonderheden of opmerkingen..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="shift-is-reserve">
+                        <span>Reserve</span>
+                    </label>
+                </div>
+                <div id="shift-validation-errors" class="validation-errors"></div>
+                <div class="modal-actions modal-actions-split">
+                    <div class="modal-actions-left">
+                        <button type="button" class="btn btn-danger hidden" id="shift-delete-btn">Verwijderen</button>
+                    </div>
+                    <div class="modal-actions-right">
+                        <button type="button" class="btn btn-secondary" id="shift-cancel-btn">Annuleren</button>
+                        <button type="submit" class="btn btn-primary" id="shift-submit-btn">Opslaan</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Activiteit toevoegen/bewerken -->
+    <div id="activity-modal" class="modal hidden">
+        <div class="modal-content modal-content--sm">
+            <div class="modal-header">
+                <h2 id="activity-modal-title">Activiteit toevoegen</h2>
+                <span class="modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <form id="activity-form">
+                <input type="hidden" id="activity-id">
+                <input type="hidden" id="activity-user-id">
+                <input type="hidden" id="activity-shift-id">
+                <input type="hidden" id="activity-date">
+                <input type="hidden" id="activity-shift-start">
+                <input type="hidden" id="activity-shift-end">
+                <div class="form-group">
+                    <label for="activity-type">Type *</label>
+                    <select id="activity-type" required>
+                        <option value="">-- Kies type --</option>
+                        <option value="oudergesprek">Oudergesprek</option>
+                        <option value="vorming">Vorming</option>
+                        <option value="overleg">Overleg</option>
+                        <option value="afspraak">Afspraak</option>
+                        <option value="vergadering">Vergadering</option>
+                        <option value="andere">Andere</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="activity-start">Starttijd *</label>
+                        <input type="time" id="activity-start" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="activity-end">Eindtijd *</label>
+                        <input type="time" id="activity-end" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="activity-description">Omschrijving</label>
+                    <input type="text" id="activity-description" placeholder="Bijv. Oudergesprek met Fam. Jansen">
+                </div>
+                <div class="modal-actions modal-actions-split">
+                    <div class="modal-actions-left">
+                        <button type="button" class="btn btn-danger hidden" id="activity-delete-btn">Verwijderen</button>
+                    </div>
+                    <div class="modal-actions-right">
+                        <button type="button" class="btn btn-secondary" id="activity-cancel-btn">Annuleren</button>
+                        <button type="submit" class="btn btn-primary" id="activity-submit-btn">Opslaan</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Waarschuwingen details -->
+    <div id="warning-details-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Waarschuwingen</h2>
+                <span class="modal-close" id="warning-details-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <div id="warning-details-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Fouten details -->
+    <div id="error-details-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Fouten</h2>
+                <span class="modal-close" id="error-details-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <div id="error-details-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Medewerker toevoegen/bewerken -->
+    <div id="employee-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="employee-modal-title">Medewerker toevoegen</h2>
+                <span class="modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <form id="employee-form">
+                <!-- Editable profile fields (shown for admin/roosterverantwoordelijke) -->
+                <div id="employee-profile-fields" class="employee-profile-fields">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="employee-name">Naam</label>
+                            <input type="text" id="employee-name" class="form-input" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="employee-email">E-mail</label>
+                            <input type="email" id="employee-email" class="form-input" placeholder="Optioneel — welkomstmail wordt verzonden zodra e-mail ingevuld is">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="employee-main-team">Team</label>
+                            <select id="employee-main-team" class="select-input" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="employee-contract">Contracturen per week</label>
+                            <input type="number" id="employee-contract" class="form-input" min="0" max="60" step="0.5" placeholder="0">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="employee-active">Status</label>
+                            <select id="employee-active" class="select-input">
+                                <option value="true">Actief</option>
+                                <option value="false">Inactief</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Week tabs - dynamisch gevuld door generateWeekScheduleHTML() -->
+                <div class="week-tabs" id="employee-week-tabs">
+                </div>
+
+                <div id="week-schedule-container" class="week-schedule-tabs-content">
+                    <!-- Dynamisch gegenereerd door JavaScript -->
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-danger mr-auto hidden" id="employee-delete-btn">Verwijderen</button>
+                    <button type="button" class="btn btn-secondary" id="employee-cancel-btn">Annuleren</button>
+                    <button type="submit" class="btn btn-primary">Opslaan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Afwezigheid registreren -->
+    <div id="availability-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="availability-modal-title">Afwezigheid registreren</h2>
+                <span class="modal-close" id="availability-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div id="availability-warning"></div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="absence-employee">Medewerker</label>
+                    <select id="absence-employee" class="select-input">
+                        <option value="">-- Selecteer medewerker --</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="absence-start-date">Van datum *</label>
+                        <input type="date" id="absence-start-date" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="absence-end-date">Tot datum *</label>
+                        <input type="date" id="absence-end-date" class="form-control" required>
+                    </div>
+                </div>
+
+                <div id="absence-date-info" class="date-range-info"></div>
+
+                <div class="form-group">
+                    <label for="absence-type">Type afwezigheid *</label>
+                    <select id="absence-type" class="select-input" required>
+                        <option value="">-- Selecteer type --</option>
+                        <option value="verlof">Verlof</option>
+                        <option value="ziek">Ziekte</option>
+                        <option value="overuren">Overuren opnemen</option>
+                        <option value="vorming">Vorming/Opleiding</option>
+                        <option value="andere">Andere</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="availability-reason">Opmerking</label>
+                    <textarea id="availability-reason" rows="2" placeholder="Optioneel: extra toelichting..."></textarea>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger mr-auto hidden" id="remove-absence-btn">Verwijderen</button>
+                <button type="button" class="btn btn-secondary" id="availability-cancel-btn">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="availability-save-btn">Opslaan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Dienst Ruilen -->
+    <div id="swap-request-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Dienst Ruilen</h2>
+                <span class="modal-close" id="swap-request-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <!-- Shift Preview -->
+                <div class="swap-shifts-preview">
+                    <div class="swap-shift-card">
+                        <h3>Jouw shift</h3>
+                        <div id="swap-requester-shift-preview"></div>
+                    </div>
+                    <div class="swap-arrow"><i data-lucide="arrow-left-right"></i></div>
+                    <div class="swap-shift-card">
+                        <h3>Gewenste shift</h3>
+                        <div id="swap-target-shift-preview"></div>
+                    </div>
+                </div>
+
+                <!-- Target Selection -->
+                <div class="form-group">
+                    <label for="swap-target-employee">Met wie wil je ruilen? *</label>
+                    <select id="swap-target-employee" class="select-input" required>
+                        <option value="">-- Selecteer collega --</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="swap-target-shift">Welke shift wil je van deze collega? *</label>
+                    <select id="swap-target-shift" class="select-input" required disabled>
+                        <option value="">-- Selecteer eerst een collega --</option>
+                    </select>
+                </div>
+
+                <!-- Message -->
+                <div class="form-group">
+                    <label for="swap-message">Bericht (optioneel)</label>
+                    <textarea id="swap-message" class="form-control" rows="3" placeholder="Bijv. Graag ruilen, familiebezoek"></textarea>
+                </div>
+
+                <!-- Validation Display -->
+                <div id="swap-validation-display" class="hidden"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="swap-request-cancel-btn">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="swap-request-submit-btn">Verzoek indienen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Ruilverzoek Beoordelen -->
+    <div id="swap-review-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Ruilverzoek Beoordelen</h2>
+                <span class="modal-close" id="swap-review-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <!-- Request Info -->
+                <div id="swap-review-info" class="form-group">
+                    <p><strong>Aangevraagd door:</strong> <span id="swap-review-requester"></span></p>
+                    <p><strong>Datum aanvraag:</strong> <span id="swap-review-created"></span></p>
+                </div>
+
+                <!-- Shift Preview -->
+                <div class="swap-shifts-preview">
+                    <div class="swap-shift-card">
+                        <h3><span id="swap-review-requester-name"></span></h3>
+                        <div id="swap-review-requester-shift"></div>
+                    </div>
+                    <div class="swap-arrow"><i data-lucide="arrow-left-right"></i></div>
+                    <div class="swap-shift-card">
+                        <h3><span id="swap-review-target-name"></span></h3>
+                        <div id="swap-review-target-shift"></div>
+                    </div>
+                </div>
+
+                <!-- Message from requester -->
+                <div class="form-group hidden" id="swap-review-message-group">
+                    <label>Bericht van aanvrager:</label>
+                    <div id="swap-review-message" class="message-display"></div>
+                </div>
+
+                <!-- Validation Display -->
+                <div id="swap-review-validation" class="my-md"></div>
+
+                <!-- Response Notes -->
+                <div class="form-group">
+                    <label for="swap-response-notes">Reactie <span id="swap-response-notes-required" class="text-danger hidden">*</span></label>
+                    <textarea id="swap-response-notes" class="form-control" rows="3" placeholder="Toelichting (optioneel bij goedkeuring, verplicht bij afwijzing)"></textarea>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="swap-review-cancel-btn">Annuleren</button>
+                <button type="button" class="btn btn-danger" id="swap-review-reject-btn">Afwijzen</button>
+                <button type="button" class="btn btn-success" id="swap-review-approve-btn">Goedkeuren</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Shift Afstaan Choice -->
+    <div id="shift-afstaan-choice-modal" class="modal hidden">
+        <div class="modal-content modal-content--md">
+            <div class="modal-header">
+                <h2>Shift afstaan</h2>
+                <span class="modal-close" id="shift-afstaan-choice-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <p class="modal-intro-text">
+                    Hoe wil je deze shift afstaan?
+                </p>
+
+                <div class="choice-stack">
+                    <button type="button" class="btn btn-primary btn-choice" id="choice-swap-btn">
+                        <div class="btn-choice-title"><i data-lucide="repeat-2" class="lucide-sm icon-inline"></i> Ruilen met collega</div>
+                        <div class="btn-choice-desc">Zoek een collega om shifts te ruilen (jij neemt hun shift over)</div>
+                    </button>
+
+                    <button type="button" class="btn btn-secondary btn-choice" id="choice-takeover-btn">
+                        <div class="btn-choice-title"><i data-lucide="hand" class="lucide-sm icon-inline"></i> Iemand zoeken</div>
+                        <div class="btn-choice-desc">Stel je shift beschikbaar voor iedereen (zonder ruilen)</div>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="shift-afstaan-choice-cancel">Annuleren</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Iemand Zoeken (Takeover Request) -->
+    <div id="takeover-request-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Iemand Zoeken voor Shift</h2>
+                <span class="modal-close" id="takeover-request-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <p class="modal-intro-text">
+                    Je shift wordt beschikbaar gesteld aan alle collega's. Iedereen kan deze overnemen.
+                </p>
+
+                <!-- Shift Preview -->
+                <div class="form-group">
+                    <label>Jouw shift:</label>
+                    <div id="takeover-shift-preview"></div>
+                </div>
+
+                <!-- Message -->
+                <div class="form-group">
+                    <label for="takeover-message">Bericht (optioneel)</label>
+                    <textarea id="takeover-message" class="form-control" rows="3" placeholder=""></textarea>
+                </div>
+
+                <p class="info-box">
+                    <i data-lucide="lightbulb" class="lucide-sm icon-inline"></i> Zodra iemand je shift accepteert, krijgt die persoon de shift toegewezen.
+                </p>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="takeover-request-cancel-btn">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="takeover-request-submit-btn">Verzoek plaatsen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirm-modal" class="modal hidden">
+        <div class="modal-content confirm-modal-content">
+            <div class="modal-header">
+                <h2 id="confirm-modal-title">Bevestig actie</h2>
+            </div>
+            <div class="modal-body">
+                <p id="confirm-modal-message"></p>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="confirm-modal-cancel">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="confirm-modal-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Input Prompt Modal (replaces browser prompt()) -->
+    <div id="input-prompt-modal" class="modal hidden">
+        <div class="modal-content input-prompt-content">
+            <label id="input-prompt-message" class="input-prompt-label"></label>
+            <input type="text" id="input-prompt-value" class="form-input">
+            <div class="input-prompt-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="input-prompt-cancel">Annuleren</button>
+                <button type="button" class="btn btn-primary btn-sm" id="input-prompt-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Roosterbouwer Dienst Kiezen -->
+    <div id="builder-shift-modal" class="modal hidden">
+        <div class="modal-content modal-content--xs">
+            <div class="modal-header">
+                <h2 id="builder-shift-modal-title">Dienst toewijzen</h2>
+                <span class="modal-close" id="builder-shift-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <div id="builder-shift-employee-info" class="form-group mb-md"></div>
+                <div class="form-group">
+                    <label>Dienst type</label>
+                    <div id="builder-shift-templates" class="builder-template-buttons"></div>
+                </div>
+                <div id="builder-custom-times" class="form-row hidden">
+                    <div class="form-group">
+                        <label for="builder-shift-start">Starttijd</label>
+                        <input type="time" id="builder-shift-start" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="builder-shift-end">Eindtijd</label>
+                        <input type="time" id="builder-shift-end" class="form-input">
+                    </div>
+                </div>
+                <div id="builder-shift-validation" class="validation-errors"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger mr-auto" id="builder-shift-clear">Leegmaken</button>
+                <button type="button" class="btn btn-secondary" id="builder-shift-cancel">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="builder-shift-save">Toewijzen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Week kopiëren modal (builder) -->
+    <div id="copy-week-modal" class="modal hidden">
+        <div class="modal-content modal-content--sm">
+            <div class="modal-header">
+                <h2>Week kopiëren</h2>
+                <span class="modal-close" id="copy-week-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="copy-week-source">Van (bron)</label>
+                        <select id="copy-week-source" class="form-input"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="copy-week-target">Naar (doel)</label>
+                        <select id="copy-week-target" class="form-input"></select>
+                    </div>
+                </div>
+                <div id="copy-week-conflict-row" class="hidden">
+                    <p id="copy-week-conflict-info" class="text-warning mb-sm"></p>
+                    <div class="form-group">
+                        <label class="radio-label"><input type="radio" name="copy-mode" value="replace" checked> Bestaande toewijzingen verwijderen en vervangen</label>
+                        <label class="radio-label"><input type="radio" name="copy-mode" value="fill"> Alleen lege dagen invullen</label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="copy-week-cancel">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="copy-week-confirm">Kopiëren</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Draft diff modal -->
+    <div id="draft-diff-modal" class="modal hidden">
+        <div class="modal-content modal-content--lg">
+            <div class="modal-header">
+                <h2>Concepten vergelijken</h2>
+                <span class="modal-close" id="draft-diff-modal-close"><i data-lucide="x"></i></span>
+            </div>
+            <div class="modal-body">
+                <div class="form-row mb-md">
+                    <div class="form-group">
+                        <label class="form-label">Concept A</label>
+                        <select id="draft-diff-a" class="form-input"></select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Concept B</label>
+                        <select id="draft-diff-b" class="form-input"></select>
+                    </div>
+                    <div class="form-group" style="flex:0">
+                        <label class="form-label">&nbsp;</label>
+                        <button type="button" class="btn btn-primary" id="draft-diff-run">Vergelijk</button>
+                    </div>
+                </div>
+                <div id="draft-diff-result"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="draft-diff-close">Sluiten</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="config/settings.js"></script>
+    <script src="data.js"></script>
+    <script src="validation.js"></script>
+    <script src="drag-handler.js"></script>
+    <script src="app-globals.js"></script>
+    <script src="app-permissions.js"></script>
+    <script src="app-ui.js"></script>
+    <script src="app-auth.js"></script>
+    <script src="app-nav.js"></script>
+    <script src="app-planner.js"></script>
+    <script src="app-shifts.js"></script>
+    <script src="app-swaps.js"></script>
+    <script src="app-employees.js"></script>
+    <script src="app-availability.js"></script>
+    <script src="app-builder.js"></script>
+    <script src="app-builder-editors.js"></script>
+    <script src="app-builder-drafts.js"></script>
+    <script src="app-settings.js"></script>
+    <script src="app-admin.js"></script>
+    <script src="app-init.js"></script>
+    <script>
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+    </script>
+
+    <!-- Data loading overlay -->
+    <div id="data-loading-overlay" class="data-loading-overlay hidden">
+        <div class="data-loading-spinner"></div>
+        <span class="data-loading-text">Bezig met opslaan...</span>
+    </div>
 </body>
 </html>
