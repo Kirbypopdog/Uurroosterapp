@@ -154,17 +154,24 @@ function renderHome() {
         item.addEventListener('click', () => switchView('swaps'));
     });
 
-    // Alert-items met datum: klik navigeert naar die week in planning-tab
-    container.querySelectorAll('.alert-item[data-date]').forEach(item => {
-        item.style.cursor = 'pointer';
-        item.addEventListener('click', () => {
-            setCurrentWeek(parseDateOnly(item.dataset.date));
+    // Alert-item header: toggle expand/collapse
+    container.querySelectorAll('.alert-item-header').forEach(header => {
+        header.addEventListener('click', () => {
+            header.closest('.alert-item').classList.toggle('alert-item--open');
+        });
+    });
+
+    // "Ga naar dag"-knop: navigeer naar die week in planning-tab
+    container.querySelectorAll('.alert-action-goto').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            setCurrentWeek(parseDateOnly(btn.dataset.date));
             switchView('planning');
         });
     });
 
-    // Dismiss-knoppen: verberg melding permanent
-    container.querySelectorAll('.alert-dismiss-btn').forEach(btn => {
+    // "Negeren"-knop: verberg melding permanent
+    container.querySelectorAll('.alert-action-dismiss').forEach(btn => {
         btn.addEventListener('click', e => {
             e.stopPropagation();
             dismissAlert(btn.dataset.alertKey);
@@ -203,7 +210,6 @@ function renderHomeAlerts(role) {
     const maxConsecutive = DataStore.settings?.rules?.maxConsecutiveDays ?? 6;
     const dayLabelsNL = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
 
-    // Dismissed alert keys (permanent, opgeslagen in settings, max 45 dagen geldig)
     const dismissedKeys = new Set(
         (DataStore.settings.dismissedAlerts || [])
             .filter(d => (Date.now() - new Date(d.dismissedAt).getTime()) < 45 * 24 * 60 * 60 * 1000)
@@ -211,34 +217,45 @@ function renderHomeAlerts(role) {
     );
     const fmtH = h => `${String(Math.floor(h)).padStart(2,'0')}:${h%1 === 0.5 ? '30' : '00'}`;
 
-    // 1. Onderbezetting komende 30 dagen (op basis van bezettingsregels actief concept)
+    // 1. Onderbezetting komende 30 dagen
     for (let i = 0; i < 30; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
         const dateStr = formatDateYYYYMMDD(d);
         if (isDayClosed(dateStr)) continue;
-
         const dayRules = typeof getStaffingRulesForDay === 'function' ? getStaffingRulesForDay(dateStr) : null;
         if (!dayRules) continue;
 
-        let firstBadH = null, lastBadH = null, firstNetto = null, firstMin = null;
+        const badWindows = [];
+        let wStart = null, wEnd = null, wNetto = null, wMin = null;
         for (let h = 7; h < 24; h += 0.5) {
             let required = -1;
             for (const rule of dayRules) {
                 if (h >= rule.from && h < rule.to) required = Math.max(required, rule.min);
             }
-            if (required < 0) continue;
+            if (required < 0) {
+                if (wStart !== null) { badWindows.push({ from: wStart, to: wEnd, netto: wNetto, min: wMin }); wStart = null; }
+                continue;
+            }
             const { netto } = calcPlanningHourlyHeadcount(dateStr, h);
             if (netto < required) {
-                if (firstBadH === null) { firstBadH = h; firstNetto = netto; firstMin = required; }
-                lastBadH = h + 0.5;
+                if (wStart === null) { wStart = h; wNetto = netto; wMin = required; }
+                wEnd = h + 0.5;
+            } else {
+                if (wStart !== null) { badWindows.push({ from: wStart, to: wEnd, netto: wNetto, min: wMin }); wStart = null; }
             }
         }
-        if (firstBadH !== null) {
+        if (wStart !== null) badWindows.push({ from: wStart, to: wEnd, netto: wNetto, min: wMin });
+
+        if (badWindows.length > 0) {
             const key = `unstaffed:${dateStr}`;
             if (!dismissedKeys.has(key)) {
-                warnings.push({ level: 'warning', date: dateStr, key,
-                    text: `${dayLabelsNL[d.getDay()]} ${formatDateShort(d)}: onderbezet ${fmtH(firstBadH)}–${fmtH(lastBadH)} (${firstNetto}/${firstMin} mdw)` });
+                const label = `${dayLabelsNL[d.getDay()]} ${formatDateShort(d)}`;
+                const text = badWindows.length === 1
+                    ? `${label}: onderbezet ${fmtH(badWindows[0].from)}–${fmtH(badWindows[0].to)}`
+                    : `${label}: ${badWindows.length} onderbezette tijdvensters`;
+                const detail = badWindows.map(w => `${fmtH(w.from)}–${fmtH(w.to)}: ${w.netto}/${w.min} mdw`).join('<br>');
+                warnings.push({ level: 'warning', date: dateStr, key, text, detail });
             }
         }
     }
@@ -256,7 +273,15 @@ function renderHomeAlerts(role) {
                 const key = `11h:${empId}:${date}`;
                 if (seen11h.has(key) || dismissedKeys.has(key)) continue;
                 seen11h.add(key);
-                warnings.push({ level: 'error', date, key, text: err.message });
+                const emp = (DataStore.users || []).find(u => u.id === Number(empId));
+                const empName = escapeHtml(emp?.name || `Medewerker #${empId}`);
+                const s1 = err.shift1, s2 = err.shift2;
+                const text = `11-uur: ${empName} (${formatDateShort(parseDateOnly(date))})`;
+                let detail = escapeHtml(err.message);
+                if (s1 && s2) {
+                    detail += `<br><span class="alert-detail-sub">Dienst 1: ${escapeHtml(s1.date)} eindigt ${escapeHtml(s1.endTime || '?')} · Dienst 2: ${escapeHtml(s2.date)} start ${escapeHtml(s2.startTime || '?')}</span>`;
+                }
+                warnings.push({ level: 'error', date, key, text, detail });
             }
         }
     }
@@ -281,51 +306,50 @@ function renderHomeAlerts(role) {
         if (dismissedKeys.has(key)) continue;
         const emp = (DataStore.users || []).find(u => u.id === Number(empId));
         const dObj = parseDateOnly(dateStr);
-        warnings.push({ level: 'warning', date: dateStr, key,
-            text: `${escapeHtml(emp?.name || 'Medewerker')}: shift op ${formatDateShort(dObj)} maar ${absenceLabels[absence.type] || 'afwezig'}` });
+        const absLabel = absenceLabels[absence.type] || 'afwezig';
+        const text = `${escapeHtml(emp?.name || 'Medewerker')}: shift op ${formatDateShort(dObj)} maar ${absLabel}`;
+        const parts = [];
+        if (s.startTime && s.endTime) parts.push(`Dienst: ${escapeHtml(s.startTime)}–${escapeHtml(s.endTime)}`);
+        parts.push(`Afwezigheid: ${escapeHtml(absLabel)}`);
+        warnings.push({ level: 'warning', date: dateStr, key, text, detail: parts.join('<br>') });
     }
 
-    // 4. Medewerkers die max opeenvolgende dagen overschrijden
+    // 4. Opeenvolgende dagen
     const activeEmployees = (DataStore.users || []).filter(u => u.active !== false && u.role === 'medewerker');
     for (const emp of activeEmployees) {
-        const windowStart = new Date(today);
-        windowStart.setDate(today.getDate() - 7);
-        const windowEnd = new Date(today);
-        windowEnd.setDate(today.getDate() + 30);
+        const windowStart = new Date(today); windowStart.setDate(today.getDate() - 7);
+        const windowEnd = new Date(today); windowEnd.setDate(today.getDate() + 30);
         const wStartStr = formatDateYYYYMMDD(windowStart);
         const wEndStr = formatDateYYYYMMDD(windowEnd);
-
         const empShiftDates = new Set(
             DataStore.shifts
                 .filter(s => Number(s.employeeId || s.userId) === emp.id &&
-                    (s.date || '').split('T')[0] >= wStartStr &&
-                    (s.date || '').split('T')[0] <= wEndStr)
+                    (s.date || '').split('T')[0] >= wStartStr && (s.date || '').split('T')[0] <= wEndStr)
                 .map(s => (s.date || '').split('T')[0])
         );
-
-        let run = 0, maxRun = 0, runStart = null, longestStart = null;
+        let run = 0, maxRun = 0, runStart = null, longestStart = null, curDates = [], longestDates = [];
         for (let i = -7; i <= 30; i++) {
-            const d = new Date(today);
-            d.setDate(today.getDate() + i);
+            const d = new Date(today); d.setDate(today.getDate() + i);
             const ds = formatDateYYYYMMDD(d);
             if (empShiftDates.has(ds)) {
-                if (run === 0) runStart = ds;
-                run++;
-                if (run > maxRun) { maxRun = run; longestStart = runStart; }
-            } else {
-                run = 0;
-            }
+                if (run === 0) { runStart = ds; curDates = []; }
+                run++; curDates.push(ds);
+                if (run > maxRun) { maxRun = run; longestStart = runStart; longestDates = [...curDates]; }
+            } else { run = 0; curDates = []; }
         }
         if (maxRun >= maxConsecutive) {
             const key = `consecutive:${emp.id}:${longestStart}`;
             if (!dismissedKeys.has(key)) {
-                warnings.push({ level: 'warning', date: longestStart, key,
-                    text: `${escapeHtml(emp.name)} werkt ${maxRun} dagen op rij (maximum: ${maxConsecutive})` });
+                const text = `${escapeHtml(emp.name)} werkt ${maxRun} dagen op rij (maximum: ${maxConsecutive})`;
+                const detail = longestDates.map(ds => {
+                    const dObj = parseDateOnly(ds); return `${dayLabelsNL[dObj.getDay()]} ${formatDateShort(dObj)}`;
+                }).join('<br>');
+                warnings.push({ level: 'warning', date: longestStart, key, text, detail });
             }
         }
     }
 
-    // 5. Ruilverzoeken ouder dan 48u zonder reactie
+    // 5. Ruilverzoeken ouder dan 48u
     const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000);
     const oldPending = (DataStore.swapRequests || []).filter(r =>
         r.status === 'pending' && new Date(r.createdAt || r.created_at) < cutoff48h
@@ -333,8 +357,9 @@ function renderHomeAlerts(role) {
     if (oldPending.length > 0) {
         const key = 'old-swaps';
         if (!dismissedKeys.has(key)) {
+            const count = oldPending.length;
             warnings.push({ level: 'info', key,
-                text: `${oldPending.length} ruilverzoek${oldPending.length !== 1 ? 'en' : ''} wacht${oldPending.length === 1 ? '' : 'en'} al meer dan 48u op goedkeuring` });
+                text: `${count} ruilverzoek${count !== 1 ? 'en' : ''} wacht${count === 1 ? '' : 'en'} al meer dan 48u op goedkeuring` });
         }
     }
 
@@ -362,12 +387,25 @@ function renderHomeAlerts(role) {
     for (const cat of alertCategoryConfig) alertGroups.set(cat.id, []);
     for (const w of warnings) alertGroups.get(getAlertCategory(w)).push(w);
 
-    const renderAlertItem = w => `
-        <div class="alert-item alert-item--${w.level}"${w.date ? ` data-date="${w.date}"` : ''}>
-            <i data-lucide="${w.level === 'error' ? 'alert-circle' : w.level === 'info' ? 'info' : 'alert-triangle'}" class="lucide-xs"></i>
-            <span>${w.text}</span>
-            ${w.key ? `<button class="alert-dismiss-btn" data-alert-key="${w.key}" title="Verberg"><i data-lucide="x" class="lucide-xs"></i></button>` : ''}
+    const renderAlertItem = w => {
+        const icon = w.level === 'error' ? 'alert-circle' : w.level === 'info' ? 'info' : 'alert-triangle';
+        return `<div class="alert-item alert-item--${w.level}"${w.date ? ` data-date="${w.date}"` : ''}>
+            <div class="alert-item-header">
+                <i data-lucide="${icon}" class="lucide-xs alert-item-icon"></i>
+                <span class="alert-item-title">${w.text}</span>
+                <i data-lucide="chevron-down" class="lucide-xs alert-item-chevron"></i>
+            </div>
+            <div class="alert-item-body">
+                <div class="alert-item-body-inner">
+                    ${w.detail ? `<div class="alert-item-detail">${w.detail}</div>` : ''}
+                    <div class="alert-item-actions">
+                        ${w.date ? `<button class="alert-action-goto" data-date="${w.date}"><i data-lucide="map-pin" class="lucide-xs"></i> Ga naar dag</button>` : ''}
+                        ${w.key ? `<button class="alert-action-dismiss" data-alert-key="${w.key}"><i data-lucide="eye-off" class="lucide-xs"></i> Negeren</button>` : ''}
+                    </div>
+                </div>
+            </div>
         </div>`;
+    };
 
     let bodyHtml = '';
     for (const cat of alertCategoryConfig) {
