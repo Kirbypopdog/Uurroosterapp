@@ -124,23 +124,8 @@ function validateTeamAssignment(employeeId, teamId) {
         return { errors, warnings };
     }
 
-    // Check if employee belongs to the assigned team
-    // Admins and roosterverantwoordelijken may freely assign cross-team shifts
-    if (teamId) {
-        const mainTeam = employee.mainTeam || employee.main_team;
-        const currentRole = typeof getEffectiveRole === 'function' ? getEffectiveRole() : null;
-        const isPrivileged = ['admin', 'roosterverantwoordelijke'].includes(currentRole);
-
-        if (mainTeam !== teamId && !isPrivileged) {
-            const teamName = DataStore.settings.teams?.[teamId]?.name || teamId;
-            const employeeTeamName = DataStore.settings.teams?.[mainTeam]?.name || mainTeam || 'Onbekend';
-            warnings.push({
-                type: ValidationRules.WARNING,
-                rule: 'Team mismatch',
-                message: `${employee.name} hoort bij ${employeeTeamName}, niet bij ${teamName}. Een roosterverantwoordelijke of admin moet deze shift goedkeuren/aanpassen.`
-            });
-        }
-    }
+    // Cross-team shifts zijn toegestaan voor alle rollen: medewerkers wijzen alleen
+    // zichzelf toe, en admins/leads kennen bewust iemand aan een ander team toe.
 
     return { errors, warnings };
 }
