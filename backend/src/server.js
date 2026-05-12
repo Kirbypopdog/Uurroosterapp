@@ -32,9 +32,12 @@ const DEFAULT_RESET_PASSWORD = process.env.DEFAULT_RESET_PASSWORD;
 app.use(helmet());
 app.set('trust proxy', 1);
 
-// CORS: restrict to frontend origin in production, open in development
+// CORS: restrict to frontend origin(s) in production, open in development
+const allowedOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map(o => o.trim())
+  : ['https://uurrooster-frontend.onrender.com', 'https://vlot-dashboard.site'];
 const corsOptions = process.env.NODE_ENV === 'production'
-  ? { origin: process.env.FRONTEND_URL || 'https://uurrooster-frontend.onrender.com', credentials: true }
+  ? { origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)), credentials: true }
   : {};
 app.use(cors(corsOptions));
 app.use(express.json());
