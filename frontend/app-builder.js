@@ -1154,6 +1154,13 @@ function openBuilderShiftModal(employeeId, dayIndex) {
 
 // --- Builder: Loading ---
 
+function builderGridHasData() {
+    const allWeeks = { ...AppState.builderGridByWeek, [AppState.builderWeekNumber]: AppState.builderGrid };
+    return Object.values(allWeeks).some(weekGrid =>
+        Object.values(weekGrid || {}).some(dayMap => Object.keys(dayMap || {}).length > 0)
+    );
+}
+
 function loadBuilderFromBaseSchedules() {
     const weekNumber = AppState.builderWeekNumber;
 
@@ -1565,31 +1572,48 @@ function attachBuilderEventListeners(container) {
 
     // Load buttons
     const loadBase = document.getElementById('builder-load-base');
-    if (loadBase) loadBase.addEventListener('click', loadBuilderFromBaseSchedules);
+    if (loadBase) loadBase.addEventListener('click', () => {
+        if (builderGridHasData()) {
+            showConfirm('Het huidige rooster wordt overschreven met het basisrooster. Ben je zeker?', 'Basisrooster laden', {
+                confirmText: 'Ja, laden'
+            }).then(ok => { if (ok) loadBuilderFromBaseSchedules(); });
+        } else {
+            loadBuilderFromBaseSchedules();
+        }
+    });
 
     const copyWeekBtn = document.getElementById('builder-copy-week');
     if (copyWeekBtn) copyWeekBtn.addEventListener('click', openCopyWeekModal);
 
     const loadBlank = document.getElementById('builder-load-blank');
     if (loadBlank) loadBlank.addEventListener('click', () => {
-        AppState.builderGrid = {};
-        AppState.builderGridByWeek = {};
-        AppState.builderStaffingRules = {};
-        AppState.builderStaffingRulesByWeek = {};
-        AppState.builderMeetings = {};
-        AppState.builderLoadedDraftId = null;
-        AppState.builderLoadedDraftName = null;
-        // Reset naar 1 week, alle dagen open
-        AppState.builderPattern = {
-            cycleLength: 1,
-            referenceDate: getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '',
-            weeks: { '1': { closedDays: [], label: 'alle dagen open' } }
-        };
-        AppState.builderConceptType = 'basis';
-        AppState.builderHolidayPeriodId = null;
+        const doReset = () => {
+            AppState.builderGrid = {};
+            AppState.builderGridByWeek = {};
+            AppState.builderStaffingRules = {};
+            AppState.builderStaffingRulesByWeek = {};
+            AppState.builderMeetings = {};
+            AppState.builderLoadedDraftId = null;
+            AppState.builderLoadedDraftName = null;
+            AppState.builderPattern = {
+                cycleLength: 1,
+                referenceDate: getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '',
+                weeks: { '1': { closedDays: [], label: 'alle dagen open' } }
+            };
+            AppState.builderConceptType = 'basis';
+            AppState.builderHolidayPeriodId = null;
             AppState.builderIsDirty = false;
-        renderBuilder();
-        showToast('Grid leeggemaakt', 'info');
+            renderBuilder();
+            showToast('Grid leeggemaakt', 'info');
+        };
+        if (builderGridHasData()) {
+            showConfirm('Alle shifts in het huidige rooster worden gewist. Ben je zeker?', 'Leeg beginnen', {
+                confirmText: 'Ja, leegmaken',
+                danger: true
+            }).then(ok => { if (ok) doReset(); });
+        } else {
+            doReset();
+        }
     });
 
     // Builder drag & drop (handles click, transfer, resize)
