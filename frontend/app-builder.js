@@ -248,6 +248,18 @@ function getBuilderWeekLabel(weekNumber) {
     return closedDays.length > 0 ? formatClosedDays(closedDays) : 'Alle dagen open';
 }
 
+// Returns the Monday Date of week N in a vakantie concept (based on holiday period startDate)
+function getBuilderVakantieWeekStart(weekNumber) {
+    const hp = (DataStore.settings.holidayPeriods || []).find(p => String(p.id) === String(AppState.builderHolidayPeriodId));
+    if (!hp) return null;
+    const start = parseDateOnly(hp.startDate);
+    const dow = start.getDay(); // 0=Sun
+    const daysToMonday = dow === 0 ? -6 : 1 - dow;
+    const monday = new Date(start);
+    monday.setDate(start.getDate() + daysToMonday + (weekNumber - 1) * 7);
+    return monday;
+}
+
 // Collect pattern data from the UI inputs (without saving)
 function ensureBuilderPattern() {
     if (!AppState.builderPattern) {
@@ -337,9 +349,23 @@ function renderBuilderControls(role, userTeam) {
                         const isVakantie = AppState.builderConceptType === 'vakantie';
                         let btns = '';
                         for (let w = 1; w <= cl; w++) {
-                            const label = getBuilderWeekLabel(w);
+                            let weekBtnLabel;
+                            if (isVakantie) {
+                                const ws = getBuilderVakantieWeekStart(w);
+                                if (ws) {
+                                    const we = new Date(ws);
+                                    we.setDate(ws.getDate() + 6);
+                                    const fmtS = ws.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+                                    const fmtE = we.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+                                    weekBtnLabel = `${fmtS} – ${fmtE}`;
+                                } else {
+                                    weekBtnLabel = getBuilderWeekLabel(w);
+                                }
+                            } else {
+                                weekBtnLabel = getBuilderWeekLabel(w);
+                            }
                             btns += `<button class="btn ${wn === w ? 'btn-primary' : 'btn-secondary'} btn-sm builder-week-btn" id="builder-week-${w}">
-                                Week ${w} (${escapeHtml(label)})
+                                Week ${w} (${escapeHtml(weekBtnLabel)})
                                 ${!isVakantie && cl > 1 ? `<span class="builder-week-remove" data-week="${w}" title="Week verwijderen">&times;</span>` : ''}
                             </button>`;
                         }
@@ -358,6 +384,7 @@ function renderBuilderControls(role, userTeam) {
                     <button class="btn btn-secondary btn-sm" id="builder-load-base">Huidig basisrooster laden</button>
                     <button class="btn btn-secondary btn-sm" id="builder-load-blank">Leeg beginnen</button>
                     ${getBuilderCycleLength() > 1 ? `<button class="btn btn-secondary btn-sm" id="builder-copy-week"><i data-lucide="copy" class="lucide-xs"></i> Kopieer week</button>` : ''}
+                    ${AppState.builderConceptType === 'vakantie' ? `<button class="btn btn-sm ${AppState.builderHideOnLeave ? 'btn-primary' : 'btn-secondary'} builder-hide-leave-toggle" id="builder-hide-leave-toggle"><i data-lucide="${AppState.builderHideOnLeave ? 'eye-off' : 'eye'}" class="lucide-xs"></i> ${AppState.builderHideOnLeave ? 'Verlof verborgen' : 'Verberg verlof'}</button>` : ''}
                 </div>
                 ${AppState.builderLoadedDraftName ? `
                     <div class="builder-loaded-draft">
@@ -382,7 +409,28 @@ function renderBuilderGrid(role, userTeam) {
     }
     employees = employees.sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
 
-    if (employees.length === 0) {
+    // Filter medewerkers met verlof in de huidige vakantieweek
+    let hiddenOnLeaveCount = 0;
+    if (AppState.builderConceptType === 'vakantie' && AppState.builderHideOnLeave) {
+        const weekStart = getBuilderVakantieWeekStart(AppState.builderWeekNumber);
+        if (weekStart) {
+            const weekDates = Array.from({ length: 7 }, (_, i) => {
+                const d = new Date(weekStart);
+                d.setDate(d.getDate() + i);
+                return d.toISOString().slice(0, 10);
+            });
+            employees = employees.filter(emp => {
+                const hasLeave = weekDates.some(dateStr => {
+                    const avail = getAvailability(emp.id, dateStr);
+                    return avail && avail.type === 'verlof';
+                });
+                if (hasLeave) hiddenOnLeaveCount++;
+                return !hasLeave;
+            });
+        }
+    }
+
+    if (employees.length === 0 && hiddenOnLeaveCount === 0) {
         return '<div class="builder-empty"><i data-lucide="users" class="empty-state-icon"></i>Geen medewerkers gevonden voor het geselecteerde team</div>';
     }
 
@@ -430,9 +478,13 @@ function renderBuilderGrid(role, userTeam) {
         return dayIndex === 6 ? 0 : dayIndex + 1;
     }
 
+    // Bereken weekdatums voor vakantie builder
+    const isVakantie = AppState.builderConceptType === 'vakantie';
+    const vakantieWeekStart = isVakantie ? getBuilderVakantieWeekStart(AppState.builderWeekNumber) : null;
+
     // Header
     html += '<div class="builder-grid-header">';
-    html += '<div class="builder-name-header">Medewerker</div>';
+    html += `<div class="builder-name-header">Medewerker${hiddenOnLeaveCount > 0 ? `<span class="builder-leave-hidden-badge" title="${hiddenOnLeaveCount} medewerker(s) verborgen wegens verlof">${hiddenOnLeaveCount} verlof</span>` : ''}</div>`;
     dayNames.forEach((name, i) => {
         let headerClass = 'builder-day-header builder-day-toggle';
         const jsDow = dayIndexToJsDow(i);
@@ -442,7 +494,13 @@ function renderBuilderGrid(role, userTeam) {
         if (isClosed) headerClass += ' closed';
         const label = isClosed ? `${name}` : name;
         const lockIcon = isClosed ? ` <span class="day-lock-icon">${IconHelper.html(ICONS.lock, 'xs')}</span>` : '';
-        html += `<div class="${headerClass}" data-jsdow="${jsDow}" title="Klik om ${isClosed ? 'te openen' : 'te sluiten'}"><span class="day-name">${label}${lockIcon}</span></div>`;
+        let dateLabel = '';
+        if (vakantieWeekStart) {
+            const d = new Date(vakantieWeekStart);
+            d.setDate(d.getDate() + i);
+            dateLabel = `<span class="builder-day-date">${d.getDate()} ${d.toLocaleDateString('nl-BE', { month: 'short' })}</span>`;
+        }
+        html += `<div class="${headerClass}" data-jsdow="${jsDow}" title="Klik om ${isClosed ? 'te openen' : 'te sluiten'}"><span class="day-name">${label}${lockIcon}</span>${dateLabel}</div>`;
     });
     html += '<div class="builder-hours-header">Uren</div>';
     html += '</div>';
@@ -1344,6 +1402,15 @@ function attachBuilderEventListeners(container) {
             if (!isNaN(jsDow)) toggleBuilderClosedDay(jsDow);
         });
     });
+
+    // Verlof verbergen toggle (alleen vakantie builder)
+    const hideLeaveToggle = document.getElementById('builder-hide-leave-toggle');
+    if (hideLeaveToggle) {
+        hideLeaveToggle.addEventListener('click', () => {
+            AppState.builderHideOnLeave = !AppState.builderHideOnLeave;
+            renderBuilder();
+        });
+    }
 
     // Vakantie verantwoordelijke picker (per week)
     const vakantieRespSelect = document.getElementById('builder-vakantie-responsible');
