@@ -400,7 +400,7 @@ function renderHomeAlerts(role) {
                     ${w.detail ? `<div class="alert-item-detail">${w.detail}</div>` : ''}
                     <div class="alert-item-actions">
                         ${w.date ? `<button class="alert-action-goto" data-date="${w.date}"><i data-lucide="map-pin" class="lucide-xs"></i> Ga naar dag</button>` : ''}
-                        ${w.key ? `<button class="alert-action-dismiss" data-alert-key="${w.key}"><i data-lucide="eye-off" class="lucide-xs"></i> Negeren</button>` : ''}
+                        ${w.key && ['admin', 'roosterverantwoordelijke'].includes(role) ? `<button class="alert-action-dismiss" data-alert-key="${w.key}"><i data-lucide="eye-off" class="lucide-xs"></i> Negeren</button>` : ''}
                     </div>
                 </div>
             </div>
