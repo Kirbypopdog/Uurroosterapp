@@ -131,8 +131,40 @@ function validateTeamAssignment(employeeId, teamId) {
 }
 
 function validateMinimumStaffing(date, teamId = null) {
-    // Bezettingsregels worden nu beheerd via de roosterbouwer (range-based per uur/dag)
-    return { errors: [], warnings: [] };
+    const warnings = [];
+    if (typeof getStaffingRulesForDay !== 'function' || typeof calcPlanningHourlyHeadcount !== 'function') {
+        return { errors: [], warnings };
+    }
+    const dayRules = getStaffingRulesForDay(date);
+    if (!dayRules || dayRules.length === 0) return { errors: [], warnings };
+
+    let wStart = null, wEnd = null, wNetto = null, wMin = null;
+    const badWindows = [];
+    for (let h = 7; h < 24; h += 0.5) {
+        let required = -1;
+        for (const rule of dayRules) {
+            if (h >= rule.from && h < rule.to) required = Math.max(required, rule.min);
+        }
+        if (required < 0) {
+            if (wStart !== null) { badWindows.push({ from: wStart, to: wEnd, netto: wNetto, min: wMin }); wStart = null; }
+            continue;
+        }
+        const { netto } = calcPlanningHourlyHeadcount(date, h);
+        if (netto < required) {
+            if (wStart === null) { wStart = h; wNetto = netto; wMin = required; }
+            wEnd = h + 0.5;
+        } else {
+            if (wStart !== null) { badWindows.push({ from: wStart, to: wEnd, netto: wNetto, min: wMin }); wStart = null; }
+        }
+    }
+    if (wStart !== null) badWindows.push({ from: wStart, to: wEnd, netto: wNetto, min: wMin });
+
+    if (badWindows.length > 0) {
+        const fmtH = h => `${String(Math.floor(h)).padStart(2,'0')}:${h%1 === 0.5 ? '30' : '00'}`;
+        const detail = badWindows.map(w => `${fmtH(w.from)}–${fmtH(w.to)}: ${w.netto}/${w.min} mdw`).join(', ');
+        warnings.push({ rule: 'onderbezetting', message: `Onderbezet: ${detail}` });
+    }
+    return { errors: [], warnings };
 }
 
 function shiftOverlapsNightWindow(shift, targetDate) {

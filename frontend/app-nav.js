@@ -217,54 +217,25 @@ function renderHomeAlerts(role) {
     );
     const fmtH = h => `${String(Math.floor(h)).padStart(2,'0')}:${h%1 === 0.5 ? '30' : '00'}`;
 
-    // 1. Onderbezetting komende 30 dagen
-    for (let i = 0; i < 30; i++) {
-        const d = new Date(today);
-        d.setDate(today.getDate() + i);
-        const dateStr = formatDateYYYYMMDD(d);
-        if (isDayClosed(dateStr)) continue;
-        const dayRules = typeof getStaffingRulesForDay === 'function' ? getStaffingRulesForDay(dateStr) : null;
-        if (!dayRules) continue;
-
-        const badWindows = [];
-        let wStart = null, wEnd = null, wNetto = null, wMin = null;
-        for (let h = 7; h < 24; h += 0.5) {
-            let required = -1;
-            for (const rule of dayRules) {
-                if (h >= rule.from && h < rule.to) required = Math.max(required, rule.min);
-            }
-            if (required < 0) {
-                if (wStart !== null) { badWindows.push({ from: wStart, to: wEnd, netto: wNetto, min: wMin }); wStart = null; }
-                continue;
-            }
-            const { netto } = calcPlanningHourlyHeadcount(dateStr, h);
-            if (netto < required) {
-                if (wStart === null) { wStart = h; wNetto = netto; wMin = required; }
-                wEnd = h + 0.5;
-            } else {
-                if (wStart !== null) { badWindows.push({ from: wStart, to: wEnd, netto: wNetto, min: wMin }); wStart = null; }
-            }
-        }
-        if (wStart !== null) badWindows.push({ from: wStart, to: wEnd, netto: wNetto, min: wMin });
-
-        if (badWindows.length > 0) {
-            const key = `unstaffed:${dateStr}`;
-            if (!dismissedKeys.has(key)) {
-                const label = `${dayLabelsNL[d.getDay()]} ${formatDateShort(d)}`;
-                const text = badWindows.length === 1
-                    ? `${label}: onderbezet`
-                    : `${label}: ${badWindows.length} onderbezette tijdvensters`;
-                const detail = badWindows.map(w => `${fmtH(w.from)}–${fmtH(w.to)}: ${w.netto}/${w.min} mdw`).join('<br>');
-                warnings.push({ level: 'warning', date: dateStr, key, text, detail });
-            }
-        }
-    }
-
-    // 2. 11-uur schendingen in komende 30 dagen
+    // 1+2. Onderbezetting én 11-uur schendingen via getValidationSummary (komende 30 dagen)
     const rangeStart = formatDateYYYYMMDD(today);
     const rangeEnd30 = formatDateYYYYMMDD(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 29));
     if (typeof getValidationSummary === 'function') {
         const summary = getValidationSummary(rangeStart, rangeEnd30);
+
+        // Onderbezetting uit warnings
+        for (const [date, issues] of Object.entries(summary.dates || {})) {
+            for (const w of (issues.warnings || [])) {
+                if (w.rule !== 'onderbezetting') continue;
+                const key = `unstaffed:${date}`;
+                if (dismissedKeys.has(key)) continue;
+                const d = parseDateOnly(date);
+                const label = `${dayLabelsNL[d.getDay()]} ${formatDateShort(d)}`;
+                warnings.push({ level: 'warning', date, key,
+                    text: `${label}: onderbezet`,
+                    detail: escapeHtml(w.message.replace('Onderbezet: ', '')) });
+            }
+        }
         const seen11h = new Set();
         for (const [date, issues] of Object.entries(summary.dates || {})) {
             for (const err of (issues.errors || [])) {
