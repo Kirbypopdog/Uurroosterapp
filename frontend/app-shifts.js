@@ -55,6 +55,21 @@ function renderShiftCard(shift) {
     </div>`;
 }
 
+function populateShiftTemplateDropdown() {
+    const sel = DOM.shiftTemplate;
+    if (!sel) return;
+    const templates = DataStore.settings.shiftTemplates || {};
+    sel.innerHTML = '<option value="">-- Kies template --</option>';
+    Object.entries(templates).forEach(([key, t]) => {
+        const label = t.name || key;
+        const times = ` (${t.start}–${t.end})`;
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = label + times;
+        sel.appendChild(opt);
+    });
+}
+
 function openAddShiftModal() {
     AppState.editingShiftId = null;
     DOM.shiftModalTitle.textContent = 'Dienst toevoegen';
@@ -62,6 +77,7 @@ function openAddShiftModal() {
     DOM.shiftValidationErrors.innerHTML = '';
     DOM.shiftDate.value = formatDateYYYYMMDD(new Date());
     DOM.shiftDeleteBtn.classList.add('hidden');
+    populateShiftTemplateDropdown();
 
     // Populate dropdown with filtered employees
     populateEmployeeDropdown();
@@ -145,8 +161,9 @@ function openShiftModal(shift, canEdit) {
     // Set modal title
     DOM.shiftModalTitle.textContent = canEdit ? 'Dienst bewerken' : 'Dienst bekijken';
 
-    // Populate employee dropdown
+    // Populate dropdowns
     populateEmployeeDropdown();
+    populateShiftTemplateDropdown();
 
     // Fill form with shift data
     DOM.shiftEmployee.value = shift.employeeId;
