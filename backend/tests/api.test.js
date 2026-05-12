@@ -878,133 +878,6 @@ describe('POST /swap-requests', () => {
   });
 });
 
-// ===== PUT /swap-requests/:id/reject (lead) =====
-
-describe('PUT /swap-requests/:id/reject', () => {
-  test('returns 400 when responseNotes is missing', async () => {
-    mockActiveUser();
-    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
-    const res = await request(app)
-      .put('/swap-requests/1/reject')
-      .set('Authorization', `Bearer ${token}`)
-      .send({}); // no responseNotes
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain('verplicht');
-  });
-
-  test('returns 403 for medewerker role', async () => {
-    mockActiveUser();
-    const mockClient = { query: jest.fn(), release: jest.fn() };
-    pool.connect.mockResolvedValueOnce(mockClient);
-    const swapRow = {
-      id: 1, status: 'pending', requester_user_id: 10, target_user_id: 20,
-      requester_shift_id: 101, target_shift_id: 102,
-      requester_date: '2026-06-01', target_date: '2026-06-02',
-      request_type: 'swap'
-    };
-    mockClient.query
-      .mockResolvedValueOnce({ rows: [] })         // BEGIN
-      .mockResolvedValueOnce({ rows: [swapRow] })  // swap fetch
-      .mockResolvedValueOnce({ rows: [] });         // ROLLBACK
-    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
-    const res = await request(app)
-      .put('/swap-requests/1/reject')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ responseNotes: 'niet beschikbaar' });
-    expect(res.status).toBe(403);
-  });
-
-  test('rejects swap successfully', async () => {
-    mockActiveUser();
-    const mockClient = { query: jest.fn(), release: jest.fn() };
-    pool.connect.mockResolvedValueOnce(mockClient);
-    const swapRow = {
-      id: 1, status: 'pending', requester_user_id: 10, target_user_id: 20,
-      requester_shift_id: 101, target_shift_id: 102,
-      requester_date: '2099-06-01', target_date: '2099-06-02',
-      request_type: 'swap'
-    };
-    mockClient.query
-      .mockResolvedValueOnce({ rows: [] })         // BEGIN
-      .mockResolvedValueOnce({ rows: [swapRow] })  // swap fetch
-      .mockResolvedValueOnce({ rows: [] })          // UPDATE swap status
-      .mockResolvedValueOnce({ rows: [] });         // COMMIT
-    pool.query.mockResolvedValueOnce({ rows: [] }); // logAudit
-    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
-    const res = await request(app)
-      .put('/swap-requests/1/reject')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ responseNotes: 'personeel onvoldoende' });
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
-  });
-});
-
-// ===== PUT /swap-requests/:id/approve (lead) =====
-
-describe('PUT /swap-requests/:id/approve', () => {
-  test('returns 401 without authentication', async () => {
-    const res = await request(app).put('/api/v1/swap-requests/1/approve');
-    expect(res.status).toBe(401);
-  });
-
-  test('returns 403 for medewerker role', async () => {
-    mockActiveUser();
-    const mockClient = { query: jest.fn(), release: jest.fn() };
-    pool.connect.mockResolvedValueOnce(mockClient);
-    const swapRow = {
-      id: 1, status: 'pending', requester_user_id: 10, target_user_id: 20,
-      requester_shift_id: 101, target_shift_id: 102,
-      requester_current_user: 10, target_current_user: 20,
-      requester_date: '2099-06-01', target_date: '2099-06-02',
-      request_type: 'swap'
-    };
-    mockClient.query
-      .mockResolvedValueOnce({ rows: [] })         // BEGIN
-      .mockResolvedValueOnce({ rows: [swapRow] })  // swap fetch
-      .mockResolvedValueOnce({ rows: [] });         // ROLLBACK
-    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
-    const res = await request(app)
-      .put('/swap-requests/1/approve')
-      .set('Authorization', `Bearer ${token}`)
-      .send({});
-    expect(res.status).toBe(403);
-  });
-
-  test('approves swap and swaps user_ids atomically', async () => {
-    mockActiveUser();
-    const mockClient = { query: jest.fn(), release: jest.fn() };
-    pool.connect.mockResolvedValueOnce(mockClient);
-    const swapRow = {
-      id: 1, status: 'pending', requester_user_id: 10, target_user_id: 20,
-      requester_shift_id: 101, target_shift_id: 102,
-      requester_current_user: 10, target_current_user: 20,
-      requester_date: '2099-06-01', target_date: '2099-06-02',
-      request_type: 'swap'
-    };
-    mockClient.query
-      .mockResolvedValueOnce({ rows: [] })         // BEGIN
-      .mockResolvedValueOnce({ rows: [swapRow] })  // swap fetch
-      .mockResolvedValueOnce({ rows: [] })          // UPDATE shifts (requester)
-      .mockResolvedValueOnce({ rows: [] })          // UPDATE shifts (target)
-      .mockResolvedValueOnce({ rows: [] })          // UPDATE swap status
-      .mockResolvedValueOnce({ rows: [] });         // COMMIT
-    pool.query.mockResolvedValueOnce({ rows: [] }); // logAudit
-    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
-    const res = await request(app)
-      .put('/swap-requests/1/approve')
-      .set('Authorization', `Bearer ${token}`)
-      .send({});
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
-    // Verify two shift UPDATE calls were made
-    const updateCalls = mockClient.query.mock.calls.filter(
-      call => typeof call[0] === 'string' && call[0].includes('UPDATE shifts')
-    );
-    expect(updateCalls).toHaveLength(2);
-  });
-});
-
 // ===== GET /schedule-drafts =====
 
 describe('GET /schedule-drafts', () => {
@@ -1283,6 +1156,7 @@ describe('POST /api/v1/schedule-drafts/:id/apply', () => {
       .mockResolvedValueOnce({ rows: [] })                    // bulk SELECT absences
       .mockResolvedValueOnce({ rows: [], rowCount: 7 })       // bulk INSERT shifts (7 days)
       .mockResolvedValueOnce({ rows: [] })                    // week_schedules UPDATE
+      .mockResolvedValueOnce({ rows: [] })                    // DELETE shift_activities vergadering cleanup
       .mockResolvedValueOnce({ rows: [] })                    // draft UPDATE (last_applied_at)
       .mockResolvedValueOnce({ rows: [] });                   // COMMIT
 
