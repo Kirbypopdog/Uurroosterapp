@@ -153,6 +153,15 @@ function renderHome() {
         item.style.cursor = 'pointer';
         item.addEventListener('click', () => switchView('swaps'));
     });
+
+    // Alert-items met datum: klik navigeert naar die week in planning-tab
+    container.querySelectorAll('.alert-item[data-date]').forEach(item => {
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', () => {
+            setCurrentWeek(parseDateOnly(item.dataset.date));
+            switchView('planning');
+        });
+    });
 }
 
 function getOnboardingStatus() {
@@ -183,44 +192,41 @@ function renderHomeAlerts(role) {
     const warnings = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const dayLabelsNL = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
     const maxConsecutive = DataStore.settings?.rules?.maxConsecutiveDays ?? 6;
-    const teams = DataStore.settings?.teams || {};
 
-    // 1. Onderbezetting komende 7 dagen per team
-    const coverageTeams = DataStore.settings?.coverageTeams || [];
-    for (let i = 0; i < 7; i++) {
+    // 1. Onderbezetting komende 30 dagen (op basis van bezettingsregels actief concept)
+    const dayLabelsNL = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
+    for (let i = 0; i < 30; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
         const dateStr = formatDateYYYYMMDD(d);
-        const dayLabel = dayLabelsNL[d.getDay()];
 
         if (isDayClosed(dateStr)) continue;
 
-        for (const [teamId, team] of Object.entries(teams)) {
-            if (coverageTeams.length > 0 && !coverageTeams.includes(teamId)) continue;
-            const teamEmps = (DataStore.users || []).filter(u =>
-                u.active !== false && u.role === 'medewerker' &&
-                (u.mainTeam === teamId || u.team_id === teamId || u.main_team === teamId)
-            );
-            if (teamEmps.length === 0) continue;
-            const teamShifts = DataStore.shifts.filter(s =>
-                s.team === teamId && (s.date || '').split('T')[0] === dateStr
-            );
-            if (teamShifts.length === 0) {
-                warnings.push({ level: 'warning', text: `${dayLabel} ${formatDateShort(d)}: ${escapeHtml(team.name)} heeft geen diensten ingepland` });
+        const dayRules = typeof getStaffingRulesForDay === 'function' ? getStaffingRulesForDay(dateStr) : null;
+        if (!dayRules) continue;
+
+        let isUnderstaffed = false;
+        outer: for (const rule of dayRules) {
+            for (let h = rule.from; h < rule.to; h += 0.5) {
+                const { netto } = calcPlanningHourlyHeadcount(dateStr, h);
+                if (netto < rule.min) { isUnderstaffed = true; break outer; }
             }
+        }
+        if (isUnderstaffed) {
+            const dayLabel = dayLabelsNL[d.getDay()];
+            warnings.push({ level: 'warning', date: dateStr, text: `${dayLabel} ${formatDateShort(d)}: onderbezet` });
         }
     }
 
     // 2. Medewerkers die max opeenvolgende dagen naderen (>= maxConsecutive - 1)
     const activeEmployees = (DataStore.users || []).filter(u => u.active !== false && u.role === 'medewerker');
     for (const emp of activeEmployees) {
-        // Check a 21-day window centred on today
+        // Check a window from 7 days back to 30 days ahead (matches onderbezettingsscope)
         const windowStart = new Date(today);
         windowStart.setDate(today.getDate() - 7);
         const windowEnd = new Date(today);
-        windowEnd.setDate(today.getDate() + 13);
+        windowEnd.setDate(today.getDate() + 30);
         const startStr = formatDateYYYYMMDD(windowStart);
         const endStr = formatDateYYYYMMDD(windowEnd);
 
@@ -235,7 +241,7 @@ function renderHomeAlerts(role) {
         // Find longest consecutive run touching today or future
         let run = 0;
         let maxRun = 0;
-        for (let i = -7; i <= 13; i++) {
+        for (let i = -7; i <= 30; i++) {
             const d = new Date(today);
             d.setDate(today.getDate() + i);
             if (empShiftDates.has(formatDateYYYYMMDD(d))) {
@@ -262,7 +268,7 @@ function renderHomeAlerts(role) {
     if (warnings.length === 0) return '';
 
     const items = warnings.map(w => `
-        <div class="alert-item alert-item--${w.level}">
+        <div class="alert-item alert-item--${w.level}"${w.date ? ` data-date="${w.date}"` : ''}>
             <i data-lucide="${w.level === 'info' ? 'info' : 'alert-triangle'}" class="lucide-xs"></i>
             <span>${w.text}</span>
         </div>`).join('');

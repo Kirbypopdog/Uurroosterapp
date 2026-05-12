@@ -132,25 +132,50 @@ function renderCoverageHeatmap() {
     weekDates.forEach(date => {
         const d = parseDateOnly(date);
         const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-        const closed = isWeekend && typeof isWeekendOpen === 'function' && !isWeekendOpen(date);
+        const manualClosed = typeof isDayClosed === 'function' && isDayClosed(date);
+        const closed = manualClosed || (isWeekend && typeof isWeekendOpen === 'function' && !isWeekendOpen(date));
 
         html += `<div class="coverage-heatmap-cell${closed ? ' closed' : ''}" data-date="${date}"
             onclick="showHeatmapDetail(null, '${date}')">`;
 
         if (!closed) {
+            const dayRules = typeof getStaffingRulesForDay === 'function' ? getStaffingRulesForDay(date) : null;
+
             for (let h = 7; h < 24; h += 0.5) {
                 const { bruto, netto } = calcPlanningHourlyHeadcount(date, h);
+
+                let required = -1;
+                if (dayRules) {
+                    for (const rule of dayRules) {
+                        if (h >= rule.from && h < rule.to)
+                            required = Math.max(required, rule.min);
+                    }
+                }
+
                 let segClass = 'heatmap-seg';
-                if (netto >= 2) segClass += ' seg-ok';
-                else if (netto > 0) segClass += ' seg-warn';
-                else segClass += ' seg-danger';
+                if (required < 0) {
+                    segClass += ' seg-none';
+                } else if (netto >= required) {
+                    segClass += ' seg-ok';
+                } else if (netto > 0) {
+                    segClass += ' seg-warn';
+                } else {
+                    segClass += ' seg-danger';
+                }
 
                 const leftPct = ((h - 7) / 17) * 100;
                 const widthPct = (0.5 / 17) * 100;
                 const timeLabel = formatStaffingHour(h);
-                const tooltipText = netto < bruto
-                    ? `${timeLabel} — ${netto} beschikbaar (${bruto} ingepland, ${bruto - netto} in activiteit)`
-                    : `${timeLabel} — ${bruto} medewerkers`;
+                let tooltipText;
+                if (required >= 0) {
+                    tooltipText = netto < bruto
+                        ? `${timeLabel} — ${netto}/${required} mdw (${bruto - netto} in activiteit)`
+                        : `${timeLabel} — ${netto}/${required} mdw`;
+                } else {
+                    tooltipText = netto < bruto
+                        ? `${timeLabel} — ${netto} beschikbaar (${bruto} ingepland, ${bruto - netto} in activiteit)`
+                        : `${timeLabel} — ${bruto} medewerkers`;
+                }
                 html += `<span class="${segClass}" style="left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%"
                     data-tooltip="${tooltipText}" data-tooltip-pos="top"></span>`;
             }
@@ -289,7 +314,6 @@ function openWarningDetailsModal() {
         DOM.warningDetailsList.innerHTML = '<p>Geen waarschuwingen gevonden voor deze periode.</p>';
     } else {
         DOM.warningDetailsList.innerHTML = breakdown.map(item => {
-            const dates = item.dates.map(date => `<li>${escapeHtml(date)}</li>`).join('');
             const messageItems = item.messages.map(message => `<li>${escapeHtml(message)}</li>`).join('');
             return `<div class="issue-details-item">
                 <div class="issue-details-header">
@@ -299,10 +323,6 @@ function openWarningDetailsModal() {
                 <div class="issue-details-messages">
                     <div class="issue-details-label">Context</div>
                     <ul>${messageItems}</ul>
-                </div>
-                <div class="issue-details-dates">
-                    <div class="issue-details-label">Datums</div>
-                    <ul>${dates}</ul>
                 </div>
             </div>`;
         }).join('');
@@ -325,7 +345,6 @@ function openErrorDetailsModal() {
         DOM.errorDetailsList.innerHTML = '<p>Geen fouten gevonden voor deze periode.</p>';
     } else {
         DOM.errorDetailsList.innerHTML = breakdown.map(item => {
-            const dates = item.dates.map(date => `<li>${escapeHtml(date)}</li>`).join('');
             const messageItems = item.messages.map(message => `<li>${escapeHtml(message)}</li>`).join('');
             return `<div class="issue-details-item">
                 <div class="issue-details-header">
@@ -335,10 +354,6 @@ function openErrorDetailsModal() {
                 <div class="issue-details-messages">
                     <div class="issue-details-label">Context</div>
                     <ul>${messageItems}</ul>
-                </div>
-                <div class="issue-details-dates">
-                    <div class="issue-details-label">Datums</div>
-                    <ul>${dates}</ul>
                 </div>
             </div>`;
         }).join('');

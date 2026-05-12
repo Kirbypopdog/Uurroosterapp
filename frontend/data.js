@@ -1953,6 +1953,25 @@ function getActiveBasisDraft() {
     ) || null;
 }
 
+function getStaffingRulesForDay(dateStr) {
+    const draft = getActiveBasisDraft();
+    if (!draft?.grid?._staffingRules) return null;
+    const weekNum = getWeekNumber(dateStr);
+    const d = parseDateOnly(dateStr);
+    const dayIndex = (d.getDay() + 6) % 7; // Mon=0 … Sun=6
+    const weekRules = draft.grid._staffingRules[String(weekNum)];
+    if (!weekRules) return null;
+    const raw = weekRules[String(dayIndex)];
+    if (!raw || (Array.isArray(raw) && raw.length === 0)) return null;
+    // Normaliseer oud formaat ({hour: min} object) naar nieuw ([{from,to,min}])
+    if (!Array.isArray(raw)) {
+        return Object.entries(raw).map(([h, min]) =>
+            ({ from: Number(h), to: Number(h) + 1, min: Number(min) })
+        );
+    }
+    return raw;
+}
+
 function getWeekScheduleFromDraft(employee, weekNumber, draft) {
     if (!draft || !draft.grid) return null;
     const grid = draft.grid;

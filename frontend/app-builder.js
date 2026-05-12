@@ -532,6 +532,9 @@ function renderBuilderGrid(role, userTeam) {
 
     html += '</div>';
 
+    // 11-hour rule warnings across consecutive days (boven heatmap zodat direct zichtbaar)
+    html += renderBuilderWarnings(employees);
+
     // Staffing heatmap (per-hour bezetting)
     html += renderBuilderStaffingHeatmap();
 
@@ -540,9 +543,6 @@ function renderBuilderGrid(role, userTeam) {
 
     // Teamvergaderingen editor (inklapbaar)
     html += renderBuilderMeetingsEditor();
-
-    // 11-hour rule warnings across consecutive days
-    html += renderBuilderWarnings(employees);
 
     html += '</div>';
     return html;
