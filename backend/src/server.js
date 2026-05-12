@@ -490,7 +490,7 @@ async function runMigrations() {
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         console.error(`  Migratie mislukt (${migration.name}): ${err.message}`);
-        throw err;
+        // Niet opnieuw gooien — log en ga verder met volgende migratie
       }
     }
   } finally {
@@ -1483,48 +1483,23 @@ v1.post('/admin/test-email', requireAuth, requireRole('admin', 'roosterverantwoo
 v1.get('/shifts', requireAuth, async (req, res) => {
   const { startDate, endDate } = req.query;
 
-  const buildQuery = (withArchivedFilter, withIsReserve = true) => {
-    const reserveCol = withIsReserve ? ', is_reserve as "isReserve"' : ', false as "isReserve"';
-    const baseSelect = `
-      SELECT id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-             end_time as "endTime", notes, source${reserveCol}, created_at as "createdAt"
-      FROM shifts
-`;
-    const params = [];
-    let where = withArchivedFilter ? 'WHERE archived = false' : 'WHERE true';
-    if (startDate && endDate) {
-      where += ' AND date >= $1 AND date <= $2';
-      params.push(startDate, endDate);
-    }
-    return { query: baseSelect + where + ' ORDER BY date, start_time', params };
-  };
+  const params = [];
+  let where = 'WHERE archived = false';
+  if (startDate && endDate) {
+    where += ' AND date >= $1 AND date <= $2';
+    params.push(startDate, endDate);
+  }
+  const query = `
+    SELECT id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
+           end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
+    FROM shifts ${where} ORDER BY date, start_time
+  `;
 
   try {
-    const { query, params } = buildQuery(true, true);
     const result = await pool.query(query, params);
     res.json({ shifts: result.rows });
   } catch (err) {
-    if (err.code === '42703') {
-      try {
-        const { query, params } = buildQuery(false, true);
-        const result = await pool.query(query, params);
-        return res.json({ shifts: result.rows });
-      } catch (err2) {
-        if (err2.code === '42703') {
-          try {
-            const { query, params } = buildQuery(false, false);
-            const result = await pool.query(query, params);
-            return res.json({ shifts: result.rows });
-          } catch (err3) {
-            console.error(err3);
-            return res.status(500).json({ error: 'Server error' });
-          }
-        }
-        console.error(err2);
-        return res.status(500).json({ error: 'Server error' });
-      }
-    }
-    console.error(err);
+    console.error('GET /shifts error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -1557,23 +1532,12 @@ v1.post('/shifts', requireAuth, async (req, res) => {
     if (!validation.valid) return res.status(422).json({ error: validation.message });
 
     // Insert the new shift
-    let result;
-    try {
-      result = await pool.query(`
-        INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source, is_reserve)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-                  end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
-      `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource, isReserve ? true : false]);
-    } catch (insertErr) {
-      if (insertErr.code !== '42703') throw insertErr;
-      result = await pool.query(`
-        INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-                  end_time as "endTime", notes, source, false as "isReserve", created_at as "createdAt"
-      `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource]);
-    }
+    const result = await pool.query(`
+      INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source, is_reserve)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
+                end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
+    `, [userId, team || null, date, startTime, endTime, notes || '', shiftSource, isReserve ? true : false]);
 
     const newShift = result.rows[0];
 
@@ -1643,38 +1607,20 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
       if (!validation.valid) return res.status(422).json({ error: validation.message });
     }
 
-    let result;
-    try {
-      result = await pool.query(`
-        UPDATE shifts
-        SET user_id = COALESCE($1, user_id),
-            team = COALESCE($2, team),
-            date = COALESCE($3, date),
-            start_time = COALESCE($4, start_time),
-            end_time = COALESCE($5, end_time),
-            notes = COALESCE($6, notes),
-            source = COALESCE($8, source, 'manual'),
-            is_reserve = COALESCE($9, is_reserve)
-        WHERE id = $7
-        RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-                  end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
-      `, [userId, team, date, startTime, endTime, notes, id, shiftSource, isReserve !== undefined ? Boolean(isReserve) : null]);
-    } catch (updateErr) {
-      if (updateErr.code !== '42703') throw updateErr;
-      result = await pool.query(`
-        UPDATE shifts
-        SET user_id = COALESCE($1, user_id),
-            team = COALESCE($2, team),
-            date = COALESCE($3, date),
-            start_time = COALESCE($4, start_time),
-            end_time = COALESCE($5, end_time),
-            notes = COALESCE($6, notes),
-            source = COALESCE($8, source, 'manual')
-        WHERE id = $7
-        RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
-                  end_time as "endTime", notes, source, false as "isReserve", created_at as "createdAt"
-      `, [userId, team, date, startTime, endTime, notes, id, shiftSource]);
-    }
+    const result = await pool.query(`
+      UPDATE shifts
+      SET user_id = COALESCE($1, user_id),
+          team = COALESCE($2, team),
+          date = COALESCE($3, date),
+          start_time = COALESCE($4, start_time),
+          end_time = COALESCE($5, end_time),
+          notes = COALESCE($6, notes),
+          source = COALESCE($8, source, 'manual'),
+          is_reserve = COALESCE($9, is_reserve)
+      WHERE id = $7
+      RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
+                end_time as "endTime", notes, source, is_reserve as "isReserve", created_at as "createdAt"
+    `, [userId, team, date, startTime, endTime, notes, id, shiftSource, isReserve !== undefined ? Boolean(isReserve) : null]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Dienst niet gevonden' });
@@ -4232,26 +4178,8 @@ app.use('/', v1);
 if (process.env.NODE_ENV !== 'test') {
   runMigrations()
     .then(() => archiveOldShifts())
-    .catch(err => console.error('[startup] Migratie mislukt:', err.message))
-    .finally(async () => {
-      // Veiligheidsnet: kritieke kolommen/tabellen altijd toevoegen, ook als migraties faalden
-      await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS is_reserve BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
-      await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
-      // shift_activities tabel en shift_id kolom veiligstellen
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS shift_activities (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
-          date DATE NOT NULL,
-          start_time TIME NOT NULL,
-          end_time TIME NOT NULL,
-          type TEXT NOT NULL,
-          description TEXT DEFAULT '',
-          created_at TIMESTAMP DEFAULT NOW()
-        )
-      `).catch(() => {});
-      await pool.query(`ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE`).catch(() => {});
+    .catch(err => console.error('[startup] Fout:', err.message))
+    .finally(() => {
       app.listen(PORT, () => console.log(`API running on :${PORT}`));
     });
 }
