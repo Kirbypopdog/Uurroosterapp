@@ -51,7 +51,8 @@ app.use(globalLimiter);
 
 // ===== DATE HELPER FUNCTIONS =====
 // Used by apply-schedule endpoint (replicates frontend data.js logic)
-const { getMonday, formatDateYYYYMMDD, parseLocalDate, getBelgianPublicHolidays, shiftsOverlapCheck, hoursBetweenShifts } = require('./utils');
+const crypto = require('crypto');
+const { getMonday, formatDateYYYYMMDD, parseLocalDate, getBelgianPublicHolidays, shiftsOverlapCheck, hoursBetweenShifts, formatICalDateTime } = require('./utils');
 
 // ===== VERSIONED MIGRATIONS =====
 // Each entry runs exactly once, tracked in the `migrations` table.
@@ -461,6 +462,12 @@ const MIGRATIONS = [
     up: async (client) => {
       await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS is_reserve BOOLEAN NOT NULL DEFAULT false`);
     }
+  },
+  {
+    name: '032_users_ical_feed_token',
+    up: async (client) => {
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ical_feed_token TEXT UNIQUE`);
+    }
   }
 ];
 
@@ -731,7 +738,8 @@ v1.get('/me', requireAuth, async (req, res) => {
                 week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules",
                 email_notifications_enabled as "emailNotificationsEnabled",
-                onboarding_flags as "onboardingFlags"
+                onboarding_flags as "onboardingFlags",
+                ical_feed_token as "icalFeedToken"
          FROM users WHERE id = $1`,
         [req.user.id]
       );
@@ -821,6 +829,91 @@ v1.put('/me/email-preferences', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+// POST /me/ical-token - Genereer of reset persoonlijke iCal feed token
+v1.post('/me/ical-token', requireAuth, async (req, res) => {
+  try {
+    const token = crypto.randomUUID();
+    await pool.query('UPDATE users SET ical_feed_token = $1 WHERE id = $2', [token, req.user.id]);
+    await logAudit(req, 'UPDATE', 'user', req.user.id, { action: 'ical_token_reset' });
+    res.json({ token });
+  } catch (err) {
+    console.error('POST /me/ical-token error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /calendar/:token.ics - Publieke iCal feed (token = auth)
+v1.get('/calendar/:token.ics', async (req, res) => {
+  try {
+    const userResult = await pool.query(
+      `SELECT id, name FROM users WHERE ical_feed_token = $1 AND active = true`,
+      [req.params.token]
+    );
+    if (!userResult.rows.length) return res.status(404).send('Not found');
+    const user = userResult.rows[0];
+
+    const from = new Date(); from.setDate(from.getDate() - 30);
+    const to   = new Date(); to.setDate(to.getDate() + 365);
+    const shiftsResult = await pool.query(
+      `SELECT s.id, s.date::text, s.start_time, s.end_time, s.team, s.notes,
+              t.name as team_name
+       FROM shifts s
+       LEFT JOIN teams t ON t.id = s.team
+       WHERE s.user_id = $1 AND s.date >= $2 AND s.date <= $3
+       ORDER BY s.date, s.start_time`,
+      [user.id, formatDateYYYYMMDD(from), formatDateYYYYMMDD(to)]
+    );
+
+    const now = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z';
+
+    const events = shiftsResult.rows.map(s => {
+      const dateStr = s.date.slice(0, 10);
+      const start = formatICalDateTime(dateStr, s.start_time);
+      let endDate = dateStr;
+      if (s.end_time <= s.start_time) {
+        const d = new Date(dateStr); d.setDate(d.getDate() + 1);
+        endDate = formatDateYYYYMMDD(d);
+      }
+      const end = formatICalDateTime(endDate, s.end_time);
+      const summary = icalEscape(s.team_name || s.team || 'Shift');
+      const lines = [
+        'BEGIN:VEVENT',
+        `UID:shift-${s.id}@hetvlot`,
+        `DTSTAMP:${now}`,
+        `DTSTART:${start}`,
+        `DTEND:${end}`,
+        `SUMMARY:${summary}`,
+      ];
+      if (s.notes) lines.push(`DESCRIPTION:${icalEscape(s.notes)}`);
+      lines.push('END:VEVENT');
+      return lines.join('\r\n');
+    }).join('\r\n');
+
+    const ical = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Het Vlot//Roosterplanning//NL',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      `X-WR-CALNAME:Rooster ${icalEscape(user.name)}`,
+      'X-WR-TIMEZONE:Europe/Brussels',
+      events,
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    res.set('Content-Type', 'text/calendar; charset=utf-8');
+    res.set('Cache-Control', 'no-cache');
+    res.send(ical);
+  } catch (err) {
+    console.error('GET /calendar/:token.ics error:', err);
+    res.status(500).send('Server error');
+  }
+});
+
+function icalEscape(str) {
+  return String(str || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+}
 
 // PUT /me/onboarding-flags - Update onboarding flags (merge)
 v1.put('/me/onboarding-flags', requireAuth, async (req, res) => {

@@ -136,7 +136,12 @@ function shiftsOverlapCheck(a, b) {
   return s1 < e2 && s2 < e1;
 }
 
+// iCal datetime: '2026-05-15' + '09:00' → '20260515T090000' (floating local time)
+function formatICalDateTime(dateStr, timeStr) {
+  return dateStr.replace(/-/g, '') + 'T' + timeStr.replace(':', '') + '00';
+}
+
 module.exports = {
   getMonday, formatDateYYYYMMDD, parseLocalDate, getEasterDate, getBelgianPublicHolidays,
-  parseShiftDateTime, getShiftEndDT, hoursBetweenShifts, shiftsOverlapCheck
+  parseShiftDateTime, getShiftEndDT, hoursBetweenShifts, shiftsOverlapCheck, formatICalDateTime
 };

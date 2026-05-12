@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
   week_schedules JSONB DEFAULT NULL,
   email_notifications_enabled BOOLEAN DEFAULT true,
   onboarding_flags JSONB DEFAULT '{}',
+  ical_feed_token TEXT UNIQUE,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
