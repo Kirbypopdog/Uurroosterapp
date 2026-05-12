@@ -195,7 +195,7 @@ function renderHomeAlerts(role) {
     const maxConsecutive = DataStore.settings?.rules?.maxConsecutiveDays ?? 6;
 
     // 1. Onderbezetting komende 30 dagen (op basis van bezettingsregels actief concept)
-    const understaffedDays = [];
+    const dayLabelsNL = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
     for (let i = 0; i < 30; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
@@ -208,18 +208,15 @@ function renderHomeAlerts(role) {
 
         let isUnderstaffed = false;
         outer: for (const rule of dayRules) {
-            for (let h = rule.from; h < rule.to; h++) {
+            for (let h = rule.from; h < rule.to; h += 0.5) {
                 const { netto } = calcPlanningHourlyHeadcount(dateStr, h);
                 if (netto < rule.min) { isUnderstaffed = true; break outer; }
             }
         }
-        if (isUnderstaffed) understaffedDays.push(dateStr);
-    }
-    if (understaffedDays.length > 0) {
-        const label = understaffedDays.length === 1
-            ? '1 dag onderbezet in de komende 30 dagen'
-            : `${understaffedDays.length} dagen onderbezet in de komende 30 dagen`;
-        warnings.push({ level: 'warning', date: understaffedDays[0], text: label });
+        if (isUnderstaffed) {
+            const dayLabel = dayLabelsNL[d.getDay()];
+            warnings.push({ level: 'warning', date: dateStr, text: `${dayLabel} ${formatDateShort(d)}: onderbezet` });
+        }
     }
 
     // 2. Medewerkers die max opeenvolgende dagen naderen (>= maxConsecutive - 1)
