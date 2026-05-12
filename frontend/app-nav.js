@@ -397,8 +397,11 @@ function renderHomeShifts(user) {
             if (activities.length > 0) {
                 const pills = activities.map(a => {
                     const label = ACTIVITY_TYPE_LABELS_FULL[a.type] || a.type || 'Activiteit';
-                    const t = a.startTime || a.start_time || '';
-                    return `<span class="home-shift-activity-badge">${escapeHtml(label)}${t ? ' · ' + escapeHtml(t) : ''}</span>`;
+                    const tStart = (a.startTime || a.start_time || '').substring(0, 5);
+                    const tEnd = (a.endTime || a.end_time || '').substring(0, 5);
+                    const timeStr = tStart && tEnd ? ` · ${tStart}–${tEnd}` : tStart ? ` · ${tStart}` : '';
+                    const desc = a.description ? ` · ${a.description}` : '';
+                    return `<span class="home-shift-activity-badge">${escapeHtml(label)}${escapeHtml(timeStr)}${escapeHtml(desc)}</span>`;
                 }).join('');
                 activitiesHtml = `<div class="home-shift-activities">${pills}</div>`;
             }
