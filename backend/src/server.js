@@ -3013,6 +3013,18 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
       ON CONFLICT (key)
       DO UPDATE SET value = $2, updated_at = NOW()
     `, [key, JSON.stringify(value)]);
+
+    // When teams settings are saved, sync names/colors to the teams table
+    if (key === 'teams' && value && typeof value === 'object') {
+      for (const [teamId, teamData] of Object.entries(value)) {
+        if (!teamData || !teamData.name) continue;
+        await pool.query(
+          `UPDATE teams SET name = $1, color = $2 WHERE id = $3`,
+          [teamData.name, teamData.color || null, teamId]
+        );
+      }
+    }
+
     await logAudit(req, 'UPDATE', 'settings', key, { key });
     res.json({ ok: true });
   } catch (err) {
