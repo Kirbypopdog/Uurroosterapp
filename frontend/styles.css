@@ -1971,90 +1971,140 @@ body[data-view-mode="day"] .timeline-header {
     margin-bottom: 16px;
 }
 
-.validation-summary {
+/* ===== VALIDATION BAR (planning tab) ===== */
+.validation-bar {
     background: var(--surface-color);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    padding: 12px 16px;
+    padding: 10px 14px 12px;
+    box-shadow: var(--shadow-sm);
+}
+
+.validation-bar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.validation-bar-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.validation-bar-title.has-errors {
+    color: var(--alert-error-text);
+}
+
+.validation-bar-title svg { opacity: 0.8; }
+
+.validation-bar-all {
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    color: var(--text-secondary);
+}
+
+.validation-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 8px;
+}
+
+.validation-chip {
+    display: inline-flex;
     align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    background: none;
+    transition: filter 0.15s, box-shadow 0.15s;
+}
+
+.validation-chip:hover {
+    filter: brightness(0.94);
     box-shadow: var(--shadow-sm);
 }
 
-.validation-summary-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: 6px 12px;
-    border-radius: var(--radius-sm);
-    font-size: 14px;
-    font-weight: 500;
-}
-
-.validation-summary-item.validation-error {
+.validation-chip-error {
     background: var(--alert-error-bg);
     color: var(--alert-error-text);
-    border: 1px solid var(--alert-error-border);
-    cursor: pointer;
+    border-color: var(--alert-error-border);
 }
 
-.validation-summary-item.validation-error:hover {
-    filter: brightness(0.96);
-    box-shadow: var(--shadow-sm);
-}
-
-.validation-summary-item.validation-warning {
+.validation-chip-warning {
     background: var(--alert-warning-bg);
     color: var(--alert-warning-text);
-    border: 1px solid var(--alert-warning-border);
-    cursor: pointer;
+    border-color: var(--alert-warning-border);
 }
 
-.validation-summary-item.validation-warning:hover {
-    filter: brightness(0.96);
-    box-shadow: var(--shadow-sm);
+.validation-chip-count {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 16px;
 }
 
-.validation-icon {
-    font-size: var(--text-md);
-}
+/* Legacy chip classes kept for any residual references */
+.validation-summary { display: flex; flex-wrap: wrap; gap: 8px; }
+.validation-summary-item { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 20px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.validation-summary-item.validation-error { background: var(--alert-error-bg); color: var(--alert-error-text); border: 1px solid var(--alert-error-border); }
+.validation-summary-item.validation-warning { background: var(--alert-warning-bg); color: var(--alert-warning-text); border: 1px solid var(--alert-warning-border); }
+.validation-text { font-size: 13px; }
+.validation-summary-note { margin-left: auto; font-size: 12px; color: var(--text-secondary); font-style: italic; }
 
-.validation-text {
-    font-size: 13px;
-}
-
-.validation-summary-note {
-    margin-left: auto;
-    font-size: 12px;
-    color: var(--text-secondary);
-    font-style: italic;
-}
-
+/* ===== VALIDATION DETAILS MODAL CARDS ===== */
 .issue-details-item {
-    padding: 16px;
+    padding: 14px 16px;
     border: 1px solid var(--border-color);
+    border-left: 4px solid var(--border-color);
     border-radius: var(--radius-md);
-    background: #fffaf0;
-    margin-bottom: 12px;
+    background: var(--surface-color);
+    margin-bottom: 10px;
+}
+
+.issue-details-level-error.issue-details-item {
+    border-left-color: var(--color-danger);
+    background: var(--alert-error-bg);
+}
+
+.issue-details-level-warning.issue-details-item {
+    border-left-color: var(--color-warning);
+    background: var(--alert-warning-bg);
 }
 
 .issue-details-header {
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
+    gap: 8px;
     margin-bottom: 8px;
 }
 
 .issue-details-rule {
     font-weight: 600;
-    color: #92400e;
+    flex: 1;
+    color: var(--text-primary);
 }
 
 .issue-details-count {
     font-size: 12px;
     color: var(--text-secondary);
+    background: rgba(0,0,0,0.06);
+    border-radius: 10px;
+    padding: 1px 8px;
 }
 
 .issue-details-example {
@@ -2102,19 +2152,18 @@ body[data-view-mode="day"] .timeline-header {
 .issue-details-more-list { display: none; margin: 4px 0 0; padding-left: 18px; color: var(--text-secondary); font-size: 12px; }
 .issue-details-more--open .issue-details-more-list { display: block; }
 
-.issue-details-header { gap: 6px; }
 .issue-details-level-error .issue-details-rule { color: #991b1b; }
 .issue-details-level-warning .issue-details-rule { color: #92400e; }
 .issue-details-level-error svg { color: #dc2626; }
 .issue-details-level-warning svg { color: #d97706; }
 
-.issue-entry-list { list-style: none; margin: 0 0 10px; padding: 0; }
+.issue-entry-list { list-style: none; margin: 0 0 6px; padding: 0; }
 .issue-entry {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 3px 0;
+    padding: 4px 0;
     font-size: 12px;
     color: var(--text-secondary);
     border-bottom: 1px solid var(--border-color);
@@ -2129,7 +2178,7 @@ body[data-view-mode="day"] .timeline-header {
     padding: 2px 4px;
     color: var(--text-muted);
     border-radius: 3px;
-    opacity: 0.5;
+    opacity: 0.45;
     transition: opacity 0.15s;
 }
 .issue-entry-dismiss:hover { opacity: 1; color: var(--text-secondary); }

@@ -237,16 +237,33 @@ function renderValidationAlerts() {
     AppState.validationBreakdown = breakdown;
 
     if (breakdown.length > 0) {
-        html += '<div class="validation-summary">';
+        const totalCount = breakdown.reduce((n, b) => n + b.count, 0);
+        const hasErrors = breakdown.some(b => b.isError);
+        const titleIcon = hasErrors ? 'alert-circle' : 'alert-triangle';
+
+        html += `<div class="validation-bar">
+            <div class="validation-bar-header">
+                <span class="validation-bar-title${hasErrors ? ' has-errors' : ''}">
+                    ${IconHelper.html(titleIcon, 'sm')}
+                    <strong>${totalCount}</strong>&nbsp;melding${totalCount !== 1 ? 'en' : ''}
+                </span>
+                <button class="btn btn-xs btn-ghost validation-bar-all" onclick="openValidationDetailsModal(null)">
+                    Alle bekijken ${IconHelper.html('chevron-right', 'xs')}
+                </button>
+            </div>
+            <div class="validation-chips">`;
+
         breakdown.forEach(item => {
             const cfg = VALIDATION_CATEGORY_CONFIG[item.rule.toLowerCase()] ||
                 { icon: item.isError ? 'alert-circle' : 'alert-triangle', label: item.rule, level: item.isError ? 'error' : 'warning' };
-            html += `<div class="validation-summary-item validation-${cfg.level}" data-rule="${escapeHtml(item.rule)}">
+            html += `<button class="validation-chip validation-chip-${cfg.level}" data-rule="${escapeHtml(item.rule)}" title="Klik voor details">
                 ${IconHelper.html(cfg.icon, 'sm')}
-                <span class="validation-text">${escapeHtml(cfg.label)} <strong>${item.count}</strong></span>
-            </div>`;
+                <span>${escapeHtml(cfg.label)}</span>
+                <span class="validation-chip-count">${item.count}</span>
+            </button>`;
         });
-        html += '</div>';
+
+        html += '</div></div>';
     }
 
     DOM.validationAlerts.innerHTML = html;
@@ -304,9 +321,10 @@ function buildIssueBreakdown(summary) {
 
 function renderIssueEntryList(entries) {
     const COLLAPSE_AT = 7;
+    const canDismiss = ['admin', 'roosterverantwoordelijke'].includes(AppState.currentUser?.role);
     const renderEntry = e => `<li class="issue-entry">
         <span class="issue-entry-label">${escapeHtml(e.label)}</span>
-        ${e.key ? `<button class="issue-entry-dismiss btn-ghost" title="Negeren" onclick="dismissFromPlanningTab('${escapeHtml(e.key)}')">${IconHelper.html('eye-off', 'xs')}</button>` : ''}
+        ${e.key && canDismiss ? `<button class="issue-entry-dismiss btn-ghost" title="Negeren" onclick="dismissFromPlanningTab('${escapeHtml(e.key)}')">${IconHelper.html('eye-off', 'xs')}</button>` : ''}
     </li>`;
     if (entries.length <= COLLAPSE_AT) {
         return `<ul class="issue-entry-list">${entries.map(renderEntry).join('')}</ul>`;
@@ -332,14 +350,24 @@ function openValidationDetailsModal(filterRule) {
     const breakdown = (AppState.validationBreakdown || [])
         .filter(item => !filterRule || item.rule === filterRule);
 
+    // Update modal title dynamically
+    const titleEl = DOM.warningDetailsModal.querySelector('.modal-header h2');
+    if (titleEl) {
+        if (filterRule) {
+            const cfg = VALIDATION_CATEGORY_CONFIG[filterRule.toLowerCase()];
+            titleEl.textContent = cfg ? cfg.label : filterRule;
+        } else {
+            titleEl.textContent = 'Validatiemeldingen';
+        }
+    }
+
     DOM.warningDetailsList.innerHTML = breakdown.length === 0
         ? '<p>Geen meldingen voor deze periode.</p>'
         : breakdown.map(item => {
             const cfg = VALIDATION_CATEGORY_CONFIG[item.rule.toLowerCase()] ||
                 { icon: item.isError ? 'alert-circle' : 'alert-triangle', label: item.rule, level: item.isError ? 'error' : 'warning' };
-            const headerClass = `issue-details-level-${cfg.level}`;
-            return `<div class="issue-details-item">
-                <div class="issue-details-header ${headerClass}">
+            return `<div class="issue-details-item issue-details-level-${cfg.level}">
+                <div class="issue-details-header">
                     ${IconHelper.html(cfg.icon, 'sm')}
                     <span class="issue-details-rule">${escapeHtml(cfg.label)}</span>
                     <span class="issue-details-count">${item.count}x</span>
