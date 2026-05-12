@@ -132,6 +132,7 @@ function validateTeamAssignment(employeeId, teamId) {
 
 function validateMinimumStaffing(date, teamId = null) {
     const warnings = [];
+    if (typeof isDayClosed === 'function' && isDayClosed(date)) return { errors: [], warnings };
     if (typeof getStaffingRulesForDay !== 'function' || typeof calcPlanningHourlyHeadcount !== 'function') {
         return { errors: [], warnings };
     }
