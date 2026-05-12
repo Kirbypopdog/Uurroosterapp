@@ -858,15 +858,20 @@ v1.get('/calendar/:token.ics', async (req, res) => {
 
     const from = new Date(); from.setDate(from.getDate() - 30);
     const to   = new Date(); to.setDate(to.getDate() + 365);
-    const shiftsResult = await pool.query(
-      `SELECT s.id, s.date::text, s.start_time, s.end_time, s.team, s.notes,
-              t.name as team_name
-       FROM shifts s
-       LEFT JOIN teams t ON t.id = s.team
-       WHERE s.user_id = $1 AND s.date >= $2 AND s.date <= $3
-       ORDER BY s.date, s.start_time`,
-      [user.id, formatDateYYYYMMDD(from), formatDateYYYYMMDD(to)]
-    );
+    const [shiftsResult, teamsSettingResult] = await Promise.all([
+      pool.query(
+        `SELECT s.id, s.date::text, s.start_time, s.end_time, s.team, s.notes,
+                t.name as team_name
+         FROM shifts s
+         LEFT JOIN teams t ON t.id = s.team
+         WHERE s.user_id = $1 AND s.date >= $2 AND s.date <= $3
+         ORDER BY s.date, s.start_time`,
+        [user.id, formatDateYYYYMMDD(from), formatDateYYYYMMDD(to)]
+      ),
+      pool.query(`SELECT value FROM settings WHERE key = 'teams'`)
+    ]);
+    // settings.teams is the primary display name source (may differ from teams table)
+    const teamNameMap = teamsSettingResult.rows.length ? teamsSettingResult.rows[0].value : {};
 
     const now = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z';
 
@@ -879,7 +884,7 @@ v1.get('/calendar/:token.ics', async (req, res) => {
         endDate = formatDateYYYYMMDD(d);
       }
       const end = formatICalDateTime(endDate, s.end_time);
-      const summary = icalEscape(s.team_name || s.team || 'Shift');
+      const summary = icalEscape((teamNameMap[s.team] && teamNameMap[s.team].name) || s.team_name || s.team || 'Shift');
       const lines = [
         'BEGIN:VEVENT',
         `UID:shift-${s.id}@hetvlot`,
