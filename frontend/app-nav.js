@@ -115,7 +115,6 @@ function renderHome() {
     html += renderHomeAlerts(role);
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
-    html += renderHomeQuickActions(role);
     html += renderHomeWeekendInfo();
     html += renderHomeRequests(user, role);
     html += '</div>';
@@ -434,7 +433,10 @@ function renderHomeRequests(user, role) {
     let pendingRequests = (DataStore.swapRequests || []).filter(r => {
         if (r.status !== 'pending' && r.status !== 'pending_lead') return false;
 
-        if (isLeadOrAdmin) return true;
+        if (isLeadOrAdmin) {
+            // Leads zien enkel verzoeken die hun goedkeuring vereisen (pending_lead)
+            return r.status === 'pending_lead';
+        }
         // Medewerker: eigen requests + takeover requests van eigen team
         return r.requester_user_id === userId || r.target_user_id === userId ||
                (r.request_type === 'takeover' && r.requester_shift_team === userTeam);
