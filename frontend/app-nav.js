@@ -225,11 +225,11 @@ function renderHomeAlerts(role) {
     // 2. Medewerkers die max opeenvolgende dagen naderen (>= maxConsecutive - 1)
     const activeEmployees = (DataStore.users || []).filter(u => u.active !== false && u.role === 'medewerker');
     for (const emp of activeEmployees) {
-        // Check a 21-day window centred on today
+        // Check a window from 7 days back to 30 days ahead (matches onderbezettingsscope)
         const windowStart = new Date(today);
         windowStart.setDate(today.getDate() - 7);
         const windowEnd = new Date(today);
-        windowEnd.setDate(today.getDate() + 13);
+        windowEnd.setDate(today.getDate() + 30);
         const startStr = formatDateYYYYMMDD(windowStart);
         const endStr = formatDateYYYYMMDD(windowEnd);
 
@@ -244,7 +244,7 @@ function renderHomeAlerts(role) {
         // Find longest consecutive run touching today or future
         let run = 0;
         let maxRun = 0;
-        for (let i = -7; i <= 13; i++) {
+        for (let i = -7; i <= 30; i++) {
             const d = new Date(today);
             d.setDate(today.getDate() + i);
             if (empShiftDates.has(formatDateYYYYMMDD(d))) {
