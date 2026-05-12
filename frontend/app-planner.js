@@ -305,6 +305,23 @@ function buildIssueBreakdown(summary, issueType) {
         });
 }
 
+function renderIssueMessageList(messages) {
+    const COLLAPSE_AT = 5;
+    if (messages.length < COLLAPSE_AT) {
+        return `<ul>${messages.map(m => `<li>${escapeHtml(m)}</li>`).join('')}</ul>`;
+    }
+    const visible = messages.slice(0, COLLAPSE_AT - 1).map(m => `<li>${escapeHtml(m)}</li>`).join('');
+    const hidden = messages.slice(COLLAPSE_AT - 1).map(m => `<li>${escapeHtml(m)}</li>`).join('');
+    return `<ul>${visible}</ul>
+        <div class="issue-details-more">
+            <button class="issue-details-more-toggle" onclick="this.closest('.issue-details-more').classList.toggle('issue-details-more--open')">
+                <span class="show-more">Toon ${messages.length - (COLLAPSE_AT - 1)} meer <i data-lucide="chevron-down" class="lucide-xs"></i></span>
+                <span class="show-less">Toon minder <i data-lucide="chevron-up" class="lucide-xs"></i></span>
+            </button>
+            <ul class="issue-details-more-list">${hidden}</ul>
+        </div>`;
+}
+
 function openWarningDetailsModal() {
     if (!DOM.warningDetailsModal) return;
     DOM.warningDetailsList.innerHTML = '';
@@ -314,7 +331,6 @@ function openWarningDetailsModal() {
         DOM.warningDetailsList.innerHTML = '<p>Geen waarschuwingen gevonden voor deze periode.</p>';
     } else {
         DOM.warningDetailsList.innerHTML = breakdown.map(item => {
-            const messageItems = item.messages.map(message => `<li>${escapeHtml(message)}</li>`).join('');
             return `<div class="issue-details-item">
                 <div class="issue-details-header">
                     <span class="issue-details-rule">${escapeHtml(item.rule)}</span>
@@ -322,13 +338,14 @@ function openWarningDetailsModal() {
                 </div>
                 <div class="issue-details-messages">
                     <div class="issue-details-label">Context</div>
-                    <ul>${messageItems}</ul>
+                    ${renderIssueMessageList(item.messages)}
                 </div>
             </div>`;
         }).join('');
     }
 
     DOM.warningDetailsModal.classList.remove('hidden');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function closeWarningDetailsModal() {
@@ -345,7 +362,6 @@ function openErrorDetailsModal() {
         DOM.errorDetailsList.innerHTML = '<p>Geen fouten gevonden voor deze periode.</p>';
     } else {
         DOM.errorDetailsList.innerHTML = breakdown.map(item => {
-            const messageItems = item.messages.map(message => `<li>${escapeHtml(message)}</li>`).join('');
             return `<div class="issue-details-item">
                 <div class="issue-details-header">
                     <span class="issue-details-rule">${escapeHtml(item.rule)}</span>
@@ -353,13 +369,14 @@ function openErrorDetailsModal() {
                 </div>
                 <div class="issue-details-messages">
                     <div class="issue-details-label">Context</div>
-                    <ul>${messageItems}</ul>
+                    ${renderIssueMessageList(item.messages)}
                 </div>
             </div>`;
         }).join('');
     }
 
     DOM.errorDetailsModal.classList.remove('hidden');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function closeErrorDetailsModal() {

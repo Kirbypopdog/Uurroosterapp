@@ -340,12 +340,54 @@ function renderHomeAlerts(role) {
 
     if (warnings.length === 0) return '';
 
-    const items = warnings.map(w => `
+    const ALERT_COLLAPSE_AT = 5;
+    const alertCategoryConfig = [
+        { id: 'unstaffed', label: 'Onderbezetting', icon: 'users' },
+        { id: '11h', label: '11-uur schending', icon: 'clock' },
+        { id: 'conflict', label: 'Shift + afwezigheid', icon: 'calendar-x-2' },
+        { id: 'consec', label: 'Opeenvolgende diensten', icon: 'trending-up' },
+        { id: 'swaps', label: 'Ruilverzoeken', icon: 'arrow-left-right' },
+        { id: 'other', label: 'Overig', icon: 'alert-triangle' },
+    ];
+    const getAlertCategory = w => {
+        if (!w.key) return 'other';
+        if (w.key.startsWith('unstaffed:')) return 'unstaffed';
+        if (w.key.startsWith('11h:')) return '11h';
+        if (w.key.startsWith('shift-absence:')) return 'conflict';
+        if (w.key.startsWith('consecutive:')) return 'consec';
+        if (w.key === 'old-swaps') return 'swaps';
+        return 'other';
+    };
+    const alertGroups = new Map();
+    for (const cat of alertCategoryConfig) alertGroups.set(cat.id, []);
+    for (const w of warnings) alertGroups.get(getAlertCategory(w)).push(w);
+
+    const renderAlertItem = w => `
         <div class="alert-item alert-item--${w.level}"${w.date ? ` data-date="${w.date}"` : ''}>
             <i data-lucide="${w.level === 'error' ? 'alert-circle' : w.level === 'info' ? 'info' : 'alert-triangle'}" class="lucide-xs"></i>
             <span>${w.text}</span>
             ${w.key ? `<button class="alert-dismiss-btn" data-alert-key="${w.key}" title="Verberg"><i data-lucide="x" class="lucide-xs"></i></button>` : ''}
-        </div>`).join('');
+        </div>`;
+
+    let bodyHtml = '';
+    for (const cat of alertCategoryConfig) {
+        const catItems = alertGroups.get(cat.id);
+        if (!catItems || catItems.length === 0) continue;
+        if (catItems.length >= ALERT_COLLAPSE_AT) {
+            bodyHtml += `
+        <div class="alert-group alert-group--collapsed">
+            <button class="alert-group-header" onclick="this.closest('.alert-group').classList.toggle('alert-group--collapsed')">
+                <i data-lucide="${cat.icon}" class="lucide-xs"></i>
+                <span class="alert-group-label">${cat.label}</span>
+                <span class="alert-group-count">${catItems.length}</span>
+                <i data-lucide="chevron-down" class="lucide-xs alert-group-chevron"></i>
+            </button>
+            <div class="alert-group-body">${catItems.map(renderAlertItem).join('')}</div>
+        </div>`;
+        } else {
+            bodyHtml += catItems.map(renderAlertItem).join('');
+        }
+    }
 
     return `
         <div class="home-alerts home-alerts--collapsed mb-md">
@@ -355,7 +397,7 @@ function renderHomeAlerts(role) {
                 <span class="home-alerts-count">${warnings.length}</span>
                 <i data-lucide="chevron-down" class="lucide-sm home-alerts-chevron"></i>
             </button>
-            <div class="home-alerts-body">${items}</div>
+            <div class="home-alerts-body">${bodyHtml}</div>
         </div>`;
 }
 

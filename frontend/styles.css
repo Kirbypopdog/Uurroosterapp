@@ -1053,6 +1053,41 @@ textarea:focus-visible {
     line-height: 1;
 }
 .alert-dismiss-btn:hover { opacity: 1; background: rgba(0,0,0,0.06); }
+.alert-group {
+    border-bottom: 1px solid var(--border-color);
+}
+.alert-group:last-child { border-bottom: none; }
+.alert-group-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--bg-secondary, #f8fafc);
+    color: var(--text-secondary);
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+.alert-group-header:hover { background: var(--bg-hover, #f1f5f9); }
+.alert-group-label { flex: 1; }
+.alert-group-count {
+    background: var(--color-warning, #f59e0b);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 10px;
+    padding: 1px 7px;
+    line-height: 1.6;
+}
+.alert-group-chevron { transition: transform 0.2s; flex-shrink: 0; }
+.alert-group--collapsed .alert-group-chevron { transform: rotate(-90deg); }
+.alert-group--collapsed .alert-group-body { display: none; }
+.alert-group .alert-item { border-bottom: 1px solid var(--border-color); }
+.alert-group .alert-item:last-child { border-bottom: none; }
 .alert-item--warning {
     background: var(--alert-warning-bg);
     border-left: 3px solid var(--alert-warning-border);
@@ -1985,6 +2020,24 @@ body[data-view-mode="day"] .timeline-header {
     margin-bottom: 4px;
     color: #92400e;
 }
+.issue-details-more { margin-top: 2px; }
+.issue-details-more-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--color-primary, #3b82f6);
+    padding: 2px 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+.issue-details-more-toggle:hover { text-decoration: underline; }
+.issue-details-more-toggle .show-less { display: none; }
+.issue-details-more--open .show-more { display: none; }
+.issue-details-more--open .show-less { display: inline-flex; align-items: center; gap: 3px; }
+.issue-details-more-list { display: none; margin: 4px 0 0; padding-left: 18px; color: var(--text-secondary); font-size: 12px; }
+.issue-details-more--open .issue-details-more-list { display: block; }
 
 
 .alert {
