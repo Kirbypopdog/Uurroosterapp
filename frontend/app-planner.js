@@ -215,6 +215,14 @@ function showHeatmapDetail(teamId, date) {
     showToast(msg.trim(), 'info', 5000);
 }
 
+const VALIDATION_CATEGORY_CONFIG = {
+    'onderbezetting':          { icon: 'users',           label: 'Onderbezetting', level: 'warning' },
+    '11-uur regel':            { icon: 'clock',           label: '11-uur regel',   level: 'error'   },
+    'overlap':                 { icon: 'layers',          label: 'Overlap',        level: 'error'   },
+    'medewerker afwezig':      { icon: 'calendar-x-2',   label: 'Afwezigheid',    level: 'warning' },
+    'opeenvolgende diensten':  { icon: 'trending-up',     label: 'Aaneengesloten', level: 'warning' },
+};
+
 function renderValidationAlerts() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
@@ -223,114 +231,122 @@ function renderValidationAlerts() {
     const summary = getValidationSummary(startDate, endDate);
 
     let html = '';
-
-    // Weekend/Vakantie verantwoordelijke sectie
     html += renderResponsibleSection();
 
-    let totalErrors = 0;
-    let totalWarnings = 0;
+    const breakdown = buildIssueBreakdown(summary);
+    AppState.validationBreakdown = breakdown;
 
-    // Count totals
-    Object.keys(summary.dates).forEach(date => {
-        const dateIssues = summary.dates[date];
-        totalErrors += dateIssues.errors.length;
-        totalWarnings += dateIssues.warnings.length;
-    });
-
-    // Show compact summary if there are issues
-    if (totalErrors > 0 || totalWarnings > 0) {
+    if (breakdown.length > 0) {
         html += '<div class="validation-summary">';
-
-        if (totalErrors > 0) {
-            AppState.errorBreakdown = buildIssueBreakdown(summary, 'errors');
-            html += `<div class="validation-summary-item validation-error">
-                <span class="validation-icon">${IconHelper.html(ICONS.info, 'sm')}</span>
-                <span class="validation-text">${totalErrors} opmerking${totalErrors > 1 ? 'en' : ''}</span>
+        breakdown.forEach(item => {
+            const cfg = VALIDATION_CATEGORY_CONFIG[item.rule.toLowerCase()] ||
+                { icon: item.isError ? 'alert-circle' : 'alert-triangle', label: item.rule, level: item.isError ? 'error' : 'warning' };
+            html += `<div class="validation-summary-item validation-${cfg.level}" data-rule="${escapeHtml(item.rule)}">
+                ${IconHelper.html(cfg.icon, 'sm')}
+                <span class="validation-text">${escapeHtml(cfg.label)} <strong>${item.count}</strong></span>
             </div>`;
-        } else {
-            AppState.errorBreakdown = null;
-        }
-
-        if (totalWarnings > 0) {
-            AppState.warningBreakdown = buildIssueBreakdown(summary, 'warnings');
-            html += `<div class="validation-summary-item validation-warning">
-                <span class="validation-icon">${IconHelper.html(ICONS.zap, 'sm')}</span>
-                <span class="validation-text">${totalWarnings} opmerking${totalWarnings > 1 ? 'en' : ''}</span>
-            </div>`;
-        } else {
-            AppState.warningBreakdown = null;
-        }
-
-        html += '<div class="validation-summary-note">Klik voor details per regel</div>';
+        });
         html += '</div>';
-
     }
 
     DOM.validationAlerts.innerHTML = html;
     IconHelper.init(DOM.validationAlerts);
 }
 
-function buildIssueBreakdown(summary, issueType) {
+function buildIssueBreakdown(summary) {
+    const dismissedKeys = new Set(
+        (DataStore.settings.dismissedAlerts || [])
+            .filter(d => (Date.now() - new Date(d.dismissedAt).getTime()) < 45 * 24 * 60 * 60 * 1000)
+            .map(d => d.key)
+    );
+
     const issueBreakdown = {};
-    const issuesKey = issueType === 'errors' ? 'errors' : 'warnings';
+
     Object.entries(summary.dates).sort().forEach(([date, dateIssues]) => {
-        dateIssues[issuesKey].forEach(issue => {
-            const key = issue.rule || 'Onbekende waarschuwing';
-            if (!issueBreakdown[key]) {
-                issueBreakdown[key] = { count: 0, messages: [] };
+        const allIssues = [
+            ...dateIssues.errors.map(i => ({ ...i, isError: true })),
+            ...dateIssues.warnings.map(i => ({ ...i, isError: false }))
+        ];
+        allIssues.forEach(issue => {
+            const ruleName = issue.rule || 'Onbekende melding';
+
+            // Genereer dismiss key (zelfde formaat als homepage)
+            let dismissKey = null;
+            if (ruleName === 'onderbezetting') {
+                dismissKey = `unstaffed:${date}`;
+            } else if (ruleName === '11-uur regel') {
+                const empId = issue.shift2?.employeeId || issue.shift1?.employeeId || '';
+                if (empId) dismissKey = `11h:${empId}:${date}`;
+            } else if (ruleName === 'medewerker afwezig') {
+                const empId = issue.shift?.employeeId || '';
+                if (empId) dismissKey = `shift-absence:${empId}:${date}`;
             }
-            issueBreakdown[key].count += 1;
+
+            if (dismissKey && dismissedKeys.has(dismissKey)) return;
+
+            if (!issueBreakdown[ruleName]) {
+                issueBreakdown[ruleName] = { count: 0, entries: [], isError: issue.isError };
+            }
+            issueBreakdown[ruleName].count++;
             if (issue.message) {
-                // Prefix elke melding met de datum voor duidelijke context
-                issueBreakdown[key].messages.push(`${formatDate(date)}: ${issue.message}`);
+                issueBreakdown[ruleName].entries.push({
+                    label: `${formatDate(date)}: ${issue.message}`,
+                    key: dismissKey
+                });
             }
         });
     });
 
     return Object.entries(issueBreakdown)
         .sort((a, b) => b[1].count - a[1].count)
-        .map(([rule, info]) => ({
-            rule,
-            count: info.count,
-            messages: info.messages
-        }));
+        .map(([rule, info]) => ({ rule, count: info.count, entries: info.entries, isError: info.isError }));
 }
 
-function renderIssueMessageList(messages) {
+function renderIssueEntryList(entries) {
     const COLLAPSE_AT = 7;
-    if (messages.length <= COLLAPSE_AT) {
-        return `<ul>${messages.map(m => `<li>${escapeHtml(m)}</li>`).join('')}</ul>`;
+    const renderEntry = e => `<li class="issue-entry">
+        <span class="issue-entry-label">${escapeHtml(e.label)}</span>
+        ${e.key ? `<button class="issue-entry-dismiss btn-ghost" title="Negeren" onclick="dismissFromPlanningTab('${escapeHtml(e.key)}')">${IconHelper.html('eye-off', 'xs')}</button>` : ''}
+    </li>`;
+    if (entries.length <= COLLAPSE_AT) {
+        return `<ul class="issue-entry-list">${entries.map(renderEntry).join('')}</ul>`;
     }
-    const visible = messages.slice(0, COLLAPSE_AT).map(m => `<li>${escapeHtml(m)}</li>`).join('');
-    const hidden = messages.slice(COLLAPSE_AT).map(m => `<li>${escapeHtml(m)}</li>`).join('');
-    return `<ul>${visible}</ul>
+    const visible = entries.slice(0, COLLAPSE_AT).map(renderEntry).join('');
+    const hidden = entries.slice(COLLAPSE_AT).map(renderEntry).join('');
+    return `<ul class="issue-entry-list">${visible}</ul>
         <div class="issue-details-more">
             <button class="issue-details-more-toggle" onclick="this.closest('.issue-details-more').classList.toggle('issue-details-more--open')">
-                <span class="show-more">Toon ${messages.length - COLLAPSE_AT} meer <i data-lucide="chevron-down" class="lucide-xs"></i></span>
+                <span class="show-more">Toon ${entries.length - COLLAPSE_AT} meer <i data-lucide="chevron-down" class="lucide-xs"></i></span>
                 <span class="show-less">Toon minder <i data-lucide="chevron-up" class="lucide-xs"></i></span>
             </button>
-            <ul class="issue-details-more-list">${hidden}</ul>
+            <ul class="issue-entry-list issue-details-more-list">${hidden}</ul>
         </div>`;
 }
+// Legacy alias (used by older callers if any)
+function renderIssueMessageList(messages) {
+    return renderIssueEntryList(messages.map(m => ({ label: m, key: null })));
+}
 
-function openWarningDetailsModal() {
+function openValidationDetailsModal(filterRule) {
     if (!DOM.warningDetailsModal) return;
-    DOM.warningDetailsList.innerHTML = '';
+    const breakdown = (AppState.validationBreakdown || [])
+        .filter(item => !filterRule || item.rule === filterRule);
 
-    const breakdown = AppState.warningBreakdown || [];
-    if (breakdown.length === 0) {
-        DOM.warningDetailsList.innerHTML = '<p>Geen waarschuwingen gevonden voor deze periode.</p>';
-    } else {
-        DOM.warningDetailsList.innerHTML = breakdown.map(item => {
+    DOM.warningDetailsList.innerHTML = breakdown.length === 0
+        ? '<p>Geen meldingen voor deze periode.</p>'
+        : breakdown.map(item => {
+            const cfg = VALIDATION_CATEGORY_CONFIG[item.rule.toLowerCase()] ||
+                { icon: item.isError ? 'alert-circle' : 'alert-triangle', label: item.rule, level: item.isError ? 'error' : 'warning' };
+            const headerClass = `issue-details-level-${cfg.level}`;
             return `<div class="issue-details-item">
-                <div class="issue-details-header">
-                    <span class="issue-details-rule">${escapeHtml(item.rule)}</span>
+                <div class="issue-details-header ${headerClass}">
+                    ${IconHelper.html(cfg.icon, 'sm')}
+                    <span class="issue-details-rule">${escapeHtml(cfg.label)}</span>
                     <span class="issue-details-count">${item.count}x</span>
                 </div>
-                ${item.messages.length ? `<div class="issue-details-messages">${renderIssueMessageList(item.messages)}</div>` : ''}
+                ${item.entries.length ? `<div class="issue-details-messages">${renderIssueEntryList(item.entries)}</div>` : ''}
             </div>`;
         }).join('');
-    }
 
     DOM.warningDetailsModal.classList.remove('hidden');
     if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -340,33 +356,17 @@ function closeWarningDetailsModal() {
     if (!DOM.warningDetailsModal) return;
     DOM.warningDetailsModal.classList.add('hidden');
 }
+// Backwards compat aliases
+function openWarningDetailsModal() { openValidationDetailsModal(); }
+function openErrorDetailsModal() { openValidationDetailsModal(); }
+function closeErrorDetailsModal() { closeWarningDetailsModal(); }
 
-function openErrorDetailsModal() {
-    if (!DOM.errorDetailsModal) return;
-    DOM.errorDetailsList.innerHTML = '';
-
-    const breakdown = AppState.errorBreakdown || [];
-    if (breakdown.length === 0) {
-        DOM.errorDetailsList.innerHTML = '<p>Geen fouten gevonden voor deze periode.</p>';
-    } else {
-        DOM.errorDetailsList.innerHTML = breakdown.map(item => {
-            return `<div class="issue-details-item">
-                <div class="issue-details-header">
-                    <span class="issue-details-rule">${escapeHtml(item.rule)}</span>
-                    <span class="issue-details-count">${item.count}x</span>
-                </div>
-                ${item.messages.length ? `<div class="issue-details-messages">${renderIssueMessageList(item.messages)}</div>` : ''}
-            </div>`;
-        }).join('');
+async function dismissFromPlanningTab(key) {
+    if (typeof dismissAlert === 'function') {
+        await dismissAlert(key);
+        renderValidationAlerts();
+        closeWarningDetailsModal();
     }
-
-    DOM.errorDetailsModal.classList.remove('hidden');
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-}
-
-function closeErrorDetailsModal() {
-    if (!DOM.errorDetailsModal) return;
-    DOM.errorDetailsModal.classList.add('hidden');
 }
 
 function renderResponsibleSection() {

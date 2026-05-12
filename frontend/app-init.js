@@ -303,15 +303,8 @@ function setupEventListeners() {
     });
 
     DOM.validationAlerts.addEventListener('click', (event) => {
-        const errorChip = event.target.closest('.validation-summary-item.validation-error');
-        if (errorChip) {
-            openErrorDetailsModal();
-            return;
-        }
-        const warningChip = event.target.closest('.validation-summary-item.validation-warning');
-        if (warningChip) {
-            openWarningDetailsModal();
-        }
+        const chip = event.target.closest('.validation-summary-item');
+        if (chip) openValidationDetailsModal(chip.dataset.rule || null);
     });
 
     // Planning controls collapse toggle (only hides filters row, not date nav)
