@@ -9289,6 +9289,26 @@ body[data-view-mode="day"] .timeline-day-cell {
     color: rgba(255,255,255,0.7);
 }
 
+.builder-day-date {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    color: rgba(255,255,255,0.85);
+    margin-top: 1px;
+}
+
+.builder-leave-hidden-badge {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--warning-color, #f59e0b);
+    color: #fff;
+    border-radius: 99px;
+    padding: 1px 7px;
+    vertical-align: middle;
+}
+
 .builder-day-header.weekend {
     background: var(--primary-dark, #1a5c4a);
 }
