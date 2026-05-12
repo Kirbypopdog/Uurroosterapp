@@ -125,10 +125,13 @@ function validateTeamAssignment(employeeId, teamId) {
     }
 
     // Check if employee belongs to the assigned team
+    // Admins and roosterverantwoordelijken may freely assign cross-team shifts
     if (teamId) {
         const mainTeam = employee.mainTeam || employee.main_team;
+        const currentRole = typeof getEffectiveRole === 'function' ? getEffectiveRole() : null;
+        const isPrivileged = ['admin', 'roosterverantwoordelijke'].includes(currentRole);
 
-        if (mainTeam !== teamId) {
+        if (mainTeam !== teamId && !isPrivileged) {
             const teamName = DataStore.settings.teams?.[teamId]?.name || teamId;
             const employeeTeamName = DataStore.settings.teams?.[mainTeam]?.name || mainTeam || 'Onbekend';
             warnings.push({
