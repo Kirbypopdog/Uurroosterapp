@@ -1085,6 +1085,8 @@ async function handleActivitySubmit(e) {
         }
         closeActivityModal();
         renderPlanning();
+        // Herrender de open shift-modal zodat de nieuwe activiteit meteen zichtbaar is
+        if (AppState.editingShiftId) openEditShiftModal(AppState.editingShiftId);
         showToast('Activiteit opgeslagen', 'success');
     } catch (error) {
         showToast('Fout bij opslaan: ' + getUserFriendlyError(error), 'error');
@@ -1100,6 +1102,7 @@ async function handleActivityDelete() {
         await deleteActivity(parseInt(id, 10));
         closeActivityModal();
         renderPlanning();
+        if (AppState.editingShiftId) openEditShiftModal(AppState.editingShiftId);
         showToast('Activiteit verwijderd', 'success');
     } catch (error) {
         showToast('Fout bij verwijderen: ' + getUserFriendlyError(error), 'error');
