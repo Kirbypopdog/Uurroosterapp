@@ -882,40 +882,6 @@ async function createSwapRequest(requestData) {
     }
 }
 
-async function approveSwapRequest(id, responseNotes) {
-    try {
-        await dataApiFetch(`/swap-requests/${id}/approve`, {
-            method: 'PUT',
-            body: JSON.stringify({ responseNotes })
-        });
-
-        // Refresh swap requests + shifts (approval can swap shift ownership)
-        await getSwapRequests();
-        await refreshShifts();
-
-        return true;
-    } catch (error) {
-        console.error('Fout bij goedkeuren swap request:', error);
-        throw error;
-    }
-}
-
-async function rejectSwapRequest(id, responseNotes) {
-    try {
-        await dataApiFetch(`/swap-requests/${id}/reject`, {
-            method: 'PUT',
-            body: JSON.stringify({ responseNotes })
-        });
-
-        await getSwapRequests();
-
-        return true;
-    } catch (error) {
-        console.error('Fout bij afwijzen swap request:', error);
-        throw error;
-    }
-}
-
 async function cancelSwapRequest(id) {
     try {
         await dataApiFetch(`/swap-requests/${id}`, {

@@ -282,15 +282,6 @@ function setupEventListeners() {
         if (e.target.id === 'swap-request-modal') closeSwapRequestModal();
     });
 
-    // Swap review modal event listeners
-    document.getElementById('swap-review-modal-close').addEventListener('click', closeSwapReviewModal);
-    document.getElementById('swap-review-cancel-btn').addEventListener('click', closeSwapReviewModal);
-    document.getElementById('swap-review-approve-btn').addEventListener('click', handleSwapApprove);
-    document.getElementById('swap-review-reject-btn').addEventListener('click', handleSwapReject);
-    document.getElementById('swap-review-modal').addEventListener('click', (e) => {
-        if (e.target.id === 'swap-review-modal') closeSwapReviewModal();
-    });
-
     // Takeover request modal event listeners
     document.getElementById('takeover-request-modal-close').addEventListener('click', closeTakeoverRequestModal);
     document.getElementById('takeover-request-cancel-btn').addEventListener('click', closeTakeoverRequestModal);

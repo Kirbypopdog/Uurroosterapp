@@ -38,7 +38,7 @@ async function renderSwaps() {
         const actionRequired = [...targetPendingRequests, ...openTakeoverRequests];
         const swapTypeRequests = swapRequests.filter(sr =>
             sr.request_type === 'swap' && sr.status !== 'expired' &&
-            (sr.requester_user_id === currentUser.id || canApproveSwap(sr))
+            sr.requester_user_id === currentUser.id
         );
         const takeoverTypeRequests = swapRequests.filter(sr =>
             sr.request_type === 'takeover' && sr.status !== 'expired' &&
@@ -108,8 +108,7 @@ async function renderSwaps() {
             </div>`;
         } else {
             swapTypeRequests.forEach(sr => {
-                const mode = sr.requester_user_id === currentUser.id ? 'view' : 'approve';
-                html += renderSwapRequestCard(sr, mode);
+                html += renderSwapRequestCard(sr, 'view');
             });
         }
         html += `</div></div>`;
@@ -235,14 +234,6 @@ function renderSwapRequestCard(swapRequest, mode) {
                 </button>
                 <button class="btn btn-danger btn-target-reject-swap" data-swap-id="${swapRequest.id}">
                     ${IconHelper.html(ICONS.close, 'xs')} Afwijzen
-                </button>
-            </div>
-        `;
-    } else if (mode === 'approve' && swapRequest.status === 'pending') {
-        actionsHtml = `
-            <div class="swap-request-actions">
-                <button class="btn btn-secondary btn-review-swap" data-swap-id="${swapRequest.id}">
-                    Beoordelen
                 </button>
             </div>
         `;
@@ -458,14 +449,6 @@ function attachSwapActionListeners() {
             } else if (notes !== null) {
                 showToast('Je moet een reden opgeven om het verzoek af te wijzen', 'warning');
             }
-        });
-    });
-
-    // Review buttons (for future lead approval)
-    document.querySelectorAll('.btn-review-swap').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const swapId = parseInt(btn.dataset.swapId);
-            openSwapReviewModal(swapId);
         });
     });
 

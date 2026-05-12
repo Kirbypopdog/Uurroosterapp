@@ -42,18 +42,6 @@ function canRequestSwap(shift) {
     return shift.userId === currentUser.id;
 }
 
-function canApproveSwap(swapRequest) {
-    const role = getEffectiveRole();
-    const currentUser = AppState.currentUser;
-
-    if (!currentUser || !swapRequest) return false;
-
-    // Admin/roosterverantwoordelijke: all swaps
-    if (['admin', 'roosterverantwoordelijke'].includes(role)) return true;
-
-    return false;
-}
-
 function canCancelSwap(swapRequest) {
     const currentUser = AppState.currentUser;
     if (!currentUser || !swapRequest) return false;
