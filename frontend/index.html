@@ -549,56 +549,6 @@
         </div>
     </div>
 
-    <!-- Modal: Ruilverzoek Beoordelen -->
-    <div id="swap-review-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Ruilverzoek Beoordelen</h2>
-                <span class="modal-close" id="swap-review-modal-close"><i data-lucide="x"></i></span>
-            </div>
-            <div class="modal-body">
-                <!-- Request Info -->
-                <div id="swap-review-info" class="form-group">
-                    <p><strong>Aangevraagd door:</strong> <span id="swap-review-requester"></span></p>
-                    <p><strong>Datum aanvraag:</strong> <span id="swap-review-created"></span></p>
-                </div>
-
-                <!-- Shift Preview -->
-                <div class="swap-shifts-preview">
-                    <div class="swap-shift-card">
-                        <h3><span id="swap-review-requester-name"></span></h3>
-                        <div id="swap-review-requester-shift"></div>
-                    </div>
-                    <div class="swap-arrow"><i data-lucide="arrow-left-right"></i></div>
-                    <div class="swap-shift-card">
-                        <h3><span id="swap-review-target-name"></span></h3>
-                        <div id="swap-review-target-shift"></div>
-                    </div>
-                </div>
-
-                <!-- Message from requester -->
-                <div class="form-group hidden" id="swap-review-message-group">
-                    <label>Bericht van aanvrager:</label>
-                    <div id="swap-review-message" class="message-display"></div>
-                </div>
-
-                <!-- Validation Display -->
-                <div id="swap-review-validation" class="my-md"></div>
-
-                <!-- Response Notes -->
-                <div class="form-group">
-                    <label for="swap-response-notes">Reactie <span id="swap-response-notes-required" class="text-danger hidden">*</span></label>
-                    <textarea id="swap-response-notes" class="form-control" rows="3" placeholder="Toelichting (optioneel bij goedkeuring, verplicht bij afwijzing)"></textarea>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn btn-secondary" id="swap-review-cancel-btn">Annuleren</button>
-                <button type="button" class="btn btn-danger" id="swap-review-reject-btn">Afwijzen</button>
-                <button type="button" class="btn btn-success" id="swap-review-approve-btn">Goedkeuren</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Modal: Shift Afstaan Choice -->
     <div id="shift-afstaan-choice-modal" class="modal hidden">
         <div class="modal-content modal-content--md">
