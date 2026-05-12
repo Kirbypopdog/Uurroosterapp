@@ -1914,7 +1914,7 @@ v1.post('/shift-activities', requireAuth, async (req, res) => {
     res.status(201).json({ activity: result.rows[0] });
   } catch (err) {
     console.error('POST /shift-activities error:', err);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error', detail: err.message });
   }
 });
 
@@ -4418,9 +4418,24 @@ if (process.env.NODE_ENV !== 'test') {
     .then(() => archiveOldShifts())
     .catch(err => console.error('[startup] Migratie mislukt:', err.message))
     .finally(async () => {
-      // Veiligheidsnet: kritieke kolommen altijd toevoegen, ook als migraties faalden
+      // Veiligheidsnet: kritieke kolommen/tabellen altijd toevoegen, ook als migraties faalden
       await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS is_reserve BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
       await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
+      // shift_activities tabel en shift_id kolom veiligstellen
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS shift_activities (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
+          date DATE NOT NULL,
+          start_time TIME NOT NULL,
+          end_time TIME NOT NULL,
+          type TEXT NOT NULL,
+          description TEXT DEFAULT '',
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `).catch(() => {});
+      await pool.query(`ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE`).catch(() => {});
       app.listen(PORT, () => console.log(`API running on :${PORT}`));
     });
 }
