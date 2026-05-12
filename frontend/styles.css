@@ -7383,7 +7383,15 @@ body[data-view-mode="day"] .timeline-day-cell {
         display: none;
     }
 
+    .sidebar-toggle-input:checked ~ .main-nav .user-menu {
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+        align-items: center;
+    }
+
     .sidebar-toggle-input:checked ~ .main-nav .user-menu-trigger {
+        width: auto;
         padding: 2px;
     }
 
