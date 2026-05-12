@@ -303,7 +303,7 @@ function setupEventListeners() {
     });
 
     DOM.validationAlerts.addEventListener('click', (event) => {
-        const chip = event.target.closest('.validation-summary-item');
+        const chip = event.target.closest('.validation-chip');
         if (chip) openValidationDetailsModal(chip.dataset.rule || null);
     });
 
