@@ -391,15 +391,17 @@ function renderHomeAlerts(role) {
         const icon = w.level === 'error' ? 'alert-circle' : w.level === 'info' ? 'info' : 'alert-triangle';
         return `<div class="alert-item alert-item--${w.level}"${w.date ? ` data-date="${w.date}"` : ''}>
             <div class="alert-item-header">
-                <i data-lucide="${icon}" class="lucide-xs"></i>
+                <i data-lucide="${icon}" class="lucide-xs alert-item-icon"></i>
                 <span class="alert-item-title">${w.text}</span>
                 <i data-lucide="chevron-down" class="lucide-xs alert-item-chevron"></i>
             </div>
             <div class="alert-item-body">
-                ${w.detail ? `<div class="alert-item-detail">${w.detail}</div>` : ''}
-                <div class="alert-item-actions">
-                    ${w.date ? `<button class="alert-action-goto" data-date="${w.date}">Ga naar dag</button>` : ''}
-                    ${w.key ? `<button class="alert-action-dismiss" data-alert-key="${w.key}">Negeren</button>` : ''}
+                <div class="alert-item-body-inner">
+                    ${w.detail ? `<div class="alert-item-detail">${w.detail}</div>` : ''}
+                    <div class="alert-item-actions">
+                        ${w.date ? `<button class="alert-action-goto" data-date="${w.date}"><i data-lucide="map-pin" class="lucide-xs"></i> Ga naar dag</button>` : ''}
+                        ${w.key ? `<button class="alert-action-dismiss" data-alert-key="${w.key}"><i data-lucide="eye-off" class="lucide-xs"></i> Negeren</button>` : ''}
+                    </div>
                 </div>
             </div>
         </div>`;
