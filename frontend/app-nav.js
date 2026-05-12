@@ -139,6 +139,15 @@ function renderHome() {
         });
     });
 
+    // Shift items: navigate to that week in planning view
+    container.querySelectorAll('.home-shift-item[data-shift-date]').forEach(item => {
+        item.addEventListener('click', () => {
+            const dateStr = item.dataset.shiftDate;
+            setCurrentWeek(parseDateOnly(dateStr));
+            switchView('planning');
+        });
+    });
+
     // Attach request click handlers
     container.querySelectorAll('.home-request-item[data-action="view-swaps"]').forEach(item => {
         item.style.cursor = 'pointer';
@@ -379,13 +388,31 @@ function renderHomeShifts(user) {
             const teamName = teamSettings?.name || teamId || '';
             const teamColor = teamSettings?.color || '#64748b';
 
+            const dateStr = shift.date.split('T')[0];
+            const activities = typeof getActivitiesByEmployee === 'function'
+                ? getActivitiesByEmployee(userId, dateStr)
+                : (DataStore.activities || []).filter(a => String(a.userId) === String(userId) && a.date === dateStr);
+
+            let activitiesHtml = '';
+            if (activities.length > 0) {
+                const pills = activities.map(a => {
+                    const label = ACTIVITY_TYPE_LABELS_FULL[a.type] || a.type || 'Activiteit';
+                    const t = a.startTime || a.start_time || '';
+                    return `<span class="home-shift-activity-badge">${escapeHtml(label)}${t ? ' · ' + escapeHtml(t) : ''}</span>`;
+                }).join('');
+                activitiesHtml = `<div class="home-shift-activities">${pills}</div>`;
+            }
+
             shiftsHtml += `
-                <div class="home-shift-item ${isToday ? 'home-shift-today' : ''}">
+                <div class="home-shift-item ${isToday ? 'home-shift-today' : ''}" data-shift-date="${escapeHtml(dateStr)}">
                     <div class="home-shift-date">
                         <span class="home-shift-date-num">${dayNum}</span>
                         <span class="day-name">${isToday ? 'Vandaag' : escapeHtml(dayName)}</span>
                     </div>
-                    <div class="home-shift-time">${escapeHtml(startTime)} – ${escapeHtml(endTime)}</div>
+                    <div class="home-shift-details">
+                        <div class="home-shift-time">${escapeHtml(startTime)} – ${escapeHtml(endTime)}</div>
+                        ${activitiesHtml}
+                    </div>
                     <span class="home-shift-team" style="background:${escapeHtml(teamColor)}">${escapeHtml(teamName)}</span>
                 </div>
             `;

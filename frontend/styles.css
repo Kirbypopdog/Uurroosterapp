@@ -1221,12 +1221,34 @@ textarea:focus-visible {
     margin-top: 2px;
 }
 
-.home-shift-time {
+.home-shift-details {
     flex: 1;
+    min-width: 0;
+}
+
+.home-shift-time {
     font-size: 1rem;
     color: var(--text-primary);
     font-weight: 600;
     font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+}
+
+.home-shift-activities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 5px;
+}
+
+.home-shift-activity-badge {
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(37, 99, 235, 0.1);
+    color: var(--primary-color);
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    font-family: inherit;
 }
 
 .home-shift-team {
