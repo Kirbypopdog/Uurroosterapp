@@ -357,7 +357,7 @@ function openValidationDetailsModal(filterRule) {
             const cfg = VALIDATION_CATEGORY_CONFIG[filterRule.toLowerCase()];
             titleEl.textContent = cfg ? cfg.label : filterRule;
         } else {
-            titleEl.textContent = 'Validatiemeldingen';
+            titleEl.textContent = 'Meldingen';
         }
     }
 
