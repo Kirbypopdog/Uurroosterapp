@@ -252,7 +252,7 @@ function renderHomeAlerts(role) {
             if (!dismissedKeys.has(key)) {
                 const label = `${dayLabelsNL[d.getDay()]} ${formatDateShort(d)}`;
                 const text = badWindows.length === 1
-                    ? `${label}: onderbezet ${fmtH(badWindows[0].from)}–${fmtH(badWindows[0].to)}`
+                    ? `${label}: onderbezet`
                     : `${label}: ${badWindows.length} onderbezette tijdvensters`;
                 const detail = badWindows.map(w => `${fmtH(w.from)}–${fmtH(w.to)}: ${w.netto}/${w.min} mdw`).join('<br>');
                 warnings.push({ level: 'warning', date: dateStr, key, text, detail });
