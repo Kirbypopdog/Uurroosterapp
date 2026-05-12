@@ -74,6 +74,17 @@
     --color-success-hover: #059669;
     --color-success-bg: #d1fae5;
     --color-success-light: #ecfdf5;
+
+    /* Alert/validatie kleurtokens (uniform over builder, planner, homepage, modals) */
+    --alert-warning-bg:     #fffbeb;
+    --alert-warning-border: #fcd34d;
+    --alert-warning-text:   #92400e;
+    --alert-error-bg:       #fef2f2;
+    --alert-error-border:   #fecaca;
+    --alert-error-text:     #991b1b;
+    --alert-info-bg:        #eff6ff;
+    --alert-info-border:    #bfdbfe;
+    --alert-info-text:      #1e40af;
 }
 
 /* ===== LUCIDE ICON SIZING ===== */
@@ -1030,12 +1041,14 @@ textarea:focus-visible {
 }
 .alert-item:last-child { border-bottom: none; }
 .alert-item--warning {
-    background: #fffbeb;
-    color: #92400e;
+    background: var(--alert-warning-bg);
+    border-left: 3px solid var(--alert-warning-border);
+    color: var(--alert-warning-text);
 }
 .alert-item--info {
-    background: #eff6ff;
-    color: #1e3a8a;
+    background: var(--alert-info-bg);
+    border-left: 3px solid var(--alert-info-border);
+    color: var(--alert-info-text);
 }
 .alert-icon {
     flex-shrink: 0;
@@ -1870,24 +1883,26 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .validation-summary-item.validation-error {
-    background: #eff6ff;
-    color: var(--accent-blue);
+    background: var(--alert-error-bg);
+    color: var(--alert-error-text);
+    border: 1px solid var(--alert-error-border);
     cursor: pointer;
 }
 
 .validation-summary-item.validation-error:hover {
-    background: #dbeafe;
+    filter: brightness(0.96);
     box-shadow: var(--shadow-sm);
 }
 
 .validation-summary-item.validation-warning {
-    background: #f8fafc;
-    color: #475569;
+    background: var(--alert-warning-bg);
+    color: var(--alert-warning-text);
+    border: 1px solid var(--alert-warning-border);
     cursor: pointer;
 }
 
 .validation-summary-item.validation-warning:hover {
-    background: #f1f5f9;
+    filter: brightness(0.96);
     box-shadow: var(--shadow-sm);
 }
 
@@ -4573,46 +4588,46 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 /* Validation messages in shift modal */
 .validation-error {
-    background: var(--color-danger-bg);
-    border: 1px solid #f87171;
+    background: var(--alert-error-bg);
+    border: 1px solid var(--alert-error-border);
     border-radius: var(--radius-md);
     padding: 12px;
     margin-bottom: 12px;
 }
 
 .validation-error strong {
-    color: #991b1b;
+    color: var(--alert-error-text);
 }
 
 .validation-error ul {
     margin: 8px 0 0 20px;
     padding: 0;
-    color: #991b1b;
+    color: var(--alert-error-text);
     font-size: 13px;
 }
 
 .validation-warning {
-    background: var(--color-warning-light);
-    border: 1px solid #fbbf24;
+    background: var(--alert-warning-bg);
+    border: 1px solid var(--alert-warning-border);
     border-radius: var(--radius-md);
     padding: 12px;
     margin-bottom: 12px;
 }
 
 .validation-warning strong {
-    color: #92400e;
+    color: var(--alert-warning-text);
 }
 
 .validation-warning ul {
     margin: 8px 0 0 20px;
     padding: 0;
-    color: #92400e;
+    color: var(--alert-warning-text);
     font-size: 13px;
 }
 
 .validation-warning.absence {
-    background: var(--color-warning-light);
-    border-color: #f59e0b;
+    background: var(--alert-warning-bg);
+    border-color: var(--alert-warning-border);
 }
 
 /* Shift source info in modal */
@@ -9988,21 +10003,21 @@ body[data-view-mode="day"] .timeline-day-cell {
 .builder-11h-warnings {
     margin: 12px 0;
     padding: 12px 16px;
-    background: #fff3cd;
-    border: 1px solid #ffc107;
+    background: var(--alert-warning-bg);
+    border: 1px solid var(--alert-warning-border);
     border-radius: var(--radius-md);
 }
 .builder-11h-warnings-title {
     font-weight: 600;
     font-size: 13px;
     margin-bottom: 6px;
-    color: #856404;
+    color: var(--alert-warning-text);
 }
 .builder-11h-warnings ul {
     margin: 0;
     padding-left: 18px;
     font-size: 13px;
-    color: #856404;
+    color: var(--alert-warning-text);
 }
 .builder-11h-warnings li {
     margin-bottom: 4px;
@@ -11060,12 +11075,12 @@ body[data-view-mode="day"] .timeline-day-cell {
     100% { box-shadow: none; }
 }
 .conflict-item:has(.conflict-warning) {
-    border-color: var(--warning-color, #f59e0b);
-    background: #fffbeb;
+    border-color: var(--alert-warning-border);
+    background: var(--alert-warning-bg);
 }
 .conflict-warning {
     font-weight: 500;
-    color: #92400e;
+    color: var(--alert-warning-text);
     font-size: 13px;
     line-height: 1.4;
 }

@@ -289,7 +289,6 @@ function openWarningDetailsModal() {
         DOM.warningDetailsList.innerHTML = '<p>Geen waarschuwingen gevonden voor deze periode.</p>';
     } else {
         DOM.warningDetailsList.innerHTML = breakdown.map(item => {
-            const dates = item.dates.map(date => `<li>${escapeHtml(date)}</li>`).join('');
             const messageItems = item.messages.map(message => `<li>${escapeHtml(message)}</li>`).join('');
             return `<div class="issue-details-item">
                 <div class="issue-details-header">
@@ -299,10 +298,6 @@ function openWarningDetailsModal() {
                 <div class="issue-details-messages">
                     <div class="issue-details-label">Context</div>
                     <ul>${messageItems}</ul>
-                </div>
-                <div class="issue-details-dates">
-                    <div class="issue-details-label">Datums</div>
-                    <ul>${dates}</ul>
                 </div>
             </div>`;
         }).join('');
@@ -325,7 +320,6 @@ function openErrorDetailsModal() {
         DOM.errorDetailsList.innerHTML = '<p>Geen fouten gevonden voor deze periode.</p>';
     } else {
         DOM.errorDetailsList.innerHTML = breakdown.map(item => {
-            const dates = item.dates.map(date => `<li>${escapeHtml(date)}</li>`).join('');
             const messageItems = item.messages.map(message => `<li>${escapeHtml(message)}</li>`).join('');
             return `<div class="issue-details-item">
                 <div class="issue-details-header">
@@ -335,10 +329,6 @@ function openErrorDetailsModal() {
                 <div class="issue-details-messages">
                     <div class="issue-details-label">Context</div>
                     <ul>${messageItems}</ul>
-                </div>
-                <div class="issue-details-dates">
-                    <div class="issue-details-label">Datums</div>
-                    <ul>${dates}</ul>
                 </div>
             </div>`;
         }).join('');

@@ -153,6 +153,15 @@ function renderHome() {
         item.style.cursor = 'pointer';
         item.addEventListener('click', () => switchView('swaps'));
     });
+
+    // Alert-items met datum: klik navigeert naar die week in planning-tab
+    container.querySelectorAll('.alert-item[data-date]').forEach(item => {
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', () => {
+            setCurrentWeek(parseDateOnly(item.dataset.date));
+            switchView('planning');
+        });
+    });
 }
 
 function getOnboardingStatus() {
@@ -187,9 +196,9 @@ function renderHomeAlerts(role) {
     const maxConsecutive = DataStore.settings?.rules?.maxConsecutiveDays ?? 6;
     const teams = DataStore.settings?.teams || {};
 
-    // 1. Onderbezetting komende 7 dagen per team
+    // 1. Onderbezetting komende 30 dagen per team
     const coverageTeams = DataStore.settings?.coverageTeams || [];
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 30; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
         const dateStr = formatDateYYYYMMDD(d);
@@ -208,7 +217,7 @@ function renderHomeAlerts(role) {
                 s.team === teamId && (s.date || '').split('T')[0] === dateStr
             );
             if (teamShifts.length === 0) {
-                warnings.push({ level: 'warning', text: `${dayLabel} ${formatDateShort(d)}: ${escapeHtml(team.name)} heeft geen diensten ingepland` });
+                warnings.push({ level: 'warning', date: dateStr, text: `${dayLabel} ${formatDateShort(d)}: ${escapeHtml(team.name)} heeft geen diensten ingepland` });
             }
         }
     }
@@ -262,7 +271,7 @@ function renderHomeAlerts(role) {
     if (warnings.length === 0) return '';
 
     const items = warnings.map(w => `
-        <div class="alert-item alert-item--${w.level}">
+        <div class="alert-item alert-item--${w.level}"${w.date ? ` data-date="${w.date}"` : ''}>
             <i data-lucide="${w.level === 'info' ? 'info' : 'alert-triangle'}" class="lucide-xs"></i>
             <span>${w.text}</span>
         </div>`).join('');
