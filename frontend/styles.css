@@ -1040,6 +1040,19 @@ textarea:focus-visible {
     line-height: 1.4;
 }
 .alert-item:last-child { border-bottom: none; }
+.alert-dismiss-btn {
+    margin-left: auto;
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    opacity: 0.4;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    color: inherit;
+    line-height: 1;
+}
+.alert-dismiss-btn:hover { opacity: 1; background: rgba(0,0,0,0.06); }
 .alert-item--warning {
     background: var(--alert-warning-bg);
     border-left: 3px solid var(--alert-warning-border);

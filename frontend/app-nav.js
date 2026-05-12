@@ -162,6 +162,14 @@ function renderHome() {
             switchView('planning');
         });
     });
+
+    // Dismiss-knoppen: verberg melding permanent
+    container.querySelectorAll('.alert-dismiss-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            dismissAlert(btn.dataset.alertKey);
+        });
+    });
 }
 
 function getOnboardingStatus() {
@@ -193,96 +201,178 @@ function renderHomeAlerts(role) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const maxConsecutive = DataStore.settings?.rules?.maxConsecutiveDays ?? 6;
+    const dayLabelsNL = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
+
+    // Dismissed alert keys (permanent, opgeslagen in settings, max 45 dagen geldig)
+    const dismissedKeys = new Set(
+        (DataStore.settings.dismissedAlerts || [])
+            .filter(d => (Date.now() - new Date(d.dismissedAt).getTime()) < 45 * 24 * 60 * 60 * 1000)
+            .map(d => d.key)
+    );
+    const fmtH = h => `${String(Math.floor(h)).padStart(2,'0')}:${h%1 === 0.5 ? '30' : '00'}`;
 
     // 1. Onderbezetting komende 30 dagen (op basis van bezettingsregels actief concept)
-    const dayLabelsNL = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
     for (let i = 0; i < 30; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
         const dateStr = formatDateYYYYMMDD(d);
-
         if (isDayClosed(dateStr)) continue;
 
         const dayRules = typeof getStaffingRulesForDay === 'function' ? getStaffingRulesForDay(dateStr) : null;
         if (!dayRules) continue;
 
-        let isUnderstaffed = false;
-        outer: for (const rule of dayRules) {
-            for (let h = rule.from; h < rule.to; h += 0.5) {
-                const { netto } = calcPlanningHourlyHeadcount(dateStr, h);
-                if (netto < rule.min) { isUnderstaffed = true; break outer; }
+        let firstBadH = null, lastBadH = null, firstNetto = null, firstMin = null;
+        for (let h = 7; h < 24; h += 0.5) {
+            let required = -1;
+            for (const rule of dayRules) {
+                if (h >= rule.from && h < rule.to) required = Math.max(required, rule.min);
+            }
+            if (required < 0) continue;
+            const { netto } = calcPlanningHourlyHeadcount(dateStr, h);
+            if (netto < required) {
+                if (firstBadH === null) { firstBadH = h; firstNetto = netto; firstMin = required; }
+                lastBadH = h + 0.5;
             }
         }
-        if (isUnderstaffed) {
-            const dayLabel = dayLabelsNL[d.getDay()];
-            warnings.push({ level: 'warning', date: dateStr, text: `${dayLabel} ${formatDateShort(d)}: onderbezet` });
+        if (firstBadH !== null) {
+            const key = `unstaffed:${dateStr}`;
+            if (!dismissedKeys.has(key)) {
+                warnings.push({ level: 'warning', date: dateStr, key,
+                    text: `${dayLabelsNL[d.getDay()]} ${formatDateShort(d)}: onderbezet ${fmtH(firstBadH)}–${fmtH(lastBadH)} (${firstNetto}/${firstMin} mdw)` });
+            }
         }
     }
 
-    // 2. Medewerkers die max opeenvolgende dagen naderen (>= maxConsecutive - 1)
+    // 2. 11-uur schendingen in komende 30 dagen
+    const rangeStart = formatDateYYYYMMDD(today);
+    const rangeEnd30 = formatDateYYYYMMDD(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 29));
+    if (typeof getValidationSummary === 'function') {
+        const summary = getValidationSummary(rangeStart, rangeEnd30);
+        const seen11h = new Set();
+        for (const [date, issues] of Object.entries(summary.dates || {})) {
+            for (const err of (issues.errors || [])) {
+                if (err.rule !== '11-uur regel') continue;
+                const empId = err.shift2?.employeeId || err.shift1?.employeeId || '';
+                const key = `11h:${empId}:${date}`;
+                if (seen11h.has(key) || dismissedKeys.has(key)) continue;
+                seen11h.add(key);
+                warnings.push({ level: 'error', date, key, text: err.message });
+            }
+        }
+    }
+
+    // 3. Shift + afwezigheid conflicten in komende 30 dagen
+    const absenceTypes = ['ziek', 'verlof', 'overuren', 'vorming', 'andere'];
+    const absenceLabels = { ziek: 'ziek', verlof: 'verlof', overuren: 'overuren opnemen', vorming: 'vorming', andere: 'afwezig' };
+    const seenConflict = new Set();
+    for (const s of DataStore.shifts) {
+        const dateStr = (s.date || '').split('T')[0];
+        if (dateStr < rangeStart || dateStr > rangeEnd30) continue;
+        const empId = s.employeeId || s.userId;
+        const conflictKey = `${empId}:${dateStr}`;
+        if (seenConflict.has(conflictKey)) continue;
+        const absence = (DataStore.availability || []).find(a =>
+            (a.userId === Number(empId) || a.employeeId === Number(empId)) &&
+            a.date === dateStr && absenceTypes.includes(a.type)
+        );
+        if (!absence) continue;
+        seenConflict.add(conflictKey);
+        const key = `shift-absence:${empId}:${dateStr}`;
+        if (dismissedKeys.has(key)) continue;
+        const emp = (DataStore.users || []).find(u => u.id === Number(empId));
+        const dObj = parseDateOnly(dateStr);
+        warnings.push({ level: 'warning', date: dateStr, key,
+            text: `${escapeHtml(emp?.name || 'Medewerker')}: shift op ${formatDateShort(dObj)} maar ${absenceLabels[absence.type] || 'afwezig'}` });
+    }
+
+    // 4. Medewerkers die max opeenvolgende dagen overschrijden
     const activeEmployees = (DataStore.users || []).filter(u => u.active !== false && u.role === 'medewerker');
     for (const emp of activeEmployees) {
-        // Check a window from 7 days back to 30 days ahead (matches onderbezettingsscope)
         const windowStart = new Date(today);
         windowStart.setDate(today.getDate() - 7);
         const windowEnd = new Date(today);
         windowEnd.setDate(today.getDate() + 30);
-        const startStr = formatDateYYYYMMDD(windowStart);
-        const endStr = formatDateYYYYMMDD(windowEnd);
+        const wStartStr = formatDateYYYYMMDD(windowStart);
+        const wEndStr = formatDateYYYYMMDD(windowEnd);
 
         const empShiftDates = new Set(
             DataStore.shifts
                 .filter(s => Number(s.employeeId || s.userId) === emp.id &&
-                    (s.date || '').split('T')[0] >= startStr &&
-                    (s.date || '').split('T')[0] <= endStr)
+                    (s.date || '').split('T')[0] >= wStartStr &&
+                    (s.date || '').split('T')[0] <= wEndStr)
                 .map(s => (s.date || '').split('T')[0])
         );
 
-        // Find longest consecutive run touching today or future
-        let run = 0;
-        let maxRun = 0;
+        let run = 0, maxRun = 0, runStart = null, longestStart = null;
         for (let i = -7; i <= 30; i++) {
             const d = new Date(today);
             d.setDate(today.getDate() + i);
-            if (empShiftDates.has(formatDateYYYYMMDD(d))) {
+            const ds = formatDateYYYYMMDD(d);
+            if (empShiftDates.has(ds)) {
+                if (run === 0) runStart = ds;
                 run++;
-                maxRun = Math.max(maxRun, run);
+                if (run > maxRun) { maxRun = run; longestStart = runStart; }
             } else {
                 run = 0;
             }
         }
         if (maxRun >= maxConsecutive) {
-            warnings.push({ level: 'warning', text: `${escapeHtml(emp.name)} werkt ${maxRun} dagen op rij (maximum: ${maxConsecutive})` });
+            const key = `consecutive:${emp.id}:${longestStart}`;
+            if (!dismissedKeys.has(key)) {
+                warnings.push({ level: 'warning', date: longestStart, key,
+                    text: `${escapeHtml(emp.name)} werkt ${maxRun} dagen op rij (maximum: ${maxConsecutive})` });
+            }
         }
     }
 
-    // 3. Ruilverzoeken ouder dan 48u zonder reactie
+    // 5. Ruilverzoeken ouder dan 48u zonder reactie
     const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000);
     const oldPending = (DataStore.swapRequests || []).filter(r =>
         r.status === 'pending' && new Date(r.createdAt || r.created_at) < cutoff48h
     );
     if (oldPending.length > 0) {
-        warnings.push({ level: 'info', text: `${oldPending.length} ruilverzoek${oldPending.length !== 1 ? 'en' : ''} wacht${oldPending.length === 1 ? '' : 'en'} al meer dan 48u op goedkeuring` });
+        const key = 'old-swaps';
+        if (!dismissedKeys.has(key)) {
+            warnings.push({ level: 'info', key,
+                text: `${oldPending.length} ruilverzoek${oldPending.length !== 1 ? 'en' : ''} wacht${oldPending.length === 1 ? '' : 'en'} al meer dan 48u op goedkeuring` });
+        }
     }
 
     if (warnings.length === 0) return '';
 
     const items = warnings.map(w => `
         <div class="alert-item alert-item--${w.level}"${w.date ? ` data-date="${w.date}"` : ''}>
-            <i data-lucide="${w.level === 'info' ? 'info' : 'alert-triangle'}" class="lucide-xs"></i>
+            <i data-lucide="${w.level === 'error' ? 'alert-circle' : w.level === 'info' ? 'info' : 'alert-triangle'}" class="lucide-xs"></i>
             <span>${w.text}</span>
+            ${w.key ? `<button class="alert-dismiss-btn" data-alert-key="${w.key}" title="Verberg"><i data-lucide="x" class="lucide-xs"></i></button>` : ''}
         </div>`).join('');
 
     return `
         <div class="home-alerts home-alerts--collapsed mb-md">
             <button class="home-alerts-header" onclick="this.closest('.home-alerts').classList.toggle('home-alerts--collapsed')" aria-expanded="false">
                 <i data-lucide="bell" class="lucide-sm"></i>
-                <strong>Attentiepunten</strong>
+                <strong>Meldingen</strong>
                 <span class="home-alerts-count">${warnings.length}</span>
                 <i data-lucide="chevron-down" class="lucide-sm home-alerts-chevron"></i>
             </button>
             <div class="home-alerts-body">${items}</div>
         </div>`;
+}
+
+async function dismissAlert(key) {
+    const current = DataStore.settings.dismissedAlerts || [];
+    const updated = current.filter(d => {
+        const daysAgo = (Date.now() - new Date(d.dismissedAt).getTime()) / (1000 * 60 * 60 * 24);
+        return d.key !== key && daysAgo < 45;
+    });
+    updated.push({ key, dismissedAt: new Date().toISOString() });
+    try {
+        await dataApiFetch('/settings/dismissedAlerts', { method: 'PUT', body: JSON.stringify({ value: updated }) });
+        DataStore.settings.dismissedAlerts = updated;
+    } catch (e) {
+        DataStore.settings.dismissedAlerts = updated; // optimistic update ook bij fout
+    }
+    renderHome();
 }
 
 function formatDateShort(date) {
