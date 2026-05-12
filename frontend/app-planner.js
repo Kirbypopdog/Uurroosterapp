@@ -273,49 +273,40 @@ function renderValidationAlerts() {
 function buildIssueBreakdown(summary, issueType) {
     const issueBreakdown = {};
     const issuesKey = issueType === 'errors' ? 'errors' : 'warnings';
-    Object.entries(summary.dates).forEach(([date, dateIssues]) => {
+    Object.entries(summary.dates).sort().forEach(([date, dateIssues]) => {
         dateIssues[issuesKey].forEach(issue => {
             const key = issue.rule || 'Onbekende waarschuwing';
             if (!issueBreakdown[key]) {
-                issueBreakdown[key] = {
-                    count: 0,
-                    dates: new Set(),
-                    messages: new Set()
-                };
+                issueBreakdown[key] = { count: 0, messages: [] };
             }
             issueBreakdown[key].count += 1;
-            issueBreakdown[key].dates.add(date);
             if (issue.message) {
-                issueBreakdown[key].messages.add(issue.message);
+                // Prefix elke melding met de datum voor duidelijke context
+                issueBreakdown[key].messages.push(`${formatDate(date)}: ${issue.message}`);
             }
         });
     });
 
     return Object.entries(issueBreakdown)
         .sort((a, b) => b[1].count - a[1].count)
-        .map(([rule, info]) => {
-            const dates = Array.from(info.dates).sort().map(date => formatDate(date));
-            const messages = Array.from(info.messages);
-            return {
-                rule,
-                count: info.count,
-                dates,
-                messages
-            };
-        });
+        .map(([rule, info]) => ({
+            rule,
+            count: info.count,
+            messages: info.messages
+        }));
 }
 
 function renderIssueMessageList(messages) {
-    const COLLAPSE_AT = 5;
-    if (messages.length < COLLAPSE_AT) {
+    const COLLAPSE_AT = 7;
+    if (messages.length <= COLLAPSE_AT) {
         return `<ul>${messages.map(m => `<li>${escapeHtml(m)}</li>`).join('')}</ul>`;
     }
-    const visible = messages.slice(0, COLLAPSE_AT - 1).map(m => `<li>${escapeHtml(m)}</li>`).join('');
-    const hidden = messages.slice(COLLAPSE_AT - 1).map(m => `<li>${escapeHtml(m)}</li>`).join('');
+    const visible = messages.slice(0, COLLAPSE_AT).map(m => `<li>${escapeHtml(m)}</li>`).join('');
+    const hidden = messages.slice(COLLAPSE_AT).map(m => `<li>${escapeHtml(m)}</li>`).join('');
     return `<ul>${visible}</ul>
         <div class="issue-details-more">
             <button class="issue-details-more-toggle" onclick="this.closest('.issue-details-more').classList.toggle('issue-details-more--open')">
-                <span class="show-more">Toon ${messages.length - (COLLAPSE_AT - 1)} meer <i data-lucide="chevron-down" class="lucide-xs"></i></span>
+                <span class="show-more">Toon ${messages.length - COLLAPSE_AT} meer <i data-lucide="chevron-down" class="lucide-xs"></i></span>
                 <span class="show-less">Toon minder <i data-lucide="chevron-up" class="lucide-xs"></i></span>
             </button>
             <ul class="issue-details-more-list">${hidden}</ul>
@@ -336,10 +327,7 @@ function openWarningDetailsModal() {
                     <span class="issue-details-rule">${escapeHtml(item.rule)}</span>
                     <span class="issue-details-count">${item.count}x</span>
                 </div>
-                <div class="issue-details-messages">
-                    <div class="issue-details-label">Context</div>
-                    ${renderIssueMessageList(item.messages)}
-                </div>
+                ${item.messages.length ? `<div class="issue-details-messages">${renderIssueMessageList(item.messages)}</div>` : ''}
             </div>`;
         }).join('');
     }
@@ -367,10 +355,7 @@ function openErrorDetailsModal() {
                     <span class="issue-details-rule">${escapeHtml(item.rule)}</span>
                     <span class="issue-details-count">${item.count}x</span>
                 </div>
-                <div class="issue-details-messages">
-                    <div class="issue-details-label">Context</div>
-                    ${renderIssueMessageList(item.messages)}
-                </div>
+                ${item.messages.length ? `<div class="issue-details-messages">${renderIssueMessageList(item.messages)}</div>` : ''}
             </div>`;
         }).join('');
     }
