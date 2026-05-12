@@ -20,7 +20,15 @@ jobs:
             const fs = require('fs');
             const files = [
               'frontend/index.html',
-              'frontend/app.js',
+              'frontend/app-globals.js',
+              'frontend/app-nav.js',
+              'frontend/app-planner.js',
+              'frontend/app-shifts.js',
+              'frontend/app-employees.js',
+              'frontend/app-builder.js',
+              'frontend/app-settings.js',
+              'frontend/app-auth.js',
+              'frontend/app-init.js',
               'frontend/data.js',
               'frontend/validation.js',
               'frontend/drag-handler.js',
@@ -33,15 +41,16 @@ jobs:
 
       - name: Check frontend JS syntax
         run: |
-          node --check frontend/app.js
-          node --check frontend/data.js
-          node --check frontend/validation.js
-          node --check frontend/drag-handler.js
-          node --check frontend/config/settings.js
+          for f in frontend/app-*.js frontend/data.js frontend/validation.js frontend/drag-handler.js frontend/config/settings.js; do
+            node --check "$f"
+          done
           echo "Frontend JS syntax OK"
 
       - name: Install backend dependencies
         run: cd backend && npm install
+
+      - name: Run backend tests
+        run: cd backend && npm test
 
       - name: Check backend JS syntax
         run: |
