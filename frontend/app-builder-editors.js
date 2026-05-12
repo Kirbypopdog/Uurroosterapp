@@ -181,67 +181,58 @@ function renderBuilderWarnings(employees) {
     const maxDays = DataStore.settings.rules?.maxConsecutiveDays || 6;
     const warnings = [];
     const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+    const cycleLength = getBuilderCycleLength();
+    const currentWeek = AppState.builderWeekNumber;
+
+    function restHoursBetween(shift1, shift2) {
+        let endMin = shift1.endTime.split(':').map(Number);
+        let startMin = shift2.startTime.split(':').map(Number);
+        let end = endMin[0] * 60 + endMin[1];
+        const start2 = startMin[0] * 60 + startMin[1];
+        const startOfShift1 = shift1.startTime.split(':').map(Number);
+        const s1Start = startOfShift1[0] * 60 + startOfShift1[1];
+        if (end <= s1Start) end += 24 * 60; // overnight
+        return ((24 * 60 - end) + start2) / 60;
+    }
 
     employees.forEach(emp => {
         const empGrid = AppState.builderGrid[emp.id] || {};
         const days = Object.keys(empGrid).map(Number).sort((a, b) => a - b);
 
-        // 11-hour rule checks
-        for (let i = 0; i < days.length; i++) {
-            const nextDay = i < days.length - 1 ? days[i + 1] : null;
-            const currentShift = empGrid[days[i]];
-
-            const wrapTarget = days[i] === 6 ? empGrid[0] : null;
-
-            const checkPairs = [];
-            if (nextDay !== null && nextDay === days[i] + 1) {
-                checkPairs.push({ day1: days[i], day2: nextDay, shift2: empGrid[nextDay], isWrap: false });
+        // 11-hour rule: within current week (consecutive days only, no wrap)
+        for (let i = 0; i < days.length - 1; i++) {
+            if (days[i + 1] !== days[i] + 1) continue;
+            const rest = restHoursBetween(empGrid[days[i]], empGrid[days[i + 1]]);
+            if (rest < minHours) {
+                warnings.push(
+                    `<strong>${escapeHtml(emp.name)}</strong>: ${rest.toFixed(1)}u rust tussen ${dayNames[days[i]]} en ${dayNames[days[i + 1]]} (min. ${minHours}u)`
+                );
             }
-            if (wrapTarget) {
-                checkPairs.push({ day1: 6, day2: 0, shift2: wrapTarget, isWrap: true });
-            }
+        }
 
-            for (const pair of checkPairs) {
-                const endParts = currentShift.endTime.split(':').map(Number);
-                const startParts = pair.shift2.startTime.split(':').map(Number);
-
-                let endMinutes = endParts[0] * 60 + endParts[1];
-                let startMinutes = startParts[0] * 60 + startParts[1];
-
-                const shift1StartParts = currentShift.startTime.split(':').map(Number);
-                const shift1Start = shift1StartParts[0] * 60 + shift1StartParts[1];
-                if (endMinutes <= shift1Start) {
-                    endMinutes += 24 * 60;
-                }
-
-                const restMinutes = (24 * 60 - endMinutes) + startMinutes;
-                const restHours = restMinutes / 60;
-
-                if (restHours < minHours) {
-                    const label1 = dayNames[pair.day1];
-                    const label2 = dayNames[pair.day2];
-                    const wrapNote = pair.isWrap ? ' (weekovergang)' : '';
+        // 11-hour rule: week boundary (Sunday of week N → Monday of week N+1)
+        const sundayShift = empGrid[6];
+        if (sundayShift) {
+            const nextWeek = currentWeek < cycleLength ? currentWeek + 1 : 1;
+            const nextWeekEmpGrid = (AppState.builderGridByWeek[nextWeek] || {})[emp.id] || {};
+            const nextMonday = nextWeekEmpGrid[0];
+            if (nextMonday) {
+                const rest = restHoursBetween(sundayShift, nextMonday);
+                const weekNote = cycleLength > 1 ? ` (week ${currentWeek}→${nextWeek})` : ' (weekovergang)';
+                if (rest < minHours) {
                     warnings.push(
-                        `<strong>${escapeHtml(emp.name)}</strong>: ${restHours.toFixed(1)}u rust tussen ${label1} en ${label2}${wrapNote} (min. ${minHours}u)`
+                        `<strong>${escapeHtml(emp.name)}</strong>: ${rest.toFixed(1)}u rust tussen Zo en Ma${weekNote} (min. ${minHours}u)`
                     );
                 }
             }
         }
 
-        // Max consecutive days check (including wrap-around for repeating pattern)
+        // Max consecutive days check (within current week only)
         if (days.length > maxDays) {
-            // Count longest consecutive run
             let maxConsec = 1, currentConsec = 1;
             for (let i = 1; i < days.length; i++) {
                 if (days[i] === days[i - 1] + 1) { currentConsec++; maxConsec = Math.max(maxConsec, currentConsec); }
                 else currentConsec = 1;
-            }
-            // Check wrap-around (zo→ma)
-            if (days.includes(6) && days.includes(0)) {
-                let tailCount = 0, headCount = 0;
-                for (let i = days.length - 1; i >= 0 && days[i] === 6 - (days.length - 1 - i); i--) tailCount++;
-                for (let i = 0; i < days.length && days[i] === i; i++) headCount++;
-                maxConsec = Math.max(maxConsec, tailCount + headCount);
             }
             if (maxConsec > maxDays) {
                 warnings.push(
