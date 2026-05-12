@@ -308,7 +308,7 @@ function renderProfile() {
                         <span class="profile-meta-value profile-ical-value">
                             ${user.icalFeedToken ? `
                                 <div class="profile-ical-url-row">
-                                    <input type="text" readonly class="form-input profile-ical-input" id="profile-ical-input" value="${escapeHtml(typeof API_URL !== 'undefined' ? API_URL : '')}/calendar/${escapeHtml(user.icalFeedToken)}.ics">
+                                    <input type="text" readonly class="form-input profile-ical-input" id="profile-ical-input" value="${escapeHtml(typeof API_BASE !== 'undefined' ? API_BASE : '')}/calendar/${escapeHtml(user.icalFeedToken)}.ics">
                                     <button type="button" class="btn btn-secondary btn-xs" id="profile-ical-copy">
                                         ${IconHelper.html('copy', 'xs')} Kopieer
                                     </button>
