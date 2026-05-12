@@ -241,7 +241,8 @@ async function loadDataFromAPI() {
             teamMeetings: apiSettings.team_meetings || DataStore.settings.teamMeetings,
             coverageTeams: apiSettings.coverageTeams || DataStore.settings.coverageTeams,
             shiftTemplates: apiSettings.shiftTemplates || DataStore.settings.shiftTemplates,
-            nachtForfait: apiSettings.nachtForfait ?? DataStore.settings.nachtForfait
+            nachtForfait: apiSettings.nachtForfait ?? DataStore.settings.nachtForfait,
+            dismissedAlerts: apiSettings.dismissedAlerts || DataStore.settings.dismissedAlerts || []
         });
 
         // Use schedule_drafts from dedicated table if available (overrides settings fallback)
