@@ -1,14 +1,14 @@
 // ===== GECENTRALISEERDE SETTINGS =====
 // Deze file is de centrale plek voor alle standaard instellingen.
 
-// Automatisch detecteren: lokaal = localhost, productie = Render URL
+// Automatisch detecteren: lokaal = localhost, productie = zelfde origin
 // Ook file:// protocol wordt als lokaal gezien (voor development)
 if (window.location.hostname === 'localhost' ||
     window.location.hostname === '127.0.0.1' ||
     window.location.protocol === 'file:') {
     window.API_BASE = 'http://localhost:3001/api/v1';
 } else {
-    window.API_BASE = 'https://uurrooster-app.onrender.com/api/v1';
+    window.API_BASE = window.location.origin + '/api/v1';
 }
 
 window.DEFAULT_SETTINGS = {
