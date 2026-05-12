@@ -303,6 +303,28 @@ function renderProfile() {
                             </label>
                         </span>
                     </div>
+                    <div class="profile-meta-row profile-ical-row">
+                        <span class="profile-meta-label">Agenda koppeling</span>
+                        <span class="profile-meta-value profile-ical-value">
+                            ${user.icalFeedToken ? `
+                                <div class="profile-ical-url-row">
+                                    <input type="text" readonly class="form-input profile-ical-input" id="profile-ical-input" value="${escapeHtml(typeof API_URL !== 'undefined' ? API_URL : '')}/calendar/${escapeHtml(user.icalFeedToken)}.ics">
+                                    <button type="button" class="btn btn-secondary btn-xs" id="profile-ical-copy">
+                                        ${IconHelper.html('copy', 'xs')} Kopieer
+                                    </button>
+                                </div>
+                                <div class="profile-ical-help">Plak deze URL in Google Calendar, Apple Agenda of Outlook als "Abonneren op agenda".</div>
+                                <button type="button" class="btn btn-ghost btn-xs profile-ical-reset" id="profile-ical-reset">
+                                    ${IconHelper.html('refresh-cw', 'xs')} Nieuwe link genereren
+                                </button>
+                            ` : `
+                                <button type="button" class="btn btn-secondary btn-xs" id="profile-ical-activate">
+                                    ${IconHelper.html('calendar-plus', 'xs')} Agenda koppeling activeren
+                                </button>
+                                <div class="profile-ical-help">Synchroniseer je shifts naar Google Calendar, Apple Agenda of Outlook.</div>
+                            `}
+                        </span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -332,6 +354,51 @@ function renderProfile() {
             } catch (error) {
                 emailToggle.checked = !emailToggle.checked;
                 showToast('Kon voorkeur niet opslaan: ' + error.message, 'error');
+            }
+        });
+    }
+
+    // iCal feed handlers
+    const icalActivateBtn = document.getElementById('profile-ical-activate');
+    if (icalActivateBtn) {
+        icalActivateBtn.addEventListener('click', async () => {
+            icalActivateBtn.disabled = true;
+            try {
+                const data = await dataApiFetch('/me/ical-token', { method: 'POST' });
+                AppState.currentUser.icalFeedToken = data.token;
+                sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+                renderProfile();
+                showToast('Agenda koppeling geactiveerd', 'success');
+            } catch (e) {
+                icalActivateBtn.disabled = false;
+                showToast('Kon koppeling niet activeren: ' + e.message, 'error');
+            }
+        });
+    }
+    const icalCopyBtn = document.getElementById('profile-ical-copy');
+    if (icalCopyBtn) {
+        icalCopyBtn.addEventListener('click', () => {
+            const input = document.getElementById('profile-ical-input');
+            if (!input) return;
+            navigator.clipboard.writeText(input.value)
+                .then(() => showToast('Link gekopieerd', 'success'))
+                .catch(() => { input.select(); document.execCommand('copy'); showToast('Link gekopieerd', 'success'); });
+        });
+    }
+    const icalResetBtn = document.getElementById('profile-ical-reset');
+    if (icalResetBtn) {
+        icalResetBtn.addEventListener('click', async () => {
+            if (!confirm('Genereer een nieuwe link? De oude link werkt dan niet meer.')) return;
+            icalResetBtn.disabled = true;
+            try {
+                const data = await dataApiFetch('/me/ical-token', { method: 'POST' });
+                AppState.currentUser.icalFeedToken = data.token;
+                sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+                renderProfile();
+                showToast('Nieuwe link gegenereerd', 'success');
+            } catch (e) {
+                icalResetBtn.disabled = false;
+                showToast('Kon link niet resetten: ' + e.message, 'error');
             }
         });
     }
