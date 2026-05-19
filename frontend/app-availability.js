@@ -276,15 +276,26 @@ function setupAvailabilityModal() {
     saveBtn.addEventListener('click', handleAvailabilitySave);
     if (removeBtn) removeBtn.addEventListener('click', handleRemoveAbsence);
 
-    // Update date info when dates change
+    // Update conflict info when any relevant field changes
     if (startDateInput) startDateInput.addEventListener('change', updateAbsenceDateInfo);
     endDateInput.addEventListener('change', updateAbsenceDateInfo);
+    const employeeSelect = document.getElementById('absence-employee');
+    const absenceTypeSelect = document.getElementById('absence-type');
+    if (employeeSelect) employeeSelect.addEventListener('change', updateAbsenceDateInfo);
+    if (absenceTypeSelect) absenceTypeSelect.addEventListener('change', updateAbsenceDateInfo);
 }
 
 function updateAbsenceDateInfo() {
+    const employeeId = Number(document.getElementById('absence-employee').value);
     const startDate = document.getElementById('absence-start-date').value;
     const endDate = document.getElementById('absence-end-date').value;
+    const absenceType = document.getElementById('absence-type').value;
     const infoDiv = document.getElementById('absence-date-info');
+    const conflictDiv = document.getElementById('absence-conflict-info');
+    const takeoverToggle = document.getElementById('absence-takeover-toggle');
+
+    if (conflictDiv) conflictDiv.innerHTML = '';
+    if (takeoverToggle) takeoverToggle.classList.add('hidden');
 
     if (startDate && endDate) {
         const start = parseDateOnly(startDate);
@@ -294,6 +305,32 @@ function updateAbsenceDateInfo() {
             const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
             infoDiv.innerHTML = `<span class="info-badge">${days} dag${days !== 1 ? 'en' : ''} geselecteerd</span>`;
             infoDiv.classList.remove('error');
+
+            // Inline conflict detection
+            if (employeeId && conflictDiv) {
+                const conflictDates = [];
+                const startParts = startDate.split('-').map(Number);
+                const endParts = endDate.split('-').map(Number);
+                let checkDate = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+                const endDateObj = new Date(endParts[0], endParts[1] - 1, endParts[2]);
+                while (checkDate <= endDateObj) {
+                    const dateStr = formatDateYYYYMMDD(checkDate);
+                    if (getShiftsByEmployee(employeeId, dateStr, dateStr).length > 0) conflictDates.push(dateStr);
+                    checkDate.setDate(checkDate.getDate() + 1);
+                }
+
+                if (conflictDates.length > 0) {
+                    conflictDiv.innerHTML = `<div class="absence-conflict-alert">
+                        ${IconHelper.html('alert-triangle', 'sm')}
+                        <span>${conflictDates.length} shift${conflictDates.length !== 1 ? 's' : ''} ingepland op deze dag${conflictDates.length !== 1 ? 'en' : ''} — ${conflictDates.map(d => formatDate(d)).join(', ')}</span>
+                    </div>`;
+                    IconHelper.init(conflictDiv);
+
+                    if (takeoverToggle && (absenceType === 'ziek' || absenceType === 'verlof')) {
+                        takeoverToggle.classList.remove('hidden');
+                    }
+                }
+            }
         } else {
             infoDiv.innerHTML = `<span class="error-text">Einddatum moet na startdatum liggen</span>`;
             infoDiv.classList.add('error');
@@ -464,28 +501,12 @@ async function handleAvailabilitySave() {
             checkDate.setDate(checkDate.getDate() + 1);
         }
 
-        // Warn about conflicts — alleen voor admins/roosterverantwoordelijken
-        const effectiveRole = getEffectiveRole();
-        if (conflictDates.length > 0 && (effectiveRole === 'admin' || effectiveRole === 'roosterverantwoordelijke')) {
-            const employee = getEmployee(employeeId);
-            const employeeName = employee?.name || 'Deze medewerker';
-            const confirmMsg = `Let op: ${employeeName} heeft nog ${conflictDates.length} dienst(en) ingepland op deze dagen!\n\nDiensten op: ${conflictDates.map(d => formatDate(d)).join(', ')}\n\nDe afwezigheid wordt geregistreerd, maar de diensten blijven staan. Vergeet niet deze diensten te verwijderen of opnieuw toe te wijzen!\n\nDoorgaan?`;
-            if (!await showConfirm(confirmMsg, 'Waarschuwing: conflicterende diensten')) {
-                return;
-            }
-        }
-
-        // Determine if we should offer takeover creation (sick/vacation with conflicts)
-        let createTakeoverRequests = false;
-        if ((absenceType === 'ziek' || absenceType === 'verlof') && conflictDates.length > 0) {
-            const confirmTakeover = await showConfirm(
-                `Er zijn ${conflictDates.length} dienst(en) op deze dagen.\n\n` +
-                `Wil je deze automatisch beschikbaar stellen zodat collega's ze kunnen overnemen?\n\n` +
-                `(Ze verschijnen in "Beschikbare shifts" op de Ruilen pagina)`,
-                'Shifts beschikbaar stellen?'
-            );
-            createTakeoverRequests = confirmTakeover;
-        }
+        // Read takeover preference from inline checkbox (no confirm dialogs needed)
+        const offerTakeoverCheckbox = document.getElementById('absence-offer-takeover');
+        const createTakeoverRequests =
+            conflictDates.length > 0 &&
+            (absenceType === 'ziek' || absenceType === 'verlof') &&
+            offerTakeoverCheckbox?.checked === true;
 
         showSectionLoading('availability-view', 'Afwezigheid opslaan...');
 
@@ -504,19 +525,13 @@ async function handleAvailabilitySave() {
         const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid' }[absenceType] || 'Afwezigheid';
 
         let msg = `${typeName} geregistreerd voor ${employeeName} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
+        if (result.takeoverRequests > 0) {
+            msg += ` — ${result.takeoverRequests} shift${result.takeoverRequests !== 1 ? 's' : ''} aangeboden voor overname`;
+        }
         showToast(msg, 'success');
 
-        if (conflictDates.length > 0 && (effectiveRole === 'admin' || effectiveRole === 'roosterverantwoordelijke')) {
-            showToast(`Vergeet niet de ${conflictDates.length} conflicterende dienst(en) aan te passen in de planning!`, 'warning');
-        }
-
-        if (result.takeoverRequests > 0) {
-            showToast(`${result.takeoverRequests} takeover verzoek(en) aangemaakt! Collega's kunnen deze shifts nu overnemen via de Ruilen pagina.`, 'success');
-        }
-
-        // Show type-specific reminders
         if (absenceType === 'ziek') {
-            showToast('Bel de personeelsdienst om je ziekte door te geven', 'info');
+            showToast('Vergeet niet de personeelsdienst te verwittigen', 'info');
         } else if (absenceType === 'verlof' || absenceType === 'overuren') {
             showToast('Vergeet niet dit ook in Eureka aan te passen', 'info');
         }

@@ -472,6 +472,7 @@
                 </div>
 
                 <div id="absence-date-info" class="date-range-info"></div>
+                <div id="absence-conflict-info"></div>
 
                 <div class="form-group">
                     <label for="absence-type">Type afwezigheid *</label>
@@ -487,6 +488,14 @@
                 <div class="form-group">
                     <label for="availability-reason">Opmerking</label>
                     <textarea id="availability-reason" rows="2" placeholder="Optioneel: extra toelichting..."></textarea>
+                </div>
+
+                <div id="absence-takeover-toggle" class="absence-takeover-row hidden">
+                    <label class="absence-takeover-label">
+                        <input type="checkbox" id="absence-offer-takeover" checked>
+                        <span>Bied conflicterende shifts aan voor overname</span>
+                    </label>
+                    <p class="absence-takeover-hint">Collega's kunnen deze shifts overnemen via de Ruilen-pagina.</p>
                 </div>
             </div>
             <div class="modal-actions">
