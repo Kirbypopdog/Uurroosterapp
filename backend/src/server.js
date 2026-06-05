@@ -63,6 +63,19 @@ const { getMonday, formatDateYYYYMMDD, parseLocalDate, getBelgianPublicHolidays,
 
 const MIGRATIONS = [
   {
+    // Basistabellen aanmaken op een verse database. schema.sql is volledig idempotent
+    // (enkel CREATE ... IF NOT EXISTS), dus op een bestaande database is dit een no-op.
+    // Hierdoor initialiseert elke nieuwe omgeving (bv. staging) zichzelf bij de eerste deploy,
+    // zonder handmatige `npm run db:setup` of shell-toegang.
+    name: '000_base_schema',
+    up: async (client) => {
+      const fs = require('fs');
+      const path = require('path');
+      const schema = fs.readFileSync(path.join(__dirname, '../sql/schema.sql'), 'utf8');
+      await client.query(schema);
+    }
+  },
+  {
     name: '001_user_employee_columns',
     up: async (client) => {
       await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS main_team TEXT REFERENCES teams(id)`);
@@ -503,6 +516,45 @@ async function runMigrations() {
         // Niet opnieuw gooien — log en ga verder met volgende migratie
       }
     }
+  } finally {
+    client.release();
+  }
+}
+
+// Zorgt dat een verse database bruikbaar is: standaardteams + een admin-account.
+// Puur additief (ON CONFLICT DO NOTHING) → op een bestaande productie-DB volledig no-op,
+// en een bestaand admin-wachtwoord wordt NOOIT overschreven.
+async function ensureBootstrapData() {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminEmail || !adminPassword) return; // geen gegevens → niets te doen
+  const client = await pool.connect();
+  try {
+    const defaultTeams = [
+      ['vlot1', 'Vlot 1 (Begeleiding)', '#3b82f6'],
+      ['vlot2', 'Vlot 2 (Begeleiding)', '#8b5cf6'],
+      ['cargo', 'Cargo (Dagbesteding)', '#10b981'],
+      ['overkoepelend', 'Overkoepelend (Kantoor)', '#f59e0b'],
+      ['jobstudent', 'Jobstudenten/Stagiairs', '#ec4899']
+    ];
+    for (const [id, name, color] of defaultTeams) {
+      await client.query(
+        `INSERT INTO teams (id, name, color) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING`,
+        [id, name, color]
+      );
+    }
+    const existing = await client.query('SELECT 1 FROM users WHERE LOWER(email) = LOWER($1)', [adminEmail]);
+    if (existing.rows.length === 0) {
+      const passwordHash = await bcrypt.hash(adminPassword, 12);
+      await client.query(
+        `INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'admin')
+         ON CONFLICT (email) DO NOTHING`,
+        ['Admin', adminEmail.toLowerCase(), passwordHash]
+      );
+      console.log('[bootstrap] Admin-account aangemaakt');
+    }
+  } catch (err) {
+    console.error('[bootstrap] Fout:', err.message);
   } finally {
     client.release();
   }
@@ -4290,6 +4342,7 @@ app.use('/', v1);
 
 if (process.env.NODE_ENV !== 'test') {
   runMigrations()
+    .then(() => ensureBootstrapData())
     .then(() => archiveOldShifts())
     .catch(err => console.error('[startup] Fout:', err.message))
     .finally(() => {
