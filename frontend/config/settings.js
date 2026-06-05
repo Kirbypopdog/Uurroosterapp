@@ -1,15 +1,25 @@
 // ===== GECENTRALISEERDE SETTINGS =====
 // Deze file is de centrale plek voor alle standaard instellingen.
 
-// Automatisch detecteren: lokaal = localhost, productie = backend API URL
-// Ook file:// protocol wordt als lokaal gezien (voor development)
-if (window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1' ||
-    window.location.protocol === 'file:') {
-    window.API_BASE = 'http://localhost:3001/api/v1';
-} else {
-    window.API_BASE = 'https://uurrooster-app.onrender.com/api/v1';
-}
+// Automatisch detecteren welke backend de frontend aanspreekt, op basis van de eigen URL:
+//   - localhost / 127.0.0.1 / file://   → lokale dev-backend
+//   - hostname bevat "staging"          → staging-backend (testomgeving)
+//   - alle andere (productie)           → productie-backend
+// Zo werkt exact dezelfde code op alle drie de omgevingen, zonder per-branch config.
+(function detectApiBase() {
+    const host = window.location.hostname;
+    const LOCAL_API   = 'http://localhost:3001/api/v1';
+    const STAGING_API = 'https://uurrooster-backend-staging.onrender.com/api/v1'; // pas aan aan de echte staging-URL na aanmaken
+    const PROD_API    = 'https://uurrooster-app.onrender.com/api/v1';
+
+    if (host === 'localhost' || host === '127.0.0.1' || window.location.protocol === 'file:') {
+        window.API_BASE = LOCAL_API;
+    } else if (host.includes('staging')) {
+        window.API_BASE = STAGING_API;
+    } else {
+        window.API_BASE = PROD_API;
+    }
+})();
 
 window.DEFAULT_SETTINGS = {
     // Referentie datum voor bi-weekly rooster (backward compat)
