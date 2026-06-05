@@ -35,7 +35,7 @@ gh issue create --repo Kirbypopdog/Uurroosterapp \
 - [ ] Geen inline `style=""` attributen in JS-gegenereerde HTML → CSS classes
 - [ ] Gebruik `dataApiFetch()` uit `data.js` (niet `apiFetch()` uit app.js)
 - [ ] `team_id` gesynchroniseerd met `main_team` bij user updates
-- [ ] Nieuwe schema changes via `ensureSchema()` in server.js (niet los SQL)
+- [ ] Nieuwe schema changes als migratie-entry in de `MIGRATIONS`-array (`runMigrations()` in server.js, niet los SQL)
 - [ ] Geen nieuwe globale functies zonder duidelijke namespace
 
 ## 4. Toegankelijkheid (a11y)

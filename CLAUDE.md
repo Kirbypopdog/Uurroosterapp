@@ -98,7 +98,7 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 3. **ALTIJD** parameterized queries gebruiken (nooit string concatenation in SQL)
 4. **Backend retourneert BEIDE** `userId` EN `employeeId` (backward compatibility alias)
 5. **Permissions** checken in ZOWEL frontend ALS backend
-6. **Auto-migratie**: `ensureSchema()` in server.js draait bij elke startup - voeg nieuwe schema changes daar toe
+6. **Migraties**: geversioneerd via de `MIGRATIONS`-array + `runMigrations()` in server.js (draait bij elke startup, elke migratie exact één keer). Voeg nieuwe schema changes toe als nieuwe migratie-entry. Migratie `000_base_schema` draait `schema.sql` idempotent, dus een verse database (bv. staging) initialiseert zichzelf; `ensureBootstrapData()` maakt standaardteams + admin-account aan zonder bestaande data te overschrijven
 7. **shift_blocks**: Bij shift delete wordt block aangemaakt (voorkomt auto-regeneratie). Manual shift create verwijdert block.
 8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging
 9. **Fetch wrapper**: Gebruik uitsluitend `dataApiFetch()` uit `data.js`. `apiFetch()` is verwijderd (issue #26 opgelost). Uitzondering: `fetchPublicHolidays()` gebruikt plain `fetch()` want `/public-holidays` vereist geen auth.
@@ -191,13 +191,22 @@ De MCP server is actief en verbonden met de productie-API. Dit laat Claude toe o
 
 ## Deploy
 
-Zie `DEPLOY.md` voor deployment instructies (Render platform).
+Twee permanente branches, elk met een eigen Render-omgeving:
+
+| Branch | Omgeving |
+|--------|----------|
+| `main` | Productie (live data) |
+| `staging` | Testomgeving (eigen database) |
+
+Workflow: ontwikkel → `push origin staging` (test op de staging-URL) → merge naar `main` (live). Ontwikkel bij voorkeur niet rechtstreeks op `main`. De frontend kiest automatisch de juiste backend op basis van zijn hostname (`frontend/config/settings.js`: bevat "staging" → staging-backend).
+
+Zie `DEPLOY.md` voor deployment instructies en `STAGING.md` voor de eenmalige setup van de testomgeving.
 
 ## Tests
 
 ```bash
 cd backend
-npm test           # Alle tests uitvoeren (129 tests, ~3 seconden)
+npm test           # Alle tests uitvoeren (188 tests, ~5 seconden)
 ```
 
 Testbestanden in `backend/tests/`:

@@ -50,16 +50,35 @@ git commit -m "Fix: vergadering badges na refresh (fixes #31)"
 
 ---
 
-## Branches & PRs
+## Branches & omgevingen
 
-```
-main          — productie, altijd werkend
-feature/xxx   — nieuwe features
-fix/xxx       — bugfixes
-refactor/xxx  — technische schuld
+Twee permanente branches, elk gekoppeld aan een eigen Render-omgeving:
+
+| Branch | Omgeving | Doel |
+|--------|----------|------|
+| `main` | **Productie** — wat het team echt gebruikt | live data, nooit rechtstreeks op experimenteren |
+| `staging` | **Testomgeving** — eigen database | veilig uitproberen vóór het live gaat |
+
+Daarnaast korte werk-branches: `feature/xxx`, `fix/xxx`, `refactor/xxx`.
+
+### Workflow
+
+```bash
+# 1. Wijziging maken en testen op staging
+git checkout staging
+# ... aanpassingen ...
+git commit -am "test: beschrijving"
+git push origin staging          # → staging deployt automatisch
+
+# 2. Tevreden na testen? Naar productie:
+git checkout main
+git merge staging
+git push origin main             # → productie deployt automatisch
 ```
 
-PR aanmaken:
+Zie **STAGING.md** voor de eenmalige setup van de testomgeving op Render.
+
+PR aanmaken (optioneel, bv. voor review):
 ```bash
 gh pr create --title "Fix: stale ruilverzoeken (fixes #30)" \
   --body "Beschrijving van de wijziging"
@@ -84,7 +103,7 @@ Zie `CLAUDE.md` voor het volledige overzicht. Kritieke regels:
 
 ```bash
 cd backend
-npm test        # Alle 117 tests (jest + supertest, geen DB vereist)
+npm test        # Alle 188 tests (jest + supertest, geen DB vereist)
 ```
 
 Voeg tests toe bij elke nieuwe pure functie of backend endpoint. Testbestanden staan in `backend/tests/`:

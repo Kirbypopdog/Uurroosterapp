@@ -54,6 +54,15 @@ function mockActiveUser() {
   pool.query.mockResolvedValueOnce({ rows: [{ active: true }] });
 }
 
+// Helper: datum in de toekomst (YYYY-MM-DD). Gebruik dit i.p.v. hardgecodeerde datums
+// voor tests die afhangen van "vandaag" (bv. swap-requests weigeren shifts in het verleden),
+// zodat ze niet verouderen wanneer de echte kalender voorbij een vaste datum kruipt.
+function futureDate(daysFromNow = 7) {
+  const d = new Date();
+  d.setDate(d.getDate() + daysFromNow);
+  return d.toISOString().slice(0, 10);
+}
+
 // ===== GET /health =====
 
 describe('GET /health', () => {
@@ -865,7 +874,7 @@ describe('POST /swap-requests', () => {
     mockActiveUser();
     const swapRow = { id: 10, requester_user_id: 5, target_user_id: 20, requester_shift_id: 1, target_shift_id: 2, status: 'pending', message: null };
     pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 1, user_id: 5, date: '2026-06-01' }, { id: 2, user_id: 20, date: '2026-06-02' }] }) // shifts check
+      .mockResolvedValueOnce({ rows: [{ id: 1, user_id: 5, date: futureDate(7) }, { id: 2, user_id: 20, date: futureDate(8) }] }) // shifts check
       .mockResolvedValueOnce({ rows: [swapRow] })  // INSERT
       .mockResolvedValueOnce({ rows: [] });          // logAudit
     const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });

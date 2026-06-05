@@ -53,7 +53,7 @@ De frontend detecteert automatisch welke backend hij moet aanspreken op basis va
    | `NODE_ENV` | `production` |
    | `FRONTEND_URL` | de staging-frontend-URL uit stap 3 (bv. `https://uurrooster-frontend-staging.onrender.com`) |
    | `RESEND_API_KEY` | **leeg laten** — zo verstuurt staging geen echte e-mails naar medewerkers |
-5. Deploy. `ensureSchema()` maakt automatisch alle tabellen aan in de lege staging-database.
+5. Deploy. De backend initialiseert zichzelf: migratie `000_base_schema` maakt alle tabellen aan en `ensureBootstrapData()` maakt de standaardteams + admin-account aan in de lege staging-database.
 6. Noteer de toegewezen URL (bv. `https://uurrooster-backend-staging.onrender.com`).
    - Komt die **niet** exact overeen met de `STAGING_API` in `frontend/config/settings.js`? Pas die ene regel aan en push opnieuw naar `staging`.
 

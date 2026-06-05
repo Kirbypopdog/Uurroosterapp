@@ -456,6 +456,9 @@ async function updateShift(id, updates) {
 // Herladen van specifieke data types van de server (DataStore als pure cache)
 
 async function refreshShifts({ startDate, endDate, merge = false } = {}) {
+    // Geen actieve sessie → niets ophalen. Voorkomt 401-ruis wanneer init-code
+    // (bv. setCurrentWeek) een refresh triggert vóór de gebruiker is ingelogd.
+    if (!sessionStorage.getItem('hetvlot_token')) return DataStore.shifts;
     try {
         // Auto-use active range if set and no explicit params given
         if (!startDate && !endDate && _activeShiftRange) {
