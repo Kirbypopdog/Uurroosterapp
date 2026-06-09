@@ -150,6 +150,20 @@ function setupEventListeners() {
             switchView(btn.dataset.view);
         });
     });
+    // Collapsible team cards — delegate from stable roster container
+    DOM.rosterCalendar.addEventListener('click', (e) => {
+        const head = e.target.closest('.tcard-head');
+        if (!head) return;
+        const card = head.closest('.tcard');
+        if (!card) return;
+        const teamKey = card.dataset.tcardTeam;
+        if (card.classList.toggle('collapsed')) {
+            AppState.collapsedTeams.add(teamKey);
+        } else {
+            AppState.collapsedTeams.delete(teamKey);
+        }
+    });
+
     DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
     DOM.prevWeekBtn.addEventListener('click', () => {
         if (AppState.viewMode === 'month') {

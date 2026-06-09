@@ -629,13 +629,22 @@ function renderTimelineView() {
 
             const team = teams[teamKey] || { name: teamKey };
             const teamName = escapeHtml(team.name);
+            const isCollapsed = AppState.collapsedTeams.has(teamKey);
 
-            // Team header row
-            html += `<div class="timeline-team-header team-${teamKey}">
+            html += `<div class="tcard${isCollapsed ? ' collapsed' : ''}" data-tcard-team="${teamKey}">`;
+
+            // Team header row (acts as card head + collapse trigger)
+            html += `<div class="tcard-head timeline-team-header team-${teamKey}">
                 <span class="team-header-dot"></span>
                 <div class="team-header-name">${teamName}</div>
                 <div class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</div>
+                <div class="tcard-spacer"></div>
+                <button class="tcard-toggle" aria-label="${isCollapsed ? 'Uitklappen' : 'Inklappen'}">
+                    ${IconHelper.html('chevron-up', 'sm')}
+                </button>
             </div>`;
+
+            html += `<div class="tcard-body">`;
 
             // Employee rows for this team
             teamEmployees.forEach((emp, index) => {
@@ -850,16 +859,26 @@ function renderTimelineView() {
 
                 html += '</div>'; // Close row
             });
+
+            html += '</div>'; // Close tcard-body
+            html += '</div>'; // Close tcard
         });
 
         // Render employees without a team (if any)
         const noTeamEmployees = employeesByTeam['_no_team'];
         if (noTeamEmployees && noTeamEmployees.length > 0) {
-            // Team header row for "No Team"
-            html += `<div class="timeline-team-header team-no-team">
+            const noTeamCollapsed = AppState.collapsedTeams.has('_no_team');
+            html += `<div class="tcard${noTeamCollapsed ? ' collapsed' : ''}" data-tcard-team="_no_team">`;
+            html += `<div class="tcard-head timeline-team-header team-no-team">
+                <span class="team-header-dot"></span>
                 <div class="team-header-name">Geen Team</div>
                 <div class="team-header-count">${noTeamEmployees.length} medewerker${noTeamEmployees.length !== 1 ? 's' : ''}</div>
+                <div class="tcard-spacer"></div>
+                <button class="tcard-toggle" aria-label="${noTeamCollapsed ? 'Uitklappen' : 'Inklappen'}">
+                    ${IconHelper.html('chevron-up', 'sm')}
+                </button>
             </div>`;
+            html += `<div class="tcard-body">`;
 
             // Employee rows for no-team employees
             noTeamEmployees.forEach((emp, index) => {
@@ -1050,6 +1069,9 @@ function renderTimelineView() {
 
                 html += '</div>'; // Close row
             });
+
+            html += '</div>'; // Close tcard-body
+            html += '</div>'; // Close tcard
         }
     }
 

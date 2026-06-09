@@ -54,7 +54,8 @@ const AppState = {
     filterOnlyWithShifts: false,
     planningControlsCollapsed: true,
     settingsDirty: false,
-    swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
+    swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
+    collapsedTeams: new Set()
 };
 
 // ===== TEAM HELPERS =====
