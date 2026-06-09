@@ -966,13 +966,13 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                     <span class="modal-close" id="draft-apply-close"><i data-lucide="x"></i></span>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-sm"><strong>${escapeHtml(draft.name)}</strong> toepassen als basisrooster ${weekLabel}?</p>
+                    <p class="mb-sm text-secondary">Periode kiezen voor <strong>${escapeHtml(draft.name)}</strong>:</p>
                     <div class="apply-presets">
-                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetSchoolStart}" data-end="${presetSchoolEnd}">Dit schooljaar (sep – aug)</button>
-                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetTodayStr}" data-end="${presetSchoolEnd}">Vanaf nu tot aug</button>
-                        <button class="btn btn-secondary btn-sm apply-preset" data-start="" data-end="">Aangepaste periode</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetSchoolStart}" data-end="${presetSchoolEnd}">Dit schooljaar</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetTodayStr}" data-end="${presetSchoolEnd}">Vanaf nu</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="" data-end="">Aangepast</button>
                     </div>
-                    <div class="form-row form-row-gap">
+                    <div class="form-row form-row-gap mt-sm">
                         <div class="form-group flex-1">
                             <label>Van</label>
                             <input type="date" id="draft-apply-start-date" class="form-input" value="${defaultStart}" required>
@@ -982,12 +982,14 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                             <input type="date" id="draft-apply-end-date" class="form-input" value="${defaultEnd}" required>
                         </div>
                     </div>
-                    <span class="form-hint form-hint-block mt-xs">Shifts worden alleen gegenereerd binnen deze periode. Bestaande shifts buiten deze periode blijven ongewijzigd.</span>
-                    <div class="code-block">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
+                    <p class="form-hint mt-xs">Manuele aanpassingen worden bewaard. Shifts buiten deze periode blijven ongewijzigd.</p>
+                    <div class="apply-changes-summary mt-sm">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
                 </div>
                 <div class="modal-footer">
+                    <span class="modal-footer-left">
+                        <button class="btn btn-ghost btn-sm" id="draft-apply-reset" data-tooltip="Verwijdert ook manuele aanpassingen — volledig terugzetten naar het concept" data-tooltip-pos="top" style="color:var(--color-danger,#dc2626)">Reset alles</button>
+                    </span>
                     <button class="btn btn-secondary btn-sm" id="draft-apply-cancel">Annuleren</button>
-                    <button class="btn btn-danger-outline btn-sm" id="draft-apply-reset" data-tooltip="Verwijdert ook manuele aanpassingen en leeggemaakte dagen — volledig terugzetten naar het concept" data-tooltip-pos="top">Reset alles naar concept</button>
                     <button class="btn btn-primary btn-sm" id="draft-apply-confirm">Toepassen</button>
                 </div>
             </div>`;
