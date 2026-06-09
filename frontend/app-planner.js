@@ -632,6 +632,7 @@ function renderTimelineView() {
 
             // Team header row
             html += `<div class="timeline-team-header team-${teamKey}">
+                <span class="team-header-dot"></span>
                 <div class="team-header-name">${teamName}</div>
                 <div class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</div>
             </div>`;

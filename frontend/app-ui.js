@@ -398,7 +398,7 @@ function applyTeamColors() {
 .timeline-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-team-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
-.timeline-team-header.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.timeline-team-header.team-${teamId} { --team-dot-color: ${color}; }
 .team-tab.active.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 `;
     });
