@@ -3767,6 +3767,14 @@ body[data-view-mode="day"] .timeline-header {
 .timeline-row:last-child {
     border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
+/* Hoek-cellen mee afronden (rij heeft overflow:visible voor nachtblokken,
+   dus de vierkante cellen zouden anders uit de ronde hoek steken) */
+.timeline-row:last-child .timeline-employee-cell {
+    border-bottom-left-radius: var(--radius-lg);
+}
+.timeline-row:last-child .timeline-day-cell:last-child {
+    border-bottom-right-radius: var(--radius-lg);
+}
 
 .timeline-row:hover {
     background: var(--surface-2);
