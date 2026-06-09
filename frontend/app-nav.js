@@ -109,10 +109,14 @@ function renderHome() {
 
     const role = getEffectiveRole();
 
+    // Bereken alerts eerst (zet AppState._homeAlertCount voor de stat-kaarten)
+    const alertsHtml = renderHomeAlerts(role);
+
     let html = '';
     html += renderHomeWelcome(user, role);
+    html += renderHomeStats(user, role);
     if (role === 'admin') html += renderHomeOnboarding();
-    html += renderHomeAlerts(role);
+    html += alertsHtml;
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
     html += renderHomeWeekendInfo();
@@ -363,6 +367,7 @@ function renderHomeAlerts(role) {
         }
     }
 
+    AppState._homeAlertCount = warnings.length;
     if (warnings.length === 0) return '';
 
     const ALERT_COLLAPSE_AT = 5;
@@ -501,21 +506,58 @@ async function dismissOnboardingChecklist(btn) {
 }
 
 function renderHomeWelcome(user, role) {
-    const roleLabels = {
-        admin: 'Admin',
-        roosterverantwoordelijke: 'Roosterverantwoordelijke',
-        medewerker: 'Medewerker'
-    };
     const today = new Date();
-    const dateStr = today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const hour = today.getHours();
+    const greeting = hour < 12 ? 'Goeiemorgen' : hour < 18 ? 'Goeiemiddag' : 'Goeieavond';
+    const dateStr = today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' });
+    const firstName = (user.name || '').split(' ')[0] || user.name;
 
     return `
-        <div class="home-welcome">
-            <h2>Welkom, ${escapeHtml(user.name)}</h2>
-            <div class="home-welcome-sub">
-                <span>${dateStr}</span>
-                <span class="home-role-badge">${escapeHtml(roleLabels[role] || role)}</span>
+        <div class="home-hi">${greeting}, <em>${escapeHtml(firstName)}</em></div>
+        <div class="home-hi-sub">${dateStr}</div>
+    `;
+}
+
+function renderHomeStats(user, role) {
+    if (!['admin', 'roosterverantwoordelijke'].includes(role)) return '';
+
+    // Diensten deze week
+    const weekStart = getMonday(new Date());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const wkStartStr = formatDateYYYYMMDD(weekStart);
+    const wkEndStr = formatDateYYYYMMDD(weekEnd);
+    const shiftsThisWeek = (DataStore.shifts || []).filter(s => {
+        const d = (s.date || '').split('T')[0];
+        return d >= wkStartStr && d <= wkEndStr;
+    }).length;
+
+    // Actieve medewerkers
+    const activeEmployees = (DataStore.users || []).filter(u => u.active !== false && u.role === 'medewerker').length;
+
+    // Open ruilverzoeken
+    const openSwaps = (DataStore.swapRequests || []).filter(r =>
+        ['pending', 'pending_lead'].includes(r.status)
+    ).length;
+
+    // Aandachtspunten (zelfde telling als de alerts-balk, gezet door renderHomeAlerts)
+    const alertCount = AppState._homeAlertCount || 0;
+
+    const stat = (icon, bg, color, value, label) => `
+        <div class="stat-card">
+            <div class="stat-card-ic" style="background:${bg};color:${color}">${IconHelper.html(icon, 'md')}</div>
+            <div>
+                <div class="stat-card-v">${value}</div>
+                <div class="stat-card-k">${label}</div>
             </div>
+        </div>`;
+
+    return `
+        <div class="home-stats">
+            ${stat('calendar-days', 'var(--ok-bg)', 'var(--sage-700)', shiftsThisWeek, 'diensten deze week')}
+            ${stat('users', 'var(--info-bg)', 'var(--info)', activeEmployees, 'medewerkers actief')}
+            ${stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken')}
+            ${stat('alert-triangle', 'var(--danger-bg)', 'var(--danger-color)', alertCount, 'aandachtspunten')}
         </div>
     `;
 }

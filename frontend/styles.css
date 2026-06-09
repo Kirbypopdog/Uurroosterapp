@@ -110,7 +110,7 @@
 
     /* Status tokens (redesign) */
     --warn: #c6803a; --warn-bg: #fbf0e2;
-    --danger-warm: #c0524a; --danger-warm-bg: #fbe9e7;
+    --danger-warm: #c0524a; --danger-warm-bg: #fbe9e7; --danger-bg: #fbe9e7;
     --info: #5b7fa6; --info-bg: #eaf0f6;
     --ok: #4a7c6f; --ok-bg: #e9f1ed;
 }
@@ -1057,36 +1057,49 @@ textarea:focus-visible {
     padding: 0;
 }
 
-.home-welcome {
-    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark, #2d5249) 100%);
-    color: white;
-    padding: 28px 24px;
-    border-radius: var(--radius-lg);
-    margin-bottom: 24px;
+/* Serif begroeting (redesign) */
+.home-hi {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    font-size: 34px;
+    letter-spacing: -.01em;
+    line-height: 1.05;
+    color: var(--text-primary);
 }
-
-.home-welcome h2 {
-    font-size: 1.5rem;
-    margin: 0 0 6px 0;
+.home-hi em { font-style: italic; color: var(--sage-700); }
+.home-hi-sub {
+    font-size: 14px;
+    color: var(--ink-3);
     font-weight: 600;
+    margin-top: 4px;
+    text-transform: capitalize;
 }
 
-.home-welcome-sub {
-    opacity: 0.85;
-    font-size: 0.95rem;
+/* Stat-kaarten (redesign) */
+.home-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-top: 22px;
+}
+.stat-card {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
+    gap: 14px;
+    box-shadow: var(--shadow-sm);
 }
-
-.home-role-badge {
-    background: rgba(255,255,255,0.2);
-    padding: 2px 10px;
-    border-radius: var(--radius-lg);
-    font-size: 0.8rem;
-    font-weight: 500;
+.stat-card-ic {
+    width: 42px; height: 42px;
+    border-radius: 12px;
+    display: grid; place-items: center;
+    flex: none;
 }
+.stat-card-v { font-size: 24px; font-weight: 800; letter-spacing: -.02em; line-height: 1; color: var(--text-primary); }
+.stat-card-k { font-size: 12.5px; color: var(--ink-3); font-weight: 600; margin-top: 4px; }
 
 /* ── Meldingen container ──────────────────────────────────────────────── */
 .home-alerts {
@@ -1095,6 +1108,7 @@ textarea:focus-visible {
     border-top: 3px solid var(--color-warning, #f59e0b);
     overflow: hidden;
     box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+    margin-top: 20px;
 }
 .home-alerts-header {
     width: 100%;
@@ -1278,6 +1292,7 @@ textarea:focus-visible {
     display: grid;
     grid-template-columns: 2fr 1fr;
     gap: var(--space-lg);
+    margin-top: 22px;
 }
 
 .home-card {
