@@ -1224,21 +1224,15 @@ function changeViewMode(mode) {
 }
 
 function updatePeriodDisplay() {
-    // Weeknummer-label naast de chevrons (verborgen in maandweergave)
-    const setWeekLabel = (text) => {
-        if (DOM.currentWeekLabel) DOM.currentWeekLabel.textContent = text;
-    };
-
     if (AppState.viewMode === 'month') {
         // Month view: show "februari 2026"
         if (!AppState.currentMonthStart) {
             setCurrentMonth(new Date());
             return;
         }
-        setWeekLabel('Maand');
         DOM.currentPeriod.textContent = formatMonthDisplay(AppState.currentMonthStart);
     } else if (AppState.viewMode === 'day') {
-        // Day view: show "Maandag, 3 maart 2026"
+        // Day view: show "Week 6 · Maandag, 3 maart 2026"
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
             return;
@@ -1246,19 +1240,19 @@ function updatePeriodDisplay() {
         const dayNames = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
         const currentDate = new Date(AppState.currentWeekStart);
         currentDate.setDate(currentDate.getDate() + AppState.mobileDayIndex);
-        setWeekLabel(`Week ${getISOWeekNumber(formatDateYYYYMMDD(currentDate))}`);
+        const weekNr = getISOWeekNumber(formatDateYYYYMMDD(currentDate));
         const dateStr = currentDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
-        DOM.currentPeriod.textContent = `${dayNames[AppState.mobileDayIndex]}, ${dateStr}`;
+        DOM.currentPeriod.textContent = `Week ${weekNr} · ${dayNames[AppState.mobileDayIndex]}, ${dateStr}`;
     } else {
-        // Week view: weeknummer-label + compact datumbereik ("8 - 14 juni 2026")
+        // Week view: "Week 24 · 8 - 14 juni 2026"
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
             return;
         }
         const weekEnd = new Date(AppState.currentWeekStart);
         weekEnd.setDate(weekEnd.getDate() + 6);
-        setWeekLabel(`Week ${getISOWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart))}`);
-        DOM.currentPeriod.textContent = formatWeekRange(AppState.currentWeekStart, weekEnd);
+        const weekNr = getISOWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart));
+        DOM.currentPeriod.textContent = `Week ${weekNr} · ${formatWeekRange(AppState.currentWeekStart, weekEnd)}`;
     }
 }
 
