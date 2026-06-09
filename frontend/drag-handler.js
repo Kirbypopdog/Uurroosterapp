@@ -399,6 +399,19 @@ const DragHandler = {
                 source: 'manual' // Mark as manual so it persists
             });
 
+            // Als de shift van dag of medewerker is veranderd, bescherm de originele
+            // cel met een shift_block zodat het concept haar niet opnieuw vult (#146).
+            const cellChanged = originalData.employeeId !== targetEmployee.id || originalData.date !== targetDate;
+            if (cellChanged) {
+                try {
+                    await dataApiFetch(`/shift-blocks`, {
+                        method: 'POST',
+                        body: JSON.stringify({ user_id: originalData.employeeId, date: originalData.date, reason: 'drag_move' })
+                    });
+                    await fetchShiftBlocks();
+                } catch (_) { /* block aanmaken is best-effort */ }
+            }
+
             // Record undo action for drag transfer (using captured shiftId)
             if (typeof UndoManager !== 'undefined') {
                 UndoManager.push({
