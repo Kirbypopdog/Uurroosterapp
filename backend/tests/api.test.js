@@ -1108,6 +1108,63 @@ describe('PATCH /admin/users/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body.user.active).toBe(false);
   });
+
+  // Regressie #168: een PATCH zonder team-velden mag team_id niet op NULL zetten.
+  test('does not overwrite team_id when no team fields are sent (#168)', async () => {
+    mockActiveUser();
+    const oldUser = { email: 'jan@example.com' };
+    const updatedUser = { id: 5, name: 'Jan', email: 'jan@example.com', role: 'medewerker', team_id: 'vlot1', active: false, mainTeam: 'vlot1', extraTeams: null, contractHours: 36, weekScheduleWeek1: [], weekScheduleWeek2: [], weekSchedules: [], emailNotificationsEnabled: true };
+    pool.query
+      .mockResolvedValueOnce({ rows: [oldUser] })
+      .mockResolvedValueOnce({ rows: [updatedUser] })
+      .mockResolvedValueOnce({ rows: [] });
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .patch('/admin/users/5')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ role: 'medewerker', active: false }); // geen team_id, geen mainTeam
+    expect(res.status).toBe(200);
+
+    // De UPDATE-query moet team_id via COALESCE behouden, en $2 moet null zijn
+    // zodat de bestaande team_id-waarde blijft staan.
+    const updateCall = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE users') && c[0].includes('SET role')
+    );
+    expect(updateCall).toBeTruthy();
+    expect(updateCall[0]).toContain('team_id = COALESCE($2, team_id)');
+    expect(updateCall[1][1]).toBeNull(); // $2 (team_id || mainTeam || null) === null
+  });
+});
+
+// ===== GET /calendar/:token.ics (iCal feed) =====
+
+describe('GET /calendar/:token.ics', () => {
+  test('includes a VTIMEZONE block and TZID-prefixed times (#172)', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 7, name: 'Karen Claes' }] }) // user by token
+      .mockResolvedValueOnce({ rows: [{ id: 100, date: '2026-06-15', start_time: '12:00', end_time: '20:00', team: 'vlot1', notes: null, team_name: 'Vlot 1' }] }) // shifts
+      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] }); // settings.teams
+
+    const res = await request(app).get('/api/v1/calendar/some-token.ics');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/calendar');
+
+    const body = res.text;
+    // VTIMEZONE-component met CET/CEST-regels aanwezig
+    expect(body).toContain('BEGIN:VTIMEZONE');
+    expect(body).toContain('TZID:Europe/Brussels');
+    expect(body).toContain('TZNAME:CEST');
+    expect(body).toContain('TZNAME:CET');
+    // Tijden expliciet aan de tijdzone gekoppeld (niet kaal/floating)
+    expect(body).toContain('DTSTART;TZID=Europe/Brussels:20260615T120000');
+    expect(body).toContain('DTEND;TZID=Europe/Brussels:20260615T200000');
+  });
+
+  test('returns 404 for an unknown token', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app).get('/api/v1/calendar/nope.ics');
+    expect(res.status).toBe(404);
+  });
 });
 
 // ===== POST /schedule-drafts/:id/apply =====
@@ -1186,6 +1243,94 @@ describe('POST /api/v1/schedule-drafts/:id/apply', () => {
     );
     expect(insertCalls).toHaveLength(1);
     expect(insertCalls[0][0]).toMatch(/VALUES \(\$1/); // bulk VALUES syntax
+  });
+});
+
+// ===== POST /admin/users/:id/replace =====
+
+describe('POST /admin/users/:id/replace', () => {
+  // Regressie #141: bij een lage medewerker-ID (bv. 3) mag de grid-remap enkel
+  // de medewerker-sleutel hernoemen, niet de dag-van-de-week-index "3".
+  test('remaps employee key without corrupting day-of-week indices (#141)', async () => {
+    const oldId = 3;   // botst met dagindex donderdag ("3")
+    const newId = 42;
+    const dayAssignment = { startTime: '08:00', endTime: '16:00', team: 'vlot1' };
+    // Medewerker 3 staat als sleutel; medewerker 9 heeft een shift op dag "3" (do)
+    const grid = {
+      '3': { '0': dayAssignment, '3': dayAssignment },
+      '9': { '3': dayAssignment }
+    };
+
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [], rowCount: 0 });        // logAudit etc.
+
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                                                 // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: oldId, name: 'Oud', week_schedules: [], week_schedule_week1: [], week_schedule_week2: [] }] }) // old user FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: newId, name: 'Nieuw', active: false }] })      // new user FOR UPDATE
+      .mockResolvedValueOnce({ rows: [] })                                                 // copy week_schedules
+      .mockResolvedValueOnce({ rows: [] })                                                 // deactivate old
+      .mockResolvedValueOnce({ rows: [{ id: 1, grid }] })                                  // SELECT drafts FOR UPDATE
+      .mockResolvedValueOnce({ rows: [] })                                                 // UPDATE schedule_drafts
+      .mockResolvedValueOnce({ rows: [] });                                                // COMMIT
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post(`/api/v1/admin/users/${oldId}/replace`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ replacementUserId: newId }); // geen transferShiftsFrom
+    expect(res.status).toBe(200);
+    expect(res.body.draftsUpdated).toBe(1);
+
+    // Inspecteer het weggeschreven grid
+    const updateCall = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE schedule_drafts SET grid')
+    );
+    expect(updateCall).toBeTruthy();
+    const writtenGrid = JSON.parse(updateCall[1][0]);
+
+    // Medewerker-sleutel hernoemd: "3" weg, "42" aanwezig met dezelfde inhoud
+    expect(writtenGrid['3']).toBeUndefined();
+    expect(writtenGrid['42']).toEqual({ '0': dayAssignment, '3': dayAssignment });
+    // Dagindex "3" van medewerker 9 ONGEMOEID
+    expect(writtenGrid['9']).toEqual({ '3': dayAssignment });
+  });
+
+  test('skips drafts where the old ID only appears as a day index (#141)', async () => {
+    const oldId = 3;
+    const newId = 42;
+    const dayAssignment = { startTime: '08:00', endTime: '16:00', team: 'vlot1' };
+    // Medewerker 3 komt NIET voor als sleutel, enkel dagindex "3" bij medewerker 9
+    const grid = { '9': { '3': dayAssignment } };
+
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] });
+    pool.query.mockResolvedValue({ rows: [], rowCount: 0 });
+
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                                                 // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: oldId, name: 'Oud', week_schedules: [], week_schedule_week1: [], week_schedule_week2: [] }] })
+      .mockResolvedValueOnce({ rows: [{ id: newId, name: 'Nieuw', active: false }] })
+      .mockResolvedValueOnce({ rows: [] })                                                 // copy week_schedules
+      .mockResolvedValueOnce({ rows: [] })                                                 // deactivate old
+      .mockResolvedValueOnce({ rows: [{ id: 1, grid }] })                                  // SELECT drafts (prefilter LIKE matcht dagindex)
+      .mockResolvedValueOnce({ rows: [] });                                                // COMMIT (geen UPDATE schedule_drafts)
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post(`/api/v1/admin/users/${oldId}/replace`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ replacementUserId: newId });
+    expect(res.status).toBe(200);
+    expect(res.body.draftsUpdated).toBe(0);
+
+    const updateCall = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE schedule_drafts SET grid')
+    );
+    expect(updateCall).toBeUndefined(); // niets weggeschreven
   });
 });
 

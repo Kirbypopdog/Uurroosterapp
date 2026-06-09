@@ -941,8 +941,8 @@ v1.get('/calendar/:token.ics', async (req, res) => {
         'BEGIN:VEVENT',
         `UID:shift-${s.id}@hetvlot`,
         `DTSTAMP:${now}`,
-        `DTSTART:${start}`,
-        `DTEND:${end}`,
+        `DTSTART;TZID=Europe/Brussels:${start}`,
+        `DTEND;TZID=Europe/Brussels:${end}`,
         `SUMMARY:${summary}`,
       ];
       if (s.notes) lines.push(`DESCRIPTION:${icalEscape(s.notes)}`);
@@ -958,6 +958,7 @@ v1.get('/calendar/:token.ics', async (req, res) => {
       'METHOD:PUBLISH',
       `X-WR-CALNAME:Rooster ${icalEscape(user.name)}`,
       'X-WR-TIMEZONE:Europe/Brussels',
+      BRUSSELS_VTIMEZONE,
       events,
       'END:VCALENDAR',
     ].join('\r\n');
@@ -974,6 +975,29 @@ v1.get('/calendar/:token.ics', async (req, res) => {
 function icalEscape(str) {
   return String(str || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
 }
+
+// VTIMEZONE-component voor Europe/Brussels (CET/CEST). Nodig zodat Outlook de
+// wall-clock tijd correct interpreteert i.p.v. de niet-officiële X-WR-TIMEZONE
+// te negeren en de kale tijd als UTC te lezen (zie issue #172).
+const BRUSSELS_VTIMEZONE = [
+  'BEGIN:VTIMEZONE',
+  'TZID:Europe/Brussels',
+  'BEGIN:DAYLIGHT',
+  'TZOFFSETFROM:+0100',
+  'TZOFFSETTO:+0200',
+  'TZNAME:CEST',
+  'DTSTART:19700329T020000',
+  'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
+  'END:DAYLIGHT',
+  'BEGIN:STANDARD',
+  'TZOFFSETFROM:+0200',
+  'TZOFFSETTO:+0100',
+  'TZNAME:CET',
+  'DTSTART:19701025T030000',
+  'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+  'END:STANDARD',
+  'END:VTIMEZONE',
+].join('\r\n');
 
 // PUT /me/onboarding-flags - Update onboarding flags (merge)
 v1.put('/me/onboarding-flags', requireAuth, async (req, res) => {
@@ -1259,7 +1283,7 @@ v1.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
     const result = await pool.query(
       `UPDATE users
        SET role = $1,
-           team_id = $2,
+           team_id = COALESCE($2, team_id),
            name = COALESCE($3, name),
            email = COALESCE($4, email),
            main_team = COALESCE($5, main_team),
@@ -1474,6 +1498,43 @@ v1.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req
 
 // ===== REPLACE EMPLOYEE =====
 
+// Hernoemt een medewerker-ID in een concept-grid van old → new, zónder de
+// dag-van-de-week-indexen (0-6) aan te raken. Vervangt de oude naïeve
+// tekstvervanging die elke dagindex met datzelfde nummer corrumpeerde (#141).
+// Ondersteunt beide layouts:
+//   single-week : { "<empId>": { "0": {...}, "3": {...} }, _pattern: ... }
+//   multi-week  : { _multiWeek: true, "1": { "<empId>": {...} }, ... }
+function remapDraftGridUser(grid, oldId, newId) {
+  if (!grid || typeof grid !== 'object') return { grid, changed: false };
+  const oldKey = String(oldId);
+  const newKey = String(newId);
+  let changed = false;
+
+  // Hernoemt de medewerker-sleutel binnen één employee-laag. Bij een conflict
+  // (newKey bestaat al) mergen we per dag, waarbij de overgedragen (oude)
+  // toewijzingen winnen.
+  const remapEmployeeLayer = (layer) => {
+    if (!layer || typeof layer !== 'object' || !(oldKey in layer)) return layer;
+    const out = { ...layer };
+    const moved = out[oldKey];
+    delete out[oldKey];
+    out[newKey] = (out[newKey] && typeof out[newKey] === 'object' && moved && typeof moved === 'object')
+      ? { ...out[newKey], ...moved }
+      : moved;
+    changed = true;
+    return out;
+  };
+
+  if (grid._multiWeek) {
+    const out = {};
+    for (const [key, val] of Object.entries(grid)) {
+      out[key] = key.startsWith('_') ? val : remapEmployeeLayer(val);
+    }
+    return { grid: out, changed };
+  }
+  return { grid: remapEmployeeLayer(grid), changed };
+}
+
 v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) => {
   const oldUserId = Number(req.params.id);
   const { replacementUserId, transferShiftsFrom } = req.body;
@@ -1559,16 +1620,24 @@ v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) 
       [oldUserId]
     );
 
-    // 4. Update schedule_drafts: replace old user ID with new in grid
-    const oldIdStr = String(oldUserId);
-    const newIdStr = String(newUserId);
-    const draftsUpdateResult = await client.query(
-      `UPDATE schedule_drafts
-       SET grid = replace(grid::text, $1, $2)::jsonb, updated_at = NOW()
-       WHERE grid::text LIKE $3`,
-      ['"' + oldIdStr + '"', '"' + newIdStr + '"', '%"' + oldIdStr + '"%']
+    // 4. Update schedule_drafts: vervang oud medewerker-ID door nieuw in het grid.
+    //    We parsen het grid in code en hernoemen enkel de medewerker-sleutels,
+    //    zodat dag-van-de-week-indexen niet per ongeluk meeveranderen (#141).
+    const draftsResult = await client.query(
+      `SELECT id, grid FROM schedule_drafts WHERE grid::text LIKE $1 FOR UPDATE`,
+      ['%"' + String(oldUserId) + '"%']
     );
-    const draftsUpdated = draftsUpdateResult.rowCount;
+    let draftsUpdated = 0;
+    for (const row of draftsResult.rows) {
+      const { grid: newGrid, changed } = remapDraftGridUser(row.grid, oldUserId, newUserId);
+      if (changed) {
+        await client.query(
+          `UPDATE schedule_drafts SET grid = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+          [JSON.stringify(newGrid), row.id]
+        );
+        draftsUpdated++;
+      }
+    }
 
     // 5. No auto-regeneration — user should re-apply active concept via Rooster Bouwen
 
