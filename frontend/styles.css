@@ -970,7 +970,10 @@ textarea:focus-visible {
 }
 
 .view-header h2 {
-    font-size: var(--text-xl);
+    font-family: var(--font-serif);
+    font-weight: 400;
+    font-size: 2rem;
+    letter-spacing: -0.01em;
     color: var(--text-primary);
 }
 
@@ -3682,15 +3685,15 @@ body[data-view-mode="day"] .timeline-day-cell {
     position: absolute;
     top: 4px;
     bottom: 4px;
-    border-radius: 4px;
+    border-radius: 6px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 1px;
     cursor: pointer;
-    transition: all 0.15s;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    transition: transform 0.12s, box-shadow 0.12s;
+    box-shadow: 0 1px 2px rgba(43,42,38,.12);
     overflow: hidden;
     min-width: 20px;
 }
@@ -3713,8 +3716,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .timeline-block:hover {
-    transform: scaleY(1.1);
-    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
     z-index: 10;
 }
 

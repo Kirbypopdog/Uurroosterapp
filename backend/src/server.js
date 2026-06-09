@@ -577,11 +577,11 @@ async function ensureBootstrapData() {
   const client = await pool.connect();
   try {
     const defaultTeams = [
-      ['vlot1', 'Vlot 1 (Begeleiding)', '#3b82f6'],
-      ['vlot2', 'Vlot 2 (Begeleiding)', '#8b5cf6'],
-      ['cargo', 'Cargo (Dagbesteding)', '#10b981'],
-      ['overkoepelend', 'Overkoepelend (Kantoor)', '#f59e0b'],
-      ['jobstudent', 'Jobstudenten/Stagiairs', '#ec4899']
+      ['vlot1', 'Vlot 1 (Begeleiding)', '#4a7c6f'],
+      ['vlot2', 'Vlot 2 (Begeleiding)', '#c08a4a'],
+      ['cargo', 'Cargo (Dagbesteding)', '#5b7fa6'],
+      ['overkoepelend', 'Overkoepelend (Kantoor)', '#9a6a9e'],
+      ['jobstudent', 'Jobstudenten/Stagiairs', '#b9656a']
     ];
     for (const [id, name, color] of defaultTeams) {
       await client.query(
@@ -4514,11 +4514,11 @@ v1.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
 // Seed teams endpoint (admin only)
 v1.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
   const teams = [
-    { id: 'vlot1', name: 'Vlot 1 (Begeleiding)', color: '#3b82f6' },
-    { id: 'vlot2', name: 'Vlot 2 (Begeleiding)', color: '#8b5cf6' },
-    { id: 'cargo', name: 'Cargo (Dagbesteding)', color: '#10b981' },
-    { id: 'overkoepelend', name: 'Overkoepelend (Kantoor)', color: '#f59e0b' },
-    { id: 'jobstudent', name: 'Jobstudenten/Stagiairs', color: '#ec4899' }
+    { id: 'vlot1', name: 'Vlot 1 (Begeleiding)', color: '#4a7c6f' },
+    { id: 'vlot2', name: 'Vlot 2 (Begeleiding)', color: '#c08a4a' },
+    { id: 'cargo', name: 'Cargo (Dagbesteding)', color: '#5b7fa6' },
+    { id: 'overkoepelend', name: 'Overkoepelend (Kantoor)', color: '#9a6a9e' },
+    { id: 'jobstudent', name: 'Jobstudenten/Stagiairs', color: '#b9656a' }
   ];
 
   try {
