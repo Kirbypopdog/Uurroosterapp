@@ -42,10 +42,11 @@ const corsOptions = process.env.NODE_ENV === 'production'
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Global rate limiter
+// Global rate limiter (disabled in test environment to avoid interference with the test suite)
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Te veel verzoeken. Probeer later opnieuw.' }
@@ -484,6 +485,51 @@ const MIGRATIONS = [
     up: async (client) => {
       await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ical_feed_token TEXT UNIQUE`);
     }
+  },
+  {
+    // #158 GDPR: ensure all user-referencing FKs have correct ON DELETE behaviour.
+    // Fresh DBs created via schema.sql already have the right constraints, but
+    // databases created before these constraints were added need them enforced.
+    name: '033_gdpr_fk_on_delete',
+    up: async (client) => {
+      const tables = [
+        { table: 'shifts',              col: 'user_id',            ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'availability',        col: 'user_id',            ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'shift_blocks',        col: 'user_id',            ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'shift_activities',    col: 'user_id',            ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'shift_swap_requests', col: 'requester_user_id',  ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'shift_swap_requests', col: 'target_user_id',     ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'shift_swap_requests', col: 'responded_by',       ref: 'users(id)',  action: 'SET NULL' },
+        { table: 'audit_log',           col: 'actor_id',           ref: 'users(id)',  action: 'SET NULL' },
+        { table: 'schedule_drafts',     col: 'created_by',         ref: 'users(id)',  action: 'SET NULL' },
+        { table: 'schedule_drafts',     col: 'updated_by',         ref: 'users(id)',  action: 'SET NULL' },
+      ];
+      for (const { table, col, ref, action } of tables) {
+        // Find the FK constraint name for this column
+        const res = await client.query(`
+          SELECT tc.constraint_name, rc.delete_rule
+          FROM information_schema.table_constraints tc
+          JOIN information_schema.key_column_usage kcu
+            ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
+          JOIN information_schema.referential_constraints rc
+            ON tc.constraint_name = rc.constraint_name
+          WHERE tc.constraint_type = 'FOREIGN KEY'
+            AND tc.table_name = $1 AND kcu.column_name = $2
+        `, [table, col]);
+        for (const row of res.rows) {
+          const currentAction = row.delete_rule; // e.g. 'NO ACTION', 'CASCADE', 'SET NULL'
+          const expected = action.replace(' ', '_'); // normalize for comparison
+          if (currentAction !== expected && currentAction !== action) {
+            await client.query(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS "${row.constraint_name}"`);
+            await client.query(`ALTER TABLE ${table} ADD FOREIGN KEY (${col}) REFERENCES ${ref} ON DELETE ${action}`);
+          }
+        }
+        // If no FK existed yet, add it
+        if (res.rows.length === 0) {
+          await client.query(`ALTER TABLE ${table} ADD FOREIGN KEY (${col}) REFERENCES ${ref} ON DELETE ${action}`);
+        }
+      }
+    }
   }
 ];
 
@@ -636,6 +682,10 @@ async function logAudit(req, action, resourceType, resourceId, details = {}) {
 
 // ===== SHIFT VALIDATIE =====
 
+function isValidTime(t) {
+  return typeof t === 'string' && /^\d{2}:\d{2}$/.test(t);
+}
+
 /**
  * Controleert overlap en 11-uur rust voor een nieuwe/gewijzigde shift.
  * @param {object} db - pool (of mock in tests)
@@ -730,6 +780,7 @@ v1.post('/auth/register', requireAuth, requireAdmin, async (req, res) => {
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10,
+  skip: () => process.env.NODE_ENV === 'test',
   message: { success: false, message: 'Te veel inlogpogingen. Probeer opnieuw over 15 minuten.' },
   standardHeaders: true,
   legacyHeaders: false
@@ -1459,6 +1510,12 @@ v1.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Gebruiker niet gevonden' });
     }
+    // Anonymize audit log before deleting — GDPR: actor_name stays queryable but
+    // is no longer personal data. Must run before DELETE triggers SET NULL on actor_id.
+    await client.query(
+      `UPDATE audit_log SET actor_name = 'Verwijderde gebruiker' WHERE actor_id = $1`,
+      [userId]
+    );
     await client.query('DELETE FROM users WHERE id = $1', [userId]);
     await client.query('COMMIT');
     await logAudit(req, 'DELETE', 'user', userId, { user: deletedUser.rows[0] });
@@ -1486,10 +1543,15 @@ v1.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req
     await logAudit(req, 'UPDATE', 'user', userId, { action: 'password_reset' });
     // Send password reset email (fire-and-forget)
     const userResult = await pool.query('SELECT name, email FROM users WHERE id = $1', [userId]);
-    if (userResult.rows[0]) {
-      emailService.notifyPasswordReset(userResult.rows[0]);
+    const targetUser = userResult.rows[0];
+    const hasEmail = !!(targetUser?.email);
+    if (hasEmail) {
+      emailService.notifyPasswordReset(targetUser);
     }
-    res.json({ ok: true, newPassword: DEFAULT_RESET_PASSWORD });
+    // Only expose the new password when there is no email address — the admin
+    // must hand it over manually. When an email exists, the user receives it
+    // via email and we never include it in the API response.
+    res.json({ ok: true, ...(hasEmail ? {} : { newPassword: DEFAULT_RESET_PASSWORD }) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -1731,6 +1793,9 @@ v1.post('/shifts', requireAuth, async (req, res) => {
   if (!userId || !date || !startTime || !endTime) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
+  if (!isValidTime(startTime) || !isValidTime(endTime)) {
+    return res.status(400).json({ error: 'Tijdstip moet HH:MM zijn' });
+  }
 
   // Permission check: medewerker can only create shifts for themselves
   const { role, id: currentUserId } = req.user;
@@ -1785,6 +1850,9 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
   const { userId, team, date, startTime, endTime, notes, source, isReserve, force } = req.body || {};
   if (!id) {
     return res.status(400).json({ error: 'ID is verplicht' });
+  }
+  if ((startTime !== undefined && !isValidTime(startTime)) || (endTime !== undefined && !isValidTime(endTime))) {
+    return res.status(400).json({ error: 'Tijdstip moet HH:MM zijn' });
   }
 
   // Permission check: medewerker can only edit own shifts

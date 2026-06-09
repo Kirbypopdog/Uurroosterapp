@@ -517,8 +517,17 @@ function showEditAccountModal(user, teams, onSave) {
             const result = await dataApiFetch(`/admin/users/${user.id}/reset-password`, {
                 method: 'POST'
             });
-            const newPw = result.newPassword || '(standaard)';
-            showToast(`Wachtwoord gereset naar: ${newPw}`, 'success', 8000);
+            if (result.newPassword) {
+                // No email on file — admin must hand over the password manually.
+                // Show once in a modal (never logged to console).
+                await showConfirm(
+                    `Wachtwoord gereset.\n\nDe medewerker heeft geen e-mailadres, dus het nieuwe wachtwoord wordt hier eenmalig getoond:\n\n${result.newPassword}\n\nDeel dit persoonlijk mee aan de medewerker.`,
+                    'Wachtwoord gereset',
+                    { confirmText: 'Begrepen', hideCancel: true }
+                );
+            } else {
+                showToast('Wachtwoord gereset. Medewerker ontvangt een e-mail.', 'success');
+            }
         } catch (error) {
             showToast(`Reset mislukt: ${error.message}`, 'error');
         }
