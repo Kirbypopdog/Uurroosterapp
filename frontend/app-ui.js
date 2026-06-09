@@ -387,25 +387,15 @@ function applyTeamColors() {
 
     const teams = DataStore.settings.teams || {};
     let css = '';
-    // Compute soft background + dark text from hex color
-    function _hexToRgb(hex) {
-        const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] : [100,116,139];
-    }
     Object.entries(teams).forEach(([teamId, team]) => {
         const color = team.color || '#64748b';
         const textColor = '#ffffff';
-        const [r,g,b] = _hexToRgb(color);
-        // Soft block background: 18% tint; dark text: 55% of original
-        const blockBg = `rgba(${r},${g},${b},0.18)`;
-        const blockText = `rgb(${Math.round(r*.52)},${Math.round(g*.52)},${Math.round(b*.52)})`;
         css += `
 .team-toggle.active[data-team="${teamId}"] { background: ${color} !important; color: ${textColor} !important; border-color: transparent !important; }
 .team-badge.${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .team-badge-mini.${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
-.timeline-block.team-${teamId} { background: ${blockBg} !important; border-left: 3.5px solid ${color} !important; color: ${blockText} !important; }
-.timeline-block.team-${teamId} .block-time { color: inherit !important; font-weight: 700 !important; text-shadow: none !important; }
+.timeline-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-team-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .timeline-team-header.team-${teamId} { --team-dot-color: ${color}; }

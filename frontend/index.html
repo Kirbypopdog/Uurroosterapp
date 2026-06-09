@@ -8,8 +8,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="vlot.css">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="vlot.css?v=20260609">
+    <link rel="stylesheet" href="styles.css?v=20260609">
     <script src="https://unpkg.com/lucide@0.577.0" onerror="
         var s=document.createElement('script');
         s.src='https://cdn.jsdelivr.net/npm/lucide@0.577.0';
@@ -127,9 +127,9 @@
             <div class="view-header">
                 <h2>Roosterplanning</h2>
                 <div class="header-actions">
+                    <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
                     <button id="add-shift-btn" class="btn btn-primary btn-primary-lg"><i data-lucide="plus" class="lucide-sm"></i> Dienst toevoegen</button>
                 </div>
-                <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
             </div>
 
             <div class="planning-controls" id="planning-controls-wrapper">
@@ -150,9 +150,6 @@
                     </div>
                 </div>
                 <div class="planning-controls-row hidden" id="planning-filters-row">
-                    <div class="team-toggles" id="team-toggles">
-                        <!-- Dynamisch gevuld via renderTeamToggles() -->
-                    </div>
                     <div class="planning-filter-buttons">
                         <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
                         <label class="toggle-switch-label" title="Verberg medewerkers zonder diensten">

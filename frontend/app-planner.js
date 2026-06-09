@@ -580,6 +580,37 @@ function renderTimelineView() {
     const needsResponsible = isWeekendOrHolidayWeek(currentWeekStart);
     const responsible = needsResponsible ? getOrCalculateResponsible(currentWeekStart) : null;
 
+    // Bouwt de naam+uren-cel (redesign: initialen-avatar + rustige urennotatie)
+    const _teamsMap = DataStore.settings.teams || {};
+    const _fmtHrs = (n) => Number.isInteger(n) ? String(n) : n.toFixed(1);
+    function buildTimelineEmpCell(emp) {
+        const isResp = responsible && String(responsible.id) === String(emp.id);
+        const respBadge = isResp ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
+        const respClass = isResp ? ' is-responsible' : '';
+        const respTip = isResp ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
+        const name = escapeHtml(emp.name);
+        const initials = escapeHtml(getInitials(emp.name || ''));
+        const teamColor = _teamsMap[emp.mainTeam]?.color || '#8d897c';
+        const contractH = emp.contractHours || emp.contract_hours || 0;
+        const weekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
+        const periodH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
+        const periodContract = contractH > 0 ? contractH * 4 : 0;
+        const weekCls = contractH > 0 ? (weekH > contractH ? ' over-hours' : ' under-hours') : '';
+        const periodCls = periodContract > 0 ? (periodH > periodContract ? ' over-hours' : ' under-hours') : '';
+        const weekLabel = contractH > 0 ? `${_fmtHrs(weekH)}/${contractH}u` : `${_fmtHrs(weekH)}u`;
+        const periodLabel = periodContract > 0 ? `${_fmtHrs(periodH)}/${periodContract}u` : `${_fmtHrs(periodH)}u`;
+        return `<div class="timeline-employee-cell${respClass}" ${respTip}>
+            <div class="emp-name-row">
+                <span class="emp-av" style="background:${teamColor}">${initials}</span>
+                ${respBadge}<span class="emp-name">${name}</span>
+            </div>
+            <div class="emp-hours-line">
+                <span class="emp-hours${weekCls}">${weekLabel}</span>
+                <span class="emp-hours-sub${periodCls}">${periodLabel}</span>
+            </div>
+        </div>`;
+    }
+
     let html = '<div class="timeline-view-wrapper">';
 
     // Header row with days
@@ -651,26 +682,8 @@ function renderTimelineView() {
                 const isAlt = index % 2 === 1;
                 html += `<div class="timeline-row ${isAlt ? 'alt' : ''}">`;
 
-                // Employee name - check if this is the weekend responsible
-                const isResponsible = responsible && String(responsible.id) === String(emp.id);
-                const responsibleBadge = isResponsible ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
-                const responsibleClass = isResponsible ? ' is-responsible' : '';
-                const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
-
-                const employeeName = escapeHtml(emp.name);
-                const empContractH = emp.contractHours || emp.contract_hours || 0;
-                const empWeekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
-                const empMonthH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
-                const empMonthContract = empContractH > 0 ? empContractH * 4 : 0;
-                const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
-                const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
-                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(2)}/${empContractH}u` : `${empWeekH.toFixed(2)}u`;
-                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(2)}/${empMonthContract}u` : `${empMonthH.toFixed(2)}u`;
-                html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
-                    <div class="emp-name-row">${responsibleBadge}<span class="emp-name">${employeeName}</span></div>
-                    <span class="emp-hours${empWeekClass}">${empWeekLabel}</span>
-                    <span class="emp-hours${empMonthClass}">${empMonthLabel}</span>
-                </div>`;
+                // Employee name + uren (redesign-cel)
+                html += buildTimelineEmpCell(emp);
 
                 // Day cells with time blocks
                 weekDates.forEach(date => {
@@ -885,25 +898,7 @@ function renderTimelineView() {
                 const isAlt = index % 2 === 1;
                 html += `<div class="timeline-row ${isAlt ? 'alt' : ''}">`;
 
-                const isResponsible = responsible && String(responsible.id) === String(emp.id);
-                const responsibleBadge = isResponsible ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
-                const responsibleClass = isResponsible ? ' is-responsible' : '';
-                const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
-
-                const employeeName = escapeHtml(emp.name);
-                const empContractH = emp.contractHours || emp.contract_hours || 0;
-                const empWeekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
-                const empMonthH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
-                const empMonthContract = empContractH > 0 ? empContractH * 4 : 0;
-                const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
-                const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
-                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(2)}/${empContractH}u` : `${empWeekH.toFixed(2)}u`;
-                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(2)}/${empMonthContract}u` : `${empMonthH.toFixed(2)}u`;
-                html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
-                    <div class="emp-name-row">${responsibleBadge}<span class="emp-name">${employeeName}</span></div>
-                    <span class="emp-hours${empWeekClass}">${empWeekLabel}</span>
-                    <span class="emp-hours${empMonthClass}">${empMonthLabel}</span>
-                </div>`;
+                html += buildTimelineEmpCell(emp);
 
                 weekDates.forEach(date => {
                     const d = parseDateOnly(date);
