@@ -18,25 +18,39 @@
 </head>
 <body>
     <!-- Login Scherm -->
-    <div id="login-container" class="container">
-        <div class="login-box">
-            <div class="logo">
-                <h1>Het Vlot</h1>
-                <p class="subtitle">Roosterplanning</p>
+    <div id="login-container">
+        <div class="login-brandside">
+            <div class="login-brand-top">
+                <div class="login-brand-mark">V</div>
+                <div>
+                    <div class="login-brand-name">Het Vlot</div>
+                    <div class="login-brand-sub">Roosterplanning</div>
+                </div>
             </div>
-            <form id="login-form">
-                <div class="form-group">
-                <label for="username">Email</label>
-                <input type="email" id="username" required autocomplete="username">
-                </div>
-                <div class="form-group">
-                    <label for="password">Wachtwoord</label>
-                    <input type="password" id="password" required autocomplete="current-password">
-                </div>
-                <button type="submit" class="btn btn-primary">Inloggen</button>
-            </form>
-            <p class="info-text">Gebruik je eigen accountgegevens om in te loggen</p>
-            <p class="info-text text-muted" style="font-size:12px;margin-top:8px">Wachtwoord vergeten? Neem contact op met je leidinggevende.</p>
+            <div class="login-brand-mid">
+                <div class="login-bigline">Je rooster, <em>rustig</em> geregeld.</div>
+                <div class="login-bigsub">Bekijk je diensten, ruil met collega's en meld verlof — alles op één plek.</div>
+            </div>
+            <div class="login-brand-foot">© 2026 Het Vlot · Gemaakt met zorg</div>
+        </div>
+        <div class="login-formside">
+            <div class="login-box">
+                <h1 class="login-title">Welkom terug</h1>
+                <p class="login-lead">Log in om je rooster te bekijken</p>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="username">E-mail</label>
+                        <input type="email" id="username" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Wachtwoord</label>
+                        <input type="password" id="password" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Inloggen</button>
+                </form>
+                <p class="info-text">Gebruik je eigen accountgegevens om in te loggen</p>
+                <p class="info-text text-muted" style="font-size:12px;margin-top:8px">Wachtwoord vergeten? Neem contact op met je leidinggevende.</p>
+            </div>
         </div>
     </div>
 
