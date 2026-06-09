@@ -521,6 +521,71 @@ describe('POST /shifts', () => {
     expect(res.status).toBe(422);
     expect(res.body.error).toContain('11-uur');
   });
+
+  test('returns 400 when startTime has invalid format', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/shifts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 1, date: '2026-04-15', startTime: '9:00', endTime: '17:00' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('HH:MM');
+  });
+
+  test('returns 400 when endTime has invalid format', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/shifts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 1, date: '2026-04-15', startTime: '09:00', endTime: '17.00' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('HH:MM');
+  });
+});
+
+// ===== PUT /shifts/:id =====
+
+describe('PUT /shifts/:id', () => {
+  test('returns 400 when startTime has invalid format', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .put('/shifts/1')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ startTime: '9:00' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('HH:MM');
+  });
+
+  test('returns 400 when endTime has invalid format', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .put('/shifts/1')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ endTime: '1700' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('HH:MM');
+  });
+
+  test('allows PUT without time fields (partial update)', async () => {
+    mockActiveUser();
+    const shift = { id: 1, userId: 1, employeeId: 1, team: null, date: '2026-04-15', startTime: '09:00', endTime: '17:00', notes: 'updated', source: 'manual', isReserve: false };
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ user_id: 1 }] })                // medewerker permission check
+      .mockResolvedValueOnce({ rows: [shift] })                          // fetch old shift
+      .mockResolvedValueOnce({ rows: [shift] })                          // UPDATE RETURNING
+      .mockResolvedValueOnce({ rows: [] });                               // logAudit
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .put('/shifts/1')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ notes: 'updated' });
+    expect(res.status).toBe(200);
+    expect(res.body.shift).toBeTruthy();
+  });
 });
 
 // ===== DELETE /shifts/:id =====
@@ -1098,18 +1163,35 @@ describe('POST /admin/users/:id/reset-password', () => {
     expect(res.status).toBe(403);
   });
 
-  test('resets password and returns new password', async () => {
+  test('does not expose newPassword when user has email (email is sent instead)', async () => {
     mockActiveUser();
     pool.query
-      .mockResolvedValueOnce({ rows: [] })                          // UPDATE password_hash
-      .mockResolvedValueOnce({ rows: [] })                          // logAudit
-      .mockResolvedValueOnce({ rows: [{ name: 'Jan', email: 'jan@test.be' }] }); // user fetch for email
+      .mockResolvedValueOnce({ rows: [] })                                         // UPDATE password_hash
+      .mockResolvedValueOnce({ rows: [] })                                         // logAudit
+      .mockResolvedValueOnce({ rows: [{ name: 'Jan', email: 'jan@test.be' }] }); // user fetch
     const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
     const res = await request(app)
       .post('/admin/users/5/reset-password')
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
+    // #170: password must NOT be in response when an email exists
+    expect(res.body.newPassword).toBeUndefined();
+  });
+
+  test('exposes newPassword in response when user has no email', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [] })                               // UPDATE password_hash
+      .mockResolvedValueOnce({ rows: [] })                               // logAudit
+      .mockResolvedValueOnce({ rows: [{ name: 'Jan', email: null }] }); // user fetch — no email
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/admin/users/5/reset-password')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    // Must include password so admin can hand it over manually
     expect(res.body.newPassword).toBeTruthy();
   });
 });

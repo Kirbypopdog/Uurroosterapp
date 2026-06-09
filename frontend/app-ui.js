@@ -232,6 +232,7 @@ function showConfirm(message, title = 'Bevestig actie', options = {}) {
         // Custom button text
         okBtn.textContent = options.confirmText || 'OK';
         cancelBtn.textContent = options.cancelText || 'Annuleren';
+        cancelBtn.style.display = options.hideCancel ? 'none' : '';
 
         // Show modal
         modal.classList.remove('hidden');
@@ -251,6 +252,7 @@ function showConfirm(message, title = 'Bevestig actie', options = {}) {
         // Cleanup function
         const cleanup = () => {
             modal.classList.add('hidden');
+            cancelBtn.style.display = '';
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);
             modal.removeEventListener('click', handleBackdropClick);
