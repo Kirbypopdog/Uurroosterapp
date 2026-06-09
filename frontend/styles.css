@@ -1059,6 +1059,12 @@ textarea:focus-visible {
     position: relative;
 }
 
+/* Planning view: no max-width — timeline should use full available width */
+#planning-view {
+    max-width: none;
+    padding-inline: 20px;
+}
+
 .view.active {
     display: block;
 }
@@ -3358,12 +3364,10 @@ body[data-view-mode="day"] .timeline-header {
 
 /* ===== TIMELINE VIEW (NEW) ===== */
 .timeline-view-wrapper {
-    background: var(--surface-color);
-    border-radius: var(--radius-lg);
     overflow: visible; /* Allow sticky positioning to work */
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--border-color);
     min-width: 100%;
+    border-radius: var(--radius-lg);
+    /* No shadow/border — team cards provide their own visual structure */
 }
 
 .timeline-view-wrapper > * {
@@ -3373,8 +3377,9 @@ body[data-view-mode="day"] .timeline-header {
 .timeline-header {
     display: grid;
     grid-template-columns: 140px repeat(7, minmax(0, 1fr));
-    background: linear-gradient(135deg, var(--accent-blue) 0%, #1e3a8a 100%);
-    color: white;
+    background: #2b2a26;
+    color: var(--surface-color);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     position: sticky;
     top: 0;
     z-index: 20;
@@ -3898,29 +3903,38 @@ body[data-view-mode="day"] .timeline-day-cell {
     z-index: 10;
 }
 
+/* Soft block fallbacks (overridden dynamically by applyTeamColors) */
 .timeline-block.team-vlot1 {
-    background: linear-gradient(135deg, var(--team-vlot1) 0%, var(--team-vlot1-dark) 100%);
+    background: color-mix(in srgb, var(--team-vlot1) 18%, white);
+    border-left: 3.5px solid var(--team-vlot1);
+    color: var(--team-vlot1-darker);
 }
-
 .timeline-block.team-vlot2 {
-    background: linear-gradient(135deg, var(--team-vlot2) 0%, var(--team-vlot2-dark) 100%);
+    background: color-mix(in srgb, var(--team-vlot2) 18%, white);
+    border-left: 3.5px solid var(--team-vlot2);
+    color: var(--team-vlot2-darker);
 }
-
 .timeline-block.team-cargo {
-    background: linear-gradient(135deg, var(--team-cargo) 0%, var(--team-cargo-dark) 100%);
+    background: color-mix(in srgb, var(--team-cargo) 18%, white);
+    border-left: 3.5px solid var(--team-cargo);
+    color: var(--team-cargo-darker);
 }
-
 .timeline-block.team-overkoepelend {
-    background: linear-gradient(135deg, var(--team-overkoepelend) 0%, var(--team-overkoepelend-dark) 100%);
+    background: color-mix(in srgb, var(--team-overkoepelend) 18%, white);
+    border-left: 3.5px solid var(--team-overkoepelend);
+    color: var(--team-overkoepelend-darker);
 }
-
 .timeline-block.team-jobstudent {
-    background: linear-gradient(135deg, var(--team-jobstudent) 0%, var(--team-jobstudent-dark) 100%);
+    background: color-mix(in srgb, var(--team-jobstudent) 18%, white);
+    border-left: 3.5px solid var(--team-jobstudent);
+    color: var(--team-jobstudent-darker);
 }
 
-/* Nachtdienst - loopt over naar volgende dag als 1 blok */
+/* Nachtdienst - stays dark regardless of team color */
 .timeline-block.nacht {
-    background: linear-gradient(135deg, #2b2a26 0%, #2b2a26 100%);
+    background: #2b2a26 !important;
+    border-left: 3.5px solid rgba(255,255,255,0.3) !important;
+    color: var(--surface-color) !important;
     z-index: 5; /* Boven andere blokken zodat het goed zichtbaar is */
     border-radius: 4px; /* Normale afronding aan beide kanten */
 }
@@ -3980,12 +3994,11 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .timeline-block .block-time {
-    color: white;
+    color: inherit;
     font-size: 9px;
-    font-weight: 600;
+    font-weight: 700;
     padding: 0 4px;
     white-space: nowrap;
-    text-shadow: 0 1px 1px rgba(0,0,0,0.2);
 }
 
 /* Short shift blocks — hide chips at <1u, hide time text at <45min (#147) */
@@ -4126,8 +4139,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 /* Month header - sticky date headers */
 .month-header {
     display: flex;
-    background: linear-gradient(135deg, var(--accent-blue) 0%, #1e3a8a 100%);
-    color: white;
+    background: #2b2a26;
+    color: var(--surface-color);
     position: sticky;
     top: 0;
     z-index: 20;
@@ -4142,10 +4155,10 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-size: 14px;
     display: flex;
     align-items: center;
-    border-right: 2px solid rgba(255,255,255,0.2);
+    border-right: 2px solid rgba(255,255,255,0.15);
     position: sticky;
     left: 0;
-    background: linear-gradient(135deg, var(--accent-blue) 0%, #1e3a8a 100%);
+    background: #2b2a26;
     z-index: 21;
 }
 
