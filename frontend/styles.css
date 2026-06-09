@@ -3379,10 +3379,13 @@ body[data-view-mode="day"] .timeline-header {
     grid-template-columns: 140px repeat(7, minmax(0, 1fr));
     background: #2b2a26;
     color: var(--surface-color);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 14px;
     position: sticky;
     top: 0;
     z-index: 20;
+    overflow: hidden;
 }
 
 @media (max-width: 1400px) {
@@ -3609,8 +3612,15 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 /* ===== COLLAPSIBLE TEAM CARDS ===== */
+/* Elke team is een losse, zwevende kaart met eigen schaduw + tussenruimte */
 .tcard {
-    margin-bottom: 10px;
+    margin-bottom: 16px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    background: var(--surface-color);
+}
+.tcard:last-child {
+    margin-bottom: 0;
 }
 
 .tcard-head {
@@ -3652,8 +3662,9 @@ body[data-view-mode="day"] .timeline-header {
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     color: var(--text-primary);
     font-weight: 600;
+    /* Sticky onder de datum-as zodat de teamnaam zichtbaar blijft bij scrollen */
     position: sticky;
-    top: 0;
+    top: 72px;
     z-index: 10;
 }
 
@@ -8378,6 +8389,7 @@ body[data-view-mode="day"] .timeline-day-cell {
         display: flex !important;
         padding: 8px 12px;
         overflow: hidden !important;
+        top: 0 !important; /* datum-header is verborgen op mobiel */
     }
 
     .timeline-team-header .team-header-count {
