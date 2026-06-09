@@ -1,8 +1,9 @@
 // HET VLOT ROOSTERPLANNING - PLANNING RENDERING
 
 function renderPlanning() {
-    // Save window scroll position before re-rendering
-    const savedScrollY = window.scrollY || document.documentElement.scrollTop;
+    // Save scroll position before re-rendering (shell scrolt via .app-views)
+    const scrollEl = document.querySelector('.app-views');
+    const savedScrollY = scrollEl ? scrollEl.scrollTop : (window.scrollY || document.documentElement.scrollTop);
 
     if (!AppState.currentWeekStart) {
         setCurrentWeek(new Date());
@@ -45,9 +46,13 @@ function renderPlanning() {
         filterBtn.checked = AppState.filterOnlyWithShifts;
     }
 
-    // Restore window scroll position after DOM updates
+    // Restore scroll position after DOM updates
     requestAnimationFrame(() => {
-        window.scrollTo(0, savedScrollY);
+        if (scrollEl) {
+            scrollEl.scrollTop = savedScrollY;
+        } else {
+            window.scrollTo(0, savedScrollY);
+        }
     });
 }
 

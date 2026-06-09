@@ -7,7 +7,7 @@ function initDOM() {
     DOM.loginForm = document.getElementById('login-form');
     DOM.usernameInput = document.getElementById('username');
     DOM.passwordInput = document.getElementById('password');
-    DOM.navButtons = document.querySelectorAll('.nav-center .nav-btn');
+    DOM.navButtons = document.querySelectorAll('#nav-menu .nav-btn');
     DOM.logoutBtn = document.getElementById('logout-btn');
     DOM.homeView = document.getElementById('home-view');
     DOM.planningView = document.getElementById('planning-view');
@@ -117,14 +117,24 @@ function setupEventListeners() {
         });
     }
 
-    // Mobile menu toggle
+    // Mobile menu toggle — schuift de sidebar in/uit met backdrop
     const mobileMenuBtn = document.getElementById('mobile-menu-btn');
     const navMenu = document.getElementById('nav-menu');
+    const sidebarScrim = document.getElementById('sidebar-scrim');
+    const closeSidebar = () => {
+        mobileMenuBtn?.classList.remove('active');
+        navMenu?.classList.remove('open');
+        document.body.classList.remove('nav-open');
+    };
     if (mobileMenuBtn && navMenu) {
         mobileMenuBtn.addEventListener('click', () => {
             mobileMenuBtn.classList.toggle('active');
             navMenu.classList.toggle('open');
+            document.body.classList.toggle('nav-open');
         });
+    }
+    if (sidebarScrim) {
+        sidebarScrim.addEventListener('click', closeSidebar);
     }
 
     // Avatar trigger → navigeer direct naar profiel
@@ -136,10 +146,7 @@ function setupEventListeners() {
     DOM.navButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             // Close mobile menu on navigation
-            if (mobileMenuBtn && navMenu) {
-                mobileMenuBtn.classList.remove('active');
-                navMenu.classList.remove('open');
-            }
+            closeSidebar();
             switchView(btn.dataset.view);
         });
     });

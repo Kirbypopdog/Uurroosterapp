@@ -42,36 +42,26 @@
 
     <!-- Hoofdapplicatie -->
     <div id="app-container" class="container hidden">
-        <!-- Sidebar toggle (CSS-only) -->
-        <input type="checkbox" id="sidebar-toggle" class="sidebar-toggle-input" aria-hidden="true">
-
-        <!-- Navigatie -->
-        <nav class="main-nav">
-            <div class="nav-left">
-                <label for="sidebar-toggle" class="sidebar-toggle-label" aria-label="Sidebar inklappen">
-                    <span class="sidebar-toggle-icon"></span>
-                </label>
-                <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu">
-                    <span class="hamburger-line"></span>
-                    <span class="hamburger-line"></span>
-                    <span class="hamburger-line"></span>
-                </button>
-                <h1 class="app-title">Het Vlot</h1>
-            </div>
-            <div class="nav-center" id="nav-menu">
-                <div class="nav-group-primary">
-                    <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i> Home</button>
-                    <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i> Planning</button>
-                    <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i> Afwezigheid</button>
-                    <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i> Ruilen</button>
-                </div>
-                <div class="nav-group-admin">
-                    <button class="nav-btn" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
-                    <button class="nav-btn" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster Bouwen</button>
-                    <button class="nav-btn" data-view="settings"><i data-lucide="settings" class="nav-icon"></i> Instellingen</button>
+        <!-- Sidebar (linkernavigatie) -->
+        <aside class="app-sidebar" id="nav-menu">
+            <div class="sidebar-brand">
+                <div class="sidebar-brand-mark">V</div>
+                <div class="sidebar-brand-text">
+                    <div class="sidebar-brand-name">Het Vlot</div>
+                    <div class="sidebar-brand-sub">Roosterplanning</div>
                 </div>
             </div>
-            <div class="nav-right">
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i> Home</button>
+                <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i> Planning</button>
+                <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i> Afwezigheid</button>
+                <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i> Ruilen</button>
+                <div class="sidebar-nav-label nav-group-admin">Beheer</div>
+                <button class="nav-btn nav-group-admin" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
+                <button class="nav-btn nav-group-admin" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster bouwen</button>
+                <button class="nav-btn nav-group-admin" data-view="settings"><i data-lucide="settings" class="nav-icon"></i> Instellingen</button>
+            </nav>
+            <div class="sidebar-foot">
                 <div id="role-switcher" class="role-switcher hidden">
                     <i data-lucide="flask-conical" class="lucide-sm role-switcher-icon"></i>
                     <select id="role-switch-select">
@@ -90,7 +80,27 @@
                     </button>
                 </div>
             </div>
-        </nav>
+        </aside>
+
+        <!-- Mobiele backdrop voor sidebar -->
+        <div class="sidebar-scrim" id="sidebar-scrim"></div>
+
+        <!-- Hoofdinhoud -->
+        <main class="app-main">
+            <!-- Mobiele topbar (enkel < 860px) -->
+            <header class="app-topbar">
+                <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu">
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                </button>
+                <div class="app-topbar-brand">
+                    <span class="sidebar-brand-mark sm">V</span>
+                    <span>Het Vlot</span>
+                </div>
+            </header>
+
+            <div class="app-views">
 
         <!-- Home View -->
         <div id="home-view" class="view active">
@@ -234,7 +244,8 @@
             </div>
         </div>
 
-        <!-- Footer verwijderd in redesign -->
+            </div><!-- /.app-views -->
+        </main><!-- /.app-main -->
     </div>
 
     <!-- Modal: Dienst toevoegen/bewerken -->
