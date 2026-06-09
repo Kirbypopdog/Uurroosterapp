@@ -678,13 +678,15 @@ function renderTimelineView() {
 
                     if (!isClosed) {
                         // Check if there's a shift block for this employee on this date
-                        const hasShiftBlock = DataStore.shiftBlocks.some(
+                        const shiftBlock = DataStore.shiftBlocks.find(
                             block => String(block.user_id) === String(emp.id) && block.date === date
                         );
 
                         // Show shift block indicator if present
-                        if (hasShiftBlock) {
-                            html += `<div class="shift-block-indicator" data-tooltip="Shift geblokkeerd (auto-schedule overgeslagen)" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
+                        if (shiftBlock) {
+                            const canRelease = hasPermission('MANAGE_SHIFTS');
+                            const releaseTip = canRelease ? ' · Klik om dag terug vrij te geven aan het concept' : '';
+                            html += `<div class="shift-block-indicator${canRelease ? ' shift-block-indicator--clickable' : ''}" data-block-id="${shiftBlock.id}" data-employee="${emp.id}" data-date="${date}" data-tooltip="Dag manueel leeggemaakt${releaseTip}" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
                         }
 
                         // Get shifts for this employee on this date

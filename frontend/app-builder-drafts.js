@@ -730,19 +730,7 @@ async function applyBuilderDraft(draftId) {
 
         showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
         try {
-            let result = await applyScheduleDraft(draftId, { clearBlocks: true });
-
-            // Handmatige wijzigingen detectie
-            if (result.needsManualConfirmation) {
-                hideSectionLoading('planning-view');
-                const overwrite = await showConfirm(
-                    `Er zijn ${result.manualShiftCount} handmatige diensten in de vakantieperiode.\n\nOK — Alles verwijderen (handmatige aanpassingen gaan verloren)\nAnnuleren — Alleen automatische diensten verwijderen`,
-                    'Handmatige diensten gevonden'
-                );
-                showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
-                result = await applyScheduleDraft(draftId, { clearBlocks: true, confirmOverwrite: overwrite });
-            }
-
+            const result = await applyScheduleDraft(draftId, { clearBlocks: true });
             showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt)`, 'success');
 
             const draftToMark = drafts.find(d => d.id === draftId);
@@ -841,7 +829,8 @@ async function applyBuilderDraft(draftId) {
         let result = await applyScheduleDraft(draftId, {
             clearBlocks: true,
             applyStartDate: applyResult.startDate,
-            applyEndDate: applyResult.endDate
+            applyEndDate: applyResult.endDate,
+            confirmOverwrite: applyResult.confirmOverwrite ? true : null
         });
 
         // Overlap detectie — ander actief concept overlapt
@@ -859,24 +848,8 @@ async function applyBuilderDraft(draftId) {
                 clearBlocks: true,
                 applyStartDate: applyResult.startDate,
                 applyEndDate: applyResult.endDate,
-                confirmOverlap: true
-            });
-        }
-
-        // Handmatige wijzigingen detectie
-        if (result.needsManualConfirmation) {
-            hideSectionLoading('planning-view');
-            const overwrite = await showConfirm(
-                `Er zijn ${result.manualShiftCount} diensten die handmatig zijn aangepast (bijv. geruild, tijden gewijzigd of handmatig toegevoegd).\n\nWat wil je doen?\n\n• OK — Alles overschrijven met het concept (handmatige aanpassingen gaan verloren)\n• Annuleren — Alleen automatische diensten vervangen, handmatige aanpassingen behouden`,
-                'Handmatige diensten gevonden'
-            );
-            showSectionLoading('planning-view', 'Concept toepassen...');
-            result = await applyScheduleDraft(draftId, {
-                clearBlocks: true,
-                applyStartDate: applyResult.startDate,
-                applyEndDate: applyResult.endDate,
                 confirmOverlap: true,
-                confirmOverwrite: overwrite
+                confirmOverwrite: applyResult.confirmOverwrite ? true : null
             });
         }
 
@@ -888,7 +861,10 @@ async function applyBuilderDraft(draftId) {
             return;
         }
 
-        showToast(`Basisrooster ${weekLabel} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt)`, 'success');
+        const preservedNote = result.manualShiftsPreserved > 0
+            ? ` · ${result.manualShiftsPreserved} manuele diensten behouden`
+            : '';
+        showToast(`Basisrooster ${weekLabel} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt${preservedNote})`, 'success');
 
         // Update local draft cache with applied dates
         const draftToMark = (DataStore.settings.schedule_drafts || []).find(d => d.id === draftId);
@@ -1011,6 +987,7 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary btn-sm" id="draft-apply-cancel">Annuleren</button>
+                    <button class="btn btn-danger-outline btn-sm" id="draft-apply-reset" data-tooltip="Verwijdert ook manuele aanpassingen en leeggemaakte dagen — volledig terugzetten naar het concept" data-tooltip-pos="top">Reset alles naar concept</button>
                     <button class="btn btn-primary btn-sm" id="draft-apply-confirm">Toepassen</button>
                 </div>
             </div>`;
@@ -1039,19 +1016,31 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
             });
         });
 
-        overlay.querySelector('#draft-apply-confirm').addEventListener('click', () => {
+        function validateDates() {
             const startDate = overlay.querySelector('#draft-apply-start-date').value;
             const endDate = overlay.querySelector('#draft-apply-end-date').value;
-            if (!startDate || !endDate) {
-                showToast('Vul beide datums in', 'warning');
-                return;
-            }
-            if (startDate >= endDate) {
-                showToast('Startdatum moet voor einddatum liggen', 'warning');
-                return;
-            }
+            if (!startDate || !endDate) { showToast('Vul beide datums in', 'warning'); return null; }
+            if (startDate >= endDate) { showToast('Startdatum moet voor einddatum liggen', 'warning'); return null; }
+            return { startDate, endDate };
+        }
+
+        overlay.querySelector('#draft-apply-confirm').addEventListener('click', () => {
+            const dates = validateDates();
+            if (!dates) return;
             cleanup();
-            resolve({ startDate, endDate });
+            resolve({ ...dates, confirmOverwrite: false });
+        });
+
+        overlay.querySelector('#draft-apply-reset').addEventListener('click', async () => {
+            const dates = validateDates();
+            if (!dates) return;
+            const confirmed = await showConfirm(
+                `Dit verwijdert ALLE diensten in de periode ${dates.startDate} – ${dates.endDate} en zet alles terug naar het concept "${escapeHtml(draftName)}", inclusief manuele aanpassingen en leeggemaakte dagen.\n\nDoorgaan?`,
+                'Reset alles naar concept'
+            );
+            if (!confirmed) return;
+            cleanup();
+            resolve({ ...dates, confirmOverwrite: true });
         });
 
         overlay.querySelector('#draft-apply-cancel').addEventListener('click', () => { cleanup(); resolve(null); });

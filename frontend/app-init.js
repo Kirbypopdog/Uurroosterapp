@@ -430,6 +430,32 @@ function setupEventListeners() {
             const { userId, date, shiftStart, shiftEnd, shiftId } = addActivityBtn.dataset;
             if (userId && date) openAddActivityModal(parseInt(userId, 10), date, shiftStart, shiftEnd, shiftId ? parseInt(shiftId, 10) : null);
         }
+
+        // Shift-block indicator click → release the cell back to the concept (#146)
+        const blockIndicator = e.target.closest('.shift-block-indicator--clickable');
+        if (blockIndicator) {
+            e.stopPropagation();
+            const blockId = parseInt(blockIndicator.dataset.blockId, 10);
+            const emp = getEmployee(parseInt(blockIndicator.dataset.employee, 10));
+            const date = blockIndicator.dataset.date;
+            if (!blockId || !emp || !date) return;
+
+            const d = new Date(date + 'T00:00:00');
+            const dateLabel = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' });
+            const confirmed = await showConfirm(
+                `${emp.name} — ${dateLabel}\n\nDe dag wordt teruggegeven aan het concept. Bij de volgende concepttoepassing krijgt ${emp.name} hier opnieuw een shift.\n\nDoorgaan?`,
+                'Dag vrijgeven aan concept'
+            );
+            if (!confirmed) return;
+
+            try {
+                await deleteShiftBlock(blockId);
+                renderPlanning();
+                showToast(`${emp.name}: ${dateLabel} teruggegeven aan het concept`, 'success');
+            } catch (err) {
+                showToast('Fout bij vrijgeven: ' + (err.message || 'onbekende fout'), 'error');
+            }
+        }
     });
 }
 

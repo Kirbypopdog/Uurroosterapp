@@ -3536,21 +3536,18 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       }
     }
 
-    // 2b. Handmatige wijzigingen detectie (niet voor vakantieconcepten)
-    if (effectiveConfirmOverwrite === null) {
+    // 2b. Tel manuele shifts in het bereik voor het succesrapport.
+    //     Manuele shifts worden standaard NIET verwijderd (enkel source='auto'),
+    //     dus er is geen bevestigingsvraag meer nodig — de teller gaat mee
+    //     in het eindresultaat zodat de gebruiker ziet wat bewaard is (#146).
+    let preservedManualCount = 0;
+    if (!isVakantie) {
       const manualResult = await client.query(
         `SELECT COUNT(*)::int as count FROM shifts WHERE source = 'manual'
          AND date >= $1::date AND date <= $2::date`,
         [effectiveStartDate, effectiveEndDate]
       );
-      const manualCount = manualResult.rows[0].count;
-      if (manualCount > 0) {
-        await client.query('ROLLBACK');
-        return res.json({
-          needsManualConfirmation: true,
-          manualShiftCount: manualCount
-        });
-      }
+      preservedManualCount = manualResult.rows[0].count;
     }
 
     // 2c. Bij bevestiging overlap: inkorten overlappende concepten
@@ -3979,7 +3976,8 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       applied: appliedCount,
       shifts: { created: totalCreated, deleted: totalDeleted },
       draftName: draft.name,
-      weekNumbers: appliedWeekNumbers
+      weekNumbers: appliedWeekNumbers,
+      manualShiftsPreserved: preservedManualCount
     });
 
   } catch (err) {

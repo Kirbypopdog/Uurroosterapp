@@ -524,6 +524,11 @@ async function fetchShiftBlocks() {
     }
 }
 
+async function deleteShiftBlock(blockId) {
+    await dataApiFetch(`/shift-blocks/${blockId}`, { method: 'DELETE' });
+    DataStore.shiftBlocks = DataStore.shiftBlocks.filter(b => b.id !== blockId);
+}
+
 async function refreshActivities() {
     try {
         const params = new URLSearchParams();

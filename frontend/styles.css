@@ -3841,6 +3841,16 @@ body[data-view-mode="day"] .timeline-day-cell {
     opacity: 1;
 }
 
+.shift-block-indicator--clickable {
+    cursor: pointer;
+}
+
+.shift-block-indicator--clickable:hover {
+    opacity: 1;
+    color: var(--primary, #3b82f6);
+    transform: scale(1.15);
+}
+
 .no-shifts-message {
     padding: 60px 40px;
     text-align: center;
@@ -5668,6 +5678,16 @@ body[data-view-mode="day"] .timeline-day-cell {
     background: var(--color-danger-hover);
     transform: translateY(-1px);
     box-shadow: 0 4px 6px -1px rgba(220, 38, 38, 0.3);
+}
+
+.btn-danger-outline {
+    background: transparent;
+    color: var(--color-danger);
+    border: 1px solid var(--color-danger);
+}
+
+.btn-danger-outline:hover {
+    background: var(--color-danger-light, #fef2f2);
 }
 
 /* Danger zone */
