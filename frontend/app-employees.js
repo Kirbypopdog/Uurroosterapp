@@ -41,9 +41,11 @@ function renderEmployees() {
 
         const team = teams[teamKey];
         const teamName = escapeHtml(team.name);
+        const teamColor = team?.color || '#8d897c';
 
         html += `<div class="employees-team-section">
             <div class="employees-team-header team-${teamKey}">
+                <span class="team-header-dot" style="background:${teamColor}"></span>
                 <span class="team-header-name">${teamName}</span>
                 <span class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</span>
             </div>
@@ -706,14 +708,20 @@ function renderEmployeeCard(emp) {
         hoursHtml = `<div class="emp-card-hours"><span>${hoursWeek.toFixed(1)}u deze week</span></div>`;
     }
 
+    const initials = escapeHtml(getInitials(emp.name || ''));
+    const subLine = contractHours > 0 ? `${contractHours}u/week` : 'Geen contracturen';
+
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
             <div class="employee-header">
-                <span class="team-color-dot" style="background: ${teamColor}" title="${escapeHtml(teamName)}"></span>
-                <div class="employee-name">${employeeName}</div>
-                ${noEmailBadge}
+                <span class="emp-avatar" style="background:${teamColor}" title="${escapeHtml(teamName)}">${initials}</span>
+                <div class="employee-card-info">
+                    <div class="employee-name">${employeeName}</div>
+                    <div class="employee-card-sub">${subLine}</div>
+                </div>
                 <span class="employee-status ${statusClass}">${statusText}</span>
             </div>
+            ${noEmailBadge ? `<div class="employee-card-badges">${noEmailBadge}</div>` : ''}
             ${hoursHtml}
         </div>
     `;

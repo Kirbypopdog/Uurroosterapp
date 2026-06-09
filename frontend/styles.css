@@ -4708,43 +4708,36 @@ body[data-view-mode="day"] .timeline-day-cell {
     border: 1px solid var(--border-color);
 }
 
+/* Rustige team-header met team-kleur-dot (consistent met de planning) */
 .employees-team-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 12px 20px;
-    color: white;
+    gap: 9px;
+    padding: 13px 18px;
+    background: var(--surface-color);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
     font-weight: 600;
 }
 
+.employees-team-header .team-header-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    flex: none;
+}
+
 .employees-team-header .team-header-name {
-    font-size: 15px;
-    font-weight: 700;
+    font-size: 14.5px;
+    font-weight: 800;
+    letter-spacing: -.01em;
 }
 
 .employees-team-header .team-header-count {
     font-size: 12px;
-    opacity: 0.85;
-}
-
-.employees-team-header.team-vlot1 {
-    background: linear-gradient(135deg, var(--team-vlot1) 0%, var(--team-vlot1-darker) 100%);
-}
-
-.employees-team-header.team-vlot2 {
-    background: linear-gradient(135deg, var(--team-vlot2) 0%, var(--team-vlot2-darker) 100%);
-}
-
-.employees-team-header.team-cargo {
-    background: linear-gradient(135deg, var(--team-cargo) 0%, var(--team-cargo-darker) 100%);
-}
-
-.employees-team-header.team-overkoepelend {
-    background: linear-gradient(135deg, var(--team-overkoepelend) 0%, var(--team-overkoepelend-darker) 100%);
-}
-
-.employees-team-header.team-jobstudent {
-    background: linear-gradient(135deg, var(--team-jobstudent) 0%, var(--team-jobstudent-darker) 100%);
+    color: var(--ink-3);
+    font-weight: 600;
+    margin-left: auto;
 }
 
 .employees-team-grid {
@@ -4777,25 +4770,56 @@ body[data-view-mode="day"] .timeline-day-cell {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     padding: 14px 16px;
-    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
     cursor: pointer;
 }
 
 .employee-card:hover {
     box-shadow: var(--shadow-md);
-    border-color: var(--primary-color);
+    border-color: var(--line-strong);
+    transform: translateY(-1px);
 }
 
 .employee-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 6px;
+    gap: 11px;
+    margin-bottom: 10px;
+}
+
+/* Initialen-avatar in teamkleur (consistent met de planning) */
+.employee-card .emp-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    flex: none;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18);
+}
+
+.employee-card .employee-card-info {
+    min-width: 0;
+    flex: 1;
+}
+
+.employee-card .employee-card-sub {
+    font-size: 11.5px;
+    color: var(--ink-3);
+    font-weight: 600;
+    margin-top: 1px;
+}
+
+.employee-card .employee-card-badges {
+    margin-bottom: 8px;
 }
 
 .employee-name {
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 700;
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
