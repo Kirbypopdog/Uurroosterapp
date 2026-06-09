@@ -3706,7 +3706,6 @@ body[data-view-mode="day"] .timeline-header {
     padding: 12px 16px;
     background: var(--surface-color);
     border: 1px solid var(--border-color);
-    border-bottom: none;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     color: var(--text-primary);
     font-weight: 600;
