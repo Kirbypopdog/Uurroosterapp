@@ -8,8 +8,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="vlot.css?v=20260609c">
-    <link rel="stylesheet" href="styles.css?v=20260609c">
+    <link rel="stylesheet" href="vlot.css?v=20260609d">
+    <link rel="stylesheet" href="styles.css?v=20260609d">
     <script src="https://unpkg.com/lucide@0.577.0" onerror="
         var s=document.createElement('script');
         s.src='https://cdn.jsdelivr.net/npm/lucide@0.577.0';
@@ -125,9 +125,11 @@
         <!-- Planning View -->
         <div id="planning-view" class="view">
             <div class="view-header">
-                <h2>Roosterplanning</h2>
+                <div class="view-title">
+                    <span class="view-title-eyebrow">Planning</span>
+                    <h2>Weekoverzicht</h2>
+                </div>
                 <div class="header-actions">
-                    <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
                     <button id="add-shift-btn" class="btn btn-primary btn-primary-lg"><i data-lucide="plus" class="lucide-sm"></i> Dienst toevoegen</button>
                 </div>
             </div>
@@ -135,19 +137,22 @@
             <div class="planning-controls" id="planning-controls-wrapper">
                 <div class="planning-controls-row">
                     <div class="date-navigation">
-                        <button id="prev-week" class="btn" aria-label="Vorige week"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
-                        <button id="today-btn" class="btn">Vandaag</button>
-                        <button id="next-week" class="btn" aria-label="Volgende week"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+                        <button id="prev-week" class="nav-arrow-btn" aria-label="Vorige"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
+                        <span id="current-week-label" class="week-label">Week</span>
+                        <button id="next-week" class="nav-arrow-btn" aria-label="Volgende"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
                     </div>
                     <div id="current-period" class="period-display period-display--clickable" title="Klik om naar een datum te springen">
-                        <i data-lucide="calendar" class="lucide-xs period-calendar-icon"></i>
                         <span id="current-period-text"></span>
                         <input type="date" id="week-jump-input" class="week-jump-input" aria-label="Spring naar week">
                     </div>
+                    <button id="today-btn" class="btn btn-secondary btn-sm">Vandaag</button>
+                    <div class="controls-spacer"></div>
                     <div class="view-toggle-controls">
-                        <button class="view-toggle-btn active" data-mode="week">Week</button>
                         <button class="view-toggle-btn" data-mode="day">Dag</button>
+                        <button class="view-toggle-btn active" data-mode="week">Week</button>
+                        <button class="view-toggle-btn" data-mode="month">Maand</button>
                     </div>
+                    <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
                 </div>
                 <div class="planning-controls-row hidden" id="planning-filters-row">
                     <div class="planning-filter-buttons">

@@ -1224,12 +1224,18 @@ function changeViewMode(mode) {
 }
 
 function updatePeriodDisplay() {
+    // Weeknummer-label naast de chevrons (verborgen in maandweergave)
+    const setWeekLabel = (text) => {
+        if (DOM.currentWeekLabel) DOM.currentWeekLabel.textContent = text;
+    };
+
     if (AppState.viewMode === 'month') {
         // Month view: show "februari 2026"
         if (!AppState.currentMonthStart) {
             setCurrentMonth(new Date());
             return;
         }
+        setWeekLabel('Maand');
         DOM.currentPeriod.textContent = formatMonthDisplay(AppState.currentMonthStart);
     } else if (AppState.viewMode === 'day') {
         // Day view: show "Maandag, 3 maart 2026"
@@ -1240,20 +1246,30 @@ function updatePeriodDisplay() {
         const dayNames = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
         const currentDate = new Date(AppState.currentWeekStart);
         currentDate.setDate(currentDate.getDate() + AppState.mobileDayIndex);
+        setWeekLabel(`Week ${getISOWeekNumber(formatDateYYYYMMDD(currentDate))}`);
         const dateStr = currentDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
         DOM.currentPeriod.textContent = `${dayNames[AppState.mobileDayIndex]}, ${dateStr}`;
     } else {
-        // Week view: show "Week 6 | 3 februari 2026 - 9 februari 2026"
+        // Week view: weeknummer-label + compact datumbereik ("8 - 14 juni 2026")
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
             return;
         }
         const weekEnd = new Date(AppState.currentWeekStart);
         weekEnd.setDate(weekEnd.getDate() + 6);
-        const options = { day: 'numeric', month: 'long', year: 'numeric' };
-        const startStr = AppState.currentWeekStart.toLocaleDateString('nl-BE', options);
-        const endStr = weekEnd.toLocaleDateString('nl-BE', options);
-        DOM.currentPeriod.textContent = `${startStr} - ${endStr}`;
+        setWeekLabel(`Week ${getISOWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart))}`);
+        DOM.currentPeriod.textContent = formatWeekRange(AppState.currentWeekStart, weekEnd);
     }
+}
+
+// Compact datumbereik: "8 - 14 juni 2026" (zelfde maand) of "28 juni - 4 juli 2026"
+function formatWeekRange(start, end) {
+    const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+    const endStr = end.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+    if (sameMonth) {
+        return `${start.getDate()} - ${endStr}`;
+    }
+    const startStr = start.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' });
+    return `${startStr} - ${endStr}`;
 }
 

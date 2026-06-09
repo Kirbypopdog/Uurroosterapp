@@ -23,6 +23,7 @@ function initDOM() {
     DOM.nextWeekBtn = document.getElementById('next-week');
     DOM.todayBtn = document.getElementById('today-btn');
     DOM.currentPeriod = document.getElementById('current-period-text');
+    DOM.currentWeekLabel = document.getElementById('current-week-label');
     DOM.viewToggleBtns = document.querySelectorAll('.view-toggle-btn');
     DOM.rosterCalendar = document.getElementById('roster-calendar');
     DOM.validationAlerts = document.getElementById('validation-alerts');

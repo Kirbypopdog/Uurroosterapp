@@ -838,6 +838,16 @@ function renderTimelineView() {
                             if (durationH < 1)   blockClass += ' timeline-block--xs';
                             else if (durationH < 2) blockClass += ' timeline-block--sm';
 
+                            // Status (conflict/fout/waarschuwing) als icoon ipv rand
+                            let statusIcon = '';
+                            if (isAbsent) {
+                                statusIcon = `<span class="shift-status-icon shift-status-icon--error">${IconHelper.html('triangle-alert', 'xs')}</span>`;
+                            } else if (!validation.isValid) {
+                                statusIcon = `<span class="shift-status-icon shift-status-icon--error">${IconHelper.html('circle-x', 'xs')}</span>`;
+                            } else if (validation.hasWarnings) {
+                                statusIcon = `<span class="shift-status-icon shift-status-icon--warn">${IconHelper.html('triangle-alert', 'xs')}</span>`;
+                            }
+
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
                             let actChips = '';
@@ -860,6 +870,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
+                                ${statusIcon}
                                 <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
@@ -1030,6 +1041,16 @@ function renderTimelineView() {
                             if (durationH < 1)   blockClass += ' timeline-block--xs';
                             else if (durationH < 2) blockClass += ' timeline-block--sm';
 
+                            // Status (conflict/fout/waarschuwing) als icoon ipv rand
+                            let statusIcon = '';
+                            if (isAbsent) {
+                                statusIcon = `<span class="shift-status-icon shift-status-icon--error">${IconHelper.html('triangle-alert', 'xs')}</span>`;
+                            } else if (!validation.isValid) {
+                                statusIcon = `<span class="shift-status-icon shift-status-icon--error">${IconHelper.html('circle-x', 'xs')}</span>`;
+                            } else if (validation.hasWarnings) {
+                                statusIcon = `<span class="shift-status-icon shift-status-icon--warn">${IconHelper.html('triangle-alert', 'xs')}</span>`;
+                            }
+
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
                             let actChips = '';
@@ -1052,6 +1073,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
+                                ${statusIcon}
                                 <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
