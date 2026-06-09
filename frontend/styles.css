@@ -2402,9 +2402,8 @@ body[data-view-mode="day"] .timeline-header {
 
 /* ===== CALENDAR ===== */
 .calendar-container {
-    background: var(--surface-color);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
+    /* Geen eigen achtergrond/schaduw — de team-kaarten zweven los op de pagina */
+    background: transparent;
     overflow: visible; /* Allow sticky positioning */
 }
 
