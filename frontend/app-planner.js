@@ -226,8 +226,9 @@ const VALIDATION_CATEGORY_CONFIG = {
 function renderValidationAlerts() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
-    const startDate = weekDates[0];
-    const endDate = weekDates[6];
+    // In day view only show alerts for the visible day, not the full week (#142)
+    const startDate = AppState.viewMode === 'day' ? weekDates[AppState.mobileDayIndex] : weekDates[0];
+    const endDate   = AppState.viewMode === 'day' ? weekDates[AppState.mobileDayIndex] : weekDates[6];
     const summary = getValidationSummary(startDate, endDate);
 
     let html = '';
@@ -694,6 +695,13 @@ function renderTimelineView() {
                         // Filter by visible teams (include shifts without team)
                         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
 
+                        // Toon "niet werkzaam" markering op lege cellen (#173)
+                        const cellAvail = getAvailability(emp.id, date);
+                        if (!shiftBlock && shifts.length === 0 && cellAvail?.type === 'niet_werkzaam') {
+                            const nwReason = cellAvail.reason ? ` — ${cellAvail.reason}` : '';
+                            html += `<div class="niet-werkzaam-indicator" data-tooltip="Niet werkzaam${nwReason}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                        }
+
                         const isDayView = AppState.viewMode === 'day';
 
                         // Doorloop van nachtshift: enkel tonen op maandag (zondag→maandag weekgrens) of in dagweergave
@@ -774,7 +782,7 @@ function renderTimelineView() {
                                 titleText += ' (nachtdienst)';
                             }
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
+                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'niet_werkzaam': 'Niet werkzaam' };
                                 titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
@@ -795,6 +803,13 @@ function renderTimelineView() {
                             // Remove inline onclick - handled by DragHandler
                             const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
+                            // Determine display density based on duration (#147)
+                            const durationH = isOvernight
+                                ? (24 - startFrac) + Math.max(0, (endHour + endMin / 60))
+                                : Math.max(0, (endHour + endMin / 60) - startFrac);
+                            if (durationH < 1)   blockClass += ' timeline-block--xs';
+                            else if (durationH < 2) blockClass += ' timeline-block--sm';
+
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
                             let actChips = '';
@@ -804,6 +819,11 @@ function renderTimelineView() {
                                 actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
                             });
 
+                            // Show only start time when block is too narrow for full range (#147)
+                            const timeLabel = durationH < 2
+                                ? shift.startTime
+                                : `${shift.startTime}-${shift.endTime}`;
+
                             html += `<div class="${blockClass}"
                                          data-shift-id="${shift.id}"
                                          data-employee-id="${shift.employeeId}"
@@ -812,7 +832,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                <span class="block-time">${shift.startTime}-${shift.endTime}</span>
+                                <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
@@ -885,6 +905,13 @@ function renderTimelineView() {
 
                         const isDayView = AppState.viewMode === 'day';
 
+                        // Toon "niet werkzaam" markering op lege cellen (#173)
+                        const cellAvail2 = getAvailability(emp.id, date);
+                        if (shifts.length === 0 && cellAvail2?.type === 'niet_werkzaam') {
+                            const nwReason2 = cellAvail2.reason ? ` — ${cellAvail2.reason}` : '';
+                            html += `<div class="niet-werkzaam-indicator" data-tooltip="Niet werkzaam${nwReason2}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                        }
+
                         // Doorloop van nachtshift: enkel tonen op maandag (zondag→maandag weekgrens) of in dagweergave
                         if (isDayView || dayOfWeek === 1) {
                             html += renderOvernightContinuation(emp.id, date, START_HOUR, TOTAL_HOURS);
@@ -956,7 +983,7 @@ function renderTimelineView() {
                                 titleText += ' (nachtdienst)';
                             }
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
+                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'niet_werkzaam': 'Niet werkzaam' };
                                 titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
@@ -976,6 +1003,13 @@ function renderTimelineView() {
                             const canEdit = canUserEditShift(shift);
                             const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
+                            // Determine display density based on duration (#147)
+                            const durationH = isOvernight
+                                ? (24 - startFrac) + Math.max(0, (endHour + endMin / 60))
+                                : Math.max(0, (endHour + endMin / 60) - startFrac);
+                            if (durationH < 1)   blockClass += ' timeline-block--xs';
+                            else if (durationH < 2) blockClass += ' timeline-block--sm';
+
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
                             let actChips = '';
@@ -985,6 +1019,11 @@ function renderTimelineView() {
                                 actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
                             });
 
+                            // Show only start time when block is too narrow for full range (#147)
+                            const timeLabel = durationH < 2
+                                ? shift.startTime
+                                : `${shift.startTime}-${shift.endTime}`;
+
                             html += `<div class="${blockClass}"
                                          data-shift-id="${shift.id}"
                                          data-employee-id="${shift.employeeId}"
@@ -993,7 +1032,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                <span class="block-time">${shift.startTime}-${shift.endTime}</span>
+                                <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;

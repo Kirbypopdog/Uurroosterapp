@@ -3779,6 +3779,15 @@ body[data-view-mode="day"] .timeline-day-cell {
     text-shadow: 0 1px 1px rgba(0,0,0,0.2);
 }
 
+/* Short shift blocks — hide chips at <1u, hide time text at <45min (#147) */
+.timeline-block--sm .activity-chips-row {
+    display: none;
+}
+.timeline-block--xs .block-time,
+.timeline-block--xs .activity-chips-row {
+    display: none;
+}
+
 /* ===== DRAG & DROP STATES ===== */
 /* Note: Drag & drop styles have been moved to the bottom of this file (around line 6200) */
 
@@ -3863,6 +3872,29 @@ body[data-view-mode="day"] .timeline-day-cell {
     color: var(--primary, #3b82f6);
     transform: scale(1.15);
 }
+
+/* Niet-werkzaam indicator — grey bar across empty cell (#173) */
+.niet-werkzaam-indicator {
+    position: absolute;
+    inset: 6px 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: repeating-linear-gradient(
+        135deg,
+        transparent,
+        transparent 4px,
+        rgba(0,0,0,0.04) 4px,
+        rgba(0,0,0,0.04) 8px
+    );
+    border: 1px dashed var(--border-color, #d1d5db);
+    border-radius: 4px;
+    color: var(--text-secondary, #9ca3af);
+    opacity: 0.7;
+    cursor: help;
+    z-index: 1;
+}
+.niet-werkzaam-indicator:hover { opacity: 1; }
 
 .no-shifts-message {
     padding: 60px 40px;

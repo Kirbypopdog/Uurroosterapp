@@ -225,6 +225,11 @@ function validateAvailability(employeeId, date, startTime = null, endTime = null
         return { warnings };
     }
 
+    // niet_werkzaam is puur informatief — geen conflict met een shift (#173)
+    if (absence.type === 'niet_werkzaam') {
+        return { warnings };
+    }
+
     // Medewerker is afwezig
     const absenceLabels = {
         'verlof': 'Verlof',

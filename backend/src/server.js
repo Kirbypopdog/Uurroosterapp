@@ -606,17 +606,45 @@ async function ensureBootstrapData() {
   }
 }
 
-async function archiveOldShifts() {
-  try {
-    const result = await pool.query(
-      `UPDATE shifts SET archived = true
-       WHERE archived = false AND date < CURRENT_DATE - INTERVAL '12 months'`
-    );
-    if (result.rowCount > 0) console.log(`[archive] ${result.rowCount} shifts gearchiveerd`);
-  } catch (err) {
-    console.error('[archive] Fout bij archiveren:', err.message);
+// #151 GDPR bewaartermijnen — loopt bij elke startup (idempotent)
+// Termijnen: shifts 5j, availability 5j, audit_log 2j, swap_requests 2j
+async function enforceRetentionPolicies() {
+  const steps = [
+    {
+      label: 'archive shifts (>12 maanden)',
+      sql: `UPDATE shifts SET archived = true WHERE archived = false AND date < CURRENT_DATE - INTERVAL '12 months'`,
+    },
+    {
+      label: 'verwijder gearchiveerde shifts (>5 jaar)',
+      sql: `DELETE FROM shifts WHERE archived = true AND date < CURRENT_DATE - INTERVAL '5 years'`,
+    },
+    {
+      label: 'verwijder beschikbaarheidsdata (>5 jaar)',
+      sql: `DELETE FROM availability WHERE date < CURRENT_DATE - INTERVAL '5 years'`,
+    },
+    {
+      label: 'verwijder audit_log (>2 jaar)',
+      sql: `DELETE FROM audit_log WHERE created_at < NOW() - INTERVAL '2 years'`,
+    },
+    {
+      label: 'verwijder afgeronde ruilverzoeken (>2 jaar)',
+      sql: `DELETE FROM shift_swap_requests
+            WHERE status IN ('approved','rejected','cancelled','expired')
+              AND created_at < NOW() - INTERVAL '2 years'`,
+    },
+  ];
+  for (const step of steps) {
+    try {
+      const r = await pool.query(step.sql);
+      if (r.rowCount > 0) console.log(`[retention] ${step.label}: ${r.rowCount} rijen`);
+    } catch (err) {
+      console.error(`[retention] Fout bij "${step.label}": ${err.message}`);
+    }
   }
 }
+
+// Legacy alias — kept so any future direct calls still work
+const archiveOldShifts = enforceRetentionPolicies;
 
 function signToken(user) {
   return jwt.sign(
@@ -885,11 +913,15 @@ v1.put('/me', requireAuth, async (req, res) => {
       ? JSON.stringify(weekSchedules)
       : null;
 
+    // #154: rotate iCal token when password changes to invalidate leaked feed URLs
+    const newIcalToken = password ? crypto.randomUUID() : null;
+
     const result = await pool.query(
       `UPDATE users
        SET name = $1,
            email = $2,
            password_hash = COALESCE($3, password_hash),
+           ical_feed_token = COALESCE($10, ical_feed_token),
            main_team = COALESCE($4, main_team),
            contract_hours = COALESCE($5, contract_hours),
            week_schedule_week1 = COALESCE($6::jsonb, week_schedule_week1),
@@ -905,7 +937,7 @@ v1.put('/me', requireAuth, async (req, res) => {
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"`,
-      [name, email.toLowerCase(), passwordHash, mainTeam, contractHours, week1Json, week2Json, weekSchedulesJson, req.user.id]
+      [name, email.toLowerCase(), passwordHash, mainTeam, contractHours, week1Json, week2Json, weekSchedulesJson, req.user.id, newIcalToken]
     );
     await logAudit(req, 'UPDATE', 'user', req.user.id, { action: 'self_update', name, email });
     res.json({ user: result.rows[0] });
