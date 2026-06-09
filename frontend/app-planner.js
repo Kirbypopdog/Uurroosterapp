@@ -697,9 +697,9 @@ function renderTimelineView() {
 
                         // Toon "niet werkzaam" markering op lege cellen (#173)
                         const cellAvail = getAvailability(emp.id, date);
-                        if (!shiftBlock && shifts.length === 0 && cellAvail?.type === 'niet_werkzaam') {
+                        if (!shiftBlock && shifts.length === 0 && cellAvail?.type === 'vrij') {
                             const nwReason = cellAvail.reason ? ` — ${cellAvail.reason}` : '';
-                            html += `<div class="niet-werkzaam-indicator" data-tooltip="Niet werkzaam${nwReason}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                            html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
                         }
 
                         const isDayView = AppState.viewMode === 'day';
@@ -782,7 +782,7 @@ function renderTimelineView() {
                                 titleText += ' (nachtdienst)';
                             }
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'niet_werkzaam': 'Niet werkzaam' };
+                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'vrij': 'Vrij' };
                                 titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
@@ -907,9 +907,9 @@ function renderTimelineView() {
 
                         // Toon "niet werkzaam" markering op lege cellen (#173)
                         const cellAvail2 = getAvailability(emp.id, date);
-                        if (shifts.length === 0 && cellAvail2?.type === 'niet_werkzaam') {
+                        if (shifts.length === 0 && cellAvail2?.type === 'vrij') {
                             const nwReason2 = cellAvail2.reason ? ` — ${cellAvail2.reason}` : '';
-                            html += `<div class="niet-werkzaam-indicator" data-tooltip="Niet werkzaam${nwReason2}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                            html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason2}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
                         }
 
                         // Doorloop van nachtshift: enkel tonen op maandag (zondag→maandag weekgrens) of in dagweergave
@@ -983,7 +983,7 @@ function renderTimelineView() {
                                 titleText += ' (nachtdienst)';
                             }
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'niet_werkzaam': 'Niet werkzaam' };
+                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'vrij': 'Vrij' };
                                 titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {

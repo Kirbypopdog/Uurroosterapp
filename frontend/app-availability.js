@@ -13,7 +13,7 @@ function renderAvailability() {
         'overuren': 'Overuren',
         'vorming': 'Vorming',
         'andere': 'Andere',
-        'niet_werkzaam': 'Niet werkzaam'
+        'vrij': 'Vrij'
     };
 
     // Group employees by team (same order as Timeline)
@@ -523,7 +523,7 @@ async function handleAvailabilitySave() {
         const employee = getEmployee(employeeId);
         const employeeName = employee?.name || 'de medewerker';
         const daysSet = result.availability?.length || 0;
-        const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid', 'niet_werkzaam': 'Niet werkzaam' }[absenceType] || 'Afwezigheid';
+        const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid', 'vrij': 'Vrij' }[absenceType] || 'Afwezigheid';
 
         let msg = `${typeName} geregistreerd voor ${employeeName} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
         if (result.takeoverRequests > 0) {

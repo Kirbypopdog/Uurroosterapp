@@ -3874,7 +3874,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* Niet-werkzaam indicator — grey bar across empty cell (#173) */
-.niet-werkzaam-indicator {
+.vrij-indicator {
     position: absolute;
     inset: 6px 4px;
     display: flex;
@@ -3894,7 +3894,7 @@ body[data-view-mode="day"] .timeline-day-cell {
     cursor: help;
     z-index: 1;
 }
-.niet-werkzaam-indicator:hover { opacity: 1; }
+.vrij-indicator:hover { opacity: 1; }
 
 .no-shifts-message {
     padding: 60px 40px;

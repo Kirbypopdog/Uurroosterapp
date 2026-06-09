@@ -225,8 +225,8 @@ function validateAvailability(employeeId, date, startTime = null, endTime = null
         return { warnings };
     }
 
-    // niet_werkzaam is puur informatief — geen conflict met een shift (#173)
-    if (absence.type === 'niet_werkzaam') {
+    // vrij is puur informatief — geen conflict met een shift (#173)
+    if (absence.type === 'vrij') {
         return { warnings };
     }
 
