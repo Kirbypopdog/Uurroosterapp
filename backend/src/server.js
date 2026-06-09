@@ -4050,6 +4050,11 @@ v1.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke')
 
   // Import users (with schedule data)
   if (Array.isArray(users)) {
+    // Eén keer hashen voor nieuwe users — voorkomt timeout bij bulk-import
+    // op beperkte CPU (bv. gratis Render plan). Bestaande users worden
+    // geüpdatet zonder nieuw wachtwoord; nieuwe krijgen dit hash (#staging).
+    const defaultPasswordHash = users.some(u => u.email) ? await bcrypt.hash(DEFAULT_RESET_PASSWORD, 12) : null;
+
     for (const user of users) {
       try {
         // Validate team exists if specified
@@ -4093,8 +4098,8 @@ v1.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke')
           ]);
           results.imported++;
         } else if (user.email) {
-          // Create new user with default password
-          const passwordHash = await bcrypt.hash(DEFAULT_RESET_PASSWORD, 12);
+          // Create new user with default password (hash berekend vóór de loop)
+          const passwordHash = defaultPasswordHash;
           const week1Json = JSON.stringify(user.weekScheduleWeek1 || []);
           const week2Json = JSON.stringify(user.weekScheduleWeek2 || []);
           const wsJson = Array.isArray(user.weekSchedules) && user.weekSchedules.length > 0
