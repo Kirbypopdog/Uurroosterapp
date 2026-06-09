@@ -614,6 +614,7 @@ function renderTimelineView() {
     let html = '<div class="timeline-view-wrapper">';
 
     // Header row with days
+    const _todayStr = formatDateYYYYMMDD(new Date());
     html += '<div class="timeline-header">';
     html += '<div class="timeline-name-header">Medewerker</div>';
     weekDates.forEach((date) => {
@@ -629,6 +630,7 @@ function renderTimelineView() {
         const closedDateInfo = getClosedDateInfo(date);
 
         let headerClass = 'timeline-day-header';
+        if (date === _todayStr) headerClass += ' today';
         if (isWeekend) headerClass += ' weekend';
         if (isClosed) headerClass += ' closed';
         if (isHoliday) headerClass += ' holiday';

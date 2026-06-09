@@ -3425,15 +3425,13 @@ body[data-view-mode="day"] .timeline-header {
 .timeline-header {
     display: grid;
     grid-template-columns: 140px repeat(7, minmax(0, 1fr));
-    background: #2b2a26;
-    color: var(--surface-color);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
-    margin-bottom: 14px;
+    background: var(--bg-color);
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    padding-bottom: 6px;
     position: sticky;
     top: 0;
     z-index: 20;
-    overflow: hidden;
 }
 
 @media (max-width: 1400px) {
@@ -3481,43 +3479,78 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .timeline-name-header {
-    padding: 14px 12px;
-    font-weight: 600;
-    font-size: 13px;
-    border-right: 1px solid rgba(255,255,255,0.1);
+    padding: 10px 12px;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    color: var(--ink-3);
     display: flex;
-    align-items: center;
+    align-items: flex-end;
 }
 
+/* Dag-headers als losse afgeronde vakjes (redesign) */
 .timeline-day-header {
-    padding: 10px 8px;
+    margin: 0 3px;
+    padding: 8px 4px;
     text-align: center;
-    border-right: 1px solid rgba(255,255,255,0.1);
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 11px;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: 1px;
 }
 
 .timeline-day-header .day-name {
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
     text-transform: uppercase;
-    opacity: 0.9;
+    color: var(--ink-3);
 }
 
 .timeline-day-header .day-num {
     font-size: var(--text-lg);
-    font-weight: 700;
+    font-weight: 800;
+    letter-spacing: -.01em;
 }
 
 .timeline-day-header.weekend {
-    background: rgba(0,0,0,0.15);
+    background: var(--surface-2);
 }
 
 .timeline-day-header.closed {
-    background: rgba(0,0,0,0.3);
-    opacity: 0.7;
+    background: var(--surface-2);
+    opacity: 0.75;
+}
+
+/* Vandaag: gevuld donker vakje (wint van weekend/gesloten, vóór feestdag/vakantie) */
+.timeline-day-header.today {
+    background: #2b2a26;
+    border-color: #2b2a26;
+    opacity: 1;
+}
+.timeline-day-header.today .day-name,
+.timeline-day-header.today .day-num {
+    color: var(--surface-color);
+}
+
+/* Gekleurde states (vakantie/feestdag/manueel gesloten): witte tekst + bijpassende rand */
+.timeline-day-header.holiday,
+.timeline-day-header.feestdag,
+.timeline-day-header.manually-closed {
+    border-color: transparent;
+}
+.timeline-day-header.holiday .day-name,
+.timeline-day-header.holiday .day-num,
+.timeline-day-header.feestdag .day-name,
+.timeline-day-header.feestdag .day-num,
+.timeline-day-header.manually-closed .day-name,
+.timeline-day-header.manually-closed .day-num {
+    color: #fff;
 }
 
 .timeline-day-header.holiday {
