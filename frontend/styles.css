@@ -47,6 +47,20 @@
     --login-bg-end: #c8d6d0;
     --login-accent: #5a7d6a;
 
+    /* Redesign-systeem aliassen (zodat vlot.css-componenten onze tokens gebruiken) */
+    --surface: var(--surface-color);
+    --ink: var(--text-primary);
+    --ink-2: var(--text-secondary);
+    --line: var(--border-color);
+    --r: var(--radius-lg);
+    --r-md: var(--radius-md);
+    --r-sm: var(--radius-sm);
+    --gap: 9px;
+    --pad: 16px;
+    --font: var(--font-family);
+    --serif: var(--font-serif);
+    --danger: var(--color-danger);
+
     /* Team kleuren — warme accentpalette (t1..t4 aliassen) */
     --t1: #4a7c6f; --t2: #c08a4a; --t3: #9a6a9e; --t4: #5b7fa6;
     --team-vlot1: #4a7c6f;
