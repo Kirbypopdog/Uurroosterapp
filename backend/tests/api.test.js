@@ -530,6 +530,59 @@ describe('DELETE /shifts/:id', () => {
     const res = await request(app).delete('/api/v1/shifts/1');
     expect(res.status).toBe(401);
   });
+
+  // Regressie #146 (lek 2): een manuele verwijdering moet een shift_block
+  // aanmaken zodat een concept de dag niet opnieuw vult.
+  test('creates a shift_block on manual delete (#146)', async () => {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [] });                     // logAudit
+
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                                                                   // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 50, user_id: 9, team: 'vlot1', source: 'manual', date: '2026-06-15' }] }) // SELECT shift
+      .mockResolvedValueOnce({ rows: [] })                                                                   // DELETE shift
+      .mockResolvedValueOnce({ rows: [] })                                                                   // INSERT shift_block
+      .mockResolvedValueOnce({ rows: [] });                                                                  // COMMIT
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .delete('/api/v1/shifts/50')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+
+    const blockInsert = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO shift_blocks')
+    );
+    expect(blockInsert).toBeTruthy();
+    expect(blockInsert[1]).toEqual([9, '2026-06-15', 1]); // user_id, date, created_by
+  });
+
+  // Regressie #146: systeemopkuis (skipBlock=true) mag GEEN block aanmaken.
+  test('skips block creation when skipBlock=true (#146)', async () => {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] });
+    pool.query.mockResolvedValue({ rows: [] });
+
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                                                                   // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 51, user_id: 9, team: 'vlot1', source: 'auto', date: '2026-06-15' }] }) // SELECT shift
+      .mockResolvedValueOnce({ rows: [] })                                                                   // DELETE shift
+      .mockResolvedValueOnce({ rows: [] });                                                                  // COMMIT
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .delete('/api/v1/shifts/51?skipBlock=true')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+
+    const blockInsert = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO shift_blocks')
+    );
+    expect(blockInsert).toBeUndefined();
+  });
 });
 
 // ===== GET /availability =====
@@ -1220,6 +1273,7 @@ describe('POST /api/v1/schedule-drafts/:id/apply', () => {
       .mockResolvedValueOnce({ rows: [], rowCount: 0 })       // bulk DELETE in-draft
       .mockResolvedValueOnce({ rows: [] })                    // bulk SELECT occupied shifts
       .mockResolvedValueOnce({ rows: [] })                    // bulk SELECT absences
+      .mockResolvedValueOnce({ rows: [] })                    // bulk SELECT blocks (#146)
       .mockResolvedValueOnce({ rows: [], rowCount: 7 })       // bulk INSERT shifts (7 days)
       .mockResolvedValueOnce({ rows: [] })                    // week_schedules UPDATE
       .mockResolvedValueOnce({ rows: [] })                    // DELETE shift_activities vergadering cleanup
@@ -1243,6 +1297,65 @@ describe('POST /api/v1/schedule-drafts/:id/apply', () => {
     );
     expect(insertCalls).toHaveLength(1);
     expect(insertCalls[0][0]).toMatch(/VALUES \(\$1/); // bulk VALUES syntax
+  });
+
+  // Regressie #146: een dag met een shift_block (manuele leegmaking) wordt
+  // NIET opnieuw gevuld bij het toepassen van het concept.
+  test('skips dates that have a shift_block (#146)', async () => {
+    const empId = 42;
+    const dayAssignment = { startTime: '08:00', endTime: '16:00', team: 'vlot1' };
+    const draftGrid = {
+      [String(empId)]: { '0': dayAssignment, '1': dayAssignment, '2': dayAssignment, '3': dayAssignment, '4': dayAssignment, '5': dayAssignment, '6': dayAssignment },
+      _pattern: { cycleLength: 1, referenceDate: '2026-05-04' }
+    };
+    const draft = {
+      id: 1, name: 'Testconcept', type: 'basis', team_filter: null,
+      week_number: 1, valid_from: null, valid_until: null, holiday_period_id: null,
+      grid: draftGrid
+    };
+    const employee = {
+      id: empId, name: 'Jan', email: 'jan@test.be', mainTeam: 'vlot1',
+      extraTeams: [], contractHours: 38, active: true,
+      weekSchedules: null, weekScheduleWeek1: null, weekScheduleWeek2: null
+    };
+
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                    // BEGIN
+      .mockResolvedValueOnce({ rows: [draft] })               // draft lookup FOR UPDATE
+      .mockResolvedValueOnce({ rows: [] })                    // overlap check
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })        // manual shifts count
+      .mockResolvedValueOnce({ rows: [employee] })            // employees
+      .mockResolvedValueOnce({ rows: [] })                    // closedDates
+      .mockResolvedValueOnce({ rows: [] })                    // vakantie skip ranges
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })       // bulk DELETE in-draft
+      .mockResolvedValueOnce({ rows: [] })                    // bulk SELECT occupied shifts
+      .mockResolvedValueOnce({ rows: [] })                    // bulk SELECT absences
+      .mockResolvedValueOnce({ rows: [{ user_id: empId, date: '2026-05-06' }] }) // bulk SELECT blocks → 1 geblokkeerde dag
+      .mockResolvedValueOnce({ rows: [], rowCount: 6 })       // bulk INSERT shifts (6 i.p.v. 7)
+      .mockResolvedValueOnce({ rows: [] })                    // week_schedules UPDATE
+      .mockResolvedValueOnce({ rows: [] })                    // vergadering cleanup
+      .mockResolvedValueOnce({ rows: [] })                    // draft UPDATE
+      .mockResolvedValueOnce({ rows: [] });                   // COMMIT
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/api/v1/schedule-drafts/1/apply')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ applyStartDate: '2026-05-04', applyEndDate: '2026-05-10' }); // 7 dagen
+    expect(res.status).toBe(200);
+
+    const insertCall = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO shifts')
+    );
+    expect(insertCall).toBeTruthy();
+    // 6 shifts × 6 params = 36 (de geblokkeerde dag is overgeslagen)
+    expect(insertCall[1]).toHaveLength(36);
+    // De geblokkeerde datum mag niet in de insert-params voorkomen
+    expect(insertCall[1]).not.toContain('2026-05-06');
   });
 });
 

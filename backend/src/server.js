@@ -1901,12 +1901,20 @@ v1.delete('/shifts/:id', requireAuth, async (req, res) => {
     await client.query('DELETE FROM shifts WHERE id = $1', [id]);
     await logAudit(req, 'DELETE', 'shift', id, { shift: { id: shift.id, user_id: shift.user_id, team: shift.team, date: shift.date, source: shift.source } });
 
-    // Create shift block to prevent auto-regeneration
-    // Check if caller wants to skip block creation (for system cleanup operations)
+    // Een manuele verwijdering is een bewuste keuze om die cel leeg te laten.
+    // We leggen dat vast als shift_block zodat het concept de dag bij een
+    // volgende toepassing NIET opnieuw vult (#146, lek 2 — de stille killer).
+    // Systeemopkuis (bv. auto-shifts wissen vóór her-toepassen) geeft
+    // skipBlock=true mee en slaat dit over.
     const skipBlock = req.query.skipBlock === 'true';
-
-    // shift_blocks niet meer nodig — geen achtergrondregeneratie meer
-    // Shift verwijdering is definitief tenzij concept opnieuw wordt toegepast
+    if (!skipBlock) {
+      await client.query(
+        `INSERT INTO shift_blocks (user_id, date, created_by, reason)
+         VALUES ($1, $2::date, $3, 'manual_delete')
+         ON CONFLICT (user_id, date) DO NOTHING`,
+        [shift.user_id, shift.date, userId]
+      );
+    }
 
     await client.query('COMMIT');
     res.json({ ok: true });
@@ -3696,11 +3704,28 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
         }
         const bulkDeleteResult = await client.query(bulkDeleteQuery, bulkDeleteParams);
         totalDeleted += bulkDeleteResult.rowCount;
+
+        // Bij een expliciete "overschrijf alles" (incl. vakantie) wist de
+        // gebruiker bewust het hele venster terug naar het concept — dan
+        // vervallen ook de manuele leegmakingen (#146). In de veilige
+        // standaardmodus blijven blocks staan zodat manuele intentie wint.
+        if (effectiveConfirmOverwrite === true) {
+          let blockDelQuery = `DELETE FROM shift_blocks WHERE user_id = ANY($1::int[]) AND date >= $2::date AND date <= $3::date`;
+          const blockDelParams = [empIds, startStr, endStr];
+          if (vakantieSkipRanges.length > 0) {
+            vakantieSkipRanges.forEach((r) => {
+              blockDelQuery += ` AND NOT (date >= $${blockDelParams.length + 1}::date AND date <= $${blockDelParams.length + 2}::date)`;
+              blockDelParams.push(r.start, r.end);
+            });
+          }
+          await client.query(blockDelQuery, blockDelParams);
+        }
       }
 
-      // ===== BULK SELECT: occupied dates and absences for employees IN draft =====
+      // ===== BULK SELECT: occupied dates, absences and blocks for employees IN draft =====
       const occupiedByEmp = {};
       const absencesByEmp = {};
+      const blockedByEmp = {};
       if (empsInDraft.length > 0) {
         const empIds = empsInDraft.map(e => e.id);
         const occupiedResult = await client.query(
@@ -3719,6 +3744,16 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           if (!absencesByEmp[row.user_id]) absencesByEmp[row.user_id] = new Set();
           absencesByEmp[row.user_id].add(row.date);
         }
+        // Manueel leeggemaakte cellen (#146): een block betekent "mens koos
+        // bewust om deze dag leeg te laten" → concept vult hem niet opnieuw.
+        const blocksResult = await client.query(
+          `SELECT user_id, date::text as date FROM shift_blocks WHERE user_id = ANY($1::int[]) AND date >= $2::date AND date <= $3::date`,
+          [empIds, startStr, endStr]
+        );
+        for (const row of blocksResult.rows) {
+          if (!blockedByEmp[row.user_id]) blockedByEmp[row.user_id] = new Set();
+          blockedByEmp[row.user_id].add(row.date);
+        }
       }
 
       // ===== COMPUTE SHIFTS TO INSERT (pure JS, no DB calls) =====
@@ -3726,6 +3761,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       for (const emp of empsInDraft) {
         const occupiedDates = occupiedByEmp[emp.id] || new Set();
         const absenceDates = absencesByEmp[emp.id] || new Set();
+        const blockedDates = blockedByEmp[emp.id] || new Set();
         let createdCount = 0;
 
         for (let d = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
@@ -3735,6 +3771,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
           if (occupiedDates.has(dateStr)) continue;
           if (absenceDates.has(dateStr)) continue;
+          if (blockedDates.has(dateStr)) continue;
           if (closedDatesSet.has(dateStr)) continue;
           if (vakantieSkipRanges.some(r => dateStr >= r.start && dateStr <= r.end)) continue;
 
