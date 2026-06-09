@@ -1,12 +1,5 @@
 // HET VLOT ROOSTERPLANNING - PLANNING RENDERING
 
-// Inline status-iconen voor shift-blokken (geen afhankelijkheid van lucide-conversie,
-// zodat ze ook tonen na dynamische re-renders / drag-handler manipulatie)
-const SHIFT_STATUS_ICON_SVG = {
-    triangle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
-    circleX: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>'
-};
-
 function renderPlanning() {
     // Save scroll position before re-rendering (shell scrolt via .app-views)
     const scrollEl = document.querySelector('.app-views');
@@ -845,16 +838,6 @@ function renderTimelineView() {
                             if (durationH < 1)   blockClass += ' timeline-block--xs';
                             else if (durationH < 2) blockClass += ' timeline-block--sm';
 
-                            // Status (conflict/fout/waarschuwing) als icoon ipv rand
-                            let statusIcon = '';
-                            if (isAbsent) {
-                                statusIcon = `<span class="shift-status-icon shift-status-icon--error">${SHIFT_STATUS_ICON_SVG.triangle}</span>`;
-                            } else if (!validation.isValid) {
-                                statusIcon = `<span class="shift-status-icon shift-status-icon--error">${SHIFT_STATUS_ICON_SVG.circleX}</span>`;
-                            } else if (validation.hasWarnings) {
-                                statusIcon = `<span class="shift-status-icon shift-status-icon--warn">${SHIFT_STATUS_ICON_SVG.triangle}</span>`;
-                            }
-
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
                             let actChips = '';
@@ -877,7 +860,6 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                ${statusIcon}
                                 <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
@@ -1048,16 +1030,6 @@ function renderTimelineView() {
                             if (durationH < 1)   blockClass += ' timeline-block--xs';
                             else if (durationH < 2) blockClass += ' timeline-block--sm';
 
-                            // Status (conflict/fout/waarschuwing) als icoon ipv rand
-                            let statusIcon = '';
-                            if (isAbsent) {
-                                statusIcon = `<span class="shift-status-icon shift-status-icon--error">${SHIFT_STATUS_ICON_SVG.triangle}</span>`;
-                            } else if (!validation.isValid) {
-                                statusIcon = `<span class="shift-status-icon shift-status-icon--error">${SHIFT_STATUS_ICON_SVG.circleX}</span>`;
-                            } else if (validation.hasWarnings) {
-                                statusIcon = `<span class="shift-status-icon shift-status-icon--warn">${SHIFT_STATUS_ICON_SVG.triangle}</span>`;
-                            }
-
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
                             let actChips = '';
@@ -1080,7 +1052,6 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                ${statusIcon}
                                 <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}

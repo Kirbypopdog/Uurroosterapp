@@ -4027,41 +4027,23 @@ body[data-view-mode="day"] .timeline-day-cell {
     border-radius: 4px; /* Normale afronding aan beide kanten */
 }
 
-/* Status (fout/waarschuwing/conflict) tonen we nu via een icoon, niet via een rand */
-.shift-status-icon {
-    position: absolute;
-    top: 3px;
-    right: 3px;
-    display: grid;
-    place-items: center;
-    width: 15px;
-    height: 15px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.95);
-    box-shadow: 0 1px 2px rgba(43, 42, 38, 0.3);
-    z-index: 4;
-    pointer-events: none;
+/* Status (fout/waarschuwing/conflict): zachte gekleurde gloed ipv rand of icoon */
+.timeline-block.warning {
+    box-shadow:
+        0 0 0 1.5px color-mix(in srgb, #e0a23a 55%, transparent),
+        0 0 9px 1px color-mix(in srgb, #e0a23a 50%, transparent);
 }
-.shift-status-icon svg {
-    width: 11px;
-    height: 11px;
-    stroke-width: 2.6;
+.timeline-block.error,
+.timeline-block.absent-conflict {
+    box-shadow:
+        0 0 0 1.5px color-mix(in srgb, var(--color-danger, #dc2626) 60%, transparent),
+        0 0 10px 1px color-mix(in srgb, var(--color-danger, #dc2626) 55%, transparent);
 }
-.shift-status-icon--error { color: var(--color-danger, #dc2626); }
-.shift-status-icon--warn { color: #d98a1f; }
-
-/* Korte blokken: status-icoon iets kleiner zodat het past */
-.timeline-block--xs .shift-status-icon,
-.timeline-block--sm .shift-status-icon {
-    width: 13px;
-    height: 13px;
-    top: 2px;
-    right: 2px;
-}
-.timeline-block--xs .shift-status-icon svg,
-.timeline-block--sm .shift-status-icon svg {
-    width: 9px;
-    height: 9px;
+/* Conflict net iets nadrukkelijker zodat het opvalt tussen de andere */
+.timeline-block.absent-conflict {
+    box-shadow:
+        0 0 0 2px color-mix(in srgb, var(--color-danger, #dc2626) 70%, transparent),
+        0 0 12px 2px color-mix(in srgb, var(--color-danger, #dc2626) 55%, transparent);
 }
 
 .timeline-block.absent-conflict .absent-badge {
