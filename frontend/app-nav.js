@@ -114,7 +114,6 @@ function renderHome() {
 
     let html = '';
     html += renderHomeWelcome(user, role);
-    html += renderHomeStats(user, role);
     if (role === 'admin') html += renderHomeOnboarding();
     html += alertsHtml;
     html += '<div class="home-grid">';
