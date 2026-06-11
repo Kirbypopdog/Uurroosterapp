@@ -1497,6 +1497,58 @@ textarea:focus-visible {
     color: var(--text-secondary);
 }
 
+/* Nu aan het werk */
+.on-duty-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 16px 20px;
+}
+
+.on-duty-chip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px 8px 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+}
+
+.on-duty-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+    letter-spacing: 0.3px;
+}
+
+.on-duty-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.on-duty-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    white-space: nowrap;
+}
+
+.on-duty-time {
+    font-size: 11px;
+    color: var(--ink-3);
+    white-space: nowrap;
+}
+
 /* Shifts list */
 .home-shift-item {
     display: flex;

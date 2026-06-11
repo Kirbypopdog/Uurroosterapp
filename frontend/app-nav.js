@@ -121,6 +121,7 @@ function renderHome() {
     html += renderHomeWeekendInfo();
     html += renderHomeRequests(user, role);
     html += '</div>';
+    html += renderHomeNuAanHetWerk();
 
     container.innerHTML = html;
     IconHelper.init(container);
@@ -875,6 +876,65 @@ function renderHomeWeekendInfo() {
                 ${isHoliday ? '<span class="shift-badge-upcoming">Vakantie</span>' : ''}
             </div>
             ${bodyHtml}
+        </div>
+    `;
+}
+
+function renderHomeNuAanHetWerk() {
+    const now = new Date();
+    const todayStr = formatDateYYYYMMDD(now);
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const activeShifts = (DataStore.shifts || []).filter(s => {
+        const date = (s.date || '').split('T')[0];
+        if (date !== todayStr) return false;
+        const start = (s.startTime || s.start_time || '').substring(0, 5);
+        const end = (s.endTime || s.end_time || '').substring(0, 5);
+        return start && end && currentTime >= start && currentTime < end;
+    });
+
+    if (activeShifts.length === 0) {
+        return `
+            <div class="home-card home-card-on-duty mt-lg">
+                <div class="home-card-header">Nu aan het werk</div>
+                <div class="home-card-empty">
+                    <i data-lucide="moon" class="empty-state-icon"></i>
+                    Niemand is op dit moment aan het werk
+                </div>
+            </div>
+        `;
+    }
+
+    const chips = activeShifts.map(shift => {
+        const userId = shift.userId || shift.employeeId || shift.user_id;
+        const emp = (DataStore.users || []).find(u => String(u.id) === String(userId));
+        const name = emp?.name || shift.employeeName || 'Onbekend';
+        const teamId = shift.team;
+        const teamColor = DataStore.settings?.teams?.[teamId]?.color || '#64748b';
+        const initials = getInitials(name);
+        const startTime = (shift.startTime || shift.start_time || '').substring(0, 5);
+        const endTime = (shift.endTime || shift.end_time || '').substring(0, 5);
+
+        return `
+            <div class="on-duty-chip">
+                <div class="on-duty-avatar" style="background:${escapeHtml(teamColor)}">${escapeHtml(initials)}</div>
+                <div class="on-duty-info">
+                    <span class="on-duty-name">${escapeHtml(name)}</span>
+                    <span class="on-duty-time">${escapeHtml(startTime)} – ${escapeHtml(endTime)}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="home-card home-card-on-duty mt-lg">
+            <div class="home-card-header">
+                Nu aan het werk
+                <span class="card-count">${activeShifts.length}</span>
+            </div>
+            <div class="on-duty-list">
+                ${chips}
+            </div>
         </div>
     `;
 }
