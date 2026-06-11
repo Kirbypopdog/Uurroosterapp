@@ -109,6 +109,10 @@ function renderProfile() {
     const user = AppState.currentUser;
     if (!user) return;
 
+    // Update eyebrow h2 with user name
+    const profileTitle = document.getElementById('profile-view-title');
+    if (profileTitle) profileTitle.textContent = user.name || 'Mijn profiel';
+
     const roleLabels = {
         admin: 'Admin',
         roosterverantwoordelijke: 'Roosterverantwoordelijke',
