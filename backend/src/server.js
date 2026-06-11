@@ -43,9 +43,11 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // Global rate limiter (disabled in test environment to avoid interference with the test suite)
+// Eén page-load doet ~10 API-calls; 600/min/IP geeft ruimte voor normaal gebruik
+// (navigatie, drag-drop, herladen) terwijl runaway loops/misbruik nog steeds geblokkeerd worden.
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: 600,
   skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
