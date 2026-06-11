@@ -22,6 +22,11 @@ function renderSettings() {
         tab.onclick = () => switchSettingsTab(tab.dataset.settingsTab);
     });
 
+    // Update view title
+    const activeTabConfig = allowedTabs.find(t => t.id === AppState.activeSettingsTab);
+    const titleEl = document.getElementById('settings-view-title');
+    if (titleEl && activeTabConfig) titleEl.textContent = activeTabConfig.label;
+
     // Scroll active tab into view
     const activeTab = document.querySelector('.settings-tab.active');
     if (activeTab) {
@@ -59,11 +64,16 @@ async function switchSettingsTab(tabName) {
     document.querySelectorAll('.settings-tab').forEach(tab => {
         const isActive = tab.dataset.settingsTab === tabName;
         tab.classList.toggle('active', isActive);
-        // Scroll active tab into view on mobile
         if (isActive) {
             tab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
         }
     });
+
+    // Update view title
+    const activeTabConfig = SETTINGS_TAB_CONFIG.find(t => t.id === tabName);
+    const titleEl = document.getElementById('settings-view-title');
+    if (titleEl && activeTabConfig) titleEl.textContent = activeTabConfig.label;
+
     renderSettingsTabContent(tabName);
 }
 
