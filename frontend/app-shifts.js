@@ -507,7 +507,7 @@ function runSwapValidation() {
                 <strong>${IconHelper.html(ICONS.warning, 'sm')} Waarschuwingen:</strong>
                 <ul>${validation.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
             </div>
-            <p class="validation-hint text-warning">Je kunt dit verzoek indienen, maar een verantwoordelijke moet het goedkeuren.</p>
+            <p class="validation-hint text-warning">Je kunt dit verzoek indienen. Je collega moet het nog accepteren.</p>
         `;
     } else {
         validationDisplay.classList.add('is-valid');
