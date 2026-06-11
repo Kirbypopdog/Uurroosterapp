@@ -138,6 +138,47 @@ function setupEventListeners() {
         sidebarScrim.addEventListener('click', closeSidebar);
     }
 
+    // Desktop sidebar collapse
+    const collapseBtn = document.getElementById('sidebar-collapse-btn');
+    if (collapseBtn) {
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            document.body.classList.add('nav-collapsed');
+        }
+        collapseBtn.addEventListener('click', () => {
+            const collapsed = document.body.classList.toggle('nav-collapsed');
+            localStorage.setItem('sidebarCollapsed', collapsed);
+            const icon = collapseBtn.querySelector('[data-lucide]');
+            if (icon) {
+                icon.setAttribute('data-lucide', collapsed ? 'panel-left-open' : 'panel-left-close');
+                IconHelper.init(collapseBtn);
+            }
+        });
+        // Sync icon on load if already collapsed
+        if (document.body.classList.contains('nav-collapsed')) {
+            const icon = collapseBtn.querySelector('[data-lucide]');
+            if (icon) icon.setAttribute('data-lucide', 'panel-left-open');
+        }
+    }
+
+    // Dark mode toggle
+    const darkBtn = document.getElementById('dark-mode-btn');
+    if (darkBtn) {
+        if (localStorage.getItem('darkMode') === 'true') {
+            document.body.classList.add('dark-mode');
+            const icon = darkBtn.querySelector('[data-lucide]');
+            if (icon) icon.setAttribute('data-lucide', 'sun');
+        }
+        darkBtn.addEventListener('click', () => {
+            const isDark = document.body.classList.toggle('dark-mode');
+            localStorage.setItem('darkMode', isDark);
+            const icon = darkBtn.querySelector('[data-lucide]');
+            if (icon) {
+                icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+                IconHelper.init(darkBtn);
+            }
+        });
+    }
+
     // Avatar trigger → navigeer direct naar profiel
     const userMenuTrigger = document.getElementById('user-menu-trigger');
     if (userMenuTrigger) {

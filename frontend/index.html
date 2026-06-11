@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="vlot.css?v=20260611a">
-    <link rel="stylesheet" href="styles.css?v=20260611b">
+    <link rel="stylesheet" href="styles.css?v=20260611c">
     <script src="https://unpkg.com/lucide@0.577.0" onerror="
         var s=document.createElement('script');
         s.src='https://cdn.jsdelivr.net/npm/lucide@0.577.0';
@@ -66,14 +66,14 @@
                 </div>
             </div>
             <nav class="sidebar-nav">
-                <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i> Home</button>
-                <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i> Planning</button>
-                <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i> Afwezigheid</button>
-                <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i> Ruilen</button>
+                <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i><span class="nav-label"> Home</span></button>
+                <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i><span class="nav-label"> Planning</span></button>
+                <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i><span class="nav-label"> Afwezigheid</span></button>
+                <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i><span class="nav-label"> Ruilen</span></button>
                 <div class="sidebar-nav-label nav-group-admin">Beheer</div>
-                <button class="nav-btn nav-group-admin" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
-                <button class="nav-btn nav-group-admin" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster bouwen</button>
-                <button class="nav-btn nav-group-admin" data-view="settings"><i data-lucide="settings" class="nav-icon"></i> Instellingen</button>
+                <button class="nav-btn nav-group-admin" data-view="employees"><i data-lucide="users" class="nav-icon"></i><span class="nav-label"> Medewerkers</span></button>
+                <button class="nav-btn nav-group-admin" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i><span class="nav-label"> Rooster bouwen</span></button>
+                <button class="nav-btn nav-group-admin" data-view="settings"><i data-lucide="settings" class="nav-icon"></i><span class="nav-label"> Instellingen</span></button>
             </nav>
             <div class="sidebar-foot">
                 <div id="role-switcher" class="role-switcher hidden">
@@ -91,6 +91,14 @@
                     </button>
                     <button class="nav-logout-btn" id="logout-btn" aria-label="Uitloggen" title="Uitloggen">
                         <i data-lucide="log-out" class="lucide-sm"></i>
+                    </button>
+                </div>
+                <div class="sidebar-foot-actions">
+                    <button class="sidebar-icon-btn" id="dark-mode-btn" aria-label="Donker thema" title="Donker/licht thema">
+                        <i data-lucide="moon" class="lucide-sm"></i>
+                    </button>
+                    <button class="sidebar-icon-btn" id="sidebar-collapse-btn" aria-label="Zijbalk inklappen" title="Inklappen">
+                        <i data-lucide="panel-left-close" class="lucide-sm"></i>
                     </button>
                 </div>
             </div>
@@ -805,7 +813,7 @@
     <script src="app-builder-drafts.js?v=20260611a"></script>
     <script src="app-settings.js?v=20260611a"></script>
     <script src="app-admin.js?v=20260611a"></script>
-    <script src="app-init.js?v=20260611a"></script>
+    <script src="app-init.js?v=20260611c"></script>
     <script>
         if (typeof lucide !== 'undefined') {
             lucide.createIcons();
