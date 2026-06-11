@@ -275,27 +275,39 @@ function renderSwapRequestCard(swapRequest, mode) {
         `;
     }
 
+    const _teams = DataStore.settings.teams || {};
+    const reqColor = _teams[swapRequest.requester_shift_team]?.color || '#8d897c';
+    const tgtColor = _teams[swapRequest.target_shift_team]?.color || '#8d897c';
+    const reqInitials = escapeHtml(getInitials(swapRequest.requester_name || ''));
+    const tgtInitials = escapeHtml(getInitials(swapRequest.target_name || ''));
+    const reqTeamName = escapeHtml(_teams[swapRequest.requester_shift_team]?.name || swapRequest.requester_shift_team || '');
+    const tgtTeamName = escapeHtml(_teams[swapRequest.target_shift_team]?.name || swapRequest.target_shift_team || '');
+
     return `
         <div class="swap-request-card">
             <div class="swap-request-header">
-                <h4>${escapeHtml(swapRequest.requester_name)} ${IconHelper.html(ICONS.swap, 'sm')} ${escapeHtml(swapRequest.target_name)}</h4>
+                <div class="swap-people">
+                    <span class="swap-person"><span class="emp-avatar" style="background:${reqColor}">${reqInitials}</span>${escapeHtml(swapRequest.requester_name)}</span>
+                    <span class="swap-people-arrow">${IconHelper.html(ICONS.swap, 'xs')}</span>
+                    <span class="swap-person"><span class="emp-avatar" style="background:${tgtColor}">${tgtInitials}</span>${escapeHtml(swapRequest.target_name)}</span>
+                </div>
                 <span class="swap-status-badge status-${swapRequest.status}">
                     ${statusLabels[swapRequest.status] || swapRequest.status}
                 </span>
             </div>
             <div class="swap-request-body">
-                <div class="swap-request-shift">
+                <div class="swap-request-shift" style="border-left:3px solid ${reqColor}">
                     <strong>${escapeHtml(swapRequest.requester_name)}</strong>
                     ${formatDate(swapRequest.requester_shift_date)} |
                     ${swapRequest.requester_shift_start} - ${swapRequest.requester_shift_end} |
-                    ${escapeHtml(swapRequest.requester_shift_team || '')}
+                    ${reqTeamName}
                 </div>
                 <div class="swap-request-arrow">${IconHelper.html(ICONS.swap, 'sm')}</div>
-                <div class="swap-request-shift">
+                <div class="swap-request-shift" style="border-left:3px solid ${tgtColor}">
                     <strong>${escapeHtml(swapRequest.target_name)}</strong>
                     ${formatDate(swapRequest.target_shift_date)} |
                     ${swapRequest.target_shift_start} - ${swapRequest.target_shift_end} |
-                    ${escapeHtml(swapRequest.target_shift_team || '')}
+                    ${tgtTeamName}
                 </div>
             </div>
             ${messageHtml}
@@ -383,19 +395,23 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
     const statusClass = takeoverRequest.status === 'pending' ? 'status-available' : `status-${takeoverRequest.status}`;
     const statusLabel = statusLabels[takeoverRequest.status] || takeoverRequest.status;
 
+    // Team color voor avatar + accent
+    const takeoverColor = (shift.team && DataStore.settings.teams?.[shift.team]?.color) || '#8d897c';
+    const reqInitials = escapeHtml(getInitials(takeoverRequest.requester_name || ''));
+
     // Title based on mode
-    const title = mode === 'view'
-        ? 'Je zoekt iemand voor deze shift'
-        : `${escapeHtml(takeoverRequest.requester_name)} zoekt iemand`;
+    const titleHtml = mode === 'view'
+        ? '<span class="swap-person-name">Je zoekt iemand voor deze shift</span>'
+        : `<span class="swap-person"><span class="emp-avatar" style="background:${takeoverColor}">${reqInitials}</span>${escapeHtml(takeoverRequest.requester_name)} zoekt iemand</span>`;
 
     return `
         <div class="swap-request-card takeover-card">
             <div class="swap-request-header">
-                <h4>${title}</h4>
+                <div class="swap-people">${titleHtml}</div>
                 <span class="swap-status-badge ${statusClass}">${statusLabel}</span>
             </div>
             <div class="swap-request-body">
-                <div class="takeover-shift-info">
+                <div class="takeover-shift-info" style="border-left:3px solid ${takeoverColor}">
                     <strong>Shift:</strong>
                     ${formatDate(shift.date)} |
                     ${shift.startTime} - ${shift.endTime} |

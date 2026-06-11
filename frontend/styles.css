@@ -9015,15 +9015,15 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .swap-request-card:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    transform: translateY(-2px);
-    border-color: rgba(var(--primary-rgb), 0.25);
+    box-shadow: var(--shadow-md);
+    border-color: var(--line-strong);
 }
 
 .swap-request-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 10px;
     margin-bottom: 0.75rem;
 }
 
@@ -9031,6 +9031,40 @@ body[data-view-mode="day"] .timeline-day-cell {
     margin: 0;
     font-size: 1rem;
     color: #2b2a26;
+}
+
+/* Mensen-regel met initialen-avatars (consistent met de rest) */
+.swap-people {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--text-primary);
+    min-width: 0;
+}
+.swap-person {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+.swap-people .emp-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    flex: none;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18);
+}
+.swap-people-arrow {
+    display: inline-flex;
+    color: var(--ink-3);
 }
 
 .swap-status-badge {
@@ -9075,10 +9109,10 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .swap-request-shift {
     flex: 1;
-    padding: 0.5rem;
-    background: #f6f4ef;
-    border: 1px solid #e6e2d8;
-    border-radius: 4px;
+    padding: 0.55rem 0.65rem;
+    background: var(--raise);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
     font-size: 0.85rem;
 }
 
@@ -9135,6 +9169,26 @@ body[data-view-mode="day"] .timeline-day-cell {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-sm);
+}
+
+/* Rustige filter-chips (dunnere rand, kalmer dan de standaard team-toggle) */
+.swaps-team-filter .team-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.swaps-team-filter .team-toggle {
+    padding: 5px 12px;
+    border: 1px solid var(--border-color);
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 999px;
+}
+.swaps-team-filter .team-toggle:hover {
+    border-color: var(--line-strong);
+    color: var(--ink);
 }
 
 /* Swap groups (collapsible type sections) */
@@ -9263,10 +9317,10 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .takeover-shift-info {
-    padding: 0.75rem;
-    background: #f0fdf4;
-    border: 1px solid var(--color-success-bg);
-    border-radius: 4px;
+    padding: 0.6rem 0.75rem;
+    background: var(--raise);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
     font-size: 0.9rem;
     margin-bottom: 0.75rem;
 }
