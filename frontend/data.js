@@ -174,6 +174,13 @@ async function dataApiFetch(path, options = {}) {
     });
 
     if (!response.ok) {
+        if (response.status === 401) {
+            // Token ontbreekt of verlopen — sessie opruimen en terug naar login
+            sessionStorage.removeItem('hetvlot_token');
+            sessionStorage.removeItem('hetvlot_user');
+            if (typeof handleLogout === 'function') handleLogout();
+            throw new Error('Sessie verlopen. Log opnieuw in.');
+        }
         const data = await response.json().catch(() => ({}));
         const msg = data.error || `HTTP ${response.status}`;
         const detail = data.detail ? ` (${data.detail})` : '';
