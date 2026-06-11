@@ -6935,8 +6935,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .legend-chip.has-shift {
-    background: #dbeafe;
-    color: #3d6a5e;
+    background: color-mix(in srgb, var(--team-cargo) 18%, white);
+    color: var(--team-cargo-darker);
 }
 
 .availability-container {
@@ -6954,31 +6954,37 @@ body[data-view-mode="day"] .timeline-day-cell {
 .availability-header-row {
     display: grid;
     grid-template-columns: 180px repeat(7, 1fr);
-    background: linear-gradient(135deg, #2b2a26 0%, #5e5b52 100%);
-    color: white;
+    background: var(--bg-color);
+    color: var(--text-primary);
     font-weight: 600;
+    padding-bottom: 6px;
     position: sticky;
     top: 0;
     z-index: 10;
 }
 
 .availability-employee-col {
-    padding: 14px 16px;
+    padding: 12px 16px;
     display: flex;
     align-items: center;
-    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    gap: 9px;
+    border-right: 1px solid var(--border-color);
 }
 
 .availability-header-row .availability-employee-col {
-    font-size: 13px;
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.4px;
+    color: var(--ink-3);
+    font-weight: 700;
+    align-items: flex-end;
+    border-right: none;
 }
 
 .availability-day-col {
     padding: 12px 8px;
     text-align: center;
-    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -6990,68 +6996,80 @@ body[data-view-mode="day"] .timeline-day-cell {
     border-right: none;
 }
 
+/* Dag-kop als losse afgeronde vakjes (redesign, consistent met planning) */
+.availability-header-row .availability-day-col {
+    margin: 0 3px;
+    padding: 8px 4px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+    border-radius: 11px;
+    box-shadow: var(--shadow-sm);
+}
+
 .availability-header-row .availability-day-col .day-name {
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--ink-3);
 }
 
 .availability-header-row .availability-day-col .day-date {
-    font-size: 11px;
-    opacity: 0.8;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--text-primary);
 }
 
 .availability-header-row .availability-day-col.weekend {
-    background: rgba(0, 0, 0, 0.15);
+    background: var(--surface-2);
 }
 
 .availability-header-row .availability-day-col.closed {
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--surface-2);
+    opacity: 0.75;
 }
 
-/* Team headers */
+.availability-header-row .availability-day-col.today {
+    background: #2b2a26;
+    border-color: #2b2a26;
+    opacity: 1;
+}
+.availability-header-row .availability-day-col.today .day-name,
+.availability-header-row .availability-day-col.today .day-date {
+    color: var(--surface-color);
+}
+
+/* Team headers — rustige stijl met team-kleur-dot (consistent met planning/medewerkers) */
 .availability-team-header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
+    gap: 9px;
+    padding: 11px 16px;
+    background: var(--surface-color);
+    color: var(--text-primary);
     font-weight: 600;
     font-size: 13px;
     border-bottom: 1px solid var(--border-color);
 }
 
-.availability-team-header.vlot1 {
-    background: linear-gradient(90deg, #dbeafe 0%, #eff6ff 100%);
-    color: var(--accent-blue);
-}
-
-.availability-team-header.vlot2 {
-    background: linear-gradient(90deg, #ede9fe 0%, #f5f3ff 100%);
-    color: #6b21a8;
-}
-
-.availability-team-header.cargo {
-    background: linear-gradient(90deg, #d1fae5 0%, #ecfdf5 100%);
-    color: #065f46;
-}
-
-.availability-team-header.overkoepelend {
-    background: linear-gradient(90deg, #fef3c7 0%, #fffbeb 100%);
-    color: #92400e;
-}
-
-.availability-team-header.jobstudent {
-    background: linear-gradient(90deg, #fce7f3 0%, #fdf2f8 100%);
-    color: #9f1239;
+.availability-team-header .team-header-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    flex: none;
 }
 
 .availability-team-header .team-name {
-    font-weight: 700;
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: -.01em;
 }
 
 .availability-team-header .team-count {
-    font-weight: 400;
-    opacity: 0.7;
+    font-weight: 600;
+    color: var(--ink-3);
     font-size: 12px;
+    margin-left: auto;
 }
 
 /* Employee rows */
@@ -7071,23 +7089,40 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .availability-employee-row.current-user {
-    background: rgba(37, 99, 235, 0.05);
-    border-left: 3px solid var(--primary-color);
+    background: color-mix(in srgb, var(--sage) 7%, transparent);
+    border-left: 3px solid var(--sage);
 }
 
 .availability-employee-row.current-user .emp-name {
-    font-weight: 600;
+    font-weight: 700;
 }
 
 .availability-employee-row .availability-employee-col {
-    background: #fafbfc;
+    background: var(--raise);
     border-right: 1px solid var(--border-color);
 }
 
+/* Initialen-avatar in teamkleur (consistent met planning/medewerkers) */
+.availability-employee-col .emp-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    flex: none;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18);
+}
+
 .availability-employee-row .emp-name {
-    font-weight: 500;
-    font-size: 14px;
+    font-weight: 600;
+    font-size: 13.5px;
     color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Day cells in rows */
@@ -7142,12 +7177,12 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .availability-cell-content.has-shift {
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
+    background: color-mix(in srgb, var(--team-cargo) 14%, white);
+    border: 1px solid color-mix(in srgb, var(--team-cargo) 32%, white);
 }
 
 .availability-cell-content.has-shift:hover {
-    background: #dbeafe;
+    background: color-mix(in srgb, var(--team-cargo) 22%, white);
 }
 
 /* Niet ingepland volgens weekrooster - vrije dag */
@@ -7189,7 +7224,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .availability-cell-content.has-shift .status-label {
-    color: #3d6a5e;
+    color: var(--team-cargo-darker);
 }
 
 .availability-cell-content .status-check {
