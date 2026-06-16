@@ -230,10 +230,13 @@ body.dark-mode .employee-grid-row:hover,
 body.dark-mode .team-schedule-row:hover,
 body.dark-mode .team-schedule-row.alt:hover,
 body.dark-mode .month-row:hover,
-body.dark-mode .month-row.alt:hover      { background: var(--raise); }
+body.dark-mode .month-row.alt:hover,
+body.dark-mode .timeline-row:hover,
+body.dark-mode .timeline-row.alt:hover   { background: var(--raise); }
 body.dark-mode .employee-name-cell       { background: var(--raise); }
 body.dark-mode .team-schedule-row.alt    { background: var(--surface-2); }
 body.dark-mode .month-row.alt            { background: var(--surface-2); }
+body.dark-mode .timeline-row.alt         { background: var(--surface-2); }
 
 /* --- Vandaag kolom-header (donkerbruin #2b2a26 onzichtbaar op donkere bg) --- */
 body.dark-mode .timeline-day-header.today,
