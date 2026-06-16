@@ -220,6 +220,24 @@ describe('POST /auth/login', () => {
     expect(res.body.error).toBe('Invalid credentials');
   });
 
+  test('returns 403 when account is deactivated despite correct password', async () => {
+    const hash = await bcrypt.hash('correct-password', 12);
+    pool.query.mockResolvedValueOnce({
+      rows: [{
+        id: 1, name: 'Jan', email: 'jan@example.com',
+        password_hash: hash, role: 'medewerker', team_id: 'team1',
+        active: false
+      }]
+    });
+
+    const res = await request(app)
+      .post('/auth/login')
+      .send({ email: 'jan@example.com', password: 'correct-password' });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Account is gedeactiveerd');
+    expect(res.body.token).toBeUndefined();
+  });
+
   test('returns 200 with token and user on valid credentials', async () => {
     const hash = await bcrypt.hash('correct-password', 12);
     pool.query.mockResolvedValueOnce({

@@ -826,6 +826,11 @@ v1.post('/auth/login', loginLimiter, async (req, res) => {
     if (!ok) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+    // Gedeactiveerde accounts: juist wachtwoord maar geen toegang. Aparte 403
+    // zodat de frontend de gebruiker niet ten onrechte "fout wachtwoord" toont.
+    if (user.active === false) {
+      return res.status(403).json({ error: 'Account is gedeactiveerd' });
+    }
     const token = signToken(user);
     delete user.password_hash;
     res.json({ token, user });

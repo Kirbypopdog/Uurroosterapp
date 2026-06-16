@@ -45,7 +45,13 @@ async function handleLogin(e) {
         showApp();
     } catch (error) {
         console.error('Login error:', error);
-        showToast('Ongeldige gebruikersnaam of wachtwoord', 'error');
+        const isDeactivated = error.message && error.message.includes('gedeactiveerd');
+        showToast(
+            isDeactivated
+                ? 'Je account is gedeactiveerd. Neem contact op met een beheerder.'
+                : 'Ongeldige gebruikersnaam of wachtwoord',
+            'error'
+        );
 
         // Clear any existing session to prevent staying logged in with old credentials
         AppState.currentUser = null;
