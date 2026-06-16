@@ -33,9 +33,14 @@ app.use(helmet());
 app.set('trust proxy', 1);
 
 // CORS: restrict to frontend origin(s) in production, open in development
+const defaultOrigins = [
+  'https://uurrooster-frontend.onrender.com',
+  'https://vlot-dashboard.site',
+  'https://www.vlot-dashboard.site',
+];
 const allowedOrigins = process.env.FRONTEND_URL
-  ? process.env.FRONTEND_URL.split(',').map(o => o.trim())
-  : ['https://uurrooster-frontend.onrender.com', 'https://vlot-dashboard.site'];
+  ? [...new Set([...process.env.FRONTEND_URL.split(',').map(o => o.trim()), ...defaultOrigins])]
+  : defaultOrigins;
 const corsOptions = process.env.NODE_ENV === 'production'
   ? { origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)), credentials: true }
   : {};
