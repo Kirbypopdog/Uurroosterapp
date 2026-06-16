@@ -164,6 +164,33 @@ body.dark-mode {
 
 /* ===== DARK MODE OVERRIDES (hardcoded-color fixes) ===== */
 
+/* --- Input velden (geen expliciete color → browser-standaard donker op donker bg) --- */
+body.dark-mode .form-group input[type="text"],
+body.dark-mode .form-group input[type="email"],
+body.dark-mode .form-group input[type="password"],
+body.dark-mode .form-group input[type="date"],
+body.dark-mode .form-group input[type="time"],
+body.dark-mode .form-group input[type="number"],
+body.dark-mode .form-group select,
+body.dark-mode .form-group textarea,
+body.dark-mode .select-input,
+body.dark-mode .form-input {
+    background: var(--surface-2);
+    color: var(--ink);
+    border-color: var(--line);
+}
+body.dark-mode .form-group input::placeholder,
+body.dark-mode .form-input::placeholder { color: var(--ink-3); }
+
+/* Browser autofill: overschrijf blauwe/gele bg via box-shadow truc */
+body.dark-mode input:-webkit-autofill,
+body.dark-mode input:-webkit-autofill:hover,
+body.dark-mode input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--ink);
+    -webkit-box-shadow: 0 0 0 1000px #252119 inset;
+    caret-color: var(--ink);
+}
+
 /* --- Knoppen (btn-secondary heeft geen dark fallback) --- */
 body.dark-mode .btn-secondary {
     background: var(--surface-2);
