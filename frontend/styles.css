@@ -174,9 +174,11 @@ body.dark-mode .profile-meta-value.role-medewerker   { background: #0d2018; colo
 /* Validation bar chip count (rgba(0,0,0,0.1) is onzichtbaar in dark) */
 body.dark-mode .validation-chip-count { background: rgba(255,255,255,.12); }
 
-/* Home melding-bar header (--bg-secondary heeft geen dark fallback) */
-body.dark-mode .home-alerts-header       { background: var(--surface-2); }
-body.dark-mode .home-alerts-header:hover { background: var(--raise); }
+/* Home melding-bar header + categorie-headers (--bg-secondary heeft geen dark fallback) */
+body.dark-mode .home-alerts-header,
+body.dark-mode .alert-group-header       { background: var(--surface-2); }
+body.dark-mode .home-alerts-header:hover,
+body.dark-mode .alert-group-header:hover { background: var(--raise); }
 body.dark-mode .alert-item-detail        { background: rgba(255,255,255,.04); }
 body.dark-mode .alert-action-goto        { background: rgba(255,255,255,.10); }
 body.dark-mode .alert-action-goto:hover  { background: rgba(255,255,255,.18); }
