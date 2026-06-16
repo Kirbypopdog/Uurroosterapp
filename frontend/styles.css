@@ -162,14 +162,147 @@ body.dark-mode {
     --color-warning-light:  #2a1a08;
 }
 
-/* Hardcoded white overrides in dark mode */
-body.dark-mode .home-card-header {
-    background: var(--surface-2);
-}
-body.dark-mode .modal-overlay { background: rgba(0,0,0,.65); }
+/* ===== DARK MODE OVERRIDES (hardcoded-color fixes) ===== */
+
+/* --- Home / algemeen --- */
+body.dark-mode .home-card-header { background: var(--surface-2); }
+body.dark-mode .modal-overlay    { background: rgba(0,0,0,.65); }
 body.dark-mode .profile-meta-value.role-admin        { background: #3a1510; color: #e8706a; }
 body.dark-mode .profile-meta-value.role-roosterverantwoordelijke { background: #0d2018; color: #6ecfb0; }
 body.dark-mode .profile-meta-value.role-medewerker   { background: #0d2018; color: #6ecfb0; }
+
+/* Validation bar chip count (rgba(0,0,0,0.1) is onzichtbaar in dark) */
+body.dark-mode .validation-chip-count { background: rgba(255,255,255,.12); }
+
+/* --- Gesloten dagen: strepen-patroon (alle grid-varianten) --- */
+body.dark-mode .calendar-cell.closed,
+body.dark-mode .time-cell.closed,
+body.dark-mode .employee-day-cell.closed,
+body.dark-mode .team-day-cell.closed,
+body.dark-mode .timeline-day-cell.closed,
+body.dark-mode .builder-day-cell.closed {
+    background: repeating-linear-gradient(
+        45deg,
+        #1e1b14,
+        #1e1b14 6px,
+        #2a2620 6px,
+        #2a2620 12px
+    );
+}
+body.dark-mode .month-day-cell.closed {
+    background: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 10px,
+        rgba(255,255,255,.03) 10px,
+        rgba(255,255,255,.03) 20px
+    );
+}
+body.dark-mode .calendar-cell.closed::after { color: #6a665c; }
+body.dark-mode .month-day-header.closed     { background: rgba(255,255,255,.06); opacity: .7; }
+
+/* --- Weekend cellen (planning, afwezigheid) --- */
+body.dark-mode .calendar-cell.weekend,
+body.dark-mode .time-cell.weekend,
+body.dark-mode .employee-day-cell.weekend,
+body.dark-mode .team-day-cell.weekend,
+body.dark-mode .timeline-day-cell.weekend { background: var(--surface-2); }
+
+/* --- Hover states (planning grid) --- */
+body.dark-mode .employee-day-cell:not(.closed):hover         { background: var(--raise); }
+body.dark-mode .employee-day-cell.weekend:not(.closed):hover { background: #2e2b22; }
+
+/* --- Afwezigheid --- */
+body.dark-mode .availability-header-row .availability-day-col.today {
+    background: var(--sage);
+    border-color: var(--sage);
+}
+body.dark-mode .availability-employee-row:hover                       { background: var(--raise); }
+body.dark-mode .availability-employee-row .availability-day-col.weekend { background: var(--surface-2); }
+body.dark-mode .availability-employee-row .availability-day-col.closed  {
+    background: repeating-linear-gradient(
+        45deg,
+        #1e1b14,
+        #1e1b14 6px,
+        #2a2620 6px,
+        #2a2620 12px
+    );
+}
+
+/* --- Swap / ruilen kaarten --- */
+body.dark-mode .swap-shifts-preview {
+    background: var(--surface-2);
+    border-color: var(--line);
+}
+body.dark-mode .swap-shift-card {
+    background: var(--surface);
+    border-color: var(--line-strong);
+}
+body.dark-mode .swap-shift-card h3,
+body.dark-mode .swap-shift-card p   { color: var(--ink-2); }
+body.dark-mode .swap-shift-card strong,
+body.dark-mode .swap-request-header h4,
+body.dark-mode .swap-request-shift strong { color: var(--ink); }
+body.dark-mode .swap-request-card {
+    background: var(--surface);
+    border-color: var(--line);
+}
+body.dark-mode .swap-request-card:hover { border-color: var(--line-strong); }
+body.dark-mode .swap-status-badge.status-pending  { color: var(--alert-warning-text); }
+body.dark-mode .swap-status-badge.status-approved { color: #6ecfb0; }
+body.dark-mode .swap-status-badge.status-rejected { color: var(--alert-error-text); }
+body.dark-mode .swap-status-badge.status-cancelled {
+    background: var(--surface-2);
+    color: var(--ink-2);
+}
+body.dark-mode .swap-request-message {
+    background: var(--surface-2);
+    color: var(--ink-2);
+    border-left-color: var(--sage);
+}
+body.dark-mode .swap-request-arrow { color: var(--sage); }
+body.dark-mode .swap-accepted-info {
+    background: rgba(74,124,111,.15);
+    color: #6ecfb0;
+}
+
+/* --- Roosterbouwer concepten dropdown --- */
+body.dark-mode .builder-loaded-draft {
+    background: var(--alert-info-bg);
+    border-color: var(--alert-info-border);
+}
+body.dark-mode .builder-draft-unsaved   { color: var(--alert-warning-text); }
+body.dark-mode .builder-vakantie-bar,
+body.dark-mode .responsible-section {
+    background: linear-gradient(135deg, #2a1a08, #1e1208);
+    border-color: #5a380e;
+    color: var(--alert-warning-text);
+}
+
+/* --- Team-badges (planning, medewerkers, instellingen) --- */
+body.dark-mode .team-badge-mini.vlot1,
+body.dark-mode .timeline-employee-cell .emp-team.team-vlot1 { background: #0c1d33; color: #7eb3e8; }
+body.dark-mode .team-badge-mini.vlot2,
+body.dark-mode .timeline-employee-cell .emp-team.team-vlot2 { background: #180d2a; color: #b59ae8; }
+body.dark-mode .team-badge-mini.jobstudent,
+body.dark-mode .timeline-employee-cell .emp-team.team-jobstudent { background: #2a0a18; color: #e8879a; }
+body.dark-mode .extra-team-badge { background: #0c0f2a; color: #8892e8; }
+
+/* --- Overtime chip --- */
+body.dark-mode .overtime-chip {
+    background: #2a1a08;
+    border-color: #5a380e;
+    color: var(--alert-warning-text);
+}
+body.dark-mode .hours-saldo.positive { color: #6ecfb0; }
+
+/* --- Instellingen: accountbeheer --- */
+body.dark-mode .admin-users-intro { background: var(--surface-2); }
+body.dark-mode .admin-user-row    { background: var(--surface); }
+body.dark-mode .admin-user-role-pill {
+    background: var(--surface-2);
+    color: var(--ink-2);
+}
 
 /* ===== SIDEBAR COLLAPSED STATE (desktop only) ===== */
 @media (min-width: 861px) {
