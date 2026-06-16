@@ -138,7 +138,7 @@ const DragHandler = {
 
             // Prevent default to avoid text selection
             e.preventDefault();
-        } else if (emptyCell && !emptyCell.classList.contains('closed')) {
+        } else if (emptyCell && !emptyCell.classList.contains('closed') && !e.target.closest('.shift-block-indicator')) {
             // Clicked on empty cell - record for potential shift creation
             this.state.startX = e.clientX;
             this.state.startY = e.clientY;
@@ -614,7 +614,7 @@ const DragHandler = {
             const shiftId = parseInt(shiftBlock.dataset.shiftId, 10);
             const shift = shiftId ? getShift(shiftId) : null;
             if (shift && canUserEditShift(shift)) openEditShiftModal(shiftId);
-        } else if (dayCell && !dayCell.classList.contains('closed')) {
+        } else if (dayCell && !dayCell.classList.contains('closed') && !e.target.closest('.shift-block-indicator')) {
             this.handleCellClick(dayCell);
         }
     },

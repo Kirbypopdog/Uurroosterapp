@@ -12,7 +12,8 @@ function renderAvailability() {
         'ziek': 'Ziekte',
         'overuren': 'Overuren',
         'vorming': 'Vorming',
-        'andere': 'Andere'
+        'andere': 'Andere',
+        'vrij': 'Vrij'
     };
 
     // Group employees by team (same order as Timeline)
@@ -69,12 +70,14 @@ function renderAvailability() {
     `;
 
     // Header with days
+    const todayStr = formatDateYYYYMMDD(new Date());
     weekDates.forEach((date, index) => {
         const d = parseDateOnly(date);
         const dayOfWeek = d.getDay();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
         const isClosed = isDayClosed(date);
         let dayClass = 'availability-day-col';
+        if (date === todayStr) dayClass += ' today';
         if (isClosed) dayClass += ' closed';
         else if (isWeekend) dayClass += ' weekend';
 
@@ -92,9 +95,11 @@ function renderAvailability() {
         if (teamEmployees.length === 0) return;
 
         const teamName = escapeHtml(DataStore.settings.teams[teamId]?.name || teamId);
+        const teamColor = DataStore.settings.teams[teamId]?.color || '#8d897c';
 
-        // Team header
-        html += `<div class="availability-team-header ${teamId}">
+        // Team header (rustige stijl met team-kleur-dot, consistent met planning/medewerkers)
+        html += `<div class="availability-team-header">
+            <span class="team-header-dot" style="background:${teamColor}"></span>
             <span class="team-name">${teamName}</span>
             <span class="team-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</span>
         </div>`;
@@ -102,8 +107,10 @@ function renderAvailability() {
         // Employee rows for this team
         teamEmployees.forEach(emp => {
             const isCurrentUser = emp.id === AppState.currentUser?.id;
+            const initials = escapeHtml(getInitials(emp.name || ''));
             html += `<div class="availability-employee-row${isCurrentUser ? ' current-user' : ''}">
                 <div class="availability-employee-col">
+                    <span class="emp-avatar" style="background:${teamColor}">${initials}</span>
                     <span class="emp-name">${escapeHtml(emp.name)}</span>
                 </div>
             `;
@@ -522,7 +529,7 @@ async function handleAvailabilitySave() {
         const employee = getEmployee(employeeId);
         const employeeName = employee?.name || 'de medewerker';
         const daysSet = result.availability?.length || 0;
-        const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid' }[absenceType] || 'Afwezigheid';
+        const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid', 'vrij': 'Vrij' }[absenceType] || 'Afwezigheid';
 
         let msg = `${typeName} geregistreerd voor ${employeeName} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
         if (result.takeoverRequests > 0) {

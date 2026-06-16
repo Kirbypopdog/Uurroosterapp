@@ -201,10 +201,17 @@ function renderConceptCard(draft, newestActiveId) {
     if (isAdmin) menuItems += `<button class="concept-menu-item concept-card-download" data-draft-id="${dId}">${IconHelper.html('download', 'xs')} Download</button>`;
     menuItems += `<hr><button class="concept-menu-item danger concept-card-delete" data-draft-id="${dId}">${IconHelper.html(ICONS.delete, 'xs')} Verwijderen</button>`;
 
+    const teamDotColor = draft.teamFilter
+        ? (DataStore.settings.teams?.[draft.teamFilter]?.color || '#8d897c')
+        : 'var(--ink-3)';
+
     return `
         <div class="builder-concept-card draft-status-${statusCls}" data-draft-id="${escapeHtml(draft.id)}">
             <div class="concept-card-header">
-                <span class="concept-card-name">${escapeHtml(draft.name)}</span>
+                <span class="concept-card-name-row">
+                    <span class="concept-card-dot" style="background:${teamDotColor}" title="${escapeHtml(teamLabel)}"></span>
+                    <span class="concept-card-name">${escapeHtml(draft.name)}</span>
+                </span>
                 <div class="concept-card-menu">
                     <button class="concept-card-menu-trigger" data-draft-id="${dId}">
                         <i data-lucide="more-vertical" class="lucide-sm"></i>
@@ -581,9 +588,14 @@ function renderBuilderEmployeeRow(employee) {
 
     let html = `<div class="builder-row" data-employee-id="${employee.id}">`;
 
+    const _empColor = DataStore.settings.teams?.[employee.mainTeam]?.color || '#8d897c';
+    const _empInitials = escapeHtml(getInitials(employee.name || ''));
     html += `<div class="builder-name-cell">
-        <span class="emp-name">${escapeHtml(employee.name)}</span>
-        <span class="emp-contract">${contractHours}u/week</span>
+        <span class="emp-avatar" style="background:${_empColor}">${_empInitials}</span>
+        <div class="builder-name-cell-text">
+            <span class="emp-name">${escapeHtml(employee.name)}</span>
+            <span class="emp-contract">${contractHours}u/week</span>
+        </div>
     </div>`;
 
     // Gesloten dagen voor huidige builder week

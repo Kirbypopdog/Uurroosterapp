@@ -202,11 +202,12 @@ function applyRoleVisibility() {
         btn.classList.toggle('hidden', !isAllowed);
     });
 
-    // Show/hide admin nav group based on whether any admin buttons are visible
-    const adminGroup = document.querySelector('.nav-group-admin');
-    if (adminGroup) {
-        const hasVisibleBtn = Array.from(adminGroup.querySelectorAll('.nav-btn')).some(b => !b.classList.contains('hidden'));
-        adminGroup.classList.toggle('hidden', !hasVisibleBtn);
+    // Show/hide the "Beheer" sidebar label based on whether any admin button is visible
+    const adminLabel = document.querySelector('.sidebar-nav-label.nav-group-admin');
+    if (adminLabel) {
+        const adminBtns = document.querySelectorAll('.nav-btn.nav-group-admin');
+        const hasVisibleBtn = Array.from(adminBtns).some(b => !b.classList.contains('hidden'));
+        adminLabel.classList.toggle('hidden', !hasVisibleBtn);
     }
 
     if (!allowedViews.has(AppState.currentView)) {

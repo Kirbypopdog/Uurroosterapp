@@ -7,7 +7,7 @@ function initDOM() {
     DOM.loginForm = document.getElementById('login-form');
     DOM.usernameInput = document.getElementById('username');
     DOM.passwordInput = document.getElementById('password');
-    DOM.navButtons = document.querySelectorAll('.nav-center .nav-btn');
+    DOM.navButtons = document.querySelectorAll('#nav-menu .nav-btn');
     DOM.logoutBtn = document.getElementById('logout-btn');
     DOM.homeView = document.getElementById('home-view');
     DOM.planningView = document.getElementById('planning-view');
@@ -23,6 +23,7 @@ function initDOM() {
     DOM.nextWeekBtn = document.getElementById('next-week');
     DOM.todayBtn = document.getElementById('today-btn');
     DOM.currentPeriod = document.getElementById('current-period-text');
+    DOM.currentWeekLabel = document.getElementById('current-week-label');
     DOM.viewToggleBtns = document.querySelectorAll('.view-toggle-btn');
     DOM.rosterCalendar = document.getElementById('roster-calendar');
     DOM.validationAlerts = document.getElementById('validation-alerts');
@@ -117,13 +118,64 @@ function setupEventListeners() {
         });
     }
 
-    // Mobile menu toggle
+    // Mobile menu toggle — schuift de sidebar in/uit met backdrop
     const mobileMenuBtn = document.getElementById('mobile-menu-btn');
     const navMenu = document.getElementById('nav-menu');
+    const sidebarScrim = document.getElementById('sidebar-scrim');
+    const closeSidebar = () => {
+        mobileMenuBtn?.classList.remove('active');
+        navMenu?.classList.remove('open');
+        document.body.classList.remove('nav-open');
+    };
     if (mobileMenuBtn && navMenu) {
         mobileMenuBtn.addEventListener('click', () => {
             mobileMenuBtn.classList.toggle('active');
             navMenu.classList.toggle('open');
+            document.body.classList.toggle('nav-open');
+        });
+    }
+    if (sidebarScrim) {
+        sidebarScrim.addEventListener('click', closeSidebar);
+    }
+
+    // Desktop sidebar collapse
+    const collapseBtn = document.getElementById('sidebar-collapse-btn');
+    if (collapseBtn) {
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            document.body.classList.add('nav-collapsed');
+        }
+        collapseBtn.addEventListener('click', () => {
+            const collapsed = document.body.classList.toggle('nav-collapsed');
+            localStorage.setItem('sidebarCollapsed', collapsed);
+            const icon = collapseBtn.querySelector('[data-lucide]');
+            if (icon) {
+                icon.setAttribute('data-lucide', collapsed ? 'panel-left-open' : 'panel-left-close');
+                IconHelper.init(collapseBtn);
+            }
+        });
+        // Sync icon on load if already collapsed
+        if (document.body.classList.contains('nav-collapsed')) {
+            const icon = collapseBtn.querySelector('[data-lucide]');
+            if (icon) icon.setAttribute('data-lucide', 'panel-left-open');
+        }
+    }
+
+    // Dark mode toggle
+    const darkBtn = document.getElementById('dark-mode-btn');
+    if (darkBtn) {
+        if (localStorage.getItem('darkMode') === 'true') {
+            document.body.classList.add('dark-mode');
+            const icon = darkBtn.querySelector('[data-lucide]');
+            if (icon) icon.setAttribute('data-lucide', 'sun');
+        }
+        darkBtn.addEventListener('click', () => {
+            const isDark = document.body.classList.toggle('dark-mode');
+            localStorage.setItem('darkMode', isDark);
+            const icon = darkBtn.querySelector('[data-lucide]');
+            if (icon) {
+                icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+                IconHelper.init(darkBtn);
+            }
         });
     }
 
@@ -136,13 +188,24 @@ function setupEventListeners() {
     DOM.navButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             // Close mobile menu on navigation
-            if (mobileMenuBtn && navMenu) {
-                mobileMenuBtn.classList.remove('active');
-                navMenu.classList.remove('open');
-            }
+            closeSidebar();
             switchView(btn.dataset.view);
         });
     });
+    // Collapsible team cards — delegate from stable roster container
+    DOM.rosterCalendar.addEventListener('click', (e) => {
+        const head = e.target.closest('.tcard-head');
+        if (!head) return;
+        const card = head.closest('.tcard');
+        if (!card) return;
+        const teamKey = card.dataset.tcardTeam;
+        if (card.classList.toggle('collapsed')) {
+            AppState.collapsedTeams.add(teamKey);
+        } else {
+            AppState.collapsedTeams.delete(teamKey);
+        }
+    });
+
     DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
     DOM.prevWeekBtn.addEventListener('click', () => {
         if (AppState.viewMode === 'month') {

@@ -48,9 +48,11 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // Global rate limiter (disabled in test environment to avoid interference with the test suite)
+// Eén page-load doet ~10 API-calls; 600/min/IP geeft ruimte voor normaal gebruik
+// (navigatie, drag-drop, herladen) terwijl runaway loops/misbruik nog steeds geblokkeerd worden.
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: 600,
   skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
@@ -582,11 +584,11 @@ async function ensureBootstrapData() {
   const client = await pool.connect();
   try {
     const defaultTeams = [
-      ['vlot1', 'Vlot 1 (Begeleiding)', '#3b82f6'],
-      ['vlot2', 'Vlot 2 (Begeleiding)', '#8b5cf6'],
-      ['cargo', 'Cargo (Dagbesteding)', '#10b981'],
-      ['overkoepelend', 'Overkoepelend (Kantoor)', '#f59e0b'],
-      ['jobstudent', 'Jobstudenten/Stagiairs', '#ec4899']
+      ['vlot1', 'Vlot 1 (Begeleiding)', '#4a7c6f'],
+      ['vlot2', 'Vlot 2 (Begeleiding)', '#c08a4a'],
+      ['cargo', 'Cargo (Dagbesteding)', '#5b7fa6'],
+      ['overkoepelend', 'Overkoepelend (Kantoor)', '#9a6a9e'],
+      ['jobstudent', 'Jobstudenten/Stagiairs', '#b9656a']
     ];
     for (const [id, name, color] of defaultTeams) {
       await client.query(
@@ -611,17 +613,45 @@ async function ensureBootstrapData() {
   }
 }
 
-async function archiveOldShifts() {
-  try {
-    const result = await pool.query(
-      `UPDATE shifts SET archived = true
-       WHERE archived = false AND date < CURRENT_DATE - INTERVAL '12 months'`
-    );
-    if (result.rowCount > 0) console.log(`[archive] ${result.rowCount} shifts gearchiveerd`);
-  } catch (err) {
-    console.error('[archive] Fout bij archiveren:', err.message);
+// #151 GDPR bewaartermijnen — loopt bij elke startup (idempotent)
+// Termijnen: shifts 5j, availability 5j, audit_log 2j, swap_requests 2j
+async function enforceRetentionPolicies() {
+  const steps = [
+    {
+      label: 'archive shifts (>12 maanden)',
+      sql: `UPDATE shifts SET archived = true WHERE archived = false AND date < CURRENT_DATE - INTERVAL '12 months'`,
+    },
+    {
+      label: 'verwijder gearchiveerde shifts (>5 jaar)',
+      sql: `DELETE FROM shifts WHERE archived = true AND date < CURRENT_DATE - INTERVAL '5 years'`,
+    },
+    {
+      label: 'verwijder beschikbaarheidsdata (>5 jaar)',
+      sql: `DELETE FROM availability WHERE date < CURRENT_DATE - INTERVAL '5 years'`,
+    },
+    {
+      label: 'verwijder audit_log (>2 jaar)',
+      sql: `DELETE FROM audit_log WHERE created_at < NOW() - INTERVAL '2 years'`,
+    },
+    {
+      label: 'verwijder afgeronde ruilverzoeken (>2 jaar)',
+      sql: `DELETE FROM shift_swap_requests
+            WHERE status IN ('approved','rejected','cancelled','expired')
+              AND created_at < NOW() - INTERVAL '2 years'`,
+    },
+  ];
+  for (const step of steps) {
+    try {
+      const r = await pool.query(step.sql);
+      if (r.rowCount > 0) console.log(`[retention] ${step.label}: ${r.rowCount} rijen`);
+    } catch (err) {
+      console.error(`[retention] Fout bij "${step.label}": ${err.message}`);
+    }
   }
 }
+
+// Legacy alias — kept so any future direct calls still work
+const archiveOldShifts = enforceRetentionPolicies;
 
 function signToken(user) {
   return jwt.sign(
@@ -895,11 +925,15 @@ v1.put('/me', requireAuth, async (req, res) => {
       ? JSON.stringify(weekSchedules)
       : null;
 
+    // #154: rotate iCal token when password changes to invalidate leaked feed URLs
+    const newIcalToken = password ? crypto.randomUUID() : null;
+
     const result = await pool.query(
       `UPDATE users
        SET name = $1,
            email = $2,
            password_hash = COALESCE($3, password_hash),
+           ical_feed_token = COALESCE($10, ical_feed_token),
            main_team = COALESCE($4, main_team),
            contract_hours = COALESCE($5, contract_hours),
            week_schedule_week1 = COALESCE($6::jsonb, week_schedule_week1),
@@ -915,7 +949,7 @@ v1.put('/me', requireAuth, async (req, res) => {
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"`,
-      [name, email.toLowerCase(), passwordHash, mainTeam, contractHours, week1Json, week2Json, weekSchedulesJson, req.user.id]
+      [name, email.toLowerCase(), passwordHash, mainTeam, contractHours, week1Json, week2Json, weekSchedulesJson, req.user.id, newIcalToken]
     );
     await logAudit(req, 'UPDATE', 'user', req.user.id, { action: 'self_update', name, email });
     res.json({ user: result.rows[0] });
@@ -4492,11 +4526,11 @@ v1.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
 // Seed teams endpoint (admin only)
 v1.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
   const teams = [
-    { id: 'vlot1', name: 'Vlot 1 (Begeleiding)', color: '#3b82f6' },
-    { id: 'vlot2', name: 'Vlot 2 (Begeleiding)', color: '#8b5cf6' },
-    { id: 'cargo', name: 'Cargo (Dagbesteding)', color: '#10b981' },
-    { id: 'overkoepelend', name: 'Overkoepelend (Kantoor)', color: '#f59e0b' },
-    { id: 'jobstudent', name: 'Jobstudenten/Stagiairs', color: '#ec4899' }
+    { id: 'vlot1', name: 'Vlot 1 (Begeleiding)', color: '#4a7c6f' },
+    { id: 'vlot2', name: 'Vlot 2 (Begeleiding)', color: '#c08a4a' },
+    { id: 'cargo', name: 'Cargo (Dagbesteding)', color: '#5b7fa6' },
+    { id: 'overkoepelend', name: 'Overkoepelend (Kantoor)', color: '#9a6a9e' },
+    { id: 'jobstudent', name: 'Jobstudenten/Stagiairs', color: '#b9656a' }
   ];
 
   try {

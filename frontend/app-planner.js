@@ -1,8 +1,9 @@
 // HET VLOT ROOSTERPLANNING - PLANNING RENDERING
 
 function renderPlanning() {
-    // Save window scroll position before re-rendering
-    const savedScrollY = window.scrollY || document.documentElement.scrollTop;
+    // Save scroll position before re-rendering (shell scrolt via .app-views)
+    const scrollEl = document.querySelector('.app-views');
+    const savedScrollY = scrollEl ? scrollEl.scrollTop : (window.scrollY || document.documentElement.scrollTop);
 
     if (!AppState.currentWeekStart) {
         setCurrentWeek(new Date());
@@ -45,9 +46,13 @@ function renderPlanning() {
         filterBtn.checked = AppState.filterOnlyWithShifts;
     }
 
-    // Restore window scroll position after DOM updates
+    // Restore scroll position after DOM updates
     requestAnimationFrame(() => {
-        window.scrollTo(0, savedScrollY);
+        if (scrollEl) {
+            scrollEl.scrollTop = savedScrollY;
+        } else {
+            window.scrollTo(0, savedScrollY);
+        }
     });
 }
 
@@ -226,8 +231,9 @@ const VALIDATION_CATEGORY_CONFIG = {
 function renderValidationAlerts() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
-    const startDate = weekDates[0];
-    const endDate = weekDates[6];
+    // In day view only show alerts for the visible day, not the full week (#142)
+    const startDate = AppState.viewMode === 'day' ? weekDates[AppState.mobileDayIndex] : weekDates[0];
+    const endDate   = AppState.viewMode === 'day' ? weekDates[AppState.mobileDayIndex] : weekDates[6];
     const summary = getValidationSummary(startDate, endDate);
 
     let html = '';
@@ -574,9 +580,41 @@ function renderTimelineView() {
     const needsResponsible = isWeekendOrHolidayWeek(currentWeekStart);
     const responsible = needsResponsible ? getOrCalculateResponsible(currentWeekStart) : null;
 
+    // Bouwt de naam+uren-cel (redesign: initialen-avatar + rustige urennotatie)
+    const _teamsMap = DataStore.settings.teams || {};
+    const _fmtHrs = (n) => Number.isInteger(n) ? String(n) : n.toFixed(1);
+    function buildTimelineEmpCell(emp) {
+        const isResp = responsible && String(responsible.id) === String(emp.id);
+        const respBadge = isResp ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
+        const respClass = isResp ? ' is-responsible' : '';
+        const respTip = isResp ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
+        const name = escapeHtml(emp.name);
+        const initials = escapeHtml(getInitials(emp.name || ''));
+        const teamColor = _teamsMap[emp.mainTeam]?.color || '#8d897c';
+        const contractH = emp.contractHours || emp.contract_hours || 0;
+        const weekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
+        const periodH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
+        const periodContract = contractH > 0 ? contractH * 4 : 0;
+        const weekCls = contractH > 0 ? (weekH > contractH ? ' over-hours' : ' under-hours') : '';
+        const periodCls = periodContract > 0 ? (periodH > periodContract ? ' over-hours' : ' under-hours') : '';
+        const weekLabel = contractH > 0 ? `${_fmtHrs(weekH)}/${contractH}u` : `${_fmtHrs(weekH)}u`;
+        const periodLabel = periodContract > 0 ? `${_fmtHrs(periodH)}/${periodContract}u` : `${_fmtHrs(periodH)}u`;
+        return `<div class="timeline-employee-cell${respClass}" ${respTip}>
+            <div class="emp-name-row">
+                <span class="emp-av" style="background:${teamColor}">${initials}</span>
+                ${respBadge}<span class="emp-name">${name}</span>
+            </div>
+            <div class="emp-hours-line">
+                <span class="emp-hours${weekCls}">${weekLabel}</span>
+                <span class="emp-hours-sub${periodCls}">${periodLabel}</span>
+            </div>
+        </div>`;
+    }
+
     let html = '<div class="timeline-view-wrapper">';
 
     // Header row with days
+    const _todayStr = formatDateYYYYMMDD(new Date());
     html += '<div class="timeline-header">';
     html += '<div class="timeline-name-header">Medewerker</div>';
     weekDates.forEach((date) => {
@@ -592,6 +630,7 @@ function renderTimelineView() {
         const closedDateInfo = getClosedDateInfo(date);
 
         let headerClass = 'timeline-day-header';
+        if (date === _todayStr) headerClass += ' today';
         if (isWeekend) headerClass += ' weekend';
         if (isClosed) headerClass += ' closed';
         if (isHoliday) headerClass += ' holiday';
@@ -623,38 +662,30 @@ function renderTimelineView() {
 
             const team = teams[teamKey] || { name: teamKey };
             const teamName = escapeHtml(team.name);
+            const isCollapsed = AppState.collapsedTeams.has(teamKey);
 
-            // Team header row
-            html += `<div class="timeline-team-header team-${teamKey}">
+            html += `<div class="tcard${isCollapsed ? ' collapsed' : ''}" data-tcard-team="${teamKey}">`;
+
+            // Team header row (acts as card head + collapse trigger)
+            html += `<div class="tcard-head timeline-team-header team-${teamKey}">
+                <span class="team-header-dot"></span>
                 <div class="team-header-name">${teamName}</div>
                 <div class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</div>
+                <div class="tcard-spacer"></div>
+                <button class="tcard-toggle" aria-label="${isCollapsed ? 'Uitklappen' : 'Inklappen'}">
+                    ${IconHelper.html('chevron-up', 'sm')}
+                </button>
             </div>`;
+
+            html += `<div class="tcard-body">`;
 
             // Employee rows for this team
             teamEmployees.forEach((emp, index) => {
                 const isAlt = index % 2 === 1;
                 html += `<div class="timeline-row ${isAlt ? 'alt' : ''}">`;
 
-                // Employee name - check if this is the weekend responsible
-                const isResponsible = responsible && String(responsible.id) === String(emp.id);
-                const responsibleBadge = isResponsible ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
-                const responsibleClass = isResponsible ? ' is-responsible' : '';
-                const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
-
-                const employeeName = escapeHtml(emp.name);
-                const empContractH = emp.contractHours || emp.contract_hours || 0;
-                const empWeekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
-                const empMonthH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
-                const empMonthContract = empContractH > 0 ? empContractH * 4 : 0;
-                const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
-                const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
-                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(2)}/${empContractH}u` : `${empWeekH.toFixed(2)}u`;
-                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(2)}/${empMonthContract}u` : `${empMonthH.toFixed(2)}u`;
-                html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
-                    <div class="emp-name-row">${responsibleBadge}<span class="emp-name">${employeeName}</span></div>
-                    <span class="emp-hours${empWeekClass}">${empWeekLabel}</span>
-                    <span class="emp-hours${empMonthClass}">${empMonthLabel}</span>
-                </div>`;
+                // Employee name + uren (redesign-cel)
+                html += buildTimelineEmpCell(emp);
 
                 // Day cells with time blocks
                 weekDates.forEach(date => {
@@ -693,6 +724,13 @@ function renderTimelineView() {
                         let shifts = getShiftsByEmployee(emp.id, date, date);
                         // Filter by visible teams (include shifts without team)
                         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+
+                        // Toon "niet werkzaam" markering op lege cellen (#173)
+                        const cellAvail = getAvailability(emp.id, date);
+                        if (!shiftBlock && shifts.length === 0 && cellAvail?.type === 'vrij') {
+                            const nwReason = cellAvail.reason ? ` — ${cellAvail.reason}` : '';
+                            html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                        }
 
                         const isDayView = AppState.viewMode === 'day';
 
@@ -774,7 +812,7 @@ function renderTimelineView() {
                                 titleText += ' (nachtdienst)';
                             }
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
+                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'vrij': 'Vrij' };
                                 titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
@@ -795,6 +833,13 @@ function renderTimelineView() {
                             // Remove inline onclick - handled by DragHandler
                             const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
+                            // Determine display density based on duration (#147)
+                            const durationH = isOvernight
+                                ? (24 - startFrac) + Math.max(0, (endHour + endMin / 60))
+                                : Math.max(0, (endHour + endMin / 60) - startFrac);
+                            if (durationH < 1)   blockClass += ' timeline-block--xs';
+                            else if (durationH < 2) blockClass += ' timeline-block--sm';
+
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
                             let actChips = '';
@@ -804,6 +849,11 @@ function renderTimelineView() {
                                 actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
                             });
 
+                            // Show only start time when block is too narrow for full range (#147)
+                            const timeLabel = durationH < 2
+                                ? shift.startTime
+                                : `${shift.startTime}-${shift.endTime}`;
+
                             html += `<div class="${blockClass}"
                                          data-shift-id="${shift.id}"
                                          data-employee-id="${shift.employeeId}"
@@ -812,7 +862,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                <span class="block-time">${shift.startTime}-${shift.endTime}</span>
+                                <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
@@ -824,41 +874,33 @@ function renderTimelineView() {
 
                 html += '</div>'; // Close row
             });
+
+            html += '</div>'; // Close tcard-body
+            html += '</div>'; // Close tcard
         });
 
         // Render employees without a team (if any)
         const noTeamEmployees = employeesByTeam['_no_team'];
         if (noTeamEmployees && noTeamEmployees.length > 0) {
-            // Team header row for "No Team"
-            html += `<div class="timeline-team-header team-no-team">
+            const noTeamCollapsed = AppState.collapsedTeams.has('_no_team');
+            html += `<div class="tcard${noTeamCollapsed ? ' collapsed' : ''}" data-tcard-team="_no_team">`;
+            html += `<div class="tcard-head timeline-team-header team-no-team">
+                <span class="team-header-dot"></span>
                 <div class="team-header-name">Geen Team</div>
                 <div class="team-header-count">${noTeamEmployees.length} medewerker${noTeamEmployees.length !== 1 ? 's' : ''}</div>
+                <div class="tcard-spacer"></div>
+                <button class="tcard-toggle" aria-label="${noTeamCollapsed ? 'Uitklappen' : 'Inklappen'}">
+                    ${IconHelper.html('chevron-up', 'sm')}
+                </button>
             </div>`;
+            html += `<div class="tcard-body">`;
 
             // Employee rows for no-team employees
             noTeamEmployees.forEach((emp, index) => {
                 const isAlt = index % 2 === 1;
                 html += `<div class="timeline-row ${isAlt ? 'alt' : ''}">`;
 
-                const isResponsible = responsible && String(responsible.id) === String(emp.id);
-                const responsibleBadge = isResponsible ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
-                const responsibleClass = isResponsible ? ' is-responsible' : '';
-                const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
-
-                const employeeName = escapeHtml(emp.name);
-                const empContractH = emp.contractHours || emp.contract_hours || 0;
-                const empWeekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
-                const empMonthH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
-                const empMonthContract = empContractH > 0 ? empContractH * 4 : 0;
-                const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
-                const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
-                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(2)}/${empContractH}u` : `${empWeekH.toFixed(2)}u`;
-                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(2)}/${empMonthContract}u` : `${empMonthH.toFixed(2)}u`;
-                html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
-                    <div class="emp-name-row">${responsibleBadge}<span class="emp-name">${employeeName}</span></div>
-                    <span class="emp-hours${empWeekClass}">${empWeekLabel}</span>
-                    <span class="emp-hours${empMonthClass}">${empMonthLabel}</span>
-                </div>`;
+                html += buildTimelineEmpCell(emp);
 
                 weekDates.forEach(date => {
                     const d = parseDateOnly(date);
@@ -884,6 +926,13 @@ function renderTimelineView() {
                         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
 
                         const isDayView = AppState.viewMode === 'day';
+
+                        // Toon "niet werkzaam" markering op lege cellen (#173)
+                        const cellAvail2 = getAvailability(emp.id, date);
+                        if (shifts.length === 0 && cellAvail2?.type === 'vrij') {
+                            const nwReason2 = cellAvail2.reason ? ` — ${cellAvail2.reason}` : '';
+                            html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason2}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                        }
 
                         // Doorloop van nachtshift: enkel tonen op maandag (zondag→maandag weekgrens) of in dagweergave
                         if (isDayView || dayOfWeek === 1) {
@@ -956,7 +1005,7 @@ function renderTimelineView() {
                                 titleText += ' (nachtdienst)';
                             }
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
+                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'vrij': 'Vrij' };
                                 titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
@@ -976,6 +1025,13 @@ function renderTimelineView() {
                             const canEdit = canUserEditShift(shift);
                             const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
+                            // Determine display density based on duration (#147)
+                            const durationH = isOvernight
+                                ? (24 - startFrac) + Math.max(0, (endHour + endMin / 60))
+                                : Math.max(0, (endHour + endMin / 60) - startFrac);
+                            if (durationH < 1)   blockClass += ' timeline-block--xs';
+                            else if (durationH < 2) blockClass += ' timeline-block--sm';
+
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
                             let actChips = '';
@@ -985,6 +1041,11 @@ function renderTimelineView() {
                                 actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
                             });
 
+                            // Show only start time when block is too narrow for full range (#147)
+                            const timeLabel = durationH < 2
+                                ? shift.startTime
+                                : `${shift.startTime}-${shift.endTime}`;
+
                             html += `<div class="${blockClass}"
                                          data-shift-id="${shift.id}"
                                          data-employee-id="${shift.employeeId}"
@@ -993,7 +1054,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                <span class="block-time">${shift.startTime}-${shift.endTime}</span>
+                                <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
                                 ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
@@ -1005,6 +1066,9 @@ function renderTimelineView() {
 
                 html += '</div>'; // Close row
             });
+
+            html += '</div>'; // Close tcard-body
+            html += '</div>'; // Close tcard
         }
     }
 

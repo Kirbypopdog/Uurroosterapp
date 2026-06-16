@@ -225,6 +225,11 @@ function validateAvailability(employeeId, date, startTime = null, endTime = null
         return { warnings };
     }
 
+    // vrij is puur informatief — geen conflict met een shift (#173)
+    if (absence.type === 'vrij') {
+        return { warnings };
+    }
+
     // Medewerker is afwezig
     const absenceLabels = {
         'verlof': 'Verlof',
@@ -596,9 +601,11 @@ function validateSwapRequest(swapData) {
 
     const requesterValidation = validateShift(requesterPostSwapShift, excludeShiftIds);
 
+    // Regel-overtredingen na ruilen (11-uur, bezetting, overlap) blokkeren niet:
+    // ze worden waarschuwingen zodat je toch kunt indienen — de verantwoordelijke keurt goed.
     if (!requesterValidation.isValid) {
-        result.isValid = false;
-        result.errors.push(`Na ruilen zou jij een probleem hebben: ${requesterValidation.errors.map(e => e.message).join(', ')}`);
+        result.hasWarnings = true;
+        result.warnings.push(`Na ruilen zou jij een regelprobleem hebben (vereist goedkeuring): ${requesterValidation.errors.map(e => e.message).join(', ')}`);
     }
 
     if (requesterValidation.hasWarnings) {
@@ -616,9 +623,9 @@ function validateSwapRequest(swapData) {
     const targetValidation = validateShift(targetPostSwapShift, excludeShiftIds);
 
     if (!targetValidation.isValid) {
-        result.isValid = false;
-        result.errors.push(
-            `Na ruilen zou ${DataStore.users.find(u => u.id === targetUserId)?.name || 'de ander'} een probleem hebben: ${targetValidation.errors.map(e => e.message).join(', ')}`
+        result.hasWarnings = true;
+        result.warnings.push(
+            `Na ruilen zou ${DataStore.users.find(u => u.id === targetUserId)?.name || 'de ander'} een regelprobleem hebben (vereist goedkeuring): ${targetValidation.errors.map(e => e.message).join(', ')}`
         );
     }
 

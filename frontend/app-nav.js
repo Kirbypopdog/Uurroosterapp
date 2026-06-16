@@ -109,15 +109,19 @@ function renderHome() {
 
     const role = getEffectiveRole();
 
+    // Bereken alerts eerst (zet AppState._homeAlertCount voor de stat-kaarten)
+    const alertsHtml = renderHomeAlerts(role);
+
     let html = '';
     html += renderHomeWelcome(user, role);
     if (role === 'admin') html += renderHomeOnboarding();
-    html += renderHomeAlerts(role);
+    html += alertsHtml;
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
     html += renderHomeWeekendInfo();
     html += renderHomeRequests(user, role);
     html += '</div>';
+    html += renderHomeNuAanHetWerk();
 
     container.innerHTML = html;
     IconHelper.init(container);
@@ -363,6 +367,7 @@ function renderHomeAlerts(role) {
         }
     }
 
+    AppState._homeAlertCount = warnings.length;
     if (warnings.length === 0) return '';
 
     const ALERT_COLLAPSE_AT = 5;
@@ -501,21 +506,58 @@ async function dismissOnboardingChecklist(btn) {
 }
 
 function renderHomeWelcome(user, role) {
-    const roleLabels = {
-        admin: 'Admin',
-        roosterverantwoordelijke: 'Roosterverantwoordelijke',
-        medewerker: 'Medewerker'
-    };
     const today = new Date();
-    const dateStr = today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const hour = today.getHours();
+    const greeting = hour < 12 ? 'Goeiemorgen' : hour < 18 ? 'Goeiemiddag' : 'Goeieavond';
+    const dateStr = today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' });
+    const firstName = (user.name || '').split(' ')[0] || user.name;
 
     return `
-        <div class="home-welcome">
-            <h2>Welkom, ${escapeHtml(user.name)}</h2>
-            <div class="home-welcome-sub">
-                <span>${dateStr}</span>
-                <span class="home-role-badge">${escapeHtml(roleLabels[role] || role)}</span>
+        <div class="home-hi">${greeting}, <em>${escapeHtml(firstName)}</em></div>
+        <div class="home-hi-sub">${dateStr}</div>
+    `;
+}
+
+function renderHomeStats(user, role) {
+    if (!['admin', 'roosterverantwoordelijke'].includes(role)) return '';
+
+    // Diensten deze week
+    const weekStart = getMonday(new Date());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const wkStartStr = formatDateYYYYMMDD(weekStart);
+    const wkEndStr = formatDateYYYYMMDD(weekEnd);
+    const shiftsThisWeek = (DataStore.shifts || []).filter(s => {
+        const d = (s.date || '').split('T')[0];
+        return d >= wkStartStr && d <= wkEndStr;
+    }).length;
+
+    // Actieve medewerkers
+    const activeEmployees = (DataStore.users || []).filter(u => u.active !== false && u.role === 'medewerker').length;
+
+    // Open ruilverzoeken
+    const openSwaps = (DataStore.swapRequests || []).filter(r =>
+        ['pending', 'pending_lead'].includes(r.status)
+    ).length;
+
+    // Aandachtspunten (zelfde telling als de alerts-balk, gezet door renderHomeAlerts)
+    const alertCount = AppState._homeAlertCount || 0;
+
+    const stat = (icon, bg, color, value, label) => `
+        <div class="stat-card">
+            <div class="stat-card-ic" style="background:${bg};color:${color}">${IconHelper.html(icon, 'md')}</div>
+            <div>
+                <div class="stat-card-v">${value}</div>
+                <div class="stat-card-k">${label}</div>
             </div>
+        </div>`;
+
+    return `
+        <div class="home-stats">
+            ${stat('calendar-days', 'var(--ok-bg)', 'var(--sage-700)', shiftsThisWeek, 'diensten deze week')}
+            ${stat('users', 'var(--info-bg)', 'var(--info)', activeEmployees, 'medewerkers actief')}
+            ${stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken')}
+            ${stat('alert-triangle', 'var(--danger-bg)', 'var(--danger-color)', alertCount, 'aandachtspunten')}
         </div>
     `;
 }
@@ -834,6 +876,65 @@ function renderHomeWeekendInfo() {
                 ${isHoliday ? '<span class="shift-badge-upcoming">Vakantie</span>' : ''}
             </div>
             ${bodyHtml}
+        </div>
+    `;
+}
+
+function renderHomeNuAanHetWerk() {
+    const now = new Date();
+    const todayStr = formatDateYYYYMMDD(now);
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const activeShifts = (DataStore.shifts || []).filter(s => {
+        const date = (s.date || '').split('T')[0];
+        if (date !== todayStr) return false;
+        const start = (s.startTime || s.start_time || '').substring(0, 5);
+        const end = (s.endTime || s.end_time || '').substring(0, 5);
+        return start && end && currentTime >= start && currentTime < end;
+    });
+
+    if (activeShifts.length === 0) {
+        return `
+            <div class="home-card home-card-on-duty mt-lg">
+                <div class="home-card-header">Nu aan het werk</div>
+                <div class="home-card-empty">
+                    <i data-lucide="moon" class="empty-state-icon"></i>
+                    Niemand is op dit moment aan het werk
+                </div>
+            </div>
+        `;
+    }
+
+    const chips = activeShifts.map(shift => {
+        const userId = shift.userId || shift.employeeId || shift.user_id;
+        const emp = (DataStore.users || []).find(u => String(u.id) === String(userId));
+        const name = emp?.name || shift.employeeName || 'Onbekend';
+        const teamId = shift.team;
+        const teamColor = DataStore.settings?.teams?.[teamId]?.color || '#64748b';
+        const initials = getInitials(name);
+        const startTime = (shift.startTime || shift.start_time || '').substring(0, 5);
+        const endTime = (shift.endTime || shift.end_time || '').substring(0, 5);
+
+        return `
+            <div class="on-duty-chip">
+                <div class="on-duty-avatar" style="background:${escapeHtml(teamColor)}">${escapeHtml(initials)}</div>
+                <div class="on-duty-info">
+                    <span class="on-duty-name">${escapeHtml(name)}</span>
+                    <span class="on-duty-time">${escapeHtml(startTime)} – ${escapeHtml(endTime)}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="home-card home-card-on-duty mt-lg">
+            <div class="home-card-header">
+                Nu aan het werk
+                <span class="card-count">${activeShifts.length}</span>
+            </div>
+            <div class="on-duty-list">
+                ${chips}
+            </div>
         </div>
     `;
 }
@@ -1190,7 +1291,7 @@ function updatePeriodDisplay() {
         }
         DOM.currentPeriod.textContent = formatMonthDisplay(AppState.currentMonthStart);
     } else if (AppState.viewMode === 'day') {
-        // Day view: show "Maandag, 3 maart 2026"
+        // Day view: show "Week 6 · Maandag, 3 maart 2026"
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
             return;
@@ -1198,20 +1299,30 @@ function updatePeriodDisplay() {
         const dayNames = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
         const currentDate = new Date(AppState.currentWeekStart);
         currentDate.setDate(currentDate.getDate() + AppState.mobileDayIndex);
+        const weekNr = getISOWeekNumber(formatDateYYYYMMDD(currentDate));
         const dateStr = currentDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
-        DOM.currentPeriod.textContent = `${dayNames[AppState.mobileDayIndex]}, ${dateStr}`;
+        DOM.currentPeriod.textContent = `Week ${weekNr} · ${dayNames[AppState.mobileDayIndex]}, ${dateStr}`;
     } else {
-        // Week view: show "Week 6 | 3 februari 2026 - 9 februari 2026"
+        // Week view: "Week 24 · 8 - 14 juni 2026"
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
             return;
         }
         const weekEnd = new Date(AppState.currentWeekStart);
         weekEnd.setDate(weekEnd.getDate() + 6);
-        const options = { day: 'numeric', month: 'long', year: 'numeric' };
-        const startStr = AppState.currentWeekStart.toLocaleDateString('nl-BE', options);
-        const endStr = weekEnd.toLocaleDateString('nl-BE', options);
-        DOM.currentPeriod.textContent = `${startStr} - ${endStr}`;
+        const weekNr = getISOWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart));
+        DOM.currentPeriod.textContent = `Week ${weekNr} · ${formatWeekRange(AppState.currentWeekStart, weekEnd)}`;
     }
+}
+
+// Compact datumbereik: "8 - 14 juni 2026" (zelfde maand) of "28 juni - 4 juli 2026"
+function formatWeekRange(start, end) {
+    const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+    const endStr = end.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+    if (sameMonth) {
+        return `${start.getDate()} - ${endStr}`;
+    }
+    const startStr = start.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' });
+    return `${startStr} - ${endStr}`;
 }
 
