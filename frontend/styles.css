@@ -191,6 +191,27 @@ body.dark-mode input:-webkit-autofill:focus {
     caret-color: var(--ink);
 }
 
+/* --- Dag-sluiten context menu (--bg-card fallback is #fff) --- */
+body.dark-mode .day-context-menu {
+    background: var(--surface-2);
+    border-color: var(--line);
+    box-shadow: 0 4px 20px rgba(0,0,0,.55);
+}
+body.dark-mode .day-context-menu button { color: var(--ink); }
+body.dark-mode .day-context-menu button:hover { background: var(--raise); }
+
+/* --- Manueel gesloten dagen (rgba(0,0,0,.45) onzichtbaar op donkere bg) --- */
+body.dark-mode .timeline-day-header.manually-closed,
+body.dark-mode .month-day-header.manually-closed {
+    background: rgba(220,38,38,.22);
+    opacity: 1;
+}
+body.dark-mode .timeline-day-header.manually-closed .day-name,
+body.dark-mode .timeline-day-header.manually-closed .day-num { color: #e8706a; }
+
+/* --- Timeline scale-row (hardcoded #f1efe8) --- */
+body.dark-mode .timeline-scale-row { background: var(--surface-2); }
+
 /* --- Knoppen (btn-secondary heeft geen dark fallback) --- */
 body.dark-mode .btn-secondary {
     background: var(--surface-2);

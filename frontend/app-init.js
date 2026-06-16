@@ -18,7 +18,7 @@ function initDOM() {
     DOM.builderView = document.getElementById('builder-view');
     DOM.swapsView = document.getElementById('swaps-view');
     DOM.settingsView = document.getElementById('settings-view');
-    DOM.addShiftBtn = document.getElementById('add-shift-btn');
+    DOM.addShiftBtn = null; // button removed from UI
     DOM.prevWeekBtn = document.getElementById('prev-week');
     DOM.nextWeekBtn = document.getElementById('next-week');
     DOM.todayBtn = document.getElementById('today-btn');
@@ -206,7 +206,7 @@ function setupEventListeners() {
         }
     });
 
-    DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
+    if (DOM.addShiftBtn) DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
     DOM.prevWeekBtn.addEventListener('click', () => {
         if (AppState.viewMode === 'month') {
             changeMonth(-1);
