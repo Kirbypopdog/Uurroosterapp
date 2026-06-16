@@ -164,6 +164,61 @@ body.dark-mode {
 
 /* ===== DARK MODE OVERRIDES (hardcoded-color fixes) ===== */
 
+/* --- Knoppen (btn-secondary heeft geen dark fallback) --- */
+body.dark-mode .btn-secondary {
+    background: var(--surface-2);
+    color: var(--ink);
+    border: 1px solid var(--line);
+}
+body.dark-mode .btn-secondary:hover {
+    background: var(--raise);
+    border-color: var(--line-strong);
+    transform: none;
+    box-shadow: none;
+}
+
+/* --- Rijhover (alt rijen hadden hardcoded lichte hover) --- */
+body.dark-mode .employee-grid-row:hover,
+body.dark-mode .team-schedule-row:hover,
+body.dark-mode .team-schedule-row.alt:hover,
+body.dark-mode .month-row:hover,
+body.dark-mode .month-row.alt:hover      { background: var(--raise); }
+body.dark-mode .employee-name-cell       { background: var(--raise); }
+body.dark-mode .team-schedule-row.alt    { background: var(--surface-2); }
+body.dark-mode .month-row.alt            { background: var(--surface-2); }
+
+/* --- Vandaag kolom-header (donkerbruin #2b2a26 onzichtbaar op donkere bg) --- */
+body.dark-mode .timeline-day-header.today,
+body.dark-mode .employee-grid-day-header.today,
+body.dark-mode .team-schedule-day-header.today,
+body.dark-mode .calendar-day-header.today {
+    background: var(--sage);
+    border-color: var(--sage);
+}
+body.dark-mode .timeline-day-header.today .day-name,
+body.dark-mode .timeline-day-header.today .day-num,
+body.dark-mode .employee-grid-day-header.today .day-name,
+body.dark-mode .employee-grid-day-header.today .day-num,
+body.dark-mode .team-schedule-day-header.today .day-name,
+body.dark-mode .team-schedule-day-header.today .day-num,
+body.dark-mode .calendar-day-header.today .day-name,
+body.dark-mode .calendar-day-header.today .day-num { color: #fff; }
+
+/* --- Shift blokken (achtergrond #f6f4ef licht beige → donker surface) --- */
+body.dark-mode .shift-block {
+    background: var(--surface-2);
+    color: var(--ink);
+    border-color: var(--line);
+}
+body.dark-mode .shift-block:hover {
+    background: var(--raise);
+    box-shadow: 0 4px 12px rgba(0,0,0,.4);
+}
+body.dark-mode .shift-block.shift-nacht {
+    background: #1a1812;
+    border-left-color: var(--ink-3);
+}
+
 /* --- Home / algemeen --- */
 body.dark-mode .home-card-header { background: var(--surface-2); }
 body.dark-mode .modal-overlay    { background: rgba(0,0,0,.65); }
@@ -196,8 +251,8 @@ body.dark-mode .builder-day-cell.closed {
         45deg,
         transparent,
         transparent 5px,
-        rgba(255,255,255,.07) 5px,
-        rgba(255,255,255,.07) 10px
+        rgba(255,255,255,.13) 5px,
+        rgba(255,255,255,.13) 10px
     );
 }
 body.dark-mode .month-day-cell.closed {
@@ -266,8 +321,8 @@ body.dark-mode .availability-employee-row .availability-day-col.closed  {
         45deg,
         transparent,
         transparent 5px,
-        rgba(255,255,255,.07) 5px,
-        rgba(255,255,255,.07) 10px
+        rgba(255,255,255,.13) 5px,
+        rgba(255,255,255,.13) 10px
     );
 }
 
