@@ -189,12 +189,13 @@ body.dark-mode .employee-day-cell.closed,
 body.dark-mode .team-day-cell.closed,
 body.dark-mode .timeline-day-cell.closed,
 body.dark-mode .builder-day-cell.closed {
-    background: repeating-linear-gradient(
+    background-color: var(--surface-2);
+    background-image: repeating-linear-gradient(
         45deg,
-        #29261e,
-        #29261e 6px,
-        #322e25 6px,
-        #322e25 12px
+        transparent,
+        transparent 5px,
+        rgba(255,255,255,.07) 5px,
+        rgba(255,255,255,.07) 10px
     );
 }
 body.dark-mode .month-day-cell.closed {
@@ -228,12 +229,13 @@ body.dark-mode .availability-header-row .availability-day-col.today {
 body.dark-mode .availability-employee-row:hover                       { background: var(--raise); }
 body.dark-mode .availability-employee-row .availability-day-col.weekend { background: var(--surface-2); }
 body.dark-mode .availability-employee-row .availability-day-col.closed  {
-    background: repeating-linear-gradient(
+    background-color: var(--surface-2);
+    background-image: repeating-linear-gradient(
         45deg,
-        #29261e,
-        #29261e 6px,
-        #322e25 6px,
-        #322e25 12px
+        transparent,
+        transparent 5px,
+        rgba(255,255,255,.07) 5px,
+        rgba(255,255,255,.07) 10px
     );
 }
 
