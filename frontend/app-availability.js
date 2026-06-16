@@ -37,14 +37,15 @@ function renderAvailability() {
     });
 
     let html = `
-        <div class="availability-controls">
-            <div class="date-navigation">
-                <button id="availability-prev-week" class="btn btn-nav">${IconHelper.html(ICONS.left, 'sm')}</button>
-                <button id="availability-today" class="btn">Vandaag</button>
-                <button id="availability-next-week" class="btn btn-nav">${IconHelper.html(ICONS.right, 'sm')}</button>
-            </div>
-            <div class="period-display">${formatDate(weekDates[0])} - ${formatDate(weekDates[6])}</div>
-            <div class="availability-actions">
+        <div class="planning-controls">
+            <div class="planning-controls-row">
+                <div class="date-navigation">
+                    <button id="availability-prev-week" class="nav-arrow-btn" aria-label="Vorige week">${IconHelper.html(ICONS.left, 'sm')}</button>
+                    <button id="availability-today" class="btn btn-secondary btn-sm">Vandaag</button>
+                    <button id="availability-next-week" class="nav-arrow-btn" aria-label="Volgende week">${IconHelper.html(ICONS.right, 'sm')}</button>
+                </div>
+                <div class="period-display">${formatDate(weekDates[0])} – ${formatDate(weekDates[6])}</div>
+                <div class="controls-spacer"></div>
                 <div class="availability-legend-inline">
                     <span class="legend-chip available">Beschikbaar</span>
                     <span class="legend-chip absent">Afwezig</span>

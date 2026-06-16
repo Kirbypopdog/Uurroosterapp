@@ -223,7 +223,37 @@ body.dark-mode .timeline-day-cell.weekend { background: var(--surface-2); }
 body.dark-mode .employee-day-cell:not(.closed):hover         { background: var(--raise); }
 body.dark-mode .employee-day-cell.weekend:not(.closed):hover { background: #2e2b22; }
 
-/* --- Afwezigheid --- */
+/* --- Afwezigheid cellen (color-mix met white → donkere versie) --- */
+body.dark-mode .availability-cell-content.has-shift {
+    background: color-mix(in srgb, var(--team-cargo) 22%, var(--surface));
+    border-color: color-mix(in srgb, var(--team-cargo) 40%, var(--surface));
+}
+body.dark-mode .availability-cell-content.has-shift:hover {
+    background: color-mix(in srgb, var(--team-cargo) 32%, var(--surface));
+}
+body.dark-mode .availability-cell-content.has-shift .status-label { color: #6ecfb0; }
+body.dark-mode .availability-cell-content.not-scheduled {
+    background: var(--surface-2);
+    border-color: var(--line);
+}
+body.dark-mode .availability-cell-content.not-scheduled:hover { background: var(--raise); }
+body.dark-mode .availability-cell-content.available {
+    border-color: rgba(74,124,111,.4);
+}
+body.dark-mode .availability-cell-content.conflict {
+    background: linear-gradient(135deg, var(--alert-error-bg) 0%, var(--alert-warning-bg) 100%);
+    border-color: var(--alert-warning-border);
+}
+body.dark-mode .availability-cell-content.conflict:hover {
+    background: linear-gradient(135deg, #3a100c 0%, #3a220a 100%);
+}
+body.dark-mode .availability-cell-content.conflict .status-label { color: var(--alert-warning-text); }
+body.dark-mode .legend-chip.has-shift {
+    background: color-mix(in srgb, var(--team-cargo) 22%, var(--surface-2));
+    color: #6ecfb0;
+}
+
+/* --- Afwezigheid navigatie --- */
 body.dark-mode .availability-header-row .availability-day-col.today {
     background: var(--sage);
     border-color: var(--sage);
@@ -8934,14 +8964,9 @@ body[data-view-mode="day"] .timeline-day-cell {
     }
 
     /* ===== BESCHIKBAARHEID VIEW MOBILE ===== */
-    .availability-controls {
-        flex-direction: column;
-        gap: var(--space-sm);
-    }
-
     /* Hide week navigation on mobile - use day nav instead */
-    .availability-controls .date-navigation,
-    .availability-controls .period-display {
+    #availability-view .date-navigation,
+    #availability-view .period-display {
         display: none !important;
     }
 
