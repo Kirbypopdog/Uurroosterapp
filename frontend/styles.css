@@ -349,11 +349,12 @@ body.dark-mode .month-day-header.manually-closed {
 }
 
 /* --- Weekend cellen (planning, afwezigheid) --- */
+/* background-color i.p.v. background shorthand: anders wordt background-image van .closed gereset */
 body.dark-mode .calendar-cell.weekend,
 body.dark-mode .time-cell.weekend,
 body.dark-mode .employee-day-cell.weekend,
 body.dark-mode .team-day-cell.weekend,
-body.dark-mode .timeline-day-cell.weekend { background: var(--surface-2); }
+body.dark-mode .timeline-day-cell.weekend { background-color: var(--surface-2); }
 
 /* --- Hover states (planning grid) --- */
 body.dark-mode .employee-day-cell:not(.closed):hover         { background: var(--raise); }
