@@ -1584,6 +1584,7 @@ textarea:focus-visible {
     font-family: var(--font-serif);
     font-weight: 400;
     font-size: 34px;
+    margin-top: 32px;
     letter-spacing: -.01em;
     line-height: 1.05;
     color: var(--text-primary);
