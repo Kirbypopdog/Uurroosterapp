@@ -455,6 +455,29 @@ body.dark-mode .responsible-section {
     color: var(--alert-warning-text);
 }
 
+/* --- Concept kaart 3-dot menu (bg-primary/#fff fallback onzichtbaar in dark) --- */
+body.dark-mode .concept-card-menu-trigger {
+    border-color: var(--line);
+    color: var(--ink-2);
+}
+body.dark-mode .concept-card-menu-trigger:hover {
+    background: var(--raise);
+}
+body.dark-mode .concept-card-menu-dropdown {
+    background: var(--surface-2);
+    border-color: var(--line);
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+}
+body.dark-mode .concept-menu-item {
+    color: var(--ink);
+}
+body.dark-mode .concept-menu-item:hover {
+    background: var(--raise);
+}
+body.dark-mode .concept-card-menu-dropdown hr {
+    border-top-color: var(--line);
+}
+
 /* --- Team-badges (planning, medewerkers, instellingen) --- */
 body.dark-mode .team-badge-mini.vlot1,
 body.dark-mode .timeline-employee-cell .emp-team.team-vlot1 { background: #0c1d33; color: #7eb3e8; }
