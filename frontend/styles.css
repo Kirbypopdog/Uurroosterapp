@@ -201,13 +201,7 @@ body.dark-mode .day-context-menu button { color: var(--ink); }
 body.dark-mode .day-context-menu button:hover { background: var(--raise); }
 
 /* --- Manueel gesloten dagen (rgba(0,0,0,.45) onzichtbaar op donkere bg) --- */
-body.dark-mode .timeline-day-header.manually-closed,
-body.dark-mode .month-day-header.manually-closed {
-    background: rgba(220,38,38,.22);
-    opacity: 1;
-}
-body.dark-mode .timeline-day-header.manually-closed .day-name,
-body.dark-mode .timeline-day-header.manually-closed .day-num { color: #e8706a; }
+/* Geen aparte dark mode regel hier meer — zie na de stripe-regel hieronder */
 
 /* --- Timeline scale-row (hardcoded #f1efe8) --- */
 body.dark-mode .timeline-scale-row { background: var(--surface-2); }
@@ -318,7 +312,7 @@ body.dark-mode .month-day-cell.closed {
 }
 body.dark-mode .calendar-cell.closed::after { color: #6a665c; }
 
-/* Gesloten dag HEADERS: ook striped zodat de hele kolom herkenbaar is */
+/* Gesloten dag HEADERS: striped zodat de hele kolom herkenbaar is */
 body.dark-mode .timeline-day-header.closed,
 body.dark-mode .calendar-day-header.closed,
 body.dark-mode .employee-grid-day-header.closed,
@@ -344,6 +338,14 @@ body.dark-mode .month-day-header.closed {
         rgba(255,255,255,.18) 12px
     );
     opacity: 1;
+}
+/* Manueel gesloten HEADERS: rode tint OVER het streeppatroon (na .closed → overschrijft enkel background-color) */
+body.dark-mode .timeline-day-header.manually-closed,
+body.dark-mode .calendar-day-header.manually-closed,
+body.dark-mode .employee-grid-day-header.manually-closed,
+body.dark-mode .team-schedule-day-header.manually-closed,
+body.dark-mode .month-day-header.manually-closed {
+    background-color: rgba(220,38,38,.18);
 }
 
 /* --- Weekend cellen (planning, afwezigheid) --- */
@@ -3094,8 +3096,9 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .calendar-day-header.closed {
-    background: rgba(0,0,0,0.25);
-    opacity: 0.7;
+    background-color: var(--surface-2);
+    background-image: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,.06) 4px, rgba(0,0,0,.06) 8px);
+    opacity: 0.9;
 }
 
 .calendar-day-header .day-name {
@@ -3416,8 +3419,9 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .employee-grid-day-header.closed {
-    background: rgba(0,0,0,0.25);
-    opacity: 0.7;
+    background-color: var(--surface-2);
+    background-image: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,.06) 4px, rgba(0,0,0,.06) 8px);
+    opacity: 0.9;
 }
 
 .employee-grid-day-header .day-name {
@@ -3747,8 +3751,9 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .team-schedule-day-header.closed {
-    background: rgba(0,0,0,0.3);
-    opacity: 0.7;
+    background-color: var(--surface-2);
+    background-image: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,.06) 4px, rgba(0,0,0,.06) 8px);
+    opacity: 0.9;
 }
 
 .team-schedule-body {
@@ -4016,8 +4021,13 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .timeline-day-header.closed {
-    background: var(--surface-2);
-    opacity: 0.75;
+    background-color: var(--surface-2);
+    background-image: repeating-linear-gradient(
+        45deg,
+        transparent, transparent 4px,
+        rgba(0,0,0,.06) 4px, rgba(0,0,0,.06) 8px
+    );
+    opacity: 0.9;
 }
 
 /* Vandaag: gevuld donker vakje (wint van weekend/gesloten, vóór feestdag/vakantie) */
@@ -4040,10 +4050,12 @@ body[data-view-mode="day"] .timeline-header {
 .timeline-day-header.holiday .day-name,
 .timeline-day-header.holiday .day-num,
 .timeline-day-header.feestdag .day-name,
-.timeline-day-header.feestdag .day-num,
+.timeline-day-header.feestdag .day-num {
+    color: #fff;
+}
 .timeline-day-header.manually-closed .day-name,
 .timeline-day-header.manually-closed .day-num {
-    color: #fff;
+    color: #991b1b;
 }
 
 .timeline-day-header.holiday {
@@ -4094,10 +4106,14 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 /* ===== MANUEEL GESLOTEN DATUMS ===== */
+/* Rode tint OVER het streeppatroon van .closed (background-color → overschrijft alleen de kleur, niet het patroon) */
 .timeline-day-header.manually-closed,
+.calendar-day-header.manually-closed,
+.employee-grid-day-header.manually-closed,
+.team-schedule-day-header.manually-closed,
 .month-day-header.manually-closed {
-    background: rgba(0, 0, 0, 0.45);
-    opacity: 0.85;
+    background-color: rgba(220, 38, 38, 0.18);
+    opacity: 1;
 }
 
 .closed-date-badge {
@@ -4802,8 +4818,9 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .month-day-header.closed {
-    background: rgba(0, 0, 0, 0.2);
-    opacity: 0.6;
+    background-color: var(--surface-2);
+    background-image: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(0,0,0,.06) 6px, rgba(0,0,0,.06) 12px);
+    opacity: 0.9;
 }
 
 .month-day-header.holiday {
