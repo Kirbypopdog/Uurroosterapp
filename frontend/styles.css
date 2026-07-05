@@ -290,7 +290,7 @@ body.dark-mode .time-cell.closed,
 body.dark-mode .employee-day-cell.closed,
 body.dark-mode .team-day-cell.closed,
 body.dark-mode .timeline-day-cell.closed,
-body.dark-mode .builder-day-cell.closed {
+body.dark-mode .builder-cell.closed {
     background-color: var(--surface-2);
     background-image: repeating-linear-gradient(
         45deg,
@@ -347,6 +347,19 @@ body.dark-mode .team-schedule-day-header.manually-closed,
 body.dark-mode .month-day-header.manually-closed {
     background-color: rgba(220,38,38,.18);
 }
+/* Leesbare dagtekst op manueel gesloten headers (light-mode #991b1b is onleesbaar op donker) */
+body.dark-mode .timeline-day-header.manually-closed .day-name,
+body.dark-mode .timeline-day-header.manually-closed .day-num { color: #e8706a; }
+/* Vandaag wint van gesloten/manueel gesloten (net als light mode) — moet ná de stripe-regels staan */
+body.dark-mode .timeline-day-header.today,
+body.dark-mode .calendar-day-header.today,
+body.dark-mode .employee-grid-day-header.today,
+body.dark-mode .team-schedule-day-header.today {
+    background-color: var(--sage);
+    background-image: none;
+}
+body.dark-mode .timeline-day-header.today .day-name,
+body.dark-mode .timeline-day-header.today .day-num { color: #fff; }
 
 /* --- Weekend cellen (planning, afwezigheid) --- */
 /* background-color i.p.v. background shorthand: anders wordt background-image van .closed gereset */
@@ -4107,12 +4120,14 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 /* ===== MANUEEL GESLOTEN DATUMS ===== */
-/* Rode tint OVER het streeppatroon van .closed (background-color → overschrijft alleen de kleur, niet het patroon) */
-.timeline-day-header.manually-closed,
-.calendar-day-header.manually-closed,
-.employee-grid-day-header.manually-closed,
-.team-schedule-day-header.manually-closed,
-.month-day-header.manually-closed {
+/* Rode tint OVER het streeppatroon van .closed (background-color → overschrijft alleen de kleur, niet het patroon).
+   Extra .closed in de selector: hogere specificiteit zodat dit wint van de
+   .month-day-header.closed regel die later in het bestand staat (cascade). */
+.timeline-day-header.closed.manually-closed,
+.calendar-day-header.closed.manually-closed,
+.employee-grid-day-header.closed.manually-closed,
+.team-schedule-day-header.closed.manually-closed,
+.month-day-header.closed.manually-closed {
     background-color: rgba(220, 38, 38, 0.18);
     opacity: 1;
 }

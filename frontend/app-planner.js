@@ -728,7 +728,7 @@ function renderTimelineView() {
                         // Toon "niet werkzaam" markering op lege cellen (#173)
                         const cellAvail = getAvailability(emp.id, date);
                         if (!shiftBlock && shifts.length === 0 && cellAvail?.type === 'vrij') {
-                            const nwReason = cellAvail.reason ? ` — ${cellAvail.reason}` : '';
+                            const nwReason = cellAvail.reason ? ` — ${escapeHtml(cellAvail.reason)}` : '';
                             html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
                         }
 
@@ -930,7 +930,7 @@ function renderTimelineView() {
                         // Toon "niet werkzaam" markering op lege cellen (#173)
                         const cellAvail2 = getAvailability(emp.id, date);
                         if (shifts.length === 0 && cellAvail2?.type === 'vrij') {
-                            const nwReason2 = cellAvail2.reason ? ` — ${cellAvail2.reason}` : '';
+                            const nwReason2 = cellAvail2.reason ? ` — ${escapeHtml(cellAvail2.reason)}` : '';
                             html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason2}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
                         }
 
