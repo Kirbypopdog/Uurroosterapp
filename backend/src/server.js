@@ -341,7 +341,7 @@ const MIGRATIONS = [
         SET shift_id = (
           SELECT s.id FROM shifts s
           WHERE s.user_id = sa.user_id AND s.date = sa.date
-          ORDER BY ABS(EXTRACT(EPOCH FROM (s.start_time - sa.start_time)))
+          ORDER BY ABS(EXTRACT(EPOCH FROM (s.start_time::TIME - sa.start_time)))
           LIMIT 1
         )
         WHERE sa.shift_id IS NULL
