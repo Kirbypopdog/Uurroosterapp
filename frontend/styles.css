@@ -531,7 +531,6 @@ body.dark-mode .admin-user-role-pill {
     body.nav-collapsed .sidebar-brand-text,
     body.nav-collapsed .sidebar-nav-label,
     body.nav-collapsed .user-menu-name,
-    body.nav-collapsed .nav-logout-btn,
     body.nav-collapsed .role-switcher,
     body.nav-collapsed .nav-label {
         display: none !important;
@@ -545,11 +544,21 @@ body.dark-mode .admin-user-role-pill {
         padding: 9px;
     }
     body.nav-collapsed .app-sidebar .user-menu {
+        /* Ingeklapt (64px) is er maar ~48px content-breedte over — avatar (32px)
+           + uitlog-knop (32px) passen niet naast elkaar. Stapel ze i.p.v. de
+           uitlog-knop te verbergen (anders kan je enkel uitloggen door de
+           zijbalk weer uit te klappen). */
+        flex-direction: column;
+        gap: 6px;
         justify-content: center;
     }
     body.nav-collapsed .app-sidebar .user-menu-trigger {
+        flex: none;
         justify-content: center;
         padding: 6px;
+    }
+    body.nav-collapsed .nav-logout-btn {
+        margin: 0 auto;
     }
     body.nav-collapsed .sidebar-foot-actions {
         /* Ingeklapt (64px) is er maar ~48px content-breedte over — de 2 knoppen
