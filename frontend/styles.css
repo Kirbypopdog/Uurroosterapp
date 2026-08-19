@@ -519,6 +519,39 @@ body.dark-mode .admin-user-role-pill {
     color: var(--ink-2);
 }
 
+/* --- Instellingen: info-boxen (waren wit met donkere tekst, ongeacht mode) --- */
+body.dark-mode .info-box.info {
+    background: var(--alert-info-bg);
+    border-color: var(--alert-info-border);
+    color: var(--alert-info-text);
+}
+body.dark-mode .info-box.neutral {
+    background: var(--surface-2);
+    border-color: var(--line);
+    color: var(--ink-2);
+}
+
+/* --- Instellingen: team- en dienst-template rijen --- */
+/* Achtergrond bleef hardcoded licht (#f6f4ef) terwijl .team-name/.template-name
+   via var(--text-primary) wél naar lichte tekst flipten in dark mode →
+   lichte tekst op lichte achtergrond, vrijwel onleesbaar. */
+body.dark-mode .team-config-item,
+body.dark-mode .template-config-item {
+    background: var(--surface-2);
+    border-color: var(--line);
+}
+body.dark-mode .stat-item {
+    background: linear-gradient(135deg, var(--surface-2) 0%, var(--raise) 100%);
+    border-color: var(--line);
+}
+body.dark-mode .template-config-item:hover {
+    background: var(--raise);
+    border-color: var(--line-strong);
+}
+body.dark-mode .team-config-item.team-drag-over {
+    background: color-mix(in srgb, var(--sage) 15%, var(--surface-2));
+}
+
 /* ===== SIDEBAR COLLAPSED STATE (desktop only) ===== */
 @media (min-width: 861px) {
     body.nav-collapsed #app-container {
