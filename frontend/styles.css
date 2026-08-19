@@ -548,6 +548,34 @@ body.dark-mode .template-config-item:hover {
     background: var(--raise);
     border-color: var(--line-strong);
 }
+
+/* --- Instellingen: icoonkiezer in het template-modal (was hardcoded licht) --- */
+body.dark-mode .template-icon-option {
+    background: var(--surface-2);
+    border-color: var(--line);
+}
+body.dark-mode .template-icon-option:hover {
+    border-color: var(--primary-color);
+    background: var(--raise);
+}
+body.dark-mode .template-icon-option.selected {
+    background: color-mix(in srgb, var(--sage) 22%, var(--surface-2));
+}
+
+/* --- Medewerker-modal: read-only weekrooster (Week X-header was onzichtbaar:
+   achtergrond bleef hardcoded licht terwijl .ro-week-title via
+   var(--text-primary) wél naar lichte tekst flipte) --- */
+body.dark-mode .ro-week-header {
+    background: var(--surface-2);
+    border-bottom-color: var(--line);
+}
+body.dark-mode .ro-week-hours {
+    background: color-mix(in srgb, var(--sage) 20%, var(--surface-2));
+    color: #6ecfb0;
+}
+body.dark-mode .ro-day-row {
+    border-bottom-color: var(--line);
+}
 body.dark-mode .team-config-item.team-drag-over {
     background: color-mix(in srgb, var(--sage) 15%, var(--surface-2));
 }
