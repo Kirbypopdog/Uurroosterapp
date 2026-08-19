@@ -9180,16 +9180,43 @@ body[data-view-mode="day"] .timeline-day-cell {
         width: 100% !important;
     }
 
+    /* Compacter op mobiel: kop + 24px marge + een losse knoppenrij stapelden
+       op tot een brede lege band vóór de eerste content. */
     .view-header {
         flex-direction: column;
-        gap: 12px;
+        gap: 6px;
         align-items: stretch;
+        margin-bottom: 10px;
         max-width: 100% !important;
         overflow: hidden !important;
     }
 
     .view-header h2 {
         font-size: 18px;
+    }
+
+    /* De beschrijving hing met een negatieve marge tegen de titel aan */
+    .view-description {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+
+    /* Dag-navigatie compacter (was 85px hoog voor één datum) */
+    .mobile-day-nav {
+        padding: 8px;
+        margin-bottom: 8px;
+    }
+
+    .mobile-day-display {
+        padding: 5px 14px;
+    }
+
+    /* Kaartkop stapelen zodat de actieknop niet afgeknipt raakt
+       ("+ Nieuwe gebruiker" liep buiten de kaart) */
+    .settings-card-header {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 14px 16px;
     }
 
     .header-actions {
@@ -9272,6 +9299,14 @@ body[data-view-mode="day"] .timeline-day-cell {
         max-width: 100% !important;
         padding: 8px 10px !important;
         font-size: 12px !important;
+    }
+
+    /* De compacte variant hoorde niet even groot te zijn als een primaire
+       actieknop — daardoor oogden secundaire knoppen (Filters, dag-pijlen)
+       onnodig log. 36px blijft comfortabel tikbaar. */
+    .btn.btn-sm {
+        min-height: 36px;
+        padding: 6px 11px !important;
     }
 
     /* Employee cards compact */
@@ -9635,10 +9670,18 @@ body[data-view-mode="day"] .timeline-day-cell {
         display: none;
     }
 
+    /* De spacer duwt knoppen naar rechts zodat ze op één lijn staan met de
+       datumnavigatie. Op mobiel zijn die navigatie én het periodelabel
+       verborgen, dus bleef er alleen een brede lege strook over met de
+       knop eenzaam rechts. Zonder spacer volgen ze gewoon de leesrichting. */
+    .controls-spacer {
+        display: none;
+    }
+
     .availability-legend-inline {
         flex-wrap: wrap;
         gap: 6px;
-        justify-content: center;
+        justify-content: flex-start;
     }
 
     .availability-legend-inline span {
@@ -9687,10 +9730,12 @@ body[data-view-mode="day"] .timeline-day-cell {
         gap: 4px;
     }
 
+    /* flex-grow uit: met `1 1 auto` rekten de tabs uit tot brede blokken die
+       de balk log lieten ogen. Nu op inhoudsbreedte, netjes gewrapt. */
     .settings-tab {
-        flex: 1 1 auto;
-        min-height: 40px;
-        padding: 8px 12px;
+        flex: 0 1 auto;
+        min-height: 38px;
+        padding: 7px 12px;
         font-size: 12px;
         display: flex;
         align-items: center;
@@ -9702,12 +9747,13 @@ body[data-view-mode="day"] .timeline-day-cell {
     }
 
     /* ===== TIKDOELEN (touch targets) =====
-       Deze knoppen waren 24-28px hoog — te klein om betrouwbaar te raken met
-       een vinger. Richtlijn is 44px (Apple) / 48dp (Material); 40px is het
-       praktische minimum zonder de layout te forceren. */
+       Deze knoppen waren 24-28px hoog — te klein om betrouwbaar te raken.
+       Let op de balans: 40px maakte de team-chips onnodig fors (40px hoog
+       bij 11px tekst). Material hanteert 32dp voor chips; dat is comfortabel
+       tikbaar én visueel in verhouding. Grotere/primaire knoppen houden 40px. */
     .team-toggle {
-        min-height: 40px;
-        padding: 9px 14px;
+        min-height: 32px;
+        padding: 6px 12px;
         display: inline-flex;
         align-items: center;
     }
