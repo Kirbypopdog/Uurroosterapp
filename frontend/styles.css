@@ -9761,12 +9761,12 @@ body[data-view-mode="day"] .timeline-day-cell {
     user-select: none;
     transition: background 0.15s ease;
 }
-.swap-group-header:hover { background: #f6f4ef; }
+.swap-group-header:hover { background: var(--surface-2); }
 
 .swap-group-header h3 {
     margin: 0;
     font-size: var(--text-md);
-    color: #2b2a26;
+    color: var(--text-primary);
     display: flex;
     align-items: center;
     gap: var(--space-sm);
