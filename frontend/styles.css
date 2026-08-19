@@ -935,18 +935,26 @@ body.dark-mode .role-switcher select {
     vertical-align: middle;
 }
 
-/* Fallback when Lucide CDN is unavailable: show data-lucide attribute as text */
+/* Fallback wanneer de Lucide-CDN onbereikbaar is.
+   LET OP: toon hier NOOIT de icoonnaam als tekst. Dat gebeurde eerder via
+   `content: attr(data-lucide)` en zette bij een CDN-storing de hele UI vol
+   met "chevron-up", "sliders-horizontal", "trash-2" enz. — voor een gebruiker
+   onbegrijpelijk en veel storender dan een leeg vlakje. De iconen zijn
+   decoratief naast tekstlabels; icon-only knoppen houden hun aria-label/title. */
 .no-lucide [data-lucide] {
     font-size: 0;
-    width: auto;
-    height: auto;
+    line-height: 0;
 }
+/* Subtiele plaatsaanduiding zodat de layout niet inzakt en icon-only knoppen
+   toch een zichtbaar doel houden. */
 .no-lucide [data-lucide]::before {
-    font-size: 12px;
-    content: attr(data-lucide);
-    font-family: var(--font-family);
-    font-style: normal;
-    opacity: 0.6;
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 3px;
+    background: currentColor;
+    opacity: 0.25;
 }
 
 .lucide-xs { width: 12px; height: 12px; }
@@ -2846,18 +2854,30 @@ textarea:focus-visible {
 }
 
 /* Date picker - minimal styling, triggered by click */
+/* Onzichtbaar datumveld over de dag-navigatie: tikken opent de native picker.
+   Stond op opacity 0.01 — op retina-schermen schemerden de datumtekst
+   ("08/19/2026") en het kalendericoon zichtbaar door áchter het dag-label.
+   Nu volledig onzichtbaar, met de webkit-onderdelen apart verborgen als
+   vangnet voor browsers die de opacity op form-internals negeren. */
 .mobile-date-picker {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    opacity: 0.01;
+    opacity: 0;
+    color: transparent;
     cursor: pointer;
     z-index: 10;
     -webkit-appearance: none;
     border: none;
     background: transparent;
+}
+.mobile-date-picker::-webkit-datetime-edit,
+.mobile-date-picker::-webkit-calendar-picker-indicator,
+.mobile-date-picker::-webkit-inner-spin-button {
+    opacity: 0;
+    color: transparent;
 }
 
 .calendar-view-toggle {
@@ -8887,9 +8907,37 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 /* Mobile breakpoint */
 @media (max-width: 900px) {
-    /* Mobiele shell: sidebar wordt off-canvas, topbar verschijnt */
+    /* Mobiele shell: sidebar wordt off-canvas, topbar verschijnt.
+
+       BELANGRIJK — het document moet hier zélf scrollen, niet een binnen-div.
+       De desktop-shell gebruikt `height: 100vh; overflow: hidden` met een
+       scrollende `.app-views`. Op mobiel geeft dat twee problemen:
+
+       1. Mobiele browsers klappen hun URL-balk alleen in/uit als het DOCUMENT
+          scrollt. Bij een scrollende binnen-div blijft de balk hangen in de
+          stand waarin hij toevallig staat (en is hij soms niet terug te halen).
+       2. Op iOS is `100vh` de hoogte ZONDER browserbalk. Met de balk zichtbaar
+          steekt de shell ~90-180px onder het scherm — en omdat het document
+          niet kan scrollen, is dat deel onbereikbaar.
+
+       Daarom hier: natuurlijke documentscroll + `dvh` (dynamic viewport height)
+       dat wél rekening houdt met de browserbalk. */
     #app-container {
         grid-template-columns: 1fr;
+        height: auto;
+        min-height: 100vh;   /* fallback voor oudere browsers */
+        min-height: 100dvh;
+        overflow: visible;
+    }
+
+    .app-main,
+    .app-views {
+        overflow: visible;
+    }
+
+    /* Achtergrond niet mee laten scrollen zolang de drawer openstaat */
+    body.nav-open {
+        overflow: hidden;
     }
 
     .app-sidebar {
@@ -9315,10 +9363,13 @@ body[data-view-mode="day"] .timeline-day-cell {
         max-width: 100% !important;
     }
 
+    /* In de mobiele dagweergave is er maar één dagkolom, dus die had veel te
+       veel ruimte (310px voor één dienstblok) terwijl de naamkolom op 80px
+       stond — namen werden daardoor afgekapt tot "Gert Test…". Ruimer verdeeld. */
     .timeline-scale-row,
     .timeline-row {
         display: grid !important;
-        grid-template-columns: 80px calc(100% - 80px) !important;
+        grid-template-columns: 132px calc(100% - 132px) !important;
         overflow: hidden !important;
         width: 100% !important;
         max-width: 100% !important;
@@ -9385,7 +9436,7 @@ body[data-view-mode="day"] .timeline-day-cell {
         overflow: hidden !important;
         text-overflow: ellipsis !important;
         display: block !important;
-        max-width: 70px !important;
+        max-width: 98px !important;
     }
 
     .timeline-employee-cell .emp-hours,

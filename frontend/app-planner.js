@@ -1,9 +1,18 @@
 // HET VLOT ROOSTERPLANNING - PLANNING RENDERING
 
+// Welk element scrollt er écht? Op desktop is dat de shell (.app-views met
+// overflow:auto), op mobiel het document zelf (zie de 900px-mediaquery in
+// styles.css — daar scrollt de pagina natuurlijk zodat de URL-balk meebeweegt).
+function getAppScrollEl() {
+    const av = document.querySelector('.app-views');
+    if (av && getComputedStyle(av).overflowY !== 'visible') return av;
+    return document.scrollingElement || document.documentElement;
+}
+
 function renderPlanning() {
-    // Save scroll position before re-rendering (shell scrolt via .app-views)
-    const scrollEl = document.querySelector('.app-views');
-    const savedScrollY = scrollEl ? scrollEl.scrollTop : (window.scrollY || document.documentElement.scrollTop);
+    // Save scroll position before re-rendering
+    const scrollEl = getAppScrollEl();
+    const savedScrollY = scrollEl ? scrollEl.scrollTop : 0;
 
     if (!AppState.currentWeekStart) {
         setCurrentWeek(new Date());
@@ -48,11 +57,7 @@ function renderPlanning() {
 
     // Restore scroll position after DOM updates
     requestAnimationFrame(() => {
-        if (scrollEl) {
-            scrollEl.scrollTop = savedScrollY;
-        } else {
-            window.scrollTo(0, savedScrollY);
-        }
+        if (scrollEl) scrollEl.scrollTop = savedScrollY;
     });
 }
 
