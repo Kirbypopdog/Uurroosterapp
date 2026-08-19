@@ -321,17 +321,19 @@ function setupEventListeners() {
         btn.addEventListener('click', closeEmployeeModal);
     });
     DOM.warningDetailsClose.addEventListener('click', closeWarningDetailsModal);
-    DOM.warningDetailsModal.addEventListener('click', (e) => {
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert en
+    // de muis buiten het kader loslaat (click-target wordt dan de backdrop).
+    DOM.warningDetailsModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.warningDetailsModal) closeWarningDetailsModal();
     });
     DOM.errorDetailsClose.addEventListener('click', closeErrorDetailsModal);
-    DOM.errorDetailsModal.addEventListener('click', (e) => {
+    DOM.errorDetailsModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.errorDetailsModal) closeErrorDetailsModal();
     });
-    DOM.shiftModal.addEventListener('click', (e) => {
+    DOM.shiftModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.shiftModal) closeShiftModal();
     });
-    DOM.employeeModal.addEventListener('click', (e) => {
+    DOM.employeeModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.employeeModal) closeEmployeeModal();
     });
 

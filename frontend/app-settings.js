@@ -293,7 +293,9 @@ function showAddUserModal(teams) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'add-user-modal';
-    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    modal.onmousedown = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
@@ -404,7 +406,9 @@ function showEditAccountModal(user, teams, onSave) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'edit-account-modal';
-    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    modal.onmousedown = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
         <div class="modal-content modal-content--md">
             <div class="modal-header">
@@ -591,7 +595,9 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'replace-employee-modal';
-    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    modal.onmousedown = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
         <div class="modal-content modal-content--md">
             <div class="modal-header">
@@ -2668,7 +2674,9 @@ function showWeekendResponsiblePicker(mondayKey) {
 
     overlay.querySelector('#weekend-picker-close').addEventListener('click', () => overlay.remove());
     overlay.querySelector('#weekend-picker-cancel').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
 
     overlay.querySelector('#weekend-picker-save').addEventListener('click', async () => {
         const selected = overlay.querySelector('input[name="weekend-responsible"]:checked')?.value;

@@ -275,7 +275,9 @@ function showNewConceptTypeModal() {
 
     overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
     overlay.querySelector('#concept-type-cancel').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
 
     overlay.querySelector('#concept-type-confirm').addEventListener('click', async () => {
         const type = overlay.querySelector('input[name="concept-type"]:checked')?.value || 'basis';
@@ -432,7 +434,9 @@ function showDraftSaveModal() {
             if (e.key === 'Enter') overlay.querySelector('#draft-save-confirm').click();
             if (e.key === 'Escape') cleanup(null);
         });
-        overlay.addEventListener('click', (e) => {
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => {
             if (e.target === overlay) cleanup(null);
         });
     });
@@ -663,7 +667,9 @@ async function deactivateBuilderDraft(draftId) {
         });
         overlay.querySelector('#deactivate-cancel').addEventListener('click', () => { cleanup(); resolve(null); });
         overlay.querySelector('#deactivate-close').addEventListener('click', () => { cleanup(); resolve(null); });
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
     });
 
     if (!result) return;
@@ -1047,7 +1053,9 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
 
         overlay.querySelector('#draft-apply-cancel').addEventListener('click', () => { cleanup(); resolve(null); });
         overlay.querySelector('#draft-apply-close').addEventListener('click', () => { cleanup(); resolve(null); });
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
     });
 }
 
@@ -1078,7 +1086,9 @@ function showReapplyAfterEditModal(draftName) {
         overlay.querySelector('#reapply-yes').addEventListener('click', () => { cleanup(); resolve(true); });
         overlay.querySelector('#reapply-no').addEventListener('click', () => { cleanup(); resolve(false); });
         overlay.querySelector('#reapply-close').addEventListener('click', () => { cleanup(); resolve(false); });
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(false); } });
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) { cleanup(); resolve(false); } });
     });
 }
 

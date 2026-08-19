@@ -510,7 +510,9 @@ function openProfileEditModal() {
     // Close handlers
     overlay.querySelector('.modal-close').addEventListener('click', closeModal);
     overlay.querySelector('.profile-edit-cancel').addEventListener('click', closeModal);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeModal(); });
     document.addEventListener('keydown', function escHandler(e) {
         if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', escHandler); }
     });

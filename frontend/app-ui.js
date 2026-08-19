@@ -255,11 +255,12 @@ function showConfirm(message, title = 'Bevestig actie', options = {}) {
             cancelBtn.style.display = '';
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);
-            modal.removeEventListener('click', handleBackdropClick);
+            modal.removeEventListener('mousedown', handleBackdropClick);
             document.removeEventListener('keydown', handleEscape);
         };
 
-        // Handle backdrop click
+        // Handle backdrop click — mousedown i.p.v. click: anders sluit de modal
+        // als je tekst selecteert en de muis buiten het kader loslaat.
         const handleBackdropClick = (e) => {
             if (e.target === modal) {
                 handleCancel();
@@ -276,7 +277,7 @@ function showConfirm(message, title = 'Bevestig actie', options = {}) {
         // Add event listeners
         okBtn.addEventListener('click', handleOk);
         cancelBtn.addEventListener('click', handleCancel);
-        modal.addEventListener('click', handleBackdropClick);
+        modal.addEventListener('mousedown', handleBackdropClick);
         document.addEventListener('keydown', handleEscape);
     });
 }
@@ -300,9 +301,11 @@ function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
             modal.classList.add('hidden');
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);
-            modal.removeEventListener('click', handleBackdropClick);
+            modal.removeEventListener('mousedown', handleBackdropClick);
             document.removeEventListener('keydown', handleKeys);
         };
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
         const handleBackdropClick = (e) => { if (e.target === modal) handleCancel(); };
         const handleKeys = (e) => {
             if (e.key === 'Escape') handleCancel();
@@ -310,7 +313,7 @@ function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
         };
         okBtn.addEventListener('click', handleOk);
         cancelBtn.addEventListener('click', handleCancel);
-        modal.addEventListener('click', handleBackdropClick);
+        modal.addEventListener('mousedown', handleBackdropClick);
         document.addEventListener('keydown', handleKeys);
     });
 }
@@ -346,9 +349,11 @@ function showSelectPrompt(message, title, options) {
             selectEl.replaceWith(inputEl);
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);
-            modal.removeEventListener('click', handleBackdropClick);
+            modal.removeEventListener('mousedown', handleBackdropClick);
             document.removeEventListener('keydown', handleKeys);
         };
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
         const handleBackdropClick = (e) => { if (e.target === modal) handleCancel(); };
         const handleKeys = (e) => {
             if (e.key === 'Escape') handleCancel();
@@ -356,7 +361,7 @@ function showSelectPrompt(message, title, options) {
         };
         okBtn.addEventListener('click', handleOk);
         cancelBtn.addEventListener('click', handleCancel);
-        modal.addEventListener('click', handleBackdropClick);
+        modal.addEventListener('mousedown', handleBackdropClick);
         document.addEventListener('keydown', handleKeys);
     });
 }
