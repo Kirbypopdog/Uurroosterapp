@@ -1213,11 +1213,12 @@ function loadBuilderFromBaseSchedules() {
     });
 
     AppState.builderGridByWeek[weekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
-    AppState.builderLoadedDraftId = null;
-    AppState.builderLoadedDraftName = null;
-    AppState.builderPattern = null;
-    AppState.builderConceptType = 'basis';
-    AppState.builderHolidayPeriodId = null;
+    // Geen reset van builderLoadedDraftId/-Name/-Pattern/-ConceptType/-HolidayPeriodId hier:
+    // zodra je in de editor bent (nieuw of bestaand concept) is er altijd al een opgeslagen
+    // concept-ID (nieuwe concepten worden meteen leeg aangemaakt in app-builder-drafts.js).
+    // Deze velden resetten koppelt het concept los, waardoor "Opslaan" verandert in
+    // "Concept opslaan" (dupliceert i.p.v. bij te werken) en een vakantieconcept stilletjes
+    // terug type 'basis' wordt.
     setBuilderDirty();
     renderBuilder();
     showToast(`Basisrooster week ${weekNumber} geladen`, 'success');
