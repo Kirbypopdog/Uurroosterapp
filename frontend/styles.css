@@ -552,6 +552,11 @@ body.dark-mode .admin-user-role-pill {
         padding: 6px;
     }
     body.nav-collapsed .sidebar-foot-actions {
+        /* Ingeklapt (64px) is er maar ~48px content-breedte over — de 2 knoppen
+           passen daar niet naast elkaar (34px + 4px + 34px = 72px) en staken
+           anders uit de zijbalk. Stapel ze i.p.v. naast elkaar. */
+        flex-direction: column;
+        align-items: center;
         justify-content: center;
     }
     /* Smooth width transition */
