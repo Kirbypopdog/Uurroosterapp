@@ -196,11 +196,13 @@ function renderAvailability() {
     // Add event listeners for navigation
     document.getElementById('availability-prev-week').addEventListener('click', () => {
         AppState.currentWeekStart.setDate(AppState.currentWeekStart.getDate() - 7);
+        updateShiftRefreshRange();
         renderAvailability();
     });
 
     document.getElementById('availability-next-week').addEventListener('click', () => {
         AppState.currentWeekStart.setDate(AppState.currentWeekStart.getDate() + 7);
+        updateShiftRefreshRange();
         renderAvailability();
     });
 
@@ -210,6 +212,7 @@ function renderAvailability() {
         const today = new Date();
         const dayOfWeek = today.getDay();
         AppState.availabilityMobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        updateShiftRefreshRange();
         renderAvailability();
     });
 

@@ -1223,11 +1223,13 @@ function changeAvailabilityMobileDay(direction) {
         const prev = new Date(AppState.currentWeekStart);
         prev.setDate(prev.getDate() - 7);
         AppState.currentWeekStart = prev;
+        updateShiftRefreshRange();
     } else if (AppState.availabilityMobileDayIndex > 6) {
         AppState.availabilityMobileDayIndex = 0;
         const next = new Date(AppState.currentWeekStart);
         next.setDate(next.getDate() + 7);
         AppState.currentWeekStart = next;
+        updateShiftRefreshRange();
     }
 
     renderAvailability();
