@@ -104,15 +104,14 @@ async function renderLeave() {
         const rounds = await fetchLeaveRounds();
         if (AppState.leaveRoundId && !rounds.some(r => r.id === AppState.leaveRoundId)) {
             AppState.leaveRoundId = null;
+            AppState.leaveScreen = 'rondes';
         }
-        if (!AppState.leaveRoundId) {
-            const open = rounds.find(r => r.status === 'open') || rounds[0];
-            AppState.leaveRoundId = open ? open.id : null;
-        }
-        if (!AppState.leaveRoundId) {
-            container.innerHTML = renderLeaveEmptyState();
+        // Bovenste niveau: de rondes zelf. Geen ronde gekozen? Altijd hier.
+        if ((AppState.leaveScreen || 'rondes') === 'rondes' || !AppState.leaveRoundId) {
+            AppState.leaveScreen = 'rondes';
+            container.innerHTML = renderLeaveRoundsOverview(rounds);
             IconHelper.init(container);
-            container.querySelector('#leave-new-round')?.addEventListener('click', openLeaveRoundModal);
+            bindLeaveRoundsOverview(container);
             return;
         }
         const data = await fetchLeaveRound(AppState.leaveRoundId);
@@ -125,22 +124,90 @@ async function renderLeave() {
     }
 }
 
-function renderLeaveEmptyState() {
-    return `
-        <div class="leave-empty">
-            ${IconHelper.html('palmtree', 'lg')}
-            <p>Er loopt momenteel geen verlofronde.</p>
-            ${canManageLeave()
-                ? '<button class="btn btn-primary" id="leave-new-round">Verlofronde starten</button>'
-                : '<p class="text-muted text-sm">Je leidinggevende opent een ronde wanneer het zover is.</p>'}
+// ===== NIVEAU 1: alle rondes als kaarten (zoals de roosterbouwer) =====
+
+const LEAVE_ROUND_STATUS = {
+    concept:   { label: 'Concept',  klasse: 'leave-rs-concept' },
+    open:      { label: 'Open',     klasse: 'leave-rs-open' },
+    gesloten:  { label: 'Gesloten', klasse: 'leave-rs-gesloten' },
+    toegepast: { label: 'Verwerkt', klasse: 'leave-rs-toegepast' },
+};
+
+function renderLeaveRoundsOverview(rounds) {
+    const lopend  = rounds.filter(r => r.status === 'open' || r.status === 'concept');
+    const afgelopen = rounds.filter(r => r.status === 'gesloten' || r.status === 'toegepast');
+
+    if (!rounds.length && !canManageLeave()) {
+        return `
+            <div class="leave-empty">
+                ${IconHelper.html('palmtree', 'lg')}
+                <p>Er loopt momenteel geen verlofronde.</p>
+                <p class="text-muted text-sm">Je leidinggevende opent een ronde wanneer het zover is.</p>
+            </div>`;
+    }
+
+    const groep = (titel, lijst) => !lijst.length ? '' : `
+        <div class="leave-group">
+            <div class="leave-group-title">${titel}</div>
+            <div class="leave-round-grid">${lijst.map(renderLeaveRoundCard).join('')}</div>
         </div>`;
+
+    return `
+        ${canManageLeave() ? `
+            <div class="leave-round-grid leave-round-grid-top">
+                <button class="leave-round-card leave-round-new" id="leave-new-round">
+                    ${IconHelper.html('plus', 'lg')}
+                    <span class="text-xs">Nieuwe ronde</span>
+                </button>
+            </div>` : ''}
+        ${groep('Lopend', lopend)}
+        ${groep('Afgelopen', afgelopen)}
+    `;
+}
+
+function renderLeaveRoundCard(r) {
+    const st = LEAVE_ROUND_STATUS[r.status] || LEAVE_ROUND_STATUS.concept;
+    const beheer = canManageLeave();
+
+    // Wat de gebruiker zelf nog moet doen weegt zwaarder dan de rondestatus
+    const eigen = r.myApproved === true  ? '<span class="leave-card-status leave-card-klaar">goedgekeurd</span>'
+               : r.myApproved === false  ? '<span class="leave-card-status leave-card-afgewezen">afgewezen</span>'
+               : r.mySubmittedAt         ? '<span class="leave-card-status leave-card-bezig">ingediend</span>'
+               : r.status === 'open'     ? '<span class="leave-card-status leave-card-open">nog in te vullen</span>'
+               : '';
+
+    return `
+        <div class="leave-round-card" data-open-round="${r.id}">
+            <div class="leave-round-card-head">
+                <strong>${escapeHtml(r.name)}</strong>
+                <span class="leave-round-badge ${st.klasse}">${st.label}</span>
+            </div>
+            <div class="leave-round-card-meta">
+                <span>${r.blockCount || 0} vakantie${r.blockCount === 1 ? '' : 's'}</span>
+                <span>${leaveDatumKort(r.startDate)} – ${leaveDatumKort(r.endDate)}</span>
+                ${r.deadline ? `<span>Indienen vóór ${leaveDatumKort(r.deadline)}</span>` : ''}
+                ${beheer ? `<span>${r.submittedCount || 0} ingediend</span>` : ''}
+            </div>
+            ${eigen ? `<div class="leave-round-card-foot">${eigen}</div>` : ''}
+        </div>`;
+}
+
+function bindLeaveRoundsOverview(container) {
+    container.querySelector('#leave-new-round')?.addEventListener('click', openLeaveRoundModal);
+    container.querySelectorAll('[data-open-round]').forEach(card =>
+        card.addEventListener('click', () => {
+            AppState.leaveRoundId = Number(card.dataset.openRound);
+            AppState.leaveScreen = 'landing';
+            AppState.leaveDraft = {};
+            renderLeave();
+        }));
 }
 
 // Router: standaard een rustige landingspagina met alleen de vakanties en
 // hun status. Pas als je er één aantikt zie je het invulwerk.
 function renderLeaveRoundHtml(rounds, data) {
     const { round, blocks = [], entries, submissions } = data;
-    const scherm = AppState.leaveScreen || 'landing';
+    const scherm = AppState.leaveScreen || 'rondes';
 
     if (scherm === 'overzicht') return renderLeaveOverzichtScherm(round, blocks, entries, submissions);
     if (scherm === 'blok') {
@@ -164,13 +231,6 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
     const alleKlaar = blocks.length > 0 && blocks.every(b => leaveBlockProgress(b, entryMap).klaar);
     const bewerkbaar = round.status === 'open';
 
-    const roundPicker = rounds.length > 1 ? `
-        <select id="leave-round-select" class="form-input leave-round-select">
-            ${rounds.map(r => `<option value="${r.id}" ${r.id === round.id ? 'selected' : ''}>
-                ${escapeHtml(r.name)}${r.status !== 'open' ? ` (${escapeHtml(r.status)})` : ''}
-            </option>`).join('')}
-        </select>` : '';
-
     const groep = (titel, lijst) => !lijst.length ? '' : `
         <div class="leave-group">
             <div class="leave-group-title">${titel}</div>
@@ -178,15 +238,14 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
         </div>`;
 
     return `
+        <button class="leave-back" id="leave-back-rounds">${IconHelper.html('chevron-left', 'sm')} Alle rondes</button>
         <div class="leave-landing-head">
             <div>
                 <h3>${escapeHtml(round.name)}</h3>
                 ${round.deadline ? `<p class="text-muted text-sm">Indienen vóór ${escapeHtml(round.deadline)}</p>` : ''}
             </div>
             <div class="leave-header-actions">
-                ${roundPicker}
                 ${canManageLeave() ? `
-                    <button class="btn btn-secondary btn-sm" id="leave-new-round">+ Nieuw</button>
                     <button class="btn-icon-only leave-round-delete" id="leave-delete" title="Ronde verwijderen">
                         ${IconHelper.html(ICONS.delete, 'sm')}
                     </button>` : ''}
@@ -447,10 +506,9 @@ function bindLeaveEvents(container, data) {
 
     container.querySelector('#leave-new-round')?.addEventListener('click', openLeaveRoundModal);
     container.querySelector('#leave-delete')?.addEventListener('click', () => deleteLeaveRound(round));
-    container.querySelector('#leave-round-select')?.addEventListener('change', e => {
-        AppState.leaveRoundId = Number(e.target.value);
+    container.querySelector('#leave-back-rounds')?.addEventListener('click', () => {
+        AppState.leaveScreen = 'rondes';
         AppState.leaveDraft = {};
-        AppState.leaveScreen = 'landing';
         renderLeave();
     });
 
@@ -580,7 +638,7 @@ async function deleteLeaveRound(round) {
     try {
         await dataApiFetch(`/leave-rounds/${round.id}`, { method: 'DELETE' });
         AppState.leaveRoundId = null;
-        AppState.leaveScreen = 'landing';
+        AppState.leaveScreen = 'rondes';
         AppState.leaveDraft = {};
         showToast('Verlofronde verwijderd', 'success');
         renderLeave();

@@ -4383,19 +4383,35 @@ v1.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke')
 const LEAVE_MANAGER_ROLES = ['admin', 'roosterverantwoordelijke'];
 const isLeaveManager = (user) => LEAVE_MANAGER_ROLES.includes(user?.role);
 
-const ROUND_SELECT = `
-  id, name, mode, start_date::text AS "startDate", end_date::text AS "endDate",
-  deadline::text AS deadline, status, holiday_period_id AS "holidayPeriodId",
-  rules, created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"`;
+// Kolommen van een ronde. De alias is nodig zodra er gejoind wordt: zowel
+// leave_rounds als leave_round_submissions hebben een kolom `id`.
+const roundSelect = (a = '') => {
+  const p = a ? `${a}.` : '';
+  return `
+  ${p}id, ${p}name, ${p}mode, ${p}start_date::text AS "startDate", ${p}end_date::text AS "endDate",
+  ${p}deadline::text AS deadline, ${p}status, ${p}holiday_period_id AS "holidayPeriodId",
+  ${p}rules, ${p}created_by AS "createdBy", ${p}created_at AS "createdAt", ${p}updated_at AS "updatedAt"`;
+};
+const ROUND_SELECT = roundSelect();
 
-// Alle rondes (iedereen mag ze zien; concepten enkel voor beheerders)
+// Alle rondes (iedereen mag ze zien; concepten enkel voor beheerders).
+// Bevat meteen wat de overzichtskaarten nodig hebben, zodat die niet elke
+// ronde apart hoeven op te halen.
 v1.get('/leave-rounds', requireAuth, async (req, res) => {
   try {
     const showConcepts = isLeaveManager(req.user);
     const result = await pool.query(
-      `SELECT ${ROUND_SELECT} FROM leave_rounds
-       ${showConcepts ? '' : `WHERE status <> 'concept'`}
-       ORDER BY start_date DESC`
+      `SELECT ${roundSelect('r')},
+              (SELECT COUNT(*) FROM leave_round_blocks b WHERE b.round_id = r.id)::int AS "blockCount",
+              (SELECT COUNT(*) FROM leave_round_submissions s
+                WHERE s.round_id = r.id AND s.submitted_at IS NOT NULL)::int AS "submittedCount",
+              ms.submitted_at AS "mySubmittedAt",
+              ms.approved     AS "myApproved"
+       FROM leave_rounds r
+       LEFT JOIN leave_round_submissions ms ON ms.round_id = r.id AND ms.user_id = $1
+       ${showConcepts ? '' : `WHERE r.status <> 'concept'`}
+       ORDER BY r.start_date DESC`,
+      [req.user.id]
     );
     res.json({ rounds: result.rows });
   } catch (err) {
