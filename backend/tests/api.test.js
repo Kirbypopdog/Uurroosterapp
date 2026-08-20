@@ -57,6 +57,21 @@ function mockActiveUser() {
 // Helper: datum in de toekomst (YYYY-MM-DD). Gebruik dit i.p.v. hardgecodeerde datums
 // voor tests die afhangen van "vandaag" (bv. swap-requests weigeren shifts in het verleden),
 // zodat ze niet verouderen wanneer de echte kalender voorbij een vaste datum kruipt.
+
+// Helper: PUT /leave-rounds/:id/entries gebruikt pool.connect() i.p.v. pool.query,
+// dus de ronde-lookup moet op de CLIENT gemockt worden.
+function mockLeaveRoundClient(round) {
+  const client = {
+    query: jest.fn().mockImplementation((sql) => {
+      if (/FROM leave_rounds/i.test(sql)) return Promise.resolve({ rows: round ? [round] : [] });
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    }),
+    release: jest.fn()
+  };
+  pool.connect.mockResolvedValueOnce(client);
+  return client;
+}
+
 function futureDate(daysFromNow = 7) {
   const d = new Date();
   d.setDate(d.getDate() + daysFromNow);
@@ -1547,3 +1562,124 @@ describe('POST /admin/users/:id/replace', () => {
   });
 });
 
+
+// ===== Verlofplanning (verlofrondes) =====
+
+describe('Verlofrondes', () => {
+  const medewerker = { id: 3, name: 'Eva', role: 'medewerker', team_id: 'vlot2' };
+  const beheerder  = { id: 1, name: 'Admin', role: 'admin', team_id: null };
+
+  test('POST /leave-rounds weigert een medewerker', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .post('/api/v1/leave-rounds')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ name: 'Zomer', startDate: '2026-06-29', endDate: '2026-08-30' });
+    expect(res.status).toBe(403);
+  });
+
+  test('POST /leave-rounds vereist naam en datums', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .post('/api/v1/leave-rounds')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Zomer' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/verplicht/i);
+  });
+
+  test('POST /leave-rounds weigert een einddatum vóór de startdatum', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .post('/api/v1/leave-rounds')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Zomer', startDate: '2026-08-30', endDate: '2026-06-29' });
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /leave-rounds weigert een onbekende modus', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .post('/api/v1/leave-rounds')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Zomer', mode: 'onzin', startDate: '2026-06-29', endDate: '2026-08-30' });
+    expect(res.status).toBe(400);
+  });
+
+  test('PUT entries: medewerker mag niet voor iemand anders invullen', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/entries')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ userId: 99, entries: [{ date: '2026-07-06', status: 'verlof' }] });
+    expect(res.status).toBe(403);
+  });
+
+  test('PUT entries weigert een datum buiten de ronde', async () => {
+    mockActiveUser();
+    mockLeaveRoundClient({ status: 'open', start_date: '2026-06-29', end_date: '2026-08-30' });
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/entries')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ entries: [{ date: '2026-01-05', status: 'verlof' }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/buiten de ronde/i);
+  });
+
+  test('PUT entries weigert een onbekende status', async () => {
+    mockActiveUser();
+    mockLeaveRoundClient({ status: 'open', start_date: '2026-06-29', end_date: '2026-08-30' });
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/entries')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ entries: [{ date: '2026-07-06', status: 'vakantie' }] });
+    expect(res.status).toBe(400);
+  });
+
+  test('PUT entries blokkeert een medewerker bij een gesloten ronde', async () => {
+    mockActiveUser();
+    mockLeaveRoundClient({ status: 'gesloten', start_date: '2026-06-29', end_date: '2026-08-30' });
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/entries')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ entries: [{ date: '2026-07-06', status: 'verlof' }] });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/gesloten/i);
+  });
+
+  test('POST submit blokkeert bij een gesloten ronde', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ status: 'gesloten' }] });
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/1/submit')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('PUT submissions vereist een boolean approved', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/submissions/3')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ approved: 'ja' });
+    expect(res.status).toBe(400);
+  });
+
+  test('GET /leave-rounds/:id verbergt een concept voor medewerkers', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Zomer', status: 'concept' }] });
+    const res = await request(app)
+      .get('/api/v1/leave-rounds/1')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('GET /leave-rounds/:id geeft 404 voor een onbekende ronde', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app)
+      .get('/api/v1/leave-rounds/999')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`);
+    expect(res.status).toBe(404);
+  });
+});

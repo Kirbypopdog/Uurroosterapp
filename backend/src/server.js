@@ -537,6 +537,64 @@ const MIGRATIONS = [
         }
       }
     }
+  },
+  {
+    // Verlofplanning: vervangt de gedeelde Excel ("Verlofplanning 2025-2026").
+    // Twee modi in één model:
+    //   'binair'   → kleine vakanties: werken / verlof
+    //   'voorkeur' → zomer: werken / liever_niet / zeker_niet (voorkeuren die
+    //                de planner daarna verdeelt)
+    // Invulling is per DAG; de UI biedt week-snelknoppen omdat de praktijk
+    // per werkweek + weekend apart werkt.
+    name: '034_create_leave_rounds',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS leave_rounds (
+          id                SERIAL PRIMARY KEY,
+          name              TEXT NOT NULL,
+          mode              TEXT NOT NULL DEFAULT 'binair' CHECK (mode IN ('binair', 'voorkeur')),
+          start_date        DATE NOT NULL,
+          end_date          DATE NOT NULL,
+          deadline          DATE,
+          status            TEXT NOT NULL DEFAULT 'concept' CHECK (status IN ('concept', 'open', 'gesloten', 'toegepast')),
+          holiday_period_id TEXT,
+          rules             JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          created_at        TIMESTAMP DEFAULT NOW(),
+          updated_at        TIMESTAMP DEFAULT NOW()
+        )
+      `);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS leave_round_entries (
+          id        SERIAL PRIMARY KEY,
+          round_id  INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+          user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          date      DATE NOT NULL,
+          status    TEXT NOT NULL CHECK (status IN ('werken', 'verlof', 'liever_niet', 'zeker_niet')),
+          note      TEXT DEFAULT '',
+          UNIQUE (round_id, user_id, date)
+        )
+      `);
+      // Eén rij per medewerker per ronde: dekt de "niet goedgekeurd verlof"-tab
+      // (wie heeft nog niet ingediend / nog niet goedgekeurd gekregen).
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS leave_round_submissions (
+          id            SERIAL PRIMARY KEY,
+          round_id      INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+          user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          submitted_at  TIMESTAMP,
+          approved      BOOLEAN,
+          approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          approved_at   TIMESTAMP,
+          response_note TEXT DEFAULT '',
+          UNIQUE (round_id, user_id)
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_entries_round ON leave_round_entries(round_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_entries_user  ON leave_round_entries(user_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_subs_round    ON leave_round_submissions(round_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_rounds_status ON leave_rounds(status)`);
+    }
   }
 ];
 
@@ -4281,6 +4339,281 @@ v1.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke')
 
   await logAudit(req, 'IMPORT', 'system', '', { imported: results.imported, skipped: results.skipped, errorCount: results.errors.length });
   res.json({ ok: true, results });
+});
+
+// ===== VERLOFPLANNING (verlofrondes) =====
+// Vervangt de gedeelde Excel. Twee modi:
+//   'binair'   → kleine vakanties: werken / verlof
+//   'voorkeur' → zomer: werken / liever_niet / zeker_niet
+// De matrix is voor iedereen zichtbaar (zoals de gedeelde Excel), maar
+// invullen mag je enkel voor jezelf — tenzij je de ronde beheert.
+
+const LEAVE_MANAGER_ROLES = ['admin', 'roosterverantwoordelijke'];
+const isLeaveManager = (user) => LEAVE_MANAGER_ROLES.includes(user?.role);
+
+const ROUND_SELECT = `
+  id, name, mode, start_date::text AS "startDate", end_date::text AS "endDate",
+  deadline::text AS deadline, status, holiday_period_id AS "holidayPeriodId",
+  rules, created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+// Alle rondes (iedereen mag ze zien; concepten enkel voor beheerders)
+v1.get('/leave-rounds', requireAuth, async (req, res) => {
+  try {
+    const showConcepts = isLeaveManager(req.user);
+    const result = await pool.query(
+      `SELECT ${ROUND_SELECT} FROM leave_rounds
+       ${showConcepts ? '' : `WHERE status <> 'concept'`}
+       ORDER BY start_date DESC`
+    );
+    res.json({ rounds: result.rows });
+  } catch (err) {
+    console.error('Error fetching leave rounds:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Eén ronde met de volledige matrix (alle medewerkers) + indienstatus
+v1.get('/leave-rounds/:id', requireAuth, async (req, res) => {
+  try {
+    const roundRes = await pool.query(`SELECT ${ROUND_SELECT} FROM leave_rounds WHERE id = $1`, [req.params.id]);
+    if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    const round = roundRes.rows[0];
+    if (round.status === 'concept' && !isLeaveManager(req.user)) {
+      return res.status(403).json({ error: 'Deze ronde is nog niet geopend' });
+    }
+
+    const [entries, subs] = await Promise.all([
+      pool.query(
+        `SELECT user_id AS "userId", date::text AS date, status, note
+         FROM leave_round_entries WHERE round_id = $1`, [req.params.id]),
+      pool.query(
+        `SELECT s.user_id AS "userId", s.submitted_at AS "submittedAt", s.approved,
+                s.approved_by AS "approvedBy", s.approved_at AS "approvedAt",
+                s.response_note AS "responseNote", u.name AS "userName"
+         FROM leave_round_submissions s JOIN users u ON u.id = s.user_id
+         WHERE s.round_id = $1`, [req.params.id]),
+    ]);
+    res.json({ round, entries: entries.rows, submissions: subs.rows });
+  } catch (err) {
+    console.error('Error fetching leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+v1.post('/leave-rounds', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const { name, mode, startDate, endDate, deadline, holidayPeriodId, rules, status } = req.body || {};
+  if (!name || !startDate || !endDate) {
+    return res.status(400).json({ error: 'Naam, startdatum en einddatum zijn verplicht' });
+  }
+  if (mode && !['binair', 'voorkeur'].includes(mode)) {
+    return res.status(400).json({ error: 'Ongeldige modus' });
+  }
+  if (new Date(endDate) < new Date(startDate)) {
+    return res.status(400).json({ error: 'Einddatum ligt voor de startdatum' });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO leave_rounds (name, mode, start_date, end_date, deadline, status, holiday_period_id, rules, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+       RETURNING ${ROUND_SELECT}`,
+      [name, mode || 'binair', startDate, endDate, deadline || null,
+       status === 'open' ? 'open' : 'concept', holidayPeriodId || null,
+       JSON.stringify(rules || {}), req.user.id]
+    );
+    await logAudit(req, 'CREATE', 'settings', String(result.rows[0].id), { type: 'leave_round', name, mode });
+    res.json({ round: result.rows[0] });
+  } catch (err) {
+    console.error('Error creating leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+v1.put('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const { name, mode, startDate, endDate, deadline, status, holidayPeriodId, rules } = req.body || {};
+  if (status && !['concept', 'open', 'gesloten', 'toegepast'].includes(status)) {
+    return res.status(400).json({ error: 'Ongeldige status' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE leave_rounds SET
+         name = COALESCE($2, name), mode = COALESCE($3, mode),
+         start_date = COALESCE($4, start_date), end_date = COALESCE($5, end_date),
+         deadline = $6, status = COALESCE($7, status),
+         holiday_period_id = COALESCE($8, holiday_period_id),
+         rules = COALESCE($9::jsonb, rules), updated_at = NOW()
+       WHERE id = $1 RETURNING ${ROUND_SELECT}`,
+      [req.params.id, name || null, mode || null, startDate || null, endDate || null,
+       deadline === undefined ? null : deadline, status || null, holidayPeriodId || null,
+       rules ? JSON.stringify(rules) : null]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    await logAudit(req, 'UPDATE', 'settings', req.params.id, { type: 'leave_round', status });
+    res.json({ round: result.rows[0] });
+  } catch (err) {
+    console.error('Error updating leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+v1.delete('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM leave_rounds WHERE id = $1 RETURNING name', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    await logAudit(req, 'DELETE', 'settings', req.params.id, { type: 'leave_round', name: result.rows[0].name });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error deleting leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Invulling opslaan. Medewerkers enkel voor zichzelf; beheerders ook voor
+// anderen (nodig om na een voorkeurronde de definitieve verdeling vast te leggen).
+v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
+  const { entries, userId } = req.body || {};
+  if (!Array.isArray(entries)) return res.status(400).json({ error: 'entries moet een array zijn' });
+
+  const targetUserId = userId && isLeaveManager(req.user) ? Number(userId) : req.user.id;
+  if (userId && Number(userId) !== req.user.id && !isLeaveManager(req.user)) {
+    return res.status(403).json({ error: 'Je kan enkel je eigen verlof invullen' });
+  }
+
+  const client = await pool.connect();
+  try {
+    const roundRes = await client.query('SELECT status, start_date, end_date FROM leave_rounds WHERE id = $1', [req.params.id]);
+    if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    const round = roundRes.rows[0];
+    // Een gesloten ronde is enkel nog door beheerders aan te passen
+    if (round.status !== 'open' && !isLeaveManager(req.user)) {
+      return res.status(403).json({ error: 'Deze ronde is gesloten' });
+    }
+
+    const valid = ['werken', 'verlof', 'liever_niet', 'zeker_niet'];
+    const start = new Date(round.start_date), end = new Date(round.end_date);
+    for (const e of entries) {
+      if (!e || !e.date || !valid.includes(e.status)) {
+        return res.status(400).json({ error: `Ongeldige invulling voor ${e && e.date}` });
+      }
+      const d = new Date(e.date);
+      if (d < start || d > end) {
+        return res.status(400).json({ error: `Datum ${e.date} valt buiten de ronde` });
+      }
+    }
+
+    await client.query('BEGIN');
+    // Volledige vervanging van de invulling van deze medewerker in deze ronde
+    await client.query('DELETE FROM leave_round_entries WHERE round_id = $1 AND user_id = $2', [req.params.id, targetUserId]);
+    for (const e of entries) {
+      await client.query(
+        `INSERT INTO leave_round_entries (round_id, user_id, date, status, note)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [req.params.id, targetUserId, e.date, e.status, e.note || '']
+      );
+    }
+    // Zorg dat er een submissierij bestaat (nog niet ingediend)
+    await client.query(
+      `INSERT INTO leave_round_submissions (round_id, user_id) VALUES ($1, $2)
+       ON CONFLICT (round_id, user_id) DO NOTHING`,
+      [req.params.id, targetUserId]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, saved: entries.length });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error saving leave entries:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// Indienen (medewerker bevestigt zijn invulling)
+v1.post('/leave-rounds/:id/submit', requireAuth, async (req, res) => {
+  try {
+    const roundRes = await pool.query('SELECT status FROM leave_rounds WHERE id = $1', [req.params.id]);
+    if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    if (roundRes.rows[0].status !== 'open') return res.status(403).json({ error: 'Deze ronde is gesloten' });
+
+    await pool.query(
+      `INSERT INTO leave_round_submissions (round_id, user_id, submitted_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (round_id, user_id)
+       DO UPDATE SET submitted_at = NOW(), approved = NULL, approved_by = NULL, approved_at = NULL`,
+      [req.params.id, req.user.id]
+    );
+    await logAudit(req, 'UPDATE', 'settings', req.params.id, { type: 'leave_round_submit' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error submitting leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Goedkeuren of afwijzen van één medewerker binnen een ronde
+v1.put('/leave-rounds/:id/submissions/:userId', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const { approved, responseNote } = req.body || {};
+  if (typeof approved !== 'boolean') return res.status(400).json({ error: 'approved moet true of false zijn' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO leave_round_submissions (round_id, user_id, approved, approved_by, approved_at, response_note)
+       VALUES ($1, $2, $3, $4, NOW(), $5)
+       ON CONFLICT (round_id, user_id)
+       DO UPDATE SET approved = $3, approved_by = $4, approved_at = NOW(), response_note = $5
+       RETURNING user_id AS "userId", approved`,
+      [req.params.id, req.params.userId, approved, req.user.id, responseNote || '']
+    );
+    await logAudit(req, approved ? 'APPROVE' : 'REJECT', 'settings', req.params.id,
+      { type: 'leave_round', targetUser: req.params.userId });
+    res.json({ submission: result.rows[0] });
+  } catch (err) {
+    console.error('Error updating leave submission:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Toepassen: goedgekeurd verlof wordt echte afwezigheid, zodat het in de
+// planning en het afwezigheidsoverzicht verschijnt.
+v1.post('/leave-rounds/:id/apply', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const roundRes = await client.query('SELECT name FROM leave_rounds WHERE id = $1', [req.params.id]);
+    if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    const roundName = roundRes.rows[0].name;
+
+    // Enkel dagen met status 'verlof' van goedgekeurde medewerkers
+    const rows = await client.query(
+      `SELECT e.user_id, e.date::text AS date
+       FROM leave_round_entries e
+       JOIN leave_round_submissions s
+         ON s.round_id = e.round_id AND s.user_id = e.user_id
+       WHERE e.round_id = $1 AND e.status = 'verlof' AND s.approved IS TRUE`,
+      [req.params.id]
+    );
+
+    await client.query('BEGIN');
+    let applied = 0;
+    for (const r of rows.rows) {
+      await client.query(
+        `INSERT INTO availability (user_id, date, type, reason, updated_at)
+         VALUES ($1, $2, 'verlof', $3, NOW())
+         ON CONFLICT (user_id, date)
+         DO UPDATE SET type = 'verlof', reason = $3, updated_at = NOW()`,
+        [r.user_id, r.date, `Verlofplanning: ${roundName}`]
+      );
+      applied++;
+    }
+    await client.query(`UPDATE leave_rounds SET status = 'toegepast', updated_at = NOW() WHERE id = $1`, [req.params.id]);
+    await client.query('COMMIT');
+
+    await logAudit(req, 'UPDATE', 'settings', req.params.id, { type: 'leave_round_apply', applied });
+    res.json({ ok: true, applied });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error applying leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
 });
 
 // Reset all data (admin only)

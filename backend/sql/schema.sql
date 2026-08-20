@@ -174,6 +174,51 @@ CREATE INDEX IF NOT EXISTS idx_swap_requests_type ON shift_swap_requests(request
 CREATE INDEX IF NOT EXISTS idx_schedule_drafts_type ON schedule_drafts(type);
 CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id);
 
+-- Verlofplanning: verlofrondes per vakantieperiode.
+-- mode 'binair'   = kleine vakanties (werken / verlof)
+-- mode 'voorkeur' = zomer (werken / liever_niet / zeker_niet)
+CREATE TABLE IF NOT EXISTS leave_rounds (
+  id                SERIAL PRIMARY KEY,
+  name              TEXT NOT NULL,
+  mode              TEXT NOT NULL DEFAULT 'binair' CHECK (mode IN ('binair', 'voorkeur')),
+  start_date        DATE NOT NULL,
+  end_date          DATE NOT NULL,
+  deadline          DATE,
+  status            TEXT NOT NULL DEFAULT 'concept' CHECK (status IN ('concept', 'open', 'gesloten', 'toegepast')),
+  holiday_period_id TEXT,
+  rules             JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMP DEFAULT NOW(),
+  updated_at        TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS leave_round_entries (
+  id        SERIAL PRIMARY KEY,
+  round_id  INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+  user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date      DATE NOT NULL,
+  status    TEXT NOT NULL CHECK (status IN ('werken', 'verlof', 'liever_niet', 'zeker_niet')),
+  note      TEXT DEFAULT '',
+  UNIQUE (round_id, user_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS leave_round_submissions (
+  id            SERIAL PRIMARY KEY,
+  round_id      INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  submitted_at  TIMESTAMP,
+  approved      BOOLEAN,
+  approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at   TIMESTAMP,
+  response_note TEXT DEFAULT '',
+  UNIQUE (round_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_leave_entries_round ON leave_round_entries(round_id);
+CREATE INDEX IF NOT EXISTS idx_leave_entries_user  ON leave_round_entries(user_id);
+CREATE INDEX IF NOT EXISTS idx_leave_subs_round    ON leave_round_submissions(round_id);
+CREATE INDEX IF NOT EXISTS idx_leave_rounds_status ON leave_rounds(status);
+
 -- Migration tracking table (used by runMigrations() in server.js)
 CREATE TABLE IF NOT EXISTS migrations (
   id SERIAL PRIMARY KEY,
