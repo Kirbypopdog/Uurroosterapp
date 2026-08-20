@@ -13510,3 +13510,60 @@ body[data-view-mode="day"] .timeline-day-cell {
     .leave-header-actions { width: 100%; }
     .leave-header-actions .leave-round-select { flex: 1; max-width: none; }
 }
+
+/* ===== VERLOFPLANNING — landingspagina =====
+   Bewust rustig: alleen wat er te doen staat. Het invulwerk zit een tik dieper. */
+.leave-landing-head {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.leave-landing-head h3 { margin: 0 0 2px; font-size: 18px; }
+
+.leave-group { margin-bottom: 18px; }
+.leave-group-title {
+    font-size: 12px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--ink-3); margin-bottom: 8px;
+}
+
+.leave-card {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 14px 14px; margin-bottom: 8px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-family: inherit; text-align: left; cursor: pointer;
+    transition: border-color .12s, box-shadow .12s;
+}
+.leave-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-sm); }
+.leave-card-main { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.leave-card-main strong { font-size: 14.5px; color: var(--text-primary); }
+.leave-card-chevron { color: var(--ink-3); flex: none; }
+
+.leave-card-status {
+    font-size: 11px; font-weight: 600; padding: 4px 10px;
+    border-radius: 20px; white-space: nowrap; flex: none;
+}
+.leave-card-klaar { background: var(--ok-bg); color: var(--ok); }
+.leave-card-bezig { background: var(--alert-warning-bg); color: var(--alert-warning-text); }
+.leave-card-open  { background: var(--surface-2); color: var(--ink-3); }
+
+.leave-landing-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.leave-landing-actions .btn { flex: 1; min-width: 140px; }
+.leave-submit-hint { margin-top: 8px; text-align: center; }
+
+.leave-back {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: none; border: none; padding: 6px 0; margin-bottom: 6px;
+    color: var(--text-secondary); font-family: inherit; font-size: 13px;
+    font-weight: 600; cursor: pointer;
+}
+.leave-back:hover { color: var(--text-primary); }
+.leave-detail-head { margin-bottom: 14px; }
+.leave-detail-head h3 { margin: 0 0 2px; font-size: 18px; }
+.leave-round-delete { color: var(--danger-color); }
+
+@media (max-width: 480px) {
+    .leave-landing-actions { flex-direction: column-reverse; }
+    .leave-landing-actions .btn { width: 100%; }
+    .leave-card-status { font-size: 10.5px; padding: 3px 8px; }
+}

@@ -81,14 +81,16 @@ function leaveWeekLabel(week) {
     return `${fmt(first)} – ${fmt(last)}`;
 }
 
-// Tabs: alle binaire blokken samen als "Kleine vakanties", de
-// voorkeurblokken als "Zomer" — net als de twee tabs in de Excel.
-function leaveTabsOf(blocks) {
-    const tabs = [];
-    if (blocks.some(b => b.mode === 'binair'))   tabs.push({ id: 'klein', label: 'Kleine vakanties', mode: 'binair' });
-    if (blocks.some(b => b.mode === 'voorkeur')) tabs.push({ id: 'zomer', label: 'Zomer', mode: 'voorkeur' });
-    tabs.push({ id: 'overzicht', label: 'Overzicht iedereen' });
-    return tabs;
+// Alle dagen van een blok (voor de voortgangsteller op de landingspagina)
+function leaveDaysOfBlock(block) {
+    return leaveWeeksOfBlock(block).flatMap(w => w.days);
+}
+
+// Hoever staat iemand met één vakantie?
+function leaveBlockProgress(block, entryMap) {
+    const dagen = leaveDaysOfBlock(block);
+    const ingevuld = dagen.filter(d => entryMap[d]).length;
+    return { totaal: dagen.length, ingevuld, klaar: ingevuld === dagen.length && dagen.length > 0 };
 }
 
 // ===== HOOFDWEERGAVE =====
@@ -134,14 +136,33 @@ function renderLeaveEmptyState() {
         </div>`;
 }
 
+// Router: standaard een rustige landingspagina met alleen de vakanties en
+// hun status. Pas als je er één aantikt zie je het invulwerk.
 function renderLeaveRoundHtml(rounds, data) {
     const { round, blocks = [], entries, submissions } = data;
+    const scherm = AppState.leaveScreen || 'landing';
+
+    if (scherm === 'overzicht') return renderLeaveOverzichtScherm(round, blocks, entries, submissions);
+    if (scherm === 'blok') {
+        const block = blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
+        if (block) return renderLeaveBlokScherm(round, block, entries, submissions);
+        AppState.leaveScreen = 'landing';
+    }
+    return renderLeaveLanding(rounds, round, blocks, entries, submissions);
+}
+
+// ===== LANDINGSPAGINA =====
+
+function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
     const me = Number(AppState.currentUser?.id);
     const mySub = submissions.find(s => Number(s.userId) === me);
+    const entryMap = {};
+    entries.filter(e => Number(e.userId) === me).forEach(e => { entryMap[e.date] = e.status; });
 
-    const tabs = leaveTabsOf(blocks);
-    if (!tabs.some(t => t.id === AppState.leaveTab)) AppState.leaveTab = tabs[0]?.id || 'overzicht';
-    const tab = AppState.leaveTab;
+    const klein = blocks.filter(b => b.mode === 'binair');
+    const zomer = blocks.filter(b => b.mode === 'voorkeur');
+    const alleKlaar = blocks.length > 0 && blocks.every(b => leaveBlockProgress(b, entryMap).klaar);
+    const bewerkbaar = round.status === 'open';
 
     const roundPicker = rounds.length > 1 ? `
         <select id="leave-round-select" class="form-input leave-round-select">
@@ -150,32 +171,117 @@ function renderLeaveRoundHtml(rounds, data) {
             </option>`).join('')}
         </select>` : '';
 
+    const groep = (titel, lijst) => !lijst.length ? '' : `
+        <div class="leave-group">
+            <div class="leave-group-title">${titel}</div>
+            ${lijst.map(b => renderLeaveBlockCard(b, entryMap)).join('')}
+        </div>`;
+
     return `
-        <div class="leave-header-card">
-            <div class="leave-header-top">
-                <div>
-                    <h3>${escapeHtml(round.name)}</h3>
-                    <p class="text-muted text-sm">
-                        ${blocks.length} vakantieperiode${blocks.length === 1 ? '' : 's'}
-                        ${round.deadline ? ` · indienen vóór ${escapeHtml(round.deadline)}` : ''}
-                    </p>
+        <div class="leave-landing-head">
+            <div>
+                <h3>${escapeHtml(round.name)}</h3>
+                ${round.deadline ? `<p class="text-muted text-sm">Indienen vóór ${escapeHtml(round.deadline)}</p>` : ''}
+            </div>
+            <div class="leave-header-actions">
+                ${roundPicker}
+                ${canManageLeave() ? `
+                    <button class="btn btn-secondary btn-sm" id="leave-new-round">+ Nieuw</button>
+                    <button class="btn-icon-only leave-round-delete" id="leave-delete" title="Ronde verwijderen">
+                        ${IconHelper.html(ICONS.delete, 'sm')}
+                    </button>` : ''}
+            </div>
+        </div>
+
+        ${renderLeaveStatusBanner(round, mySub)}
+
+        ${groep('Kleine vakanties', klein)}
+        ${groep('Zomer', zomer)}
+
+        <div class="leave-landing-actions">
+            ${bewerkbaar ? `<button class="btn btn-primary" id="leave-submit" ${alleKlaar ? '' : 'disabled'}>
+                ${mySub?.submittedAt ? 'Opnieuw indienen' : 'Indienen'}
+            </button>` : ''}
+            <button class="btn btn-secondary" id="leave-goto-overzicht">Overzicht iedereen</button>
+        </div>
+        ${bewerkbaar && !alleKlaar
+            ? '<p class="text-muted text-xs leave-submit-hint">Vul alle vakanties in om te kunnen indienen.</p>'
+            : ''}
+    `;
+}
+
+function renderLeaveBlockCard(block, entryMap) {
+    const p = leaveBlockProgress(block, entryMap);
+    const weken = leaveWeeksOfBlock(block).length;
+    const status = p.klaar
+        ? '<span class="leave-card-status leave-card-klaar">ingevuld</span>'
+        : p.ingevuld > 0
+            ? `<span class="leave-card-status leave-card-bezig">${p.ingevuld}/${p.totaal} dagen</span>`
+            : '<span class="leave-card-status leave-card-open">nog niet ingevuld</span>';
+    return `
+        <button class="leave-card" data-open-block="${block.id}">
+            <div class="leave-card-main">
+                <strong>${escapeHtml(block.name)}</strong>
+                <span class="text-muted text-xs">
+                    ${leaveDatumKort(block.startDate)} – ${leaveDatumKort(block.endDate)} · ${weken} week${weken === 1 ? '' : 'en'}
+                </span>
+            </div>
+            ${status}
+            ${IconHelper.html('chevron-right', 'sm', 'leave-card-chevron')}
+        </button>`;
+}
+
+function leaveDatumKort(iso) {
+    return parseDateOnly(iso).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+}
+
+// ===== DETAIL: één vakantie =====
+
+function renderLeaveBlokScherm(round, block, entries, submissions) {
+    const me = Number(AppState.currentUser?.id);
+    const entryMap = {};
+    entries.filter(e => Number(e.userId) === me).forEach(e => { entryMap[e.date] = e.status; });
+    AppState.leaveDraft = { ...(AppState.leaveDraft || {}), ...entryMap };
+
+    const weergave = AppState.leaveFillMode || 'week';
+    const bewerkbaar = round.status === 'open' || canManageLeave();
+
+    return `
+        <button class="leave-back" id="leave-back">${IconHelper.html('chevron-left', 'sm')} Alle vakanties</button>
+        <div class="leave-detail-head">
+            <h3>${escapeHtml(block.name)}</h3>
+            <p class="text-muted text-sm">
+                ${leaveDatumKort(block.startDate)} – ${leaveDatumKort(block.endDate)} ·
+                ${block.mode === 'voorkeur' ? 'geef je voorkeur' : 'werken of verlof'}
+            </p>
+        </div>
+        <div class="leave-fill">
+            <div class="leave-fill-toolbar">
+                <div class="leave-viewtoggle">
+                    <button class="leave-viewtoggle-btn ${weergave === 'week' ? 'active' : ''}" data-leave-fillmode="week">Per week</button>
+                    <button class="leave-viewtoggle-btn ${weergave === 'dag' ? 'active' : ''}" data-leave-fillmode="dag">Per dag</button>
                 </div>
-                <div class="leave-header-actions">
-                    ${roundPicker}
-                    ${canManageLeave() ? '<button class="btn btn-secondary btn-sm" id="leave-new-round">+ Nieuwe ronde</button>' : ''}
+                <div class="leave-legend">
+                    ${leaveOptionsFor(block.mode).map(s =>
+                        `<span class="leave-legend-chip ${LEAVE_STATUS[s].klasse}">${LEAVE_STATUS[s].label}</span>`).join('')}
                 </div>
             </div>
-            ${renderLeaveStatusBanner(round, mySub)}
-        </div>
+            <div id="leave-fill-body">
+                ${weergave === 'dag'
+                    ? renderLeaveFillDays(block, AppState.leaveDraft, bewerkbaar)
+                    : renderLeaveFillWeeks(block, AppState.leaveDraft, bewerkbaar)}
+            </div>
+            ${bewerkbaar ? `
+                <div class="leave-fill-actions">
+                    <button class="btn btn-primary" id="leave-save-block">Bewaren en terug</button>
+                </div>` : ''}
+        </div>`;
+}
 
-        <div class="leave-tabs">
-            ${tabs.map(t => `<button class="leave-tab ${tab === t.id ? 'active' : ''}" data-leave-tab="${t.id}">${t.label}</button>`).join('')}
-        </div>
-
-        ${tab === 'overzicht'
-            ? renderLeaveMatrix(round, blocks, entries, submissions)
-            : renderLeaveFill(round, blocks.filter(b => b.mode === tabs.find(t => t.id === tab)?.mode), entries, mySub)}
-    `;
+function renderLeaveOverzichtScherm(round, blocks, entries, submissions) {
+    return `
+        <button class="leave-back" id="leave-back">${IconHelper.html('chevron-left', 'sm')} Terug</button>
+        ${renderLeaveMatrix(round, blocks, entries, submissions)}`;
 }
 
 function renderLeaveStatusBanner(round, mySub) {
@@ -190,54 +296,6 @@ function renderLeaveStatusBanner(round, mySub) {
 }
 
 // ===== INVULLEN =====
-
-function renderLeaveFill(round, blocks, entries, mySub) {
-    const me = Number(AppState.currentUser?.id);
-    const entryMap = {};
-    entries.filter(e => Number(e.userId) === me).forEach(e => { entryMap[e.date] = e.status; });
-    AppState.leaveDraft = { ...(AppState.leaveDraft || {}), ...entryMap };
-
-    const weergave = AppState.leaveFillMode || 'week';
-    const bewerkbaar = round.status === 'open' || canManageLeave();
-    const mode = blocks[0]?.mode || 'binair';
-
-    if (!blocks.length) return '<p class="no-items-text">Geen vakantieperiodes in deze categorie.</p>';
-
-    return `
-        <div class="leave-fill">
-            <div class="leave-fill-toolbar">
-                <div class="leave-viewtoggle">
-                    <button class="leave-viewtoggle-btn ${weergave === 'week' ? 'active' : ''}" data-leave-fillmode="week">Per week</button>
-                    <button class="leave-viewtoggle-btn ${weergave === 'dag' ? 'active' : ''}" data-leave-fillmode="dag">Per dag</button>
-                </div>
-                <div class="leave-legend">
-                    ${leaveOptionsFor(mode).map(s =>
-                        `<span class="leave-legend-chip ${LEAVE_STATUS[s].klasse}">${LEAVE_STATUS[s].label}</span>`).join('')}
-                </div>
-            </div>
-            <div id="leave-fill-body">${renderLeaveFillBlocks(blocks, entryMap, bewerkbaar, weergave)}</div>
-            ${bewerkbaar ? `
-                <div class="leave-fill-actions">
-                    <button class="btn btn-secondary" id="leave-save">Opslaan</button>
-                    <button class="btn btn-primary" id="leave-submit">
-                        ${mySub?.submittedAt ? 'Opnieuw indienen' : 'Indienen'}
-                    </button>
-                </div>` : ''}
-        </div>`;
-}
-
-function renderLeaveFillBlocks(blocks, entryMap, bewerkbaar, weergave) {
-    return blocks.map(block => `
-        <div class="leave-block">
-            <div class="leave-block-head">
-                <strong>${escapeHtml(block.name)}</strong>
-                <span class="text-muted text-xs">${escapeHtml(block.startDate)} – ${escapeHtml(block.endDate)}</span>
-            </div>
-            ${weergave === 'dag'
-                ? renderLeaveFillDays(block, entryMap, bewerkbaar)
-                : renderLeaveFillWeeks(block, entryMap, bewerkbaar)}
-        </div>`).join('');
-}
 
 function renderLeaveFillWeeks(block, entryMap, bewerkbaar) {
     const opties = leaveOptionsFor(block.mode);
@@ -388,19 +446,39 @@ function bindLeaveEvents(container, data) {
     const { round, blocks = [] } = data;
 
     container.querySelector('#leave-new-round')?.addEventListener('click', openLeaveRoundModal);
+    container.querySelector('#leave-delete')?.addEventListener('click', () => deleteLeaveRound(round));
     container.querySelector('#leave-round-select')?.addEventListener('change', e => {
         AppState.leaveRoundId = Number(e.target.value);
         AppState.leaveDraft = {};
+        AppState.leaveScreen = 'landing';
         renderLeave();
     });
-    container.querySelectorAll('[data-leave-tab]').forEach(btn =>
-        btn.addEventListener('click', () => { AppState.leaveTab = btn.dataset.leaveTab; renderLeave(); }));
+
+    // Navigatie tussen landing, één vakantie en het overzicht
+    container.querySelectorAll('[data-open-block]').forEach(btn =>
+        btn.addEventListener('click', () => {
+            AppState.leaveBlockId = btn.dataset.openBlock;
+            AppState.leaveScreen = 'blok';
+            renderLeave();
+        }));
+    container.querySelector('#leave-back')?.addEventListener('click', () => {
+        AppState.leaveScreen = 'landing';
+        renderLeave();
+    });
+    container.querySelector('#leave-goto-overzicht')?.addEventListener('click', () => {
+        AppState.leaveScreen = 'overzicht';
+        renderLeave();
+    });
+
     container.querySelectorAll('[data-leave-fillmode]').forEach(btn =>
         btn.addEventListener('click', () => { AppState.leaveFillMode = btn.dataset.leaveFillmode; renderLeave(); }));
 
     bindLeaveChoiceButtons(container, blocks);
 
-    container.querySelector('#leave-save')?.addEventListener('click', () => saveLeaveDraft(round, false));
+    // Bewaren in het detailscherm keert terug naar het overzicht
+    container.querySelector('#leave-save-block')?.addEventListener('click', async () => {
+        await saveLeaveDraft(round, false, { terug: true });
+    });
     container.querySelector('#leave-submit')?.addEventListener('click', () => saveLeaveDraft(round, true));
     container.querySelector('#leave-close')?.addEventListener('click', e => closeLeaveRound(round, Number(e.currentTarget.dataset.open || 0)));
     container.querySelector('#leave-apply')?.addEventListener('click', () => applyLeaveRound(round));
@@ -435,14 +513,16 @@ function refreshLeaveFillBody(blocks) {
     const body = document.getElementById('leave-fill-body');
     if (!body) return;
     const round = AppState.leaveRound?.round;
-    const tabMode = AppState.leaveTab === 'zomer' ? 'voorkeur' : 'binair';
-    const zichtbaar = blocks.filter(b => b.mode === tabMode);
+    const block = blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
+    if (!block) return;
     const bewerkbaar = round?.status === 'open' || canManageLeave();
-    body.innerHTML = renderLeaveFillBlocks(zichtbaar, AppState.leaveDraft, bewerkbaar, AppState.leaveFillMode || 'week');
+    body.innerHTML = (AppState.leaveFillMode === 'dag')
+        ? renderLeaveFillDays(block, AppState.leaveDraft, bewerkbaar)
+        : renderLeaveFillWeeks(block, AppState.leaveDraft, bewerkbaar);
     bindLeaveChoiceButtons(body, blocks);
 }
 
-async function saveLeaveDraft(round, ookIndienen) {
+async function saveLeaveDraft(round, ookIndienen, opties = {}) {
     const entries = Object.entries(AppState.leaveDraft || {})
         .filter(([, status]) => status)
         .map(([date, status]) => ({ date, status }));
@@ -456,6 +536,7 @@ async function saveLeaveDraft(round, ookIndienen) {
         } else {
             showToast('Opgeslagen', 'success');
         }
+        if (opties.terug) AppState.leaveScreen = 'landing';
         renderLeave();
     } catch (err) {
         console.error('Verlof opslaan mislukt:', err);
@@ -489,6 +570,22 @@ async function closeLeaveRound(round, aantalOpen) {
         renderLeave();
     } catch (err) {
         showToast('Sluiten mislukt: ' + getUserFriendlyError(err), 'error');
+    }
+}
+
+async function deleteLeaveRound(round) {
+    if (!await showConfirm(
+        `Verlofronde "${round.name}" verwijderen? Alle ingevulde verlofkeuzes van deze ronde gaan mee weg.\n\nAl toegepaste afwezigheden in de planning blijven staan.`,
+        'Ronde verwijderen')) return;
+    try {
+        await dataApiFetch(`/leave-rounds/${round.id}`, { method: 'DELETE' });
+        AppState.leaveRoundId = null;
+        AppState.leaveScreen = 'landing';
+        AppState.leaveDraft = {};
+        showToast('Verlofronde verwijderd', 'success');
+        renderLeave();
+    } catch (err) {
+        showToast('Verwijderen mislukt: ' + getUserFriendlyError(err), 'error');
     }
 }
 
@@ -644,7 +741,7 @@ function openLeaveRoundModal() {
             sluit();
             AppState.leaveRoundId = res.round.id;
             AppState.leaveDraft = {};
-            AppState.leaveTab = null;
+            AppState.leaveScreen = 'landing';
             showToast(`Verlofronde "${naam}" geopend`, 'success');
             renderLeave();
         } catch (err) {
