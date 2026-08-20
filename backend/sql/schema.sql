@@ -192,6 +192,22 @@ CREATE TABLE IF NOT EXISTS leave_rounds (
   updated_at        TIMESTAMP DEFAULT NOW()
 );
 
+-- Een ronde dekt een heel schooljaar en bestaat uit blokken: herfst, kerst,
+-- krokus en paas (modus 'binair') plus de zomer (modus 'voorkeur').
+-- Elk blok verwijst naar een vakantieperiode uit settings.holidayPeriods.
+CREATE TABLE IF NOT EXISTS leave_round_blocks (
+  id                SERIAL PRIMARY KEY,
+  round_id          INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+  name              TEXT NOT NULL,
+  mode              TEXT NOT NULL DEFAULT 'binair' CHECK (mode IN ('binair', 'voorkeur')),
+  start_date        DATE NOT NULL,
+  end_date          DATE NOT NULL,
+  holiday_period_id TEXT,
+  sort_order        INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_leave_blocks_round ON leave_round_blocks(round_id);
+
 CREATE TABLE IF NOT EXISTS leave_round_entries (
   id        SERIAL PRIMARY KEY,
   round_id  INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,

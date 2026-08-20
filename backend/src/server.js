@@ -595,6 +595,38 @@ const MIGRATIONS = [
       await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_subs_round    ON leave_round_submissions(round_id)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_rounds_status ON leave_rounds(status)`);
     }
+  },
+  {
+    // Een verlofronde dekt een heel SCHOOLJAAR, niet één vakantie: in de
+    // Excel stonden herfst/kerst/krokus/paas samen in één tab, met de zomer
+    // (andere regels) in een aparte tab. Een ronde bestaat daarom uit
+    // blokken die elk naar een vakantieperiode uit de instellingen wijzen
+    // en een eigen modus hebben. De modus verhuist dus van ronde naar blok.
+    name: '035_leave_round_blocks',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS leave_round_blocks (
+          id                SERIAL PRIMARY KEY,
+          round_id          INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+          name              TEXT NOT NULL,
+          mode              TEXT NOT NULL DEFAULT 'binair' CHECK (mode IN ('binair', 'voorkeur')),
+          start_date        DATE NOT NULL,
+          end_date          DATE NOT NULL,
+          holiday_period_id TEXT,
+          sort_order        INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_blocks_round ON leave_round_blocks(round_id)`);
+
+      // Bestaande rondes (staging-testdata) krijgen één blok dat de hele
+      // ronde beslaat, zodat ze blijven werken onder het nieuwe model.
+      await client.query(`
+        INSERT INTO leave_round_blocks (round_id, name, mode, start_date, end_date, holiday_period_id, sort_order)
+        SELECT r.id, r.name, r.mode, r.start_date, r.end_date, r.holiday_period_id, 0
+        FROM leave_rounds r
+        WHERE NOT EXISTS (SELECT 1 FROM leave_round_blocks b WHERE b.round_id = r.id)
+      `);
+    }
   }
 ];
 
@@ -4382,7 +4414,7 @@ v1.get('/leave-rounds/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Deze ronde is nog niet geopend' });
     }
 
-    const [entries, subs] = await Promise.all([
+    const [entries, subs, blocks] = await Promise.all([
       pool.query(
         `SELECT user_id AS "userId", date::text AS date, status, note
          FROM leave_round_entries WHERE round_id = $1`, [req.params.id]),
@@ -4392,39 +4424,69 @@ v1.get('/leave-rounds/:id', requireAuth, async (req, res) => {
                 s.response_note AS "responseNote", u.name AS "userName"
          FROM leave_round_submissions s JOIN users u ON u.id = s.user_id
          WHERE s.round_id = $1`, [req.params.id]),
+      pool.query(
+        `SELECT id, name, mode, start_date::text AS "startDate", end_date::text AS "endDate",
+                holiday_period_id AS "holidayPeriodId", sort_order AS "sortOrder"
+         FROM leave_round_blocks WHERE round_id = $1 ORDER BY sort_order, start_date`, [req.params.id]),
     ]);
-    res.json({ round, entries: entries.rows, submissions: subs.rows });
+    res.json({ round, blocks: blocks.rows, entries: entries.rows, submissions: subs.rows });
   } catch (err) {
     console.error('Error fetching leave round:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
+// Een ronde wordt aangemaakt mét zijn blokken (de vakanties van het
+// schooljaar). De ronde-datums zijn de omhullende van die blokken.
 v1.post('/leave-rounds', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
-  const { name, mode, startDate, endDate, deadline, holidayPeriodId, rules, status } = req.body || {};
-  if (!name || !startDate || !endDate) {
-    return res.status(400).json({ error: 'Naam, startdatum en einddatum zijn verplicht' });
+  const { name, deadline, rules, status, blocks } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'Naam is verplicht' });
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    return res.status(400).json({ error: 'Kies minstens één vakantieperiode' });
   }
-  if (mode && !['binair', 'voorkeur'].includes(mode)) {
-    return res.status(400).json({ error: 'Ongeldige modus' });
+  for (const b of blocks) {
+    if (!b || !b.name || !b.startDate || !b.endDate) {
+      return res.status(400).json({ error: 'Elk blok heeft een naam, start- en einddatum nodig' });
+    }
+    if (b.mode && !['binair', 'voorkeur'].includes(b.mode)) {
+      return res.status(400).json({ error: 'Ongeldige modus' });
+    }
+    if (new Date(b.endDate) < new Date(b.startDate)) {
+      return res.status(400).json({ error: `Einddatum ligt voor de startdatum bij "${b.name}"` });
+    }
   }
-  if (new Date(endDate) < new Date(startDate)) {
-    return res.status(400).json({ error: 'Einddatum ligt voor de startdatum' });
-  }
+
+  const startDate = blocks.reduce((m, b) => (b.startDate < m ? b.startDate : m), blocks[0].startDate);
+  const endDate   = blocks.reduce((m, b) => (b.endDate   > m ? b.endDate   : m), blocks[0].endDate);
+
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
-      `INSERT INTO leave_rounds (name, mode, start_date, end_date, deadline, status, holiday_period_id, rules, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+    await client.query('BEGIN');
+    const result = await client.query(
+      `INSERT INTO leave_rounds (name, mode, start_date, end_date, deadline, status, rules, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
        RETURNING ${ROUND_SELECT}`,
-      [name, mode || 'binair', startDate, endDate, deadline || null,
-       status === 'open' ? 'open' : 'concept', holidayPeriodId || null,
-       JSON.stringify(rules || {}), req.user.id]
+      [name, blocks[0].mode || 'binair', startDate, endDate, deadline || null,
+       status === 'concept' ? 'concept' : 'open', JSON.stringify(rules || {}), req.user.id]
     );
-    await logAudit(req, 'CREATE', 'settings', String(result.rows[0].id), { type: 'leave_round', name, mode });
-    res.json({ round: result.rows[0] });
+    const round = result.rows[0];
+    let i = 0;
+    for (const b of blocks) {
+      await client.query(
+        `INSERT INTO leave_round_blocks (round_id, name, mode, start_date, end_date, holiday_period_id, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [round.id, b.name, b.mode || 'binair', b.startDate, b.endDate, b.holidayPeriodId || null, i++]
+      );
+    }
+    await client.query('COMMIT');
+    await logAudit(req, 'CREATE', 'settings', String(round.id), { type: 'leave_round', name, blocks: blocks.length });
+    res.json({ round });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Error creating leave round:', err);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 
@@ -4489,13 +4551,21 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
     }
 
     const valid = ['werken', 'verlof', 'liever_niet', 'zeker_niet'];
-    const start = new Date(round.start_date), end = new Date(round.end_date);
+    // Een ronde beslaat een heel schooljaar met gaten ertussen (schoolweken).
+    // Een dag moet dus binnen een van de vakantieblokken vallen, niet enkel
+    // tussen de omhullende rondedatums.
+    const blockRes = await client.query(
+      'SELECT start_date, end_date FROM leave_round_blocks WHERE round_id = $1', [req.params.id]);
+    const blokken = blockRes.rows.length
+      ? blockRes.rows.map(b => [new Date(b.start_date), new Date(b.end_date)])
+      : [[new Date(round.start_date), new Date(round.end_date)]];
+
     for (const e of entries) {
       if (!e || !e.date || !valid.includes(e.status)) {
         return res.status(400).json({ error: `Ongeldige invulling voor ${e && e.date}` });
       }
       const d = new Date(e.date);
-      if (d < start || d > end) {
+      if (!blokken.some(([s, t]) => d >= s && d <= t)) {
         return res.status(400).json({ error: `Datum ${e.date} valt buiten de ronde` });
       }
     }

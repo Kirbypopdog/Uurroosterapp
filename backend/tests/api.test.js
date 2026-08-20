@@ -1578,14 +1578,24 @@ describe('Verlofrondes', () => {
     expect(res.status).toBe(403);
   });
 
-  test('POST /leave-rounds vereist naam en datums', async () => {
+  test('POST /leave-rounds vereist een naam', async () => {
     mockActiveUser();
     const res = await request(app)
       .post('/api/v1/leave-rounds')
       .set('Authorization', `Bearer ${makeToken(beheerder)}`)
-      .send({ name: 'Zomer' });
+      .send({ blocks: [{ name: 'Zomer', startDate: '2026-06-29', endDate: '2026-08-30' }] });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/verplicht/i);
+  });
+
+  test('POST /leave-rounds vereist minstens één vakantieblok', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .post('/api/v1/leave-rounds')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Schooljaar 2026' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/vakantieperiode/i);
   });
 
   test('POST /leave-rounds weigert een einddatum vóór de startdatum', async () => {
@@ -1593,7 +1603,7 @@ describe('Verlofrondes', () => {
     const res = await request(app)
       .post('/api/v1/leave-rounds')
       .set('Authorization', `Bearer ${makeToken(beheerder)}`)
-      .send({ name: 'Zomer', startDate: '2026-08-30', endDate: '2026-06-29' });
+      .send({ name: 'Zomer', blocks: [{ name: 'Zomer', startDate: '2026-08-30', endDate: '2026-06-29' }] });
     expect(res.status).toBe(400);
   });
 
@@ -1602,7 +1612,7 @@ describe('Verlofrondes', () => {
     const res = await request(app)
       .post('/api/v1/leave-rounds')
       .set('Authorization', `Bearer ${makeToken(beheerder)}`)
-      .send({ name: 'Zomer', mode: 'onzin', startDate: '2026-06-29', endDate: '2026-08-30' });
+      .send({ name: 'Zomer', blocks: [{ name: 'Zomer', mode: 'onzin', startDate: '2026-06-29', endDate: '2026-08-30' }] });
     expect(res.status).toBe(400);
   });
 
