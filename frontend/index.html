@@ -16,6 +16,19 @@
         s.onerror=function(){document.documentElement.classList.add('no-lucide')};
         document.head.appendChild(s);
     "></script>
+    <script>
+        // Voorkomt een flits van het loginscherm bij herladen met een actieve
+        // sessie: #login-container staat zichtbaar in de HTML en werd pas
+        // verborgen NADAT de /me-sessiecheck terugkwam (lokaal ~130ms, op een
+        // trage mobiele verbinding een stuk langer en duidelijk zichtbaar).
+        // Deze check leest sessionStorage synchroon vóór de eerste paint.
+        // showLogin() haalt de klasse weer weg als de sessie ongeldig blijkt.
+        try {
+            if (sessionStorage.getItem('hetvlot_token')) {
+                document.documentElement.classList.add('session-restoring');
+            }
+        } catch (e) { /* sessionStorage geblokkeerd — dan gewoon login tonen */ }
+    </script>
 </head>
 <body>
     <!-- Login Scherm -->

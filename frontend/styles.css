@@ -849,8 +849,11 @@ body.dark-mode .role-switcher select {
     border-color: var(--line);
 }
 
-/* ===== SIDEBAR COLLAPSED STATE (desktop only) ===== */
-@media (min-width: 861px) {
+/* ===== SIDEBAR COLLAPSED STATE (desktop only) =====
+   Ondergrens is 901px, niet 861px: onder 900px is de zijbalk een off-canvas
+   drawer. Bij 861-900px golden bééde regelsets, waardoor de drawer zijn
+   labels verloor en alleen icoontjes toonde. */
+@media (min-width: 901px) {
     body.nav-collapsed #app-container {
         grid-template-columns: var(--sidebar-collapsed-width) 1fr;
     }
@@ -1235,6 +1238,13 @@ body {
 
 /* Utility class to hide elements */
 .hidden {
+    display: none !important;
+}
+
+/* Zie de inline sessiecheck in index.html: verbergt het loginscherm meteen
+   bij herladen met een actieve sessie, zodat het niet even opflitst voordat
+   de /me-check antwoordt. */
+html.session-restoring #login-container {
     display: none !important;
 }
 
@@ -8940,6 +8950,13 @@ body[data-view-mode="day"] .timeline-day-cell {
         overflow: hidden;
     }
 
+    /* De inklap-knop hoort bij de vaste desktop-zijbalk. Op mobiel is de
+       zijbalk een drawer, dus deed de knop niets zichtbaars — hij zette
+       enkel een klasse die alleen ≥901px iets uitricht. Weglaten. */
+    #sidebar-collapse-btn {
+        display: none;
+    }
+
     .app-sidebar {
         position: fixed;
         inset: 0 auto 0 0;
@@ -9676,6 +9693,20 @@ body[data-view-mode="day"] .timeline-day-cell {
        knop eenzaam rechts. Zonder spacer volgen ze gewoon de leesrichting. */
     .controls-spacer {
         display: none;
+    }
+
+    /* Planning: Filters-knop naast de titel i.p.v. op een eigen regel
+       eronder. De knop zit in een sibling-container van .view-header, dus
+       trekken we die omhoog tot op titelhoogte en lijnen rechts uit.
+       Alleen zolang de filterrij ingeklapt is — uitgeklapt wordt het weer
+       een gewone kaart ónder de titel (anders overlapt hij de kop). */
+    #planning-view .planning-controls:not(:has(#planning-filters-row:not(.hidden))) {
+        margin-top: -46px;
+        margin-bottom: 14px;
+    }
+
+    #planning-view .planning-controls:not(:has(#planning-filters-row:not(.hidden))) .planning-controls-row {
+        justify-content: flex-end;
     }
 
     .availability-legend-inline {

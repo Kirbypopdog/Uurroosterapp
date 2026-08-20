@@ -108,6 +108,9 @@ async function checkSession() {
 }
 
 function showLogin() {
+    // Sessie blijkt ongeldig/afwezig → de anti-flits-klasse uit index.html
+    // moet weg, anders blijft het loginscherm verborgen.
+    document.documentElement.classList.remove('session-restoring');
     DOM.loginContainer.classList.remove('hidden');
     DOM.appContainer.classList.add('hidden');
     DOM.usernameInput.value = '';
