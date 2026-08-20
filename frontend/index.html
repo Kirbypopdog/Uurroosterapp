@@ -83,6 +83,7 @@
                 <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i><span class="nav-label"> Planning</span></button>
                 <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i><span class="nav-label"> Afwezigheid</span></button>
                 <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i><span class="nav-label"> Ruilen</span></button>
+                <button class="nav-btn" data-view="leave"><i data-lucide="palmtree" class="nav-icon"></i><span class="nav-label"> Verlof</span></button>
                 <div class="sidebar-nav-label nav-group-admin">Beheer</div>
                 <button class="nav-btn nav-group-admin" data-view="employees"><i data-lucide="users" class="nav-icon"></i><span class="nav-label"> Medewerkers</span></button>
                 <button class="nav-btn nav-group-admin" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i><span class="nav-label"> Rooster bouwen</span></button>
@@ -261,6 +262,19 @@
                 <p class="view-description">Overzicht van dienstruilverzoeken tussen medewerkers</p>
             </div>
             <div id="swaps-list"></div>
+            <div class="section-loading-overlay hidden">
+                <div class="section-loading-spinner"></div>
+                <span class="section-loading-text"></span>
+            </div>
+        </div>
+
+        <!-- Verlofplanning View -->
+        <div id="leave-view" class="view">
+            <div class="view-header">
+                <h2>Verlofplanning</h2>
+                <p class="view-description">Duid je verlof aan voor de vakantieperiodes</p>
+            </div>
+            <div id="leave-content"></div>
             <div class="section-loading-overlay hidden">
                 <div class="section-loading-spinner"></div>
                 <span class="section-loading-text"></span>
@@ -817,6 +831,7 @@
     <script src="app-planner.js?v=20260611a"></script>
     <script src="app-shifts.js?v=20260611a"></script>
     <script src="app-swaps.js?v=20260611a"></script>
+    <script src="app-leave.js?v=20260820a"></script>
     <script src="app-employees.js?v=20260611a"></script>
     <script src="app-availability.js?v=20260611a"></script>
     <script src="app-builder.js?v=20260611a"></script>

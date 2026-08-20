@@ -17,6 +17,7 @@ function initDOM() {
     DOM.availabilityView = document.getElementById('availability-view');
     DOM.builderView = document.getElementById('builder-view');
     DOM.swapsView = document.getElementById('swaps-view');
+    DOM.leaveView = document.getElementById('leave-view');
     DOM.settingsView = document.getElementById('settings-view');
     DOM.addShiftBtn = null; // button removed from UI
     DOM.prevWeekBtn = document.getElementById('prev-week');

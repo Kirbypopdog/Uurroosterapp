@@ -38,6 +38,7 @@ open ../frontend/index.html
 | `app-planner.js` | ~1330 | renderPlanning, timeline, maand, heatmap, validatiemeldingen, uren-per-naam |
 | `app-shifts.js` | ~1105 | Shift modals, swap modals, shift CRUD, activiteiten |
 | `app-swaps.js` | ~512 | renderSwaps, swap- en overnamekaartenrendering |
+| `app-leave.js` | ~700 | Verlofplanning: rondes, invullen (week/dag), matrix, goedkeuren, export |
 | `app-employees.js` | ~1010 | renderEmployees, profiel, medewerker CRUD, weekrooster |
 | `app-availability.js` | ~640 | renderAvailability, afwezigheidsmodal |
 | `app-builder.js` | ~3065 | Roosterbouwer: grid, concepten, vergaderingen, staffing |
@@ -73,7 +74,7 @@ open ../frontend/index.html
 
 ## Database Schema
 
-**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities
+**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, leave_rounds, leave_round_entries, leave_round_submissions
 
 Kernrelaties:
 - `shifts.user_id` → `users.id`
@@ -138,6 +139,15 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - `PUT /api/v1/swap-requests/:id/approve` - Lead keurt goed
 - `PUT /api/v1/swap-requests/:id/reject` - Lead wijst af
 
+### Verlofplanning
+- `GET /api/v1/leave-rounds` - Alle verlofrondes (concepten enkel voor beheerders)
+- `GET /api/v1/leave-rounds/:id` - Ronde met volledige matrix + indienstatus
+- `POST|PUT|DELETE /api/v1/leave-rounds[/:id]` - Ronde beheren (admin/roosterverantw.)
+- `PUT /api/v1/leave-rounds/:id/entries` - Invulling opslaan (eigen; beheerder ook voor anderen)
+- `POST /api/v1/leave-rounds/:id/submit` - Indienen
+- `PUT /api/v1/leave-rounds/:id/submissions/:userId` - Goedkeuren/afwijzen
+- `POST /api/v1/leave-rounds/:id/apply` - Goedgekeurd verlof → availability
+
 ### Admin
 - `GET /api/v1/audit-log` - Audit log met filters en paginatie
 - `POST /api/v1/admin/users/:id/replace` - Medewerker vervangen
@@ -150,6 +160,7 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - **Modals**: `openShiftModal(shift, canEdit)` - view vs edit mode op basis van permissies
 - **Scroll preservation**: ScrollY wordt bewaard bij planner re-renders
 - **Validation**: `validation.js` draait client-side checks voor shift toewijzingen
+- **Verlofplanning**: verlofrondes vervangen de gedeelde Excel. Twee modi: `binair` (kleine vakanties: werken/verlof) en `voorkeur` (zomer: werken/liever_niet/zeker_niet). Invulling wordt per DAG opgeslagen; de UI biedt week-snelknoppen omdat de praktijk per werkweek + weekend apart werkt. Bij een voorkeurronde legt de beheerder ná het sluiten de definitieve verdeling vast (entries op `verlof` zetten) vóór `apply`. De matrix is voor iedereen zichtbaar; invullen enkel voor jezelf.
 - **Feestdagen**: `DataStore._publicHolidaysCache` — lazy geladen via `fetchPublicHolidays(year)`. Gebruik `getPublicHoliday(date)` voor rendering. Let op: gebruik hier plain `fetch()`, niet `dataApiFetch()` (endpoint vereist geen auth)
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.

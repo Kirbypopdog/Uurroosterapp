@@ -14,6 +14,13 @@ const AppState = {
     authToken: null,
     isAuthenticating: false, // Prevent concurrent authentication attempts
     currentView: 'home',
+    // Verlofplanning
+    leaveRounds: [],          // lijst van rondes
+    leaveRound: null,         // geladen detail (ronde + entries + submissions)
+    leaveRoundId: null,       // welke ronde staat open in de view
+    leaveTab: 'invullen',     // 'invullen' | 'overzicht'
+    leaveFillMode: 'week',    // 'week' | 'dag'
+    leaveDraft: {},           // { 'YYYY-MM-DD': status } vóór opslaan
     schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
     currentMonthStart: null, // First day of month for month view

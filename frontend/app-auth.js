@@ -183,6 +183,7 @@ function applyRoleVisibility() {
     // All roles get basic views
     allowedViews.add('availability');
     allowedViews.add('swaps');
+    allowedViews.add('leave');
 
     // Employees tab: NOT for medewerker role (they manage their schedule via profile)
     if (role !== 'medewerker') {

@@ -1052,6 +1052,10 @@ async function switchView(viewName) {
             DOM.swapsView.classList.add('active');
             renderSwaps();
             break;
+        case 'leave':
+            DOM.leaveView.classList.add('active');
+            renderLeave();
+            break;
         case 'builder':
             DOM.builderView.classList.add('active');
             renderBuilder();
