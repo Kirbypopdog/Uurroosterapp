@@ -70,6 +70,38 @@ function populateShiftTemplateDropdown() {
     });
 }
 
+// Een handmatig leeggemaakte dag is "beschermd": het concept vult hem niet
+// opnieuw. Dat was alleen af te leiden uit een klein icoontje met tooltip —
+// op een telefoon dus onzichtbaar. Bij het toevoegen van een dienst zeggen
+// we het daarom expliciet, net zoals een handmatig aangepaste dienst dat doet.
+function updateShiftBlockNotice() {
+    if (!DOM.shiftValidationErrors) return;
+    const bestaand = DOM.shiftValidationErrors.querySelector('.shift-block-notice');
+    if (bestaand) bestaand.remove();
+
+    if (AppState.editingShiftId) return; // enkel bij toevoegen
+    const empId = DOM.shiftEmployee?.value;
+    const datum = DOM.shiftDate?.value;
+    if (!empId || !datum) return;
+
+    const block = (DataStore.shiftBlocks || []).find(
+        b => String(b.user_id) === String(empId) && b.date === datum
+    );
+    if (!block) return;
+
+    const wie = getEmployee(Number(empId))?.name || 'deze medewerker';
+    const melding = document.createElement('div');
+    melding.className = 'shift-source-info shift-block-notice';
+    melding.innerHTML = `
+        <span class="source-icon">${IconHelper.html('circle-slash', 'sm')}</span>
+        <span class="source-text">
+            Deze dag is eerder handmatig leeggemaakt voor ${escapeHtml(wie)}.
+            Het basisrooster vult hem daarom niet meer automatisch in.
+        </span>`;
+    DOM.shiftValidationErrors.prepend(melding);
+    IconHelper.init(melding);
+}
+
 function openAddShiftModal() {
     AppState.editingShiftId = null;
     DOM.shiftModalTitle.textContent = 'Dienst toevoegen';
@@ -98,6 +130,7 @@ function openAddShiftModal() {
     resetShiftSubmitBtn();
 
     DOM.shiftModal.classList.remove('hidden');
+    updateShiftBlockNotice();
 }
 
 function openAddShiftForEmployee(employeeId, date) {
@@ -110,6 +143,7 @@ function openAddShiftForEmployee(employeeId, date) {
     populateEmployeeDropdown();
     DOM.shiftEmployee.value = employeeId;
     DOM.shiftModal.classList.remove('hidden');
+    updateShiftBlockNotice();
 }
 
 function canUserEditShift(shift) {

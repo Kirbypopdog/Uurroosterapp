@@ -667,12 +667,15 @@ const DragHandler = {
         } else {
             // Fallback: open normal modal and manually fill
             openAddShiftModal();
-            // TODO: Pre-fill form fields
             document.getElementById('shift-employee').value = employee.id;
             document.getElementById('shift-date').value = date;
             document.getElementById('shift-team').value = employee.mainTeam;
             document.getElementById('shift-start').value = defaultStartTime;
             document.getElementById('shift-end').value = defaultEndTime;
+            // Velden worden hier met .value gezet, wat géén change-event vuurt.
+            // De melding "dag handmatig leeggemaakt" moet dus expliciet opnieuw
+            // bepaald worden nu medewerker én datum bekend zijn.
+            if (typeof updateShiftBlockNotice === 'function') updateShiftBlockNotice();
         }
     },
 

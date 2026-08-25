@@ -13630,3 +13630,34 @@ body[data-view-mode="day"] .timeline-day-cell {
 @media (max-width: 480px) {
     .leave-round-grid { grid-template-columns: 1fr; }
 }
+
+/* ===== HANDMATIG LEEGGEMAAKTE DAG =====
+   Een blokkade betekent "iemand koos bewust om deze dag leeg te laten", en
+   het concept respecteert dat. Dat stond alleen in een tooltip op een klein
+   icoontje — op touch dus onzichtbaar. De cel krijgt nu zelf een subtiele
+   arcering, zodat je zonder hover ziet dat de leegte opzettelijk is. */
+.timeline-day-cell.has-block {
+    background-image: repeating-linear-gradient(45deg,
+        transparent, transparent 5px,
+        color-mix(in srgb, var(--ink-3) 22%, transparent) 5px,
+        color-mix(in srgb, var(--ink-3) 22%, transparent) 7px);
+}
+
+.shift-block-indicator {
+    opacity: 0.85;
+    color: var(--ink-2);
+}
+.shift-block-indicator--clickable { cursor: pointer; }
+.shift-block-indicator--clickable:hover { opacity: 1; color: var(--danger-color); }
+
+/* Melding in het dienst-toevoegen scherm, in dezelfde stijl als
+   "Handmatig aangepast (beschermd bij regeneratie)" */
+.shift-block-notice {
+    background: var(--surface-2);
+    border-left: 3px solid var(--ink-3);
+    color: var(--ink-2);
+}
+body.dark-mode .shift-block-notice {
+    background: var(--surface-2);
+    color: var(--ink-2);
+}

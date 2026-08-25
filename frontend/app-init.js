@@ -296,6 +296,9 @@ function setupEventListeners() {
     // Team toggle buttons for employees view — attached dynamically via renderEmployeeTeamToggles()
 
     DOM.addEmployeeBtn.addEventListener('click', openAddEmployeeModal);
+    // Melding "dag handmatig leeggemaakt" bijwerken zodra medewerker of datum wijzigt
+    DOM.shiftEmployee?.addEventListener('change', () => { if (typeof updateShiftBlockNotice === 'function') updateShiftBlockNotice(); });
+    DOM.shiftDate?.addEventListener('change', () => { if (typeof updateShiftBlockNotice === 'function') updateShiftBlockNotice(); });
     DOM.shiftForm.addEventListener('submit', handleShiftSubmit);
     DOM.shiftForm.addEventListener('input', () => {
         if (AppState._shiftForceOverride) {

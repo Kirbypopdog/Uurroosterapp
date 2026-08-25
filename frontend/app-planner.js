@@ -702,6 +702,10 @@ function renderTimelineView() {
                     let cellClass = 'timeline-day-cell';
                     if (isWeekend) cellClass += ' weekend';
                     if (isClosed) cellClass += ' closed';
+                    if (!isClosed && DataStore.shiftBlocks.some(
+                            b => String(b.user_id) === String(emp.id) && b.date === date)) {
+                        cellClass += ' has-block';
+                    }
 
                     // Check if there are shifts for this cell (to add has-shifts class)
                     if (!isClosed) {
@@ -916,6 +920,10 @@ function renderTimelineView() {
                     let cellClass = 'timeline-day-cell';
                     if (isWeekend) cellClass += ' weekend';
                     if (isClosed) cellClass += ' closed';
+                    if (!isClosed && DataStore.shiftBlocks.some(
+                            b => String(b.user_id) === String(emp.id) && b.date === date)) {
+                        cellClass += ' has-block';
+                    }
 
                     // Check if there are shifts for this cell (to add has-shifts class)
                     if (!isClosed) {
@@ -933,8 +941,20 @@ function renderTimelineView() {
                         const isDayView = AppState.viewMode === 'day';
 
                         // Toon "niet werkzaam" markering op lege cellen (#173)
+                        // Zelfde blokkade-indicator als in de team-tak hierboven;
+                        // ontbrak hier, waardoor medewerkers zonder team geen
+                        // enkel teken kregen dat een dag bewust leeg is.
+                        const shiftBlock2 = DataStore.shiftBlocks.find(
+                            block => String(block.user_id) === String(emp.id) && block.date === date
+                        );
+                        if (shiftBlock2) {
+                            const canRelease2 = hasPermission('MANAGE_SHIFTS');
+                            const releaseTip2 = canRelease2 ? ' · Klik om dag terug vrij te geven aan het concept' : '';
+                            html += `<div class="shift-block-indicator${canRelease2 ? ' shift-block-indicator--clickable' : ''}" data-block-id="${shiftBlock2.id}" data-employee="${emp.id}" data-date="${date}" data-tooltip="Dag manueel leeggemaakt${releaseTip2}" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
+                        }
+
                         const cellAvail2 = getAvailability(emp.id, date);
-                        if (shifts.length === 0 && cellAvail2?.type === 'vrij') {
+                        if (!shiftBlock2 && shifts.length === 0 && cellAvail2?.type === 'vrij') {
                             const nwReason2 = cellAvail2.reason ? ` — ${escapeHtml(cellAvail2.reason)}` : '';
                             html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason2}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
                         }
