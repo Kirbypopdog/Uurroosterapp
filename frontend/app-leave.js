@@ -81,49 +81,6 @@ function leaveWeekLabel(week) {
     return `${fmt(first)} – ${fmt(last)}`;
 }
 
-// Kort genoeg voor een smalle kolomkop, maar nog steeds een periode:
-// "2–8/11", of "28/12–3/1" als de week over een maandgrens loopt.
-function leaveWeekShort(week) {
-    const first = parseDateOnly(week.days[0]);
-    const last = parseDateOnly(week.days[week.days.length - 1]);
-    const m = d => d.getMonth() + 1;
-    return m(first) === m(last)
-        ? `${first.getDate()}–${last.getDate()}/${m(last)}`
-        : `${first.getDate()}/${m(first)}–${last.getDate()}/${m(last)}`;
-}
-
-// Wat één medewerker die week vroeg, samengevat tot iets leesbaars.
-// De matrix toonde enkel kleurvlakken: zonder hover — en dus zonder kans
-// op een telefoon — was niet te zien of roze nu verlof of "zeker niet" was.
-const LEAVE_WEIGHT = ['zeker_niet', 'verlof', 'liever_niet', 'werken'];
-
-function leaveWeekSummary(days, entryMap) {
-    const tally = {};
-    let ingevuld = 0;
-    days.forEach(d => {
-        const s = entryMap[d];
-        if (!s) return;
-        ingevuld++;
-        tally[s] = (tally[s] || 0) + 1;
-    });
-    if (!ingevuld) {
-        return { klasse: 'leave-leeg', kort: '', titel: 'niet ingevuld', vraagtVrij: false };
-    }
-    // De zwaarste vraag bepaalt de kleur: "zeker niet" weegt door, ook als
-    // het maar twee dagen van de week betreft.
-    const hoofd = LEAVE_WEIGHT.find(s => tally[s]);
-    const volledig = tally[hoofd] === days.length;
-    const st = LEAVE_STATUS[hoofd];
-    const detail = Object.entries(tally)
-        .map(([s, n]) => `${n}× ${LEAVE_STATUS[s].label.toLowerCase()}`).join(', ');
-    return {
-        klasse: st.klasse + (volledig ? '' : ' leave-deels'),
-        kort: volledig ? st.kort : `${tally[hoofd]}${st.kort}`,
-        titel: volledig ? st.label : detail,
-        vraagtVrij: hoofd !== 'werken',
-    };
-}
-
 // Alle dagen van een blok (voor de voortgangsteller op de landingspagina)
 function leaveDaysOfBlock(block) {
     return leaveWeeksOfBlock(block).flatMap(w => w.days);
@@ -463,22 +420,21 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
     submissions.forEach(s => { subMap[Number(s.userId)] = s; });
     const nogNiet = medewerkers.filter(m => !subMap[Number(m.id)]?.submittedAt);
 
-    // Alle weken van alle blokken achter elkaar, met een kopregel per blok
-    const kolommen = [];
-    blocks.forEach(b => leaveWeeksOfBlock(b).forEach(w => kolommen.push({ blok: b, week: w })));
-
-    // Per medewerker per week één samenvatting; de telling onderaan hergebruikt
-    // die, zodat kolom en totaal onmogelijk uit elkaar kunnen lopen.
-    const samenvatting = medewerkers.map(m => ({
-        medewerker: m,
-        sub: subMap[Number(m.id)],
-        weken: kolommen.map(k => leaveWeekSummary(k.week.days, perUser[Number(m.id)] || {})),
-    }));
-    const vrijPerWeek = kolommen.map((_, i) => samenvatting.filter(r => r.weken[i].vraagtVrij).length);
-
-    const legendeItem = (klasse, kort, label) =>
-        `<span class="leave-legend-item"><span class="leave-legend-swatch ${klasse}">${kort}</span>${label}</span>`;
+    const legendeItem = (klasse, label) =>
+        `<span class="leave-legend-item"><span class="leave-legend-swatch ${klasse}"></span>${label}</span>`;
+    // "verlof" en "zeker niet" delen dezelfde kleur (net als in de Excel).
+    // Naast elkaar in één legende zou dat verwarren, dus toont de legende
+    // alleen wat in deze ronde effectief voorkomt.
     const toontVoorkeur = blocks.some(b => b.mode === 'voorkeur');
+    const toontBinair = blocks.some(b => b.mode !== 'voorkeur');
+
+    const statusPil = m => {
+        const sub = subMap[Number(m.id)];
+        if (sub?.approved === true)  return '<span class="leave-pill-ok" data-tooltip="Goedgekeurd" data-tooltip-pos="bottom">ok</span>';
+        if (sub?.approved === false) return '<span class="leave-pill-nee" data-tooltip="Afgewezen" data-tooltip-pos="bottom">afgewezen</span>';
+        if (sub?.submittedAt)        return '<span class="leave-pill-wacht" data-tooltip="Ingediend, wacht op antwoord" data-tooltip-pos="bottom">ingediend</span>';
+        return '<span class="leave-pill-leeg" data-tooltip="Nog niet ingediend" data-tooltip-pos="bottom">—</span>';
+    };
 
     return `
         <div class="leave-matrix-wrap">
@@ -488,59 +444,91 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
                 </div>` : '<div class="leave-banner leave-banner-ok">Iedereen heeft ingediend.</div>'}
 
             <div class="leave-legend">
-                <span class="leave-legend-title">Eén vakje = één week</span>
-                ${legendeItem('leave-werken', 'W', 'werken')}
-                ${legendeItem('leave-verlof', 'V', 'verlof')}
-                ${toontVoorkeur ? legendeItem('leave-liever-niet', 'L', 'liever niet') : ''}
-                ${toontVoorkeur ? legendeItem('leave-zeker-niet', 'Z', 'zeker niet') : ''}
-                ${legendeItem('leave-verlof leave-deels', '3V', 'aantal dagen, rest werken')}
-                ${legendeItem('leave-leeg', '', 'niet ingevuld')}
+                ${legendeItem('leave-werken', 'werken')}
+                ${legendeItem('leave-verlof', toontBinair && toontVoorkeur ? 'verlof of zeker niet'
+                                            : toontBinair ? 'verlof' : 'zeker niet')}
+                ${toontVoorkeur ? legendeItem('leave-liever-niet', 'liever niet') : ''}
+                ${legendeItem('leave-leeg', 'niet ingevuld')}
             </div>
 
+            ${blocks.map(b => renderLeaveMatrixBlock(b, medewerkers, perUser, statusPil)).join('')}
+
+            ${canManageLeave() ? renderLeaveManagerActions(round, medewerkers, subMap, nogNiet) : ''}
+        </div>`;
+}
+
+// Eén tabel per vakantie, opgebouwd zoals de Excel: elke dag een rij, elke
+// medewerker een kolom. De weekweergave die hier eerst stond vatte een week
+// samen tot één vakje, waardoor je losse verlofdagen niet meer zag staan.
+function renderLeaveMatrixBlock(block, medewerkers, perUser, statusPil) {
+    const dagen = leaveDaysOfBlock(block);
+    if (!dagen.length) return '';
+
+    const perDagVrij = dagen.map(d =>
+        medewerkers.filter(m => {
+            const s = (perUser[Number(m.id)] || {})[d];
+            return s && s !== 'werken';
+        }).length
+    );
+
+    return `
+        <div class="leave-matrix-block-wrap">
+            <div class="leave-matrix-caption">
+                <strong>${escapeHtml(block.name)}</strong>
+                <span class="text-muted text-xs">${leaveBlockRange(block)} · ${
+                    block.mode === 'voorkeur' ? 'voorkeuren' : 'werken of verlof'}</span>
+            </div>
             <div class="leave-matrix-scroll">
-                <table class="leave-matrix">
+                <table class="leave-matrix leave-matrix-days">
                     <thead>
                         <tr>
-                            <th class="leave-matrix-name" rowspan="2">Medewerker</th>
-                            ${blocks.map(b => {
-                                const n = leaveWeeksOfBlock(b).length;
-                                return n ? `<th colspan="${n}" class="leave-matrix-block">${escapeHtml(b.name)}</th>` : '';
-                            }).join('')}
-                            <th rowspan="2">Status</th>
+                            <th class="leave-matrix-day">Dag</th>
+                            ${medewerkers.map(m => `<th class="leave-matrix-person">${escapeHtml(leaveShortName(m.name))}</th>`).join('')}
+                            <th class="leave-matrix-count-head" data-tooltip="Aantal mensen dat die dag niet werkt" data-tooltip-pos="top">vrij</th>
                         </tr>
-                        <tr>
-                            ${kolommen.map(k => `
-                                <th class="leave-matrix-week" data-tooltip="${leaveWeekLabel(k.week)}" data-tooltip-pos="top">${leaveWeekShort(k.week)}</th>`).join('')}
+                        <tr class="leave-matrix-substatus">
+                            <th></th>
+                            ${medewerkers.map(m => `<th>${statusPil(m)}</th>`).join('')}
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${samenvatting.map(r => `
-                            <tr>
-                                <td class="leave-matrix-name">${escapeHtml(r.medewerker.name)}</td>
-                                ${r.weken.map((w, i) => `
-                                    <td class="leave-cell ${w.klasse}"
-                                        data-tooltip="${escapeHtml(kolommen[i].blok.name)} ${leaveWeekLabel(kolommen[i].week)} — ${escapeHtml(w.titel)}" data-tooltip-pos="top">${w.kort}</td>`).join('')}
-                                <td class="leave-matrix-status">${
-                                    r.sub?.approved === true ? '<span class="leave-pill-ok">goedgekeurd</span>'
-                                    : r.sub?.approved === false ? '<span class="leave-pill-nee">afgewezen</span>'
-                                    : r.sub?.submittedAt ? '<span class="leave-pill-wacht">ingediend</span>'
-                                    : '<span class="leave-pill-leeg">—</span>'
-                                }</td>
-                            </tr>`).join('')}
+                        ${dagen.map((d, i) => {
+                            const datum = parseDateOnly(d);
+                            const weekend = datum.getDay() === 0 || datum.getDay() === 6;
+                            return `<tr class="${weekend ? 'leave-row-weekend' : ''}">
+                                <td class="leave-matrix-day">${leaveDayLabel(datum)}</td>
+                                ${medewerkers.map(m => {
+                                    const s = (perUser[Number(m.id)] || {})[d];
+                                    const st = s ? LEAVE_STATUS[s] : null;
+                                    return `<td class="leave-cell ${st ? st.klasse : 'leave-leeg'}"
+                                        data-tooltip="${escapeHtml(m.name)} — ${leaveDayLabel(datum)} — ${st ? st.label : 'niet ingevuld'}"
+                                        data-tooltip-pos="top"></td>`;
+                                }).join('')}
+                                <td class="leave-matrix-count ${perDagVrij[i] > medewerkers.length / 2 ? 'leave-druk' : ''}">${perDagVrij[i]}</td>
+                            </tr>`;
+                        }).join('')}
                     </tbody>
-                    <tfoot>
-                        <tr>
-                            <td class="leave-matrix-name">Vraagt vrij</td>
-                            ${vrijPerWeek.map((n, i) => `
-                                <td class="leave-matrix-count ${n > medewerkers.length / 2 ? 'leave-druk' : ''}"
-                                    data-tooltip="${n} van ${medewerkers.length} vroeg deze week iets anders dan werken" data-tooltip-pos="top">${n}</td>`).join('')}
-                            <td></td>
-                        </tr>
-                    </tfoot>
                 </table>
             </div>
-            ${canManageLeave() ? renderLeaveManagerActions(round, medewerkers, subMap, nogNiet) : ''}
         </div>`;
+}
+
+function leaveBlockRange(block) {
+    const fmt = d => parseDateOnly(d).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+    return `${fmt(block.startDate)} – ${fmt(block.endDate)}`;
+}
+
+function leaveDayLabel(datum) {
+    const dag = datum.toLocaleDateString('nl-BE', { weekday: 'short' }).replace('.', '');
+    return `${dag} ${datum.getDate()}/${datum.getMonth() + 1}`;
+}
+
+// De kolommen zijn smal; "Anna Testerman" past niet. Voornaam + eerste letter
+// van de achternaam is genoeg om mensen uit elkaar te houden.
+function leaveShortName(naam) {
+    const delen = String(naam || '').trim().split(/\s+/);
+    return delen.length < 2 ? delen[0] || '' : `${delen[0]} ${delen[delen.length - 1][0]}.`;
 }
 
 function renderLeaveManagerActions(round, medewerkers, subMap, nogNiet) {
