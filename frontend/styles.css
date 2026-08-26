@@ -13435,18 +13435,32 @@ body[data-view-mode="day"] .timeline-day-cell {
 .leave-cell { min-width: 34px; height: 24px; }
 
 /* De kleuren van de keuzeknoppen zijn bewust zacht, maar in een raster van
-   honderden vakjes moet je het patroon van een afstand kunnen lezen. Zelfde
-   betekenis, steviger: groen werken, rood niet werken, oranje liever niet —
-   net als de Excel. "Verlof" en "zeker niet" delen de rode kleur, precies
-   zoals daar; ze komen nooit in hetzelfde blok voor. */
-.leave-cell.leave-werken      { background: color-mix(in srgb, var(--ok) 26%, var(--surface-color)); }
+   honderden lege vakjes draagt de kleur alle betekenis. Die moet je van een
+   afstand uit elkaar kunnen houden, in beide modi — vandaar aparte, stevige
+   waarden in plaats van een lichte tint van de meldingskleuren. Groen werken,
+   rood niet werken, oranje liever niet, net als de Excel. "Verlof" en "zeker
+   niet" delen het rood zoals daar; ze komen nooit in hetzelfde blok voor. */
+:root {
+    --leave-cel-werken:      #86c3ab;
+    --leave-cel-niet:        #e58278;
+    --leave-cel-liever-niet: #f0b45c;
+}
+body.dark-mode {
+    --leave-cel-werken:      #3f8f74;
+    --leave-cel-niet:        #b04a40;
+    --leave-cel-liever-niet: #bd8429;
+}
+.leave-cell.leave-werken,
+.leave-legend-swatch.leave-werken           { background: var(--leave-cel-werken); }
 .leave-cell.leave-verlof,
-.leave-cell.leave-zeker-niet  { background: color-mix(in srgb, var(--alert-error-text) 26%, var(--surface-color)); }
-.leave-cell.leave-liever-niet { background: color-mix(in srgb, var(--warn) 34%, var(--surface-color)); }
-.leave-legend-swatch.leave-werken      { background: color-mix(in srgb, var(--ok) 26%, var(--surface-color)); }
+.leave-cell.leave-zeker-niet,
 .leave-legend-swatch.leave-verlof,
-.leave-legend-swatch.leave-zeker-niet  { background: color-mix(in srgb, var(--alert-error-text) 26%, var(--surface-color)); }
-.leave-legend-swatch.leave-liever-niet { background: color-mix(in srgb, var(--warn) 34%, var(--surface-color)); }
+.leave-legend-swatch.leave-zeker-niet       { background: var(--leave-cel-niet); }
+.leave-cell.leave-liever-niet,
+.leave-legend-swatch.leave-liever-niet      { background: var(--leave-cel-liever-niet); }
+/* Niet ingevuld blijft bewust kleurloos: de afwezigheid van een keuze. */
+.leave-cell.leave-leeg,
+.leave-legend-swatch.leave-leeg             { background: var(--surface-2); }
 
 /* Eén tabel per vakantie: dagen als rijen, mensen als kolommen (zoals de
    Excel). De dagkolom blijft staan bij horizontaal scrollen, de kopregel
