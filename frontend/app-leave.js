@@ -81,6 +81,49 @@ function leaveWeekLabel(week) {
     return `${fmt(first)} – ${fmt(last)}`;
 }
 
+// Kort genoeg voor een smalle kolomkop, maar nog steeds een periode:
+// "2–8/11", of "28/12–3/1" als de week over een maandgrens loopt.
+function leaveWeekShort(week) {
+    const first = parseDateOnly(week.days[0]);
+    const last = parseDateOnly(week.days[week.days.length - 1]);
+    const m = d => d.getMonth() + 1;
+    return m(first) === m(last)
+        ? `${first.getDate()}–${last.getDate()}/${m(last)}`
+        : `${first.getDate()}/${m(first)}–${last.getDate()}/${m(last)}`;
+}
+
+// Wat één medewerker die week vroeg, samengevat tot iets leesbaars.
+// De matrix toonde enkel kleurvlakken: zonder hover — en dus zonder kans
+// op een telefoon — was niet te zien of roze nu verlof of "zeker niet" was.
+const LEAVE_WEIGHT = ['zeker_niet', 'verlof', 'liever_niet', 'werken'];
+
+function leaveWeekSummary(days, entryMap) {
+    const tally = {};
+    let ingevuld = 0;
+    days.forEach(d => {
+        const s = entryMap[d];
+        if (!s) return;
+        ingevuld++;
+        tally[s] = (tally[s] || 0) + 1;
+    });
+    if (!ingevuld) {
+        return { klasse: 'leave-leeg', kort: '', titel: 'niet ingevuld', vraagtVrij: false };
+    }
+    // De zwaarste vraag bepaalt de kleur: "zeker niet" weegt door, ook als
+    // het maar twee dagen van de week betreft.
+    const hoofd = LEAVE_WEIGHT.find(s => tally[s]);
+    const volledig = tally[hoofd] === days.length;
+    const st = LEAVE_STATUS[hoofd];
+    const detail = Object.entries(tally)
+        .map(([s, n]) => `${n}× ${LEAVE_STATUS[s].label.toLowerCase()}`).join(', ');
+    return {
+        klasse: st.klasse + (volledig ? '' : ' leave-deels'),
+        kort: volledig ? st.kort : `${tally[hoofd]}${st.kort}`,
+        titel: volledig ? st.label : detail,
+        vraagtVrij: hoofd !== 'werken',
+    };
+}
+
 // Alle dagen van een blok (voor de voortgangsteller op de landingspagina)
 function leaveDaysOfBlock(block) {
     return leaveWeeksOfBlock(block).flatMap(w => w.days);
@@ -246,7 +289,7 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
             </div>
             <div class="leave-header-actions">
                 ${canManageLeave() ? `
-                    <button class="btn-icon-only leave-round-delete" id="leave-delete" title="Ronde verwijderen">
+                    <button class="btn-icon-only leave-round-delete" id="leave-delete" data-tooltip="Ronde verwijderen" data-tooltip-pos="left" aria-label="Ronde verwijderen">
                         ${IconHelper.html(ICONS.delete, 'sm')}
                     </button>` : ''}
             </div>
@@ -350,7 +393,7 @@ function renderLeaveStatusBanner(round, mySub) {
     if (mySub?.approved === true)     return '<div class="leave-banner leave-banner-ok">Je verlof is goedgekeurd.</div>';
     if (mySub?.approved === false)    return `<div class="leave-banner leave-banner-warn">Je aanvraag is afgewezen.${
         mySub.responseNote ? ' ' + escapeHtml(mySub.responseNote) : ''}</div>`;
-    if (mySub?.submittedAt)           return '<div class="leave-banner leave-banner-ok">Ingediend — je kan nog aanpassen tot de deadline.</div>';
+    if (mySub?.submittedAt)           return '<div class="leave-banner leave-banner-ok">Je hebt al ingediend, maar je kan nog aanpassen tot de deadline.</div>';
     return '<div class="leave-banner leave-banner-warn">Je hebt nog niets ingediend.</div>';
 }
 
@@ -399,7 +442,7 @@ function renderLeaveFillDays(block, entryMap, bewerkbaar) {
                             ${opties.map(s => `
                                 <button class="leave-choice leave-choice-sm ${LEAVE_STATUS[s].klasse} ${status === s ? 'active' : ''}"
                                         data-day-set="${d}" data-status="${s}" ${bewerkbaar ? '' : 'disabled'}
-                                        title="${LEAVE_STATUS[s].label}">${LEAVE_STATUS[s].kort}</button>`).join('')}
+                                        data-tooltip="${LEAVE_STATUS[s].label}" data-tooltip-pos="top" aria-label="${LEAVE_STATUS[s].label}">${LEAVE_STATUS[s].kort}</button>`).join('')}
                         </div>
                     </div>`;
                 }).join('')}
@@ -424,12 +467,36 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
     const kolommen = [];
     blocks.forEach(b => leaveWeeksOfBlock(b).forEach(w => kolommen.push({ blok: b, week: w })));
 
+    // Per medewerker per week één samenvatting; de telling onderaan hergebruikt
+    // die, zodat kolom en totaal onmogelijk uit elkaar kunnen lopen.
+    const samenvatting = medewerkers.map(m => ({
+        medewerker: m,
+        sub: subMap[Number(m.id)],
+        weken: kolommen.map(k => leaveWeekSummary(k.week.days, perUser[Number(m.id)] || {})),
+    }));
+    const vrijPerWeek = kolommen.map((_, i) => samenvatting.filter(r => r.weken[i].vraagtVrij).length);
+
+    const legendeItem = (klasse, kort, label) =>
+        `<span class="leave-legend-item"><span class="leave-legend-swatch ${klasse}">${kort}</span>${label}</span>`;
+    const toontVoorkeur = blocks.some(b => b.mode === 'voorkeur');
+
     return `
         <div class="leave-matrix-wrap">
             ${nogNiet.length ? `
                 <div class="leave-banner leave-banner-warn">
                     Nog niet ingediend (${nogNiet.length}): ${nogNiet.map(m => escapeHtml(m.name)).join(', ')}
                 </div>` : '<div class="leave-banner leave-banner-ok">Iedereen heeft ingediend.</div>'}
+
+            <div class="leave-legend">
+                <span class="leave-legend-title">Eén vakje = één week</span>
+                ${legendeItem('leave-werken', 'W', 'werken')}
+                ${legendeItem('leave-verlof', 'V', 'verlof')}
+                ${toontVoorkeur ? legendeItem('leave-liever-niet', 'L', 'liever niet') : ''}
+                ${toontVoorkeur ? legendeItem('leave-zeker-niet', 'Z', 'zeker niet') : ''}
+                ${legendeItem('leave-verlof leave-deels', '3V', 'aantal dagen, rest werken')}
+                ${legendeItem('leave-leeg', '', 'niet ingevuld')}
+            </div>
+
             <div class="leave-matrix-scroll">
                 <table class="leave-matrix">
                     <thead>
@@ -442,33 +509,34 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
                             <th rowspan="2">Status</th>
                         </tr>
                         <tr>
-                            ${kolommen.map(k => {
-                                const d = parseDateOnly(k.week.days[0]);
-                                return `<th title="${leaveWeekLabel(k.week)}">${d.getDate()}/${d.getMonth() + 1}</th>`;
-                            }).join('')}
+                            ${kolommen.map(k => `
+                                <th class="leave-matrix-week" data-tooltip="${leaveWeekLabel(k.week)}" data-tooltip-pos="top">${leaveWeekShort(k.week)}</th>`).join('')}
                         </tr>
                     </thead>
                     <tbody>
-                        ${medewerkers.map(m => {
-                            const map = perUser[Number(m.id)] || {};
-                            const sub = subMap[Number(m.id)];
-                            return `<tr>
-                                <td class="leave-matrix-name">${escapeHtml(m.name)}</td>
-                                ${kolommen.map(k => {
-                                    const s = weekStatus(k.week.days, map);
-                                    const kl = s ? LEAVE_STATUS[s].klasse : (s === null ? 'leave-gemengd' : 'leave-leeg');
-                                    const titel = s ? LEAVE_STATUS[s].label : (s === null ? 'gemengd' : 'niet ingevuld');
-                                    return `<td class="leave-cell ${kl}" title="${escapeHtml(k.blok.name)} ${leaveWeekLabel(k.week)} — ${titel}"></td>`;
-                                }).join('')}
+                        ${samenvatting.map(r => `
+                            <tr>
+                                <td class="leave-matrix-name">${escapeHtml(r.medewerker.name)}</td>
+                                ${r.weken.map((w, i) => `
+                                    <td class="leave-cell ${w.klasse}"
+                                        data-tooltip="${escapeHtml(kolommen[i].blok.name)} ${leaveWeekLabel(kolommen[i].week)} — ${escapeHtml(w.titel)}" data-tooltip-pos="top">${w.kort}</td>`).join('')}
                                 <td class="leave-matrix-status">${
-                                    sub?.approved === true ? '<span class="leave-pill-ok">goedgekeurd</span>'
-                                    : sub?.approved === false ? '<span class="leave-pill-nee">afgewezen</span>'
-                                    : sub?.submittedAt ? '<span class="leave-pill-wacht">ingediend</span>'
+                                    r.sub?.approved === true ? '<span class="leave-pill-ok">goedgekeurd</span>'
+                                    : r.sub?.approved === false ? '<span class="leave-pill-nee">afgewezen</span>'
+                                    : r.sub?.submittedAt ? '<span class="leave-pill-wacht">ingediend</span>'
                                     : '<span class="leave-pill-leeg">—</span>'
                                 }</td>
-                            </tr>`;
-                        }).join('')}
+                            </tr>`).join('')}
                     </tbody>
+                    <tfoot>
+                        <tr>
+                            <td class="leave-matrix-name">Vraagt vrij</td>
+                            ${vrijPerWeek.map((n, i) => `
+                                <td class="leave-matrix-count ${n > medewerkers.length / 2 ? 'leave-druk' : ''}"
+                                    data-tooltip="${n} van ${medewerkers.length} vroeg deze week iets anders dan werken" data-tooltip-pos="top">${n}</td>`).join('')}
+                            <td></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
             ${canManageLeave() ? renderLeaveManagerActions(round, medewerkers, subMap, nogNiet) : ''}

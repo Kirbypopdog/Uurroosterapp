@@ -13432,7 +13432,45 @@ body[data-view-mode="day"] .timeline-day-cell {
 .leave-matrix thead th { background: var(--surface-2); font-weight: 700; }
 .leave-matrix-name { text-align: left !important; font-weight: 600; position: sticky; left: 0; background: var(--surface-color); }
 .leave-matrix thead .leave-matrix-name { background: var(--surface-2); }
-.leave-cell { min-width: 30px; height: 26px; }
+.leave-cell {
+    min-width: 34px; height: 26px;
+    font-weight: 700; font-size: 11.5px;
+}
+/* Deels: de week is niet volledig die status, dus toont hij een aantal.
+   Gestreept zodat je ook zonder de cijfers te lezen ziet dat het gemengd is. */
+.leave-cell.leave-deels {
+    background-image: repeating-linear-gradient(45deg,
+        transparent, transparent 4px,
+        rgba(0,0,0,.05) 4px, rgba(0,0,0,.05) 7px);
+}
+body.dark-mode .leave-cell.leave-deels {
+    background-image: repeating-linear-gradient(45deg,
+        transparent, transparent 4px,
+        rgba(255,255,255,.07) 4px, rgba(255,255,255,.07) 7px);
+}
+
+/* Telling onderaan: hoeveel mensen vroegen die week iets anders dan werken */
+.leave-matrix tfoot td {
+    background: var(--surface-2);
+    font-weight: 700;
+    color: var(--ink-2);
+}
+.leave-matrix-count.leave-druk { color: var(--alert-error-text); }
+.leave-matrix-week { font-size: 11px; font-weight: 600; }
+
+.leave-legend {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+    margin: 10px 0 12px;
+    font-size: 12px; color: var(--text-secondary);
+}
+.leave-legend-title { font-weight: 700; color: var(--ink-2); }
+.leave-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.leave-legend-swatch {
+    display: inline-grid; place-items: center;
+    min-width: 26px; height: 20px; padding: 0 4px;
+    border: 1px solid var(--border-color); border-radius: 4px;
+    font-size: 11px; font-weight: 700;
+}
 
 .leave-pill-ok, .leave-pill-nee, .leave-pill-wacht, .leave-pill-leeg {
     font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px;
@@ -13470,14 +13508,6 @@ body[data-view-mode="day"] .timeline-day-cell {
     .leave-tabs, .leave-viewtoggle { width: 100%; }
     .leave-tab, .leave-viewtoggle-btn { flex: 1; }
     .leave-approve-row { flex-direction: column; align-items: stretch; }
-}
-
-/* Gemengde week in de matrix: deels ingevuld — mag niet lijken op leeg */
-.leave-cell.leave-gemengd {
-    background-color: var(--surface-2);
-    background-image: repeating-linear-gradient(45deg,
-        transparent, transparent 3px,
-        var(--line-strong) 3px, var(--line-strong) 6px);
 }
 
 /* Verlofronde: vakantieblokken en periodekiezer */
