@@ -642,14 +642,17 @@ function renderTimelineView() {
         if (feestdag) headerClass += ' feestdag';
         if (closedDateInfo) headerClass += ' manually-closed';
 
+        // Een vakantiedag herken je al aan de kleur van de kop; een los
+        // (bovendien wippend) paraplu-icoontje erbij is enkel ruis. De naam
+        // van de vakantie blijft wel bereikbaar via de tooltip op de kop zelf.
         const holidayLabel = escapeHtml(holidayInfo?.name || 'Vakantie');
-        const holidayBadge = isHoliday ? `<span class="holiday-badge" data-tooltip="${holidayLabel}">${IconHelper.html(ICONS.holiday, 'xs')}</span>` : '';
+        const holidayTip = isHoliday ? ` data-tooltip="${holidayLabel}" data-tooltip-pos="bottom"` : '';
         const feestdagBadge = feestdag ? `<span class="feestdag-badge" data-tooltip="${escapeHtml(feestdag.name)}">${IconHelper.html(ICONS.feestdag, 'xs')}</span>` : '';
         const closedBadge = closedDateInfo ? `<span class="closed-date-badge" data-tooltip="${escapeHtml(closedDateInfo.reason || 'Manueel gesloten')}">${IconHelper.html(ICONS.lock, 'xs')}</span>` : '';
 
-        html += `<div class="${headerClass}" data-date="${date}">
+        html += `<div class="${headerClass}" data-date="${date}"${holidayTip}>
             <span class="day-name">${dayName}</span>
-            <span class="day-num">${dateNum}${holidayBadge}${feestdagBadge}${closedBadge}</span>
+            <span class="day-num">${dateNum}${feestdagBadge}${closedBadge}</span>
         </div>`;
     });
     html += '</div>';
@@ -702,10 +705,6 @@ function renderTimelineView() {
                     let cellClass = 'timeline-day-cell';
                     if (isWeekend) cellClass += ' weekend';
                     if (isClosed) cellClass += ' closed';
-                    if (!isClosed && DataStore.shiftBlocks.some(
-                            b => String(b.user_id) === String(emp.id) && b.date === date)) {
-                        cellClass += ' has-block';
-                    }
 
                     // Check if there are shifts for this cell (to add has-shifts class)
                     if (!isClosed) {
@@ -920,10 +919,6 @@ function renderTimelineView() {
                     let cellClass = 'timeline-day-cell';
                     if (isWeekend) cellClass += ' weekend';
                     if (isClosed) cellClass += ' closed';
-                    if (!isClosed && DataStore.shiftBlocks.some(
-                            b => String(b.user_id) === String(emp.id) && b.date === date)) {
-                        cellClass += ' has-block';
-                    }
 
                     // Check if there are shifts for this cell (to add has-shifts class)
                     if (!isClosed) {

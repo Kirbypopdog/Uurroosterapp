@@ -204,13 +204,23 @@ async function loadDataFromAPI() {
     try {
         // Load all data in parallel - users now includes employee/schedule data
         const loadErrors = [];
+
+        // /schedule-drafts is admin-only. Voor een medewerker gaf dit bij elke
+        // login een rode 403 in de console — opgevangen, maar verwarrend.
+        // Let op: de échte rol, niet getEffectiveRole(): een admin die een
+        // medewerker simuleert moet de concepten wél geladen hebben.
+        const echteRol = AppState.currentUser?.role;
+        const magConcepten = ['admin', 'roosterverantwoordelijke',
+            'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(echteRol);
         const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData] = await Promise.all([
             dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
             dataApiFetch(`/shifts?startDate=${_getInitialWindowStart()}&endDate=${_getInitialWindowEnd()}`).catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
             dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
             dataApiFetch('/shift-blocks').catch(err => { loadErrors.push('shift-blocks'); console.error('[LoadData] Failed to load shift-blocks:', err); return []; }),
             dataApiFetch('/settings').catch(err => { loadErrors.push('settings'); console.error('[LoadData] Failed to load settings:', err); return { settings: {} }; }),
-            dataApiFetch('/schedule-drafts').catch(err => { console.log('[LoadData] Schedule drafts not available (using settings fallback)'); return { drafts: null }; }),
+            magConcepten
+                ? dataApiFetch('/schedule-drafts').catch(err => { console.log('[LoadData] Schedule drafts not available (using settings fallback)'); return { drafts: null }; })
+                : Promise.resolve({ drafts: null }),
             dataApiFetch('/shift-activities').catch(err => { console.log('[LoadData] Activities not available'); return { activities: [] }; })
         ]);
 

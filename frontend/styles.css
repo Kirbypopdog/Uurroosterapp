@@ -4462,19 +4462,6 @@ body[data-view-mode="day"] .timeline-header {
     pointer-events: none;
 }
 
-.holiday-badge {
-    display: inline-block;
-    margin-left: 4px;
-    font-size: 14px;
-    vertical-align: middle;
-    animation: gentle-bounce 2s ease-in-out infinite;
-}
-
-@keyframes gentle-bounce {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-2px); }
-}
-
 /* ===== BELGISCHE FEESTDAGEN ===== */
 .timeline-day-header.feestdag,
 .month-day-header.feestdag {
@@ -13631,18 +13618,7 @@ body[data-view-mode="day"] .timeline-day-cell {
     .leave-round-grid { grid-template-columns: 1fr; }
 }
 
-/* ===== HANDMATIG LEEGGEMAAKTE DAG =====
-   Een blokkade betekent "iemand koos bewust om deze dag leeg te laten", en
-   het concept respecteert dat. Dat stond alleen in een tooltip op een klein
-   icoontje — op touch dus onzichtbaar. De cel krijgt nu zelf een subtiele
-   arcering, zodat je zonder hover ziet dat de leegte opzettelijk is. */
-.timeline-day-cell.has-block {
-    background-image: repeating-linear-gradient(45deg,
-        transparent, transparent 5px,
-        color-mix(in srgb, var(--ink-3) 22%, transparent) 5px,
-        color-mix(in srgb, var(--ink-3) 22%, transparent) 7px);
-}
-
+/* ===== HANDMATIG LEEGGEMAAKTE DAG ===== */
 .shift-block-indicator {
     opacity: 0.85;
     color: var(--ink-2);
