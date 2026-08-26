@@ -200,6 +200,22 @@ body.dark-mode .form-input {
 body.dark-mode .form-group input::placeholder,
 body.dark-mode .form-input::placeholder { color: var(--ink-3); }
 
+/* De regel hierboven is specifieker dan `.form-group input:focus`, waardoor
+   de randkleur bij focus in donkere modus op --line bleef staan: het veld
+   waarin je typt was dus niet te onderscheiden van de rest. */
+body.dark-mode .form-group input[type="text"]:focus,
+body.dark-mode .form-group input[type="email"]:focus,
+body.dark-mode .form-group input[type="password"]:focus,
+body.dark-mode .form-group input[type="date"]:focus,
+body.dark-mode .form-group input[type="time"]:focus,
+body.dark-mode .form-group input[type="number"]:focus,
+body.dark-mode .form-group select:focus,
+body.dark-mode .form-group textarea:focus,
+body.dark-mode .select-input:focus,
+body.dark-mode .form-input:focus {
+    border-color: var(--sage);
+}
+
 /* Browser autofill: overschrijf blauwe/gele bg via box-shadow truc */
 body.dark-mode input:-webkit-autofill,
 body.dark-mode input:-webkit-autofill:hover,
@@ -1352,7 +1368,6 @@ html.session-restoring #login-container {
     box-shadow: var(--shadow-sm);
 }
 .login-brand-name { font-weight: 800; font-size: 18px; color: var(--text-primary); }
-.login-brand-sub { font-size: 12.5px; color: var(--ink-3); font-weight: 600; }
 .login-bigline {
     font-family: var(--font-serif);
     font-weight: 400;
@@ -1363,13 +1378,6 @@ html.session-restoring #login-container {
     color: var(--text-primary);
 }
 .login-bigline em { font-style: italic; color: var(--sage-700); }
-.login-bigsub {
-    font-size: 16px;
-    color: var(--text-secondary);
-    max-width: 40ch;
-    margin-top: 18px;
-    line-height: 1.55;
-}
 .login-brand-foot { font-size: 12.5px; color: var(--ink-3); font-weight: 600; }
 
 .login-formside {
@@ -11988,14 +11996,9 @@ body[data-view-mode="day"] .timeline-day-cell {
     transition-duration: 0.1s;
 }
 
-/* Login box subtle interaction */
-.login-box {
-    transition: box-shadow 0.3s ease;
-}
-
-.login-box:focus-within {
-    box-shadow: 0 20px 40px -8px rgba(0, 0, 0, 0.12);
-}
+/* .login-box heeft geen eigen achtergrond of rand: hij staat rechtstreeks
+   op het witte paneel. Een schaduw eromheen bij focus tekende daardoor een
+   los zwevend kadertje zodra je in een veld klikte. Geen schaduw dus. */
 
 /* Settings card hover */
 .settings-card {
