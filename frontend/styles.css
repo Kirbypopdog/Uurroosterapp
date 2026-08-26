@@ -13452,9 +13452,8 @@ body.dark-mode {
     --leave-cel-werken:      #3f8f74;
     --leave-cel-niet:        #b04a40;
     --leave-cel-liever-niet: #bd8429;
-    /* In donkere modus is een zwarte lijn onzichtbaar tegen de vakjes; daar
-       moet het raster juist lichter zijn dan wat het scheidt. */
-    --leave-raster-lijn:     #6a6455;
+    /* Donkere modus houdt de gewone, subtiele randkleur. */
+    --leave-raster-lijn:     var(--border-color);
 }
 .leave-cell.leave-werken,
 .leave-legend-swatch.leave-werken           { background: var(--leave-cel-werken); }
