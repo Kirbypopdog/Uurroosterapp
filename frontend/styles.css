@@ -13423,8 +13423,10 @@ body[data-view-mode="day"] .timeline-day-cell {
     background: var(--surface-color);
     border-radius: var(--radius-md);
 }
+/* De gewone randkleur verdween tegen de ingekleurde vakjes, waardoor het
+   raster één vlak werd. Deze tabel krijgt daarom een eigen, harde lijn. */
 .leave-matrix th, .leave-matrix td {
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--leave-raster-lijn);
     padding: 6px 8px;
     text-align: center;
     white-space: nowrap;
@@ -13444,11 +13446,15 @@ body[data-view-mode="day"] .timeline-day-cell {
     --leave-cel-werken:      #86c3ab;
     --leave-cel-niet:        #e58278;
     --leave-cel-liever-niet: #f0b45c;
+    --leave-raster-lijn:     #24231f;
 }
 body.dark-mode {
     --leave-cel-werken:      #3f8f74;
     --leave-cel-niet:        #b04a40;
     --leave-cel-liever-niet: #bd8429;
+    /* In donkere modus is een zwarte lijn onzichtbaar tegen de vakjes; daar
+       moet het raster juist lichter zijn dan wat het scheidt. */
+    --leave-raster-lijn:     #6a6455;
 }
 .leave-cell.leave-werken,
 .leave-legend-swatch.leave-werken           { background: var(--leave-cel-werken); }
