@@ -737,8 +737,7 @@ function openLeaveRoundModal() {
                 <div class="form-group">
                     <label class="form-label">Welke vakanties horen bij deze ronde?</label>
                     <p class="text-muted text-xs mb-sm">
-                        Deze komen uit Instellingen › Planning. Kleine vakanties vul je binair in,
-                        de zomer met voorkeuren — net als in de Excel.
+                        Staat er een vakantie niet bij? Voeg ze toe bij Instellingen › Planning.
                     </p>
                     <div class="leave-period-picker">
                         ${perioden.map(p => `
