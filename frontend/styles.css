@@ -1289,7 +1289,6 @@ html.session-restoring #login-container {
 }
 .sidebar-brand-mark.sm { width: 28px; height: 28px; font-size: 13px; border-radius: 8px; }
 .sidebar-brand-name { font-weight: 800; font-size: 15.5px; letter-spacing: -.01em; color: var(--text-primary); }
-.sidebar-brand-sub { font-size: 11.5px; color: var(--ink-3); font-weight: 500; margin-top: 1px; }
 .sidebar-nav { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 .sidebar-nav-label {
     font-size: 11px; text-transform: uppercase; letter-spacing: .08em;

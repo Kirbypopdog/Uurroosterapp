@@ -158,6 +158,11 @@ function renderHome() {
         item.addEventListener('click', () => switchView('swaps'));
     });
 
+    container.querySelectorAll('.home-request-item[data-action="view-leave"]').forEach(item => {
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', () => switchView('leave'));
+    });
+
     // Alert-item header: toggle expand/collapse
     container.querySelectorAll('.alert-item-header').forEach(header => {
         header.addEventListener('click', () => {
@@ -690,11 +695,38 @@ function renderHomeRequests(user, role) {
                (r.request_type === 'takeover' && r.requester_shift_team === userTeam);
     });
 
+    // Een lopende verlofronde die nog op jou wacht hoort hier ook thuis:
+    // anders zie je pas dat je iets moet invullen als je de verloftab opent.
+    // Geldt voor iedereen — ook een lead vult zijn eigen verlof in.
+    const verlofTaken = (AppState.leaveRounds || []).filter(r =>
+        r.status === 'open' && (!r.mySubmittedAt || r.myApproved === false)
+    );
+
+    const totaal = pendingRequests.length + verlofTaken.length;
+
     let requestsHtml = '';
-    if (pendingRequests.length === 0) {
-        requestsHtml = '<div class="home-card-empty"><i data-lucide="inbox" class="empty-state-icon"></i>Geen openstaande verzoeken</div>';
+    if (totaal === 0) {
+        requestsHtml = '<div class="home-card-empty"><i data-lucide="inbox" class="empty-state-icon"></i>Niets dat je aandacht vraagt</div>';
     } else {
         requestsHtml = '<div class="home-card-body">';
+
+        verlofTaken.forEach(r => {
+            const afgewezen = r.myApproved === false;
+            const label = afgewezen ? 'Opnieuw invullen' : 'Invullen';
+            const deadline = r.deadline
+                ? `vóór ${parseDateOnly(r.deadline).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })}`
+                : 'nog niet ingediend';
+            requestsHtml += `
+                <div class="home-request-item" data-action="view-leave">
+                    <div class="home-request-info">
+                        <div class="home-request-type">Verlof</div>
+                        <div class="home-request-detail">${escapeHtml(r.name)} — ${escapeHtml(deadline)}</div>
+                    </div>
+                    <span class="home-request-status needs-action">${label}</span>
+                </div>
+            `;
+        });
+
         pendingRequests.slice(0, 5).forEach(req => {
             const isSwap = req.request_type === 'swap';
             const typeLabel = isSwap ? 'Ruil' : 'Overname';
@@ -722,11 +754,12 @@ function renderHomeRequests(user, role) {
         requestsHtml += '</div>';
     }
 
+    // Niet langer alleen ruilverzoeken, dus ook niet langer "verzoeken"
     return `
         <div class="home-card">
             <div class="home-card-header">
-                Openstaande verzoeken
-                ${pendingRequests.length > 0 ? `<span class="card-count">${pendingRequests.length}</span>` : ''}
+                Vraagt je aandacht
+                ${totaal > 0 ? `<span class="card-count">${totaal}</span>` : ''}
             </div>
             ${requestsHtml}
         </div>

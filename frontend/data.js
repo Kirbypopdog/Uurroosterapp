@@ -212,7 +212,7 @@ async function loadDataFromAPI() {
         const echteRol = AppState.currentUser?.role;
         const magConcepten = ['admin', 'roosterverantwoordelijke',
             'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(echteRol);
-        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData] = await Promise.all([
+        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData, leaveRoundsData] = await Promise.all([
             dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
             dataApiFetch(`/shifts?startDate=${_getInitialWindowStart()}&endDate=${_getInitialWindowEnd()}`).catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
             dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
@@ -221,7 +221,10 @@ async function loadDataFromAPI() {
             magConcepten
                 ? dataApiFetch('/schedule-drafts').catch(err => { console.log('[LoadData] Schedule drafts not available (using settings fallback)'); return { drafts: null }; })
                 : Promise.resolve({ drafts: null }),
-            dataApiFetch('/shift-activities').catch(err => { console.log('[LoadData] Activities not available'); return { activities: [] }; })
+            dataApiFetch('/shift-activities').catch(err => { console.log('[LoadData] Activities not available'); return { activities: [] }; }),
+            // Nodig op de startpagina: daar herinneren we mensen eraan dat een
+            // verlofronde nog op hen wacht, zonder dat ze de verloftab openen.
+            dataApiFetch('/leave-rounds').catch(err => { console.log('[LoadData] Verlofrondes niet beschikbaar'); return { rounds: [] }; })
         ]);
 
         if (loadErrors.length > 0) {
@@ -237,6 +240,7 @@ async function loadDataFromAPI() {
         DataStore.activities = (activitiesData.activities || []).map(normalizeActivity);
         DataStore.availability = (availabilityData.availability || []).map(normalizeAvailability);
         DataStore.shiftBlocks = (Array.isArray(shiftBlocksData) ? shiftBlocksData : []).map(normalizeShiftBlock);
+        AppState.leaveRounds = leaveRoundsData.rounds || [];
 
         // Merge API settings with defaults
         const apiSettings = settingsData.settings || {};
