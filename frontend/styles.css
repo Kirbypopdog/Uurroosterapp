@@ -675,16 +675,23 @@ body.dark-mode .shift-block.team-jobstudent {
 }
 body.dark-mode .shift-block:hover { background: var(--raise); }
 
-/* Uurlijnen in de timeline waren bijna-witte streepjes in élke cel */
+/* Uurlijnen in de timeline. In lichte modus zijn dit haarlijntjes van 0,01%
+   breed die je nauwelijks ziet; de donkere variant was 13× dikker én wit op
+   bijna zwart, en tekende dus duidelijke strepen door elke cel. Zelfde
+   posities en breedte als de lichte versie, alleen een andere kleur. */
 body.dark-mode .timeline-day-cell {
     background: linear-gradient(90deg,
-        transparent 0%, transparent 16.66%,
-        rgba(255,255,255,.05) 16.66%, rgba(255,255,255,.05) 16.79%,
-        transparent 16.79%, transparent 50%,
-        rgba(255,255,255,.05) 50%, rgba(255,255,255,.05) 50.13%,
-        transparent 50.13%, transparent 83.33%,
-        rgba(255,255,255,.05) 83.33%, rgba(255,255,255,.05) 83.46%,
-        transparent 83.46%);
+        transparent 0%,     transparent 16.66%,
+        rgba(255,255,255,.05) 16.66%, rgba(255,255,255,.05) 16.67%,
+        transparent 16.67%, transparent 33.33%,
+        rgba(255,255,255,.05) 33.33%, rgba(255,255,255,.05) 33.34%,
+        transparent 33.34%, transparent 50%,
+        rgba(255,255,255,.05) 50%,    rgba(255,255,255,.05) 50.01%,
+        transparent 50.01%, transparent 66.66%,
+        rgba(255,255,255,.05) 66.66%, rgba(255,255,255,.05) 66.67%,
+        transparent 66.67%, transparent 83.33%,
+        rgba(255,255,255,.05) 83.33%, rgba(255,255,255,.05) 83.34%,
+        transparent 83.34%);
 }
 /* Weekendverantwoordelijke: geel gradient + lichte tekst = onleesbaar */
 body.dark-mode .timeline-employee-cell.is-responsible {
