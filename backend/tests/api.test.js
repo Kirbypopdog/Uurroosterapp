@@ -1616,6 +1616,136 @@ describe('Verlofrondes', () => {
     expect(res.status).toBe(400);
   });
 
+  // ===== Weekends uit het roosterconcept =====
+
+  test('POST /leave-rounds weigert een gesloten dag buiten het blok', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .post('/api/v1/leave-rounds')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Schooljaar', blocks: [{
+        name: 'Kerst', startDate: '2026-12-21', endDate: '2027-01-03',
+        closedDates: ['2026-11-01']
+      }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/buiten/i);
+  });
+
+  test('POST /leave-rounds weigert gesloten dagen die geen lijst zijn', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .post('/api/v1/leave-rounds')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Schooljaar', blocks: [{
+        name: 'Kerst', startDate: '2026-12-21', endDate: '2027-01-03',
+        closedDates: '2026-12-26'
+      }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/lijst/i);
+  });
+
+  test('POST /leave-rounds weigert een ongeldig datumformaat bij gesloten dagen', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .post('/api/v1/leave-rounds')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Schooljaar', blocks: [{
+        name: 'Kerst', startDate: '2026-12-21', endDate: '2027-01-03',
+        closedDates: ['26-12-2026']
+      }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/ongeldige gesloten dag/i);
+  });
+
+  // Een ronde zonder gekoppeld concept moet gewoon kunnen: closedDates blijft
+  // dan weg en betekent "onbekend", niet "alles open".
+  test('POST /leave-rounds accepteert een blok zonder gesloten dagen', async () => {
+    mockActiveUser();
+    const client = {
+      query: jest.fn().mockImplementation((sql) => {
+        if (/INSERT INTO leave_rounds/i.test(sql)) return Promise.resolve({ rows: [{ id: 7, name: 'Schooljaar' }] });
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      }),
+      release: jest.fn()
+    };
+    pool.connect.mockResolvedValueOnce(client);
+    const res = await request(app)
+      .post('/api/v1/leave-rounds')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Schooljaar', blocks: [{
+        name: 'Kerst', startDate: '2026-12-21', endDate: '2027-01-03'
+      }] });
+    expect(res.status).toBe(200);
+    const insert = client.query.mock.calls.find(c => /INSERT INTO leave_round_blocks/i.test(c[0]));
+    expect(insert).toBeTruthy();
+    expect(insert[1][7]).toBeNull();
+  });
+
+  test('PUT blocks weigert een medewerker', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/blocks/2')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ closedDates: [] });
+    expect(res.status).toBe(403);
+  });
+
+  test('PUT blocks geeft 404 als het blok niet bij de ronde hoort', async () => {
+    mockActiveUser();
+    const client = { query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(client);
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/blocks/999')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ closedDates: [] });
+    expect(res.status).toBe(404);
+  });
+
+  test('PUT blocks geeft 409 op een gesloten ronde zonder force', async () => {
+    mockActiveUser();
+    const client = {
+      query: jest.fn().mockResolvedValue({ rows: [{
+        id: 2, name: 'Kerst', startDate: '2026-12-21', endDate: '2027-01-03',
+        closedDates: null, status: 'gesloten'
+      }], rowCount: 1 }),
+      release: jest.fn()
+    };
+    pool.connect.mockResolvedValueOnce(client);
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/blocks/2')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ closedDates: ['2026-12-26'] });
+    expect(res.status).toBe(409);
+  });
+
+  // Invulling op een dag die nu dicht is moet weg, anders zet apply daar
+  // alsnog verlof op.
+  test('PUT blocks verwijdert entries op nieuw gesloten dagen', async () => {
+    mockActiveUser();
+    const client = {
+      query: jest.fn().mockImplementation((sql) => {
+        if (/FROM leave_round_blocks b JOIN leave_rounds/i.test(sql)) {
+          return Promise.resolve({ rows: [{
+            id: 2, name: 'Kerst', startDate: '2026-12-21', endDate: '2027-01-03',
+            closedDates: null, status: 'open'
+          }], rowCount: 1 });
+        }
+        return Promise.resolve({ rows: [], rowCount: 3 });
+      }),
+      release: jest.fn()
+    };
+    pool.connect.mockResolvedValueOnce(client);
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/blocks/2')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ closedDates: ['2026-12-26', '2026-12-27'] });
+    expect(res.status).toBe(200);
+    const del = client.query.mock.calls.find(c => /DELETE FROM leave_round_entries/i.test(c[0]));
+    expect(del).toBeTruthy();
+    expect(del[1][1]).toEqual(['2026-12-26', '2026-12-27']);
+    expect(res.body.entriesRemoved).toBe(3);
+  });
+
   test('PUT entries: medewerker mag niet voor iemand anders invullen', async () => {
     mockActiveUser();
     const res = await request(app)

@@ -13377,6 +13377,39 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .leave-mixed { font-size: 11.5px; color: var(--alert-warning-text); flex-basis: 100%; }
 
+/* Weekendindeling uit het roosterconcept. Elke week krijgt een chip zodra de
+   ronde weekendinfo heeft — ook "open", want alleen "gesloten" tonen zou niet
+   te onderscheiden zijn van "we weten het niet". */
+.leave-weekend-chip {
+    display: inline-block;
+    font-size: 11px; font-weight: 700;
+    padding: 1px 8px; border-radius: 20px;
+    border: 1px solid transparent;
+}
+.leave-weekend-chip.is-open  { background: var(--ok-bg);  color: var(--ok); }
+.leave-weekend-chip.is-dicht { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); }
+
+.leave-week-row.is-gesloten, .leave-day-row.is-gesloten { opacity: .72; }
+.leave-week-dicht, .leave-day-dicht {
+    font-size: 12px; font-weight: 600; color: var(--ink-3);
+    padding: 4px 10px; background: var(--surface-2);
+    border: 1px dashed var(--line); border-radius: var(--radius-md);
+}
+
+/* In de matrix: gesloten is iets anders dan niet ingevuld. */
+.leave-cell.leave-gesloten,
+.leave-legend-swatch.leave-gesloten {
+    background-color: var(--surface-2);
+    background-image: repeating-linear-gradient(45deg,
+        transparent, transparent 3px,
+        color-mix(in srgb, var(--ink-3) 45%, transparent) 3px,
+        color-mix(in srgb, var(--ink-3) 45%, transparent) 5px);
+}
+.leave-dicht-tag {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--ink-3);
+}
+
 .leave-day-week {
     background: var(--surface-color);
     border: 1px solid var(--border-color);
@@ -13555,6 +13588,10 @@ body.dark-mode {
     cursor: pointer;
 }
 .leave-period-name { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+/* Herkomst van de weekendindeling, onder de vakantienaam in de nieuwe-rondemodal */
+.leave-period-concept { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; }
+.leave-period-concept.is-leeg { color: var(--alert-warning-text); }
+.form-input-xs { font-size: 11.5px; padding: 2px 6px; height: auto; width: auto; max-width: 100%; }
 .leave-period-row .form-input { max-width: 150px; font-size: 12px; padding: 6px 8px; }
 
 @media (max-width: 480px) {

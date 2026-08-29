@@ -314,3 +314,120 @@ describe('getShiftEndDateTime — extra grensgevallen', () => {
     expect(end.getDate()).toBe(1);
   });
 });
+
+// ===== VERLOFPLANNING: gesloten dagen uit het roosterconcept =====
+//
+// app-leave.js is browsercode, maar de weekindeling en de afleiding van
+// gesloten dagen zijn pure functies. Ze leunen op drie datumhelpers uit
+// data.js; die zetten we hier als globals klaar, net zoals hierboven met
+// DataStore gebeurt.
+global.parseDateOnly = (value) => {
+  const [y, m, d] = String(value).split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+global.getMondayOfWeek = (date) => {
+  const x = new Date(date);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  x.setHours(0, 0, 0, 0);
+  return x;
+};
+global.formatDateYYYYMMDD = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const {
+  closedDatesFromPattern,
+  leaveWeeksOfBlock,
+  leaveWeekendInfo,
+  leaveOpenDaysOfBlock,
+  leaveBlockProgress
+} = require('../../frontend/app-leave.js');
+
+// Kerstvakantie 21 dec 2026 t/m 3 jan 2027 = twee volle maandagweken.
+const KERST = { startDate: '2026-12-21', endDate: '2027-01-03' };
+const PATROON = { cycleLength: 2, weeks: { '1': { closedDays: [6, 0] }, '2': { closedDays: [] } } };
+
+describe('closedDatesFromPattern', () => {
+  test('sluit het weekend van week 1 en laat week 2 open', () => {
+    const dicht = closedDatesFromPattern(KERST.startDate, KERST.startDate, KERST.endDate, PATROON);
+    expect(dicht).toEqual(['2026-12-26', '2026-12-27']);
+  });
+
+  test('geeft niets terug zonder patroon', () => {
+    expect(closedDatesFromPattern(KERST.startDate, KERST.startDate, KERST.endDate, null)).toEqual([]);
+  });
+
+  // Weken voorbij de cyclus hebben geen entry: dan claimen we niets, in
+  // plaats van het patroon te laten herhalen.
+  test('claimt niets voor weken voorbij de cyclus', () => {
+    const kort = { cycleLength: 1, weeks: { '1': { closedDays: [6, 0] } } };
+    const dicht = closedDatesFromPattern(KERST.startDate, KERST.startDate, KERST.endDate, kort);
+    expect(dicht).toEqual(['2026-12-26', '2026-12-27']);
+  });
+
+  test('neemt alleen dagen binnen het blok mee als het blok midden in een week start', () => {
+    // Blok start op woensdag 23 dec; de zaterdag erna valt nog in week 1.
+    const dicht = closedDatesFromPattern('2026-12-21', '2026-12-23', '2027-01-03', PATROON);
+    expect(dicht).toEqual(['2026-12-26', '2026-12-27']);
+  });
+});
+
+describe('leaveWeeksOfBlock met gesloten dagen', () => {
+  const blok = { ...KERST, closedDates: ['2026-12-26', '2026-12-27'] };
+
+  test('splitst open en gesloten dagen per week', () => {
+    const weken = leaveWeeksOfBlock(blok);
+    expect(weken).toHaveLength(2);
+    expect(weken[0].openDays).toHaveLength(5);
+    expect(weken[0].closedDays).toEqual(['2026-12-26', '2026-12-27']);
+    expect(weken[1].openDays).toHaveLength(7);
+  });
+
+  test('benoemt het weekend per week', () => {
+    const weken = leaveWeeksOfBlock(blok);
+    expect(leaveWeekendInfo(weken[0])).toMatchObject({ open: false, label: 'weekend gesloten' });
+    expect(leaveWeekendInfo(weken[1])).toMatchObject({ open: true, label: 'weekend open' });
+  });
+
+  // Een concept kan ook een doordeweekse dag sluiten — 25 december, 11 juli.
+  // Dan moet de rij die dag benoemen in plaats van "weekend open".
+  test('benoemt een gesloten doordeweekse dag', () => {
+    const kerstdag = { ...KERST, closedDates: ['2026-12-25'] };
+    const weken = leaveWeeksOfBlock(kerstdag);
+    expect(weken[0].openDays).toHaveLength(6);
+    expect(leaveWeekendInfo(weken[0])).toMatchObject({ open: true, label: 'vr gesloten' });
+  });
+
+  test('somt weekdag en weekend samen op', () => {
+    const nieuwjaar = { ...KERST, closedDates: ['2027-01-01', '2027-01-02', '2027-01-03'] };
+    const weken = leaveWeeksOfBlock(nieuwjaar);
+    expect(leaveWeekendInfo(weken[1])).toMatchObject({ open: false, label: 'vr, za, zo gesloten' });
+  });
+
+  // Zonder gekoppeld concept weten we niets: dan tonen we ook niets.
+  test('zegt niets over het weekend zonder closedDates', () => {
+    const weken = leaveWeeksOfBlock(KERST);
+    expect(weken[0].openDays).toHaveLength(7);
+    expect(leaveWeekendInfo(weken[0])).toBeNull();
+  });
+});
+
+describe('leaveBlockProgress', () => {
+  const blok = { ...KERST, closedDates: ['2026-12-26', '2026-12-27'] };
+
+  // Zonder deze regel blijft de indienknop permanent uitgeschakeld zodra
+  // er ergens een weekend dicht staat.
+  test('is klaar wanneer enkel de open dagen ingevuld zijn', () => {
+    const map = {};
+    leaveOpenDaysOfBlock(blok).forEach(d => { map[d] = 'werken'; });
+    expect(leaveBlockProgress(blok, map)).toEqual({ totaal: 12, ingevuld: 12, klaar: true });
+  });
+
+  test('telt gesloten dagen niet mee als ontbrekend', () => {
+    expect(leaveBlockProgress(blok, {}).totaal).toBe(12);
+  });
+
+  test('een volledig gesloten blok is meteen klaar', () => {
+    const dicht = { startDate: '2026-12-26', endDate: '2026-12-27', closedDates: ['2026-12-26', '2026-12-27'] };
+    expect(leaveBlockProgress(dicht, {}).klaar).toBe(true);
+  });
+});

@@ -627,6 +627,22 @@ const MIGRATIONS = [
         WHERE NOT EXISTS (SELECT 1 FROM leave_round_blocks b WHERE b.round_id = r.id)
       `);
     }
+  },
+  {
+    // Welke weekends van een vakantie open of gesloten zijn, wordt beslist in
+    // het roosterconcept. De verlofronde neemt die beslissing bij het openen
+    // over als eigen gegeven: wie invult moet weten waar hij aan toe is, en
+    // over een jaar moet nog na te gaan zijn welke weekends toen werkweekends
+    // waren. Een concept kan intussen gewijzigd of verwijderd zijn.
+    //
+    // NULL = onbekend (geen concept gekoppeld) · [] = bekend, alles open ·
+    // [...] = deze dagen zijn gesloten. Die drie moeten uit elkaar blijven,
+    // anders tonen we "weekend open" terwijl we niets weten.
+    name: '036_leave_block_closed_dates',
+    up: async (client) => {
+      await client.query(`ALTER TABLE leave_round_blocks ADD COLUMN IF NOT EXISTS closed_dates JSONB`);
+      await client.query(`ALTER TABLE leave_round_blocks ADD COLUMN IF NOT EXISTS closed_source JSONB NOT NULL DEFAULT '{}'::jsonb`);
+    }
   }
 ];
 
@@ -3806,6 +3822,13 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       }
     }
 
+    // Gesloten dagen per week uit het patroon van het concept (0=zo … 6=za)
+    const patternClosedDays = {};
+    Object.entries(rawGrid._pattern?.weeks || {}).forEach(([w, cfg]) => {
+      if (Array.isArray(cfg?.closedDays)) patternClosedDays[w] = cfg.closedDays;
+    });
+    let closedDaySkips = 0;
+
     let appliedCount = 0;
     let totalCreated = 0;
     let totalDeleted = 0;
@@ -3974,12 +3997,22 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           if (closedDatesSet.has(dateStr)) continue;
           if (vakantieSkipRanges.some(r => dateStr >= r.start && dateStr <= r.end)) continue;
 
-          // Calculate cycle week number for this date
+          // Calculate cycle week number for this date.
+          //
+          // Een vakantieconcept telt zijn weken vanaf de eerste maandag van de
+          // vakantie — dat is wat de bouwer toont en wat de mens aanklikt
+          // (getBuilderVakantieWeekStart). De modulo-berekening hieronder gaat
+          // uit van een doorlopende cyclus vanaf een globale referentiedatum,
+          // en die erft een vakantieconcept bij aanmaak. Daardoor kreeg week 1
+          // van bv. de paasvakantie het rooster van week 2, en bij de zomer
+          // schoof het hele rooster op. Basisroosters houden de cyclus.
           const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
-          const diffMs = currMonday.getTime() - refMonday.getTime();
+          const ankerMonday = isVakantie ? getMonday(rangeStart) : refMonday;
+          const diffMs = currMonday.getTime() - ankerMonday.getTime();
           const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
-          const mod = diffWeeks % cycleLength;
-          const weekNumber = (mod < 0 ? mod + cycleLength : mod) + 1;
+          const weekNumber = isVakantie
+            ? diffWeeks + 1
+            : ((diffWeeks % cycleLength) < 0 ? (diffWeeks % cycleLength) + cycleLength : (diffWeeks % cycleLength)) + 1;
 
           const weekGrid = gridByWeek[weekNumber];
           if (!weekGrid) continue;
@@ -3992,6 +4025,16 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           const dayIndex = jsDow === 0 ? 6 : jsDow - 1;
           const assignment = empGrid[String(dayIndex)] || empGrid[dayIndex];
           if (!assignment) continue;
+
+          // Een dag die in de bouwer gesloten is levert geen shift op. Je kan
+          // zo'n dag daar niet invullen, dus een resterende gridcel komt van
+          // vóór het sluiten en is onzichtbaar geworden — die mag niet alsnog
+          // een dienst opleveren. Pas hier tellen, na de cel: anders telt de
+          // teller gesloten dagen in plaats van onderdrukte diensten.
+          if ((patternClosedDays[String(weekNumber)] || []).includes(jsDow)) {
+            closedDaySkips++;
+            continue;
+          }
 
           insertRows.push({
             userId: emp.id,
@@ -4171,6 +4214,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       employeesApplied: appliedCount,
       shiftsCreated: totalCreated,
       shiftsDeleted: totalDeleted,
+      closedDaySkips,
       clearBlocks
     });
 
@@ -4179,7 +4223,10 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       shifts: { created: totalCreated, deleted: totalDeleted },
       draftName: draft.name,
       weekNumbers: appliedWeekNumbers,
-      manualShiftsPreserved: preservedManualCount
+      manualShiftsPreserved: preservedManualCount,
+      // Aantal keer dat een gridcel niet is uitgevoerd omdat die dag in het
+      // concept gesloten staat. Zichtbaar maken, niet stil overslaan.
+      closedDaySkips
     });
 
   } catch (err) {
@@ -4381,6 +4428,27 @@ v1.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke')
 // invullen mag je enkel voor jezelf — tenzij je de ronde beheert.
 
 const LEAVE_MANAGER_ROLES = ['admin', 'roosterverantwoordelijke'];
+
+// Gesloten dagen van een verlofblok. De frontend leidt ze af uit het
+// vakantieconcept en stuurt ze mee; hier controleren we enkel dat het
+// geldige datums binnen het blok zijn. `undefined`/`null` blijft "onbekend".
+function normalizeClosedDates(waarde, startDate, endDate, blokNaam) {
+  if (waarde === undefined || waarde === null) return { ok: true, value: null };
+  if (!Array.isArray(waarde)) {
+    return { ok: false, error: `Gesloten dagen bij "${blokNaam}" moeten een lijst zijn` };
+  }
+  const uniek = new Set();
+  for (const d of waarde) {
+    if (typeof d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      return { ok: false, error: `Ongeldige gesloten dag bij "${blokNaam}"` };
+    }
+    if (d < startDate || d > endDate) {
+      return { ok: false, error: `Gesloten dag ${d} valt buiten "${blokNaam}"` };
+    }
+    uniek.add(d);
+  }
+  return { ok: true, value: [...uniek].sort() };
+}
 const isLeaveManager = (user) => LEAVE_MANAGER_ROLES.includes(user?.role);
 
 // Kolommen van een ronde. De alias is nodig zodra er gejoind wordt: zowel
@@ -4442,7 +4510,8 @@ v1.get('/leave-rounds/:id', requireAuth, async (req, res) => {
          WHERE s.round_id = $1`, [req.params.id]),
       pool.query(
         `SELECT id, name, mode, start_date::text AS "startDate", end_date::text AS "endDate",
-                holiday_period_id AS "holidayPeriodId", sort_order AS "sortOrder"
+                holiday_period_id AS "holidayPeriodId", sort_order AS "sortOrder",
+                closed_dates AS "closedDates", closed_source AS "closedSource"
          FROM leave_round_blocks WHERE round_id = $1 ORDER BY sort_order, start_date`, [req.params.id]),
     ]);
     res.json({ round, blocks: blocks.rows, entries: entries.rows, submissions: subs.rows });
@@ -4470,6 +4539,9 @@ v1.post('/leave-rounds', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async
     if (new Date(b.endDate) < new Date(b.startDate)) {
       return res.status(400).json({ error: `Einddatum ligt voor de startdatum bij "${b.name}"` });
     }
+    const cd = normalizeClosedDates(b.closedDates, b.startDate, b.endDate, b.name);
+    if (!cd.ok) return res.status(400).json({ error: cd.error });
+    b._closedDates = cd.value;
   }
 
   const startDate = blocks.reduce((m, b) => (b.startDate < m ? b.startDate : m), blocks[0].startDate);
@@ -4489,9 +4561,11 @@ v1.post('/leave-rounds', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async
     let i = 0;
     for (const b of blocks) {
       await client.query(
-        `INSERT INTO leave_round_blocks (round_id, name, mode, start_date, end_date, holiday_period_id, sort_order)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [round.id, b.name, b.mode || 'binair', b.startDate, b.endDate, b.holidayPeriodId || null, i++]
+        `INSERT INTO leave_round_blocks (round_id, name, mode, start_date, end_date, holiday_period_id, sort_order, closed_dates, closed_source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)`,
+        [round.id, b.name, b.mode || 'binair', b.startDate, b.endDate, b.holidayPeriodId || null, i++,
+         b._closedDates === null ? null : JSON.stringify(b._closedDates),
+         JSON.stringify(b._closedDates === null ? {} : (b.closedSource || {}))]
       );
     }
     await client.query('COMMIT');
@@ -4530,6 +4604,68 @@ v1.put('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), as
   } catch (err) {
     console.error('Error updating leave round:', err);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Weekends van één blok opnieuw overnemen uit het roosterconcept. Bewust een
+// aparte, expliciete actie: een concept dat na het openen van de ronde wijzigt
+// mag de grondslag waarop mensen invulden niet stilzwijgend verschuiven.
+v1.put('/leave-rounds/:id/blocks/:blockId', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const { closedDates, closedSource } = req.body || {};
+  const client = await pool.connect();
+  try {
+    const blokRes = await client.query(
+      `SELECT b.id, b.name, b.start_date::text AS "startDate", b.end_date::text AS "endDate",
+              b.closed_dates AS "closedDates", r.status
+       FROM leave_round_blocks b JOIN leave_rounds r ON r.id = b.round_id
+       WHERE b.id = $1 AND b.round_id = $2`,
+      [req.params.blockId, req.params.id]
+    );
+    if (blokRes.rows.length === 0) return res.status(404).json({ error: 'Blok niet gevonden in deze ronde' });
+    const blok = blokRes.rows[0];
+
+    // Een gesloten of toegepaste ronde herschrijven raakt afspraken die al
+    // goedgekeurd zijn — dat mag alleen bewust.
+    if (['gesloten', 'toegepast'].includes(blok.status) && req.query.force !== '1') {
+      return res.status(409).json({
+        error: 'Deze ronde is al gesloten. Bevestig dat je de weekendindeling toch wil aanpassen.',
+        status: blok.status
+      });
+    }
+
+    const cd = normalizeClosedDates(closedDates, blok.startDate, blok.endDate, blok.name);
+    if (!cd.ok) return res.status(400).json({ error: cd.error });
+
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE leave_round_blocks SET closed_dates = $1::jsonb, closed_source = $2::jsonb WHERE id = $3`,
+      [cd.value === null ? null : JSON.stringify(cd.value),
+       JSON.stringify(cd.value === null ? {} : (closedSource || {})), blok.id]
+    );
+
+    // Invulling op een dag die nu gesloten is moet weg: anders zet `apply`
+    // daar alsnog verlof op, en telt die dag mee in latere weekendtellingen.
+    let entriesRemoved = 0;
+    if (cd.value && cd.value.length > 0) {
+      const del = await client.query(
+        `DELETE FROM leave_round_entries WHERE round_id = $1 AND date = ANY($2::date[])`,
+        [req.params.id, cd.value]
+      );
+      entriesRemoved = del.rowCount || 0;
+    }
+    await client.query('COMMIT');
+
+    await logAudit(req, 'UPDATE', 'settings', String(req.params.id), {
+      type: 'leave_block_closed_dates', blockId: blok.id,
+      closed: cd.value ? cd.value.length : null, entriesRemoved
+    });
+    res.json({ block: { id: blok.id, closedDates: cd.value, closedSource: closedSource || {} }, entriesRemoved });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error updating leave block:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 

@@ -203,7 +203,11 @@ CREATE TABLE IF NOT EXISTS leave_round_blocks (
   start_date        DATE NOT NULL,
   end_date          DATE NOT NULL,
   holiday_period_id TEXT,
-  sort_order        INTEGER NOT NULL DEFAULT 0
+  sort_order        INTEGER NOT NULL DEFAULT 0,
+  -- Gesloten dagen, overgenomen uit het gekoppelde vakantieconcept bij het
+  -- openen van de ronde. NULL = onbekend, [] = alles open, [...] = dicht.
+  closed_dates      JSONB,
+  closed_source     JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE INDEX IF NOT EXISTS idx_leave_blocks_round ON leave_round_blocks(round_id);

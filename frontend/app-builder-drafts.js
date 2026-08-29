@@ -737,7 +737,11 @@ async function applyBuilderDraft(draftId) {
         showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
         try {
             const result = await applyScheduleDraft(draftId, { clearBlocks: true });
-            showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt)`, 'success');
+            // Overgeslagen dagen expliciet melden: die komen uit gridcellen die
+            // je in de bouwer niet meer ziet omdat de dag intussen gesloten is.
+            const gesloten = result.closedDaySkips
+                ? `, ${result.closedDaySkips} overgeslagen op gesloten dagen` : '';
+            showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt${gesloten})`, 'success');
 
             const draftToMark = drafts.find(d => d.id === draftId);
             if (draftToMark) {
@@ -870,7 +874,9 @@ async function applyBuilderDraft(draftId) {
         const preservedNote = result.manualShiftsPreserved > 0
             ? ` · ${result.manualShiftsPreserved} manuele diensten behouden`
             : '';
-        showToast(`Basisrooster ${weekLabel} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt${preservedNote})`, 'success');
+        const geslotenNote = result.closedDaySkips
+            ? `, ${result.closedDaySkips} overgeslagen op gesloten dagen` : '';
+        showToast(`Basisrooster ${weekLabel} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt${preservedNote}${geslotenNote})`, 'success');
 
         // Update local draft cache with applied dates
         const draftToMark = (DataStore.settings.schedule_drafts || []).find(d => d.id === draftId);

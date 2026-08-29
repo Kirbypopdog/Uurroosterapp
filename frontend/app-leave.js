@@ -42,12 +42,58 @@ async function fetchLeaveRound(id) {
     return data;
 }
 
+// ===== GESLOTEN DAGEN =====
+// Of het toestel tijdens een vakantieweek open is, wordt beslist in het
+// roosterconcept. De verlofronde neemt die beslissing bij het openen over
+// (leave_round_blocks.closedDates), zodat een medewerker het ziet zonder de
+// concepten te mogen lezen, en zodat later nog na te gaan is welke weekends
+// toen werkweekends waren.
+//
+// null = onbekend (geen concept gekoppeld) · lege set = alles open.
+function leaveClosedSet(block) {
+    return Array.isArray(block?.closedDates) ? new Set(block.closedDates) : null;
+}
+
+// WEEKCONVENTIE — niet wijzigen zonder de bouwer mee te nemen.
+// `_pattern.weeks["i"]` van een vakantieconcept betekent "de i-de maandagweek
+// van de vakantieperiode". Dat is wat de bouwer toont en wat de mens aanklikt
+// (app-builder.js getBuilderVakantieWeekStart). Het is NIET het weeknummer dat
+// getWeekNumber() teruggeeft — dat rekent modulo een globale referentiedatum.
+// Deze functie spiegelt daarom leaveWeeksOfBlock, zodat index i één-op-één
+// blijft lopen met de weekrijen in het invulscherm.
+function closedDatesFromPattern(periodeStart, blokStart, blokEind, pattern) {
+    if (!pattern || !pattern.weeks) return [];
+    const start = parseDateOnly(blokStart);
+    const eind = parseDateOnly(blokEind);
+    const dagen = [];
+    let cursor = getMondayOfWeek(parseDateOnly(periodeStart));
+    let w = 1;
+    while (cursor <= eind) {
+        // Weken voorbij de cyclus hebben geen entry: dan claimen we niets.
+        const closedDays = pattern.weeks[String(w)]?.closedDays || [];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(cursor);
+            d.setDate(d.getDate() + i);
+            if (d >= start && d <= eind && closedDays.includes(d.getDay())) {
+                dagen.push(formatDateYYYYMMDD(d));
+            }
+        }
+        cursor = new Date(cursor);
+        cursor.setDate(cursor.getDate() + 7);
+        w++;
+    }
+    return dagen;
+}
+
 // ===== WEEKINDELING (per blok) =====
 // Een ronde loopt over een heel schooljaar met schoolweken ertussen; alleen
-// de weken binnen een vakantieblok zijn relevant.
+// de weken binnen een vakantieblok zijn relevant. Per week houden we open en
+// gesloten dagen apart: op een gesloten dag valt niets in te vullen, dus die
+// telt ook niet mee voor "alles ingevuld".
 function leaveWeeksOfBlock(block) {
     const start = parseDateOnly(block.startDate);
     const end = parseDateOnly(block.endDate);
+    const closed = leaveClosedSet(block);
     const weeks = [];
     let cursor = getMondayOfWeek(start);
     while (cursor <= end) {
@@ -57,11 +103,47 @@ function leaveWeeksOfBlock(block) {
             d.setDate(d.getDate() + i);
             if (d >= start && d <= end) days.push(formatDateYYYYMMDD(d));
         }
-        if (days.length) weeks.push({ maandag: formatDateYYYYMMDD(cursor), days });
+        if (days.length) {
+            const closedDays = closed ? days.filter(d => closed.has(d)) : [];
+            weeks.push({
+                maandag: formatDateYYYYMMDD(cursor),
+                days,
+                closedDays,
+                openDays: closed ? days.filter(d => !closed.has(d)) : days,
+                weekendBekend: !!closed,
+            });
+        }
         cursor = new Date(cursor);
         cursor.setDate(cursor.getDate() + 7);
     }
     return weeks;
+}
+
+// Wat er deze week gesloten is. Meestal gaat dat over het weekend, maar een
+// concept kan evengoed 25 december of 11 juli sluiten — dan moet de rij dát
+// benoemen in plaats van "weekend open". Zonder concept: niets, want dan
+// tonen we liever niks dan een gok.
+function leaveWeekendInfo(week) {
+    if (!week.weekendBekend) return null;
+    const kort = d => ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'][parseDateOnly(d).getDay()];
+    const isWeekend = d => [0, 6].includes(parseDateOnly(d).getDay());
+    const weekenddagen = week.days.filter(isWeekend);
+    const weekendDicht = weekenddagen.filter(d => week.closedDays.includes(d));
+
+    if (!week.closedDays.length) {
+        return weekenddagen.length ? { open: true, label: 'weekend open' } : null;
+    }
+    // Precies het hele weekend en niets anders: de vertrouwde formulering.
+    if (weekenddagen.length && weekendDicht.length === weekenddagen.length
+        && week.closedDays.length === weekendDicht.length) {
+        return { open: false, label: 'weekend gesloten' };
+    }
+    // Alle andere gevallen benoemen de dagen zelf, bv. "vr, za, zo gesloten".
+    return {
+        open: weekendDicht.length < weekenddagen.length,
+        deels: true,
+        label: `${week.closedDays.map(kort).join(', ')} gesloten`
+    };
 }
 
 // 'werken'/... = alle dagen gelijk · null = gemengd · undefined = nog leeg.
@@ -81,16 +163,22 @@ function leaveWeekLabel(week) {
     return `${fmt(first)} – ${fmt(last)}`;
 }
 
-// Alle dagen van een blok (voor de voortgangsteller op de landingspagina)
+// Alle dagen van een blok
 function leaveDaysOfBlock(block) {
     return leaveWeeksOfBlock(block).flatMap(w => w.days);
 }
 
-// Hoever staat iemand met één vakantie?
+// Enkel de dagen waarop iets in te vullen valt (voor de voortgangsteller)
+function leaveOpenDaysOfBlock(block) {
+    return leaveWeeksOfBlock(block).flatMap(w => w.openDays);
+}
+
+// Hoever staat iemand met één vakantie? Gesloten dagen tellen niet mee —
+// anders staat de indienknop permanent op disabled zodra een weekend dicht is.
 function leaveBlockProgress(block, entryMap) {
-    const dagen = leaveDaysOfBlock(block);
+    const dagen = leaveOpenDaysOfBlock(block);
     const ingevuld = dagen.filter(d => entryMap[d]).length;
-    return { totaal: dagen.length, ingevuld, klaar: ingevuld === dagen.length && dagen.length > 0 };
+    return { totaal: dagen.length, ingevuld, klaar: ingevuld === dagen.length };
 }
 
 // ===== HOOFDWEERGAVE =====
@@ -225,6 +313,9 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
     const mySub = submissions.find(s => Number(s.userId) === me);
     const entryMap = {};
     entries.filter(e => Number(e.userId) === me).forEach(e => { entryMap[e.date] = e.status; });
+    // De draft is de bron voor opslaan, en "Opnieuw indienen" staat op deze
+    // pagina. Zonder deze regel vertrekt hij leeg en wist het indienen alles.
+    AppState.leaveDraft = { ...(AppState.leaveDraft || {}), ...entryMap };
 
     const klein = blocks.filter(b => b.mode === 'binair');
     const zomer = blocks.filter(b => b.mode === 'voorkeur');
@@ -252,7 +343,7 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
             </div>
         </div>
 
-        ${renderLeaveStatusBanner(round, mySub)}
+        ${renderLeaveStatusBanner(round, mySub, alleKlaar)}
 
         ${groep('Kleine vakanties', klein)}
         ${groep('Zomer', zomer)}
@@ -282,7 +373,7 @@ function renderLeaveBlockCard(block, entryMap) {
             <div class="leave-card-main">
                 <strong>${escapeHtml(block.name)}</strong>
                 <span class="text-muted text-xs">
-                    ${leaveDatumKort(block.startDate)} – ${leaveDatumKort(block.endDate)} · ${weken} week${weken === 1 ? '' : 'en'}
+                    ${leaveDatumKort(block.startDate)} – ${leaveDatumKort(block.endDate)} · ${weken} ${weken === 1 ? 'week' : 'weken'}
                 </span>
             </div>
             ${status}
@@ -348,13 +439,16 @@ function renderLeaveOverzichtScherm(round, blocks, entries, submissions) {
         ${renderLeaveMatrix(round, blocks, entries, submissions)}`;
 }
 
-function renderLeaveStatusBanner(round, mySub) {
+function renderLeaveStatusBanner(round, mySub, alleKlaar) {
     if (round.status === 'concept')   return '<div class="leave-banner leave-banner-info">Concept — nog niet zichtbaar voor medewerkers.</div>';
     if (round.status === 'toegepast') return '<div class="leave-banner leave-banner-ok">Verwerkt — het verlof staat in de planning.</div>';
     if (round.status === 'gesloten')  return '<div class="leave-banner leave-banner-info">Deze ronde is gesloten.</div>';
     if (mySub?.approved === true)     return '<div class="leave-banner leave-banner-ok">Je verlof is goedgekeurd.</div>';
     if (mySub?.approved === false)    return `<div class="leave-banner leave-banner-warn">Je aanvraag is afgewezen.${
         mySub.responseNote ? ' ' + escapeHtml(mySub.responseNote) : ''}</div>`;
+    // Na een bijgewerkte weekendindeling kan een ingediende invulling gaten
+    // hebben. "Je hebt al ingediend" zou dan geruststellen zonder reden.
+    if (mySub?.submittedAt && alleKlaar === false) return '<div class="leave-banner leave-banner-warn">De weekendindeling is aangepast. Vul de ontbrekende weken opnieuw in en dien opnieuw in.</div>';
     if (mySub?.submittedAt)           return '<div class="leave-banner leave-banner-ok">Je hebt al ingediend, maar je kan nog aanpassen tot de deadline.</div>';
     return '<div class="leave-banner leave-banner-warn">Je hebt nog niets ingediend.</div>';
 }
@@ -365,20 +459,31 @@ function renderLeaveFillWeeks(block, entryMap, bewerkbaar) {
     const opties = leaveOptionsFor(block.mode);
     return `<div class="leave-week-list">
         ${leaveWeeksOfBlock(block).map(week => {
-            const status = weekStatus(week.days, entryMap);
+            // Alleen open dagen bepalen de status: een week met een gesloten
+            // zaterdag zou anders eeuwig "gemengd" heten.
+            const status = weekStatus(week.openDays, entryMap);
+            const weekend = leaveWeekendInfo(week);
+            const volledigDicht = week.openDays.length === 0;
+            // Zonder gekoppeld concept tonen we niets over het weekend —
+            // een verkeerde indeling tonen is erger dan geen.
+            const chip = weekend
+                ? `<span class="leave-weekend-chip ${weekend.open ? 'is-open' : 'is-dicht'}">${weekend.label}</span>`
+                : '';
             return `
-            <div class="leave-week-row" data-week="${week.maandag}" data-block="${block.id}">
+            <div class="leave-week-row ${volledigDicht ? 'is-gesloten' : ''}" data-week="${week.maandag}" data-block="${block.id}">
                 <div class="leave-week-info">
                     <strong>${leaveWeekLabel(week)}</strong>
-                    <span class="text-muted text-xs">${week.days.length} dagen</span>
+                    <span class="text-muted text-xs">${week.openDays.length} dagen${chip ? ' · ' : ''}</span>
+                    ${chip}
                 </div>
+                ${volledigDicht ? '<span class="leave-week-dicht">volledig gesloten</span>' : `
                 <div class="leave-week-choices">
                     ${opties.map(s => `
                         <button class="leave-choice ${LEAVE_STATUS[s].klasse} ${status === s ? 'active' : ''}"
                                 data-week-set="${week.maandag}" data-block="${block.id}" data-status="${s}"
                                 ${bewerkbaar ? '' : 'disabled'}>${LEAVE_STATUS[s].label}</button>`).join('')}
-                </div>
-                ${status === null ? '<span class="leave-mixed">gemengd — zie "per dag"</span>' : ''}
+                </div>`}
+                ${status === null && !volledigDicht ? '<span class="leave-mixed">gemengd — zie "per dag"</span>' : ''}
             </div>`;
         }).join('')}
     </div>`;
@@ -394,18 +499,20 @@ function renderLeaveFillDays(block, entryMap, bewerkbaar) {
                 ${week.days.map(d => {
                     const dt = parseDateOnly(d);
                     const status = entryMap[d] || null;
+                    const dicht = week.closedDays.includes(d);
                     return `
-                    <div class="leave-day-row">
+                    <div class="leave-day-row ${dicht ? 'is-gesloten' : ''}">
                         <div class="leave-day-label">
                             <strong>${dagNamen[dt.getDay()]}</strong>
                             <span>${dt.getDate()}/${dt.getMonth() + 1}</span>
                         </div>
+                        ${dicht ? '<span class="leave-day-dicht">gesloten</span>' : `
                         <div class="leave-day-choices">
                             ${opties.map(s => `
                                 <button class="leave-choice leave-choice-sm ${LEAVE_STATUS[s].klasse} ${status === s ? 'active' : ''}"
                                         data-day-set="${d}" data-status="${s}" ${bewerkbaar ? '' : 'disabled'}
                                         data-tooltip="${LEAVE_STATUS[s].label}" data-tooltip-pos="top" aria-label="${LEAVE_STATUS[s].label}">${LEAVE_STATUS[s].kort}</button>`).join('')}
-                        </div>
+                        </div>`}
                     </div>`;
                 }).join('')}
             </div>`).join('')}
@@ -454,6 +561,7 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
                                             : toontBinair ? 'verlof' : 'zeker niet')}
                 ${toontVoorkeur ? legendeItem('leave-liever-niet', 'liever niet') : ''}
                 ${legendeItem('leave-leeg', 'niet ingevuld')}
+                ${blocks.some(b => Array.isArray(b.closedDates)) ? legendeItem('leave-gesloten', 'gesloten') : ''}
             </div>
 
             ${blocks.map(b => renderLeaveMatrixBlock(b, medewerkers, perUser, statusPil)).join('')}
@@ -469,7 +577,10 @@ function renderLeaveMatrixBlock(block, medewerkers, perUser, statusPil) {
     const dagen = leaveDaysOfBlock(block);
     if (!dagen.length) return '';
 
-    const perDagVrij = dagen.map(d =>
+    const gesloten = leaveClosedSet(block);
+    // Op een gesloten dag is iedereen vrij; die meetellen zou een valse piek
+    // geven en de "druk"-markering onterecht laten afgaan.
+    const perDagVrij = dagen.map(d => gesloten?.has(d) ? null :
         medewerkers.filter(m => {
             const s = (perUser[Number(m.id)] || {})[d];
             return s && s !== 'werken';
@@ -501,16 +612,21 @@ function renderLeaveMatrixBlock(block, medewerkers, perUser, statusPil) {
                         ${dagen.map((d, i) => {
                             const datum = parseDateOnly(d);
                             const weekend = datum.getDay() === 0 || datum.getDay() === 6;
-                            return `<tr class="${weekend ? 'leave-row-weekend' : ''}">
-                                <td class="leave-matrix-day">${leaveDayLabel(datum)}</td>
+                            const dicht = !!gesloten?.has(d);
+                            return `<tr class="${weekend ? 'leave-row-weekend' : ''} ${dicht ? 'leave-row-gesloten' : ''}">
+                                <td class="leave-matrix-day">${leaveDayLabel(datum)}${dicht ? ' <span class="leave-dicht-tag">dicht</span>' : ''}</td>
                                 ${medewerkers.map(m => {
+                                    // Gesloten moet visueel verschillen van niet ingevuld,
+                                    // anders lijkt het alsof iedereen achterloopt.
+                                    if (dicht) return `<td class="leave-cell leave-gesloten"
+                                        data-tooltip="${leaveDayLabel(datum)} — gesloten" data-tooltip-pos="top"></td>`;
                                     const s = (perUser[Number(m.id)] || {})[d];
                                     const st = s ? LEAVE_STATUS[s] : null;
                                     return `<td class="leave-cell ${st ? st.klasse : 'leave-leeg'}"
                                         data-tooltip="${escapeHtml(m.name)} — ${leaveDayLabel(datum)} — ${st ? st.label : 'niet ingevuld'}"
                                         data-tooltip-pos="top"></td>`;
                                 }).join('')}
-                                <td class="leave-matrix-count ${perDagVrij[i] > medewerkers.length / 2 ? 'leave-druk' : ''}">${perDagVrij[i]}</td>
+                                <td class="leave-matrix-count ${perDagVrij[i] !== null && perDagVrij[i] > medewerkers.length / 2 ? 'leave-druk' : ''}">${perDagVrij[i] === null ? '—' : perDagVrij[i]}</td>
                             </tr>`;
                         }).join('')}
                     </tbody>
@@ -555,6 +671,7 @@ function renderLeaveManagerActions(round, medewerkers, subMap, nogNiet) {
             <div class="leave-manager-actions">
                 ${round.status === 'open' ? `<button class="btn btn-secondary" id="leave-close" data-open="${nogNiet.length}">Ronde sluiten</button>` : ''}
                 ${round.status === 'gesloten' ? '<button class="btn btn-primary" id="leave-apply">Verlof toepassen op planning</button>' : ''}
+                <button class="btn btn-secondary" id="leave-resync">Weekends bijwerken uit concept</button>
                 <button class="btn btn-secondary" id="leave-export">Exporteren (CSV)</button>
             </div>
         </div>`;
@@ -602,6 +719,7 @@ function bindLeaveEvents(container, data) {
     container.querySelector('#leave-close')?.addEventListener('click', e => closeLeaveRound(round, Number(e.currentTarget.dataset.open || 0)));
     container.querySelector('#leave-apply')?.addEventListener('click', () => applyLeaveRound(round));
     container.querySelector('#leave-export')?.addEventListener('click', () => exportLeaveRound(data));
+    container.querySelector('#leave-resync')?.addEventListener('click', () => resyncLeaveWeekends(data));
 
     container.querySelectorAll('[data-leave-approve]').forEach(btn =>
         btn.addEventListener('click', () => decideLeave(round, btn.dataset.leaveApprove, true)));
@@ -615,7 +733,10 @@ function bindLeaveChoiceButtons(root, blocks) {
             const block = blocks.find(b => String(b.id) === btn.dataset.block);
             const week = block && leaveWeeksOfBlock(block).find(w => w.maandag === btn.dataset.weekSet);
             if (!week) return;
-            week.days.forEach(d => { AppState.leaveDraft[d] = btn.dataset.status; });
+            week.openDays.forEach(d => { AppState.leaveDraft[d] = btn.dataset.status; });
+            // Een dag die intussen gesloten is mag geen invulling houden:
+            // anders zet `apply` daar alsnog verlof op.
+            week.closedDays.forEach(d => { delete AppState.leaveDraft[d]; });
             refreshLeaveFillBody(blocks);
         });
     });
@@ -645,6 +766,17 @@ async function saveLeaveDraft(round, ookIndienen, opties = {}) {
     const entries = Object.entries(AppState.leaveDraft || {})
         .filter(([, status]) => status)
         .map(([date, status]) => ({ date, status }));
+
+    // De server vervangt de volledige invulling. Leeg opslaan terwijl er op de
+    // server wél iets staat, wist dus alles — dat is nooit de bedoeling van een
+    // klik op Opslaan of Indienen.
+    const me = Number(AppState.currentUser?.id);
+    const opServer = (AppState.leaveRound?.entries || []).some(e => Number(e.userId) === me);
+    if (entries.length === 0 && opServer) {
+        showToast('Er is niets om op te slaan — je invulling is niet gewijzigd', 'warning');
+        return;
+    }
+
     try {
         await dataApiFetch(`/leave-rounds/${round.id}/entries`, {
             method: 'PUT', body: JSON.stringify({ entries })
@@ -723,6 +855,56 @@ async function applyLeaveRound(round) {
 }
 
 // Export in hetzelfde raster als de Excel: rijen = dagen, kolommen = medewerkers
+// Weekendindeling per blok opnieuw overnemen uit het gekoppelde concept.
+// Bewust handmatig: een wijzigend concept mag de grondslag waarop mensen
+// invulden niet stilzwijgend verschuiven.
+async function resyncLeaveWeekends(data) {
+    const { round, blocks = [] } = data;
+    const teDoen = blocks
+        .map(b => ({ blok: b, concept: leaveDraftsForPeriod(b.holidayPeriodId)[0] }))
+        .filter(x => x.concept);
+
+    if (!teDoen.length) {
+        showToast('Geen vakantieconcept gevonden voor de blokken van deze ronde', 'warning');
+        return;
+    }
+
+    const namen = teDoen.map(x => `${x.blok.name} ← "${x.concept.name}"`).join('\n');
+    const gesloten = ['gesloten', 'toegepast'].includes(round.status);
+    const bevestigd = await showConfirm(
+        `${namen}\n\nInvulling op dagen die daardoor gesloten raken wordt verwijderd; wie al indiende moet die weken opnieuw invullen.${
+            gesloten ? '\n\nLet op: deze ronde is al gesloten.' : ''}\n\nDoorgaan?`,
+        'Weekends bijwerken uit concept'
+    );
+    if (!bevestigd) return;
+
+    let gewist = 0;
+    try {
+        for (const { blok, concept } of teDoen) {
+            const res = await dataApiFetch(
+                `/leave-rounds/${round.id}/blocks/${blok.id}${gesloten ? '?force=1' : ''}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    closedDates: closedDatesFromPattern(blok.startDate, blok.startDate, blok.endDate, concept.grid?._pattern),
+                    closedSource: {
+                        draftId: String(concept.id), draftName: concept.name,
+                        holidayPeriodId: String(blok.holidayPeriodId || ''),
+                        syncedAt: new Date().toISOString(),
+                        syncedBy: AppState.currentUser?.id ?? null,
+                        syncedByName: AppState.currentUser?.name || ''
+                    }
+                })
+            });
+            gewist += res.entriesRemoved || 0;
+        }
+        showToast(gewist ? `Weekends bijgewerkt — ${gewist} ingevulde dagen vervallen` : 'Weekends bijgewerkt', 'success');
+        renderLeave();
+    } catch (err) {
+        console.error('Weekends bijwerken mislukt:', err);
+        showToast('Bijwerken mislukt: ' + getUserFriendlyError(err), 'error');
+    }
+}
+
 function exportLeaveRound(data) {
     const { round, blocks = [], entries } = data;
     const medewerkers = getAllEmployees(true);
@@ -733,13 +915,16 @@ function exportLeaveRound(data) {
     });
 
     const dagNamen = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
-    const rijen = [['vakantie', 'dag', 'datum', ...medewerkers.map(m => m.name)]];
+    const rijen = [['vakantie', 'dag', 'datum', 'open', ...medewerkers.map(m => m.name)]];
     blocks.forEach(block => {
+        const gesloten = leaveClosedSet(block);
         leaveWeeksOfBlock(block).forEach(week => {
             week.days.forEach(d => {
                 const dt = parseDateOnly(d);
+                // leeg = geen concept gekoppeld, dus onbekend
+                const open = gesloten ? (gesloten.has(d) ? 'nee' : 'ja') : '';
                 rijen.push([
-                    block.name, dagNamen[dt.getDay()], d,
+                    block.name, dagNamen[dt.getDay()], d, open,
                     ...medewerkers.map(m => {
                         const s = (perUser[Number(m.id)] || {})[d];
                         return s ? LEAVE_STATUS[s].label : '';
@@ -765,6 +950,48 @@ function exportLeaveRound(data) {
 // ===== RONDE STARTEN =====
 // Je kiest welke vakantieperiodes (uit Instellingen) bij dit schooljaar horen
 // en per periode of het binair of op voorkeur ingevuld wordt.
+
+// Vakantieconcepten die aan deze periode hangen, nieuwste eerst. Meerdere
+// concepten per periode mag, dus laten we de beheerder kiezen in plaats van
+// zelf te gokken.
+function leaveDraftsForPeriod(periodId) {
+    return (DataStore.settings.schedule_drafts || [])
+        .filter(d => d.type === 'vakantie' && String(d.holidayPeriodId) === String(periodId))
+        .sort((a, b) => (b.lastAppliedAt || '').localeCompare(a.lastAppliedAt || '')
+                     || (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+}
+
+// Hoeveel weekends dit concept open respectievelijk gesloten laat.
+function leaveWeekendTelling(periode, closedDates) {
+    const blok = { startDate: periode.startDate, endDate: periode.endDate, closedDates };
+    let open = 0, dicht = 0;
+    leaveWeeksOfBlock(blok).forEach(w => {
+        const info = leaveWeekendInfo(w);
+        if (!info) return;
+        if (info.open) open++; else dicht++;
+    });
+    return { open, dicht };
+}
+
+// De weekendindeling komt uit het vakantieconcept. Ontbreekt dat, dan zeggen
+// we dat gewoon en blokkeren we niets: een ronde openen zonder concept mag.
+function renderLeavePeriodConcept(p) {
+    const concepten = leaveDraftsForPeriod(p.id);
+    if (!concepten.length) {
+        return `<span class="leave-period-concept is-leeg">Geen vakantieconcept — weekendinfo ontbreekt</span>`;
+    }
+    const beschrijf = d => {
+        const t = leaveWeekendTelling(p, closedDatesFromPattern(p.startDate, p.startDate, p.endDate, d.grid?._pattern));
+        return `${t.open} open, ${t.dicht} gesloten`;
+    };
+    if (concepten.length === 1) {
+        return `<span class="leave-period-concept">Weekends uit "${escapeHtml(concepten[0].name)}": ${beschrijf(concepten[0])}</span>`;
+    }
+    return `<span class="leave-period-concept">Weekends uit:
+        <select class="lr-period-draft form-input form-input-xs">
+            ${concepten.map(d => `<option value="${escapeHtml(String(d.id))}">${escapeHtml(d.name)} — ${beschrijf(d)}</option>`).join('')}
+        </select></span>`;
+}
 
 function openLeaveRoundModal() {
     const perioden = [...(DataStore.settings.holidayPeriods || [])]
@@ -809,6 +1036,7 @@ function openLeaveRoundModal() {
                                 <span class="leave-period-name">
                                     <strong>${escapeHtml(p.name)}</strong>
                                     <span class="text-muted text-xs">${escapeHtml(p.startDate)} – ${escapeHtml(p.endDate)}</span>
+                                    ${renderLeavePeriodConcept(p)}
                                 </span>
                                 <select class="form-input lr-period-mode">
                                     <option value="binair" ${isZomer(p) ? '' : 'selected'}>Werken / verlof</option>
@@ -837,13 +1065,36 @@ function openLeaveRoundModal() {
 
         const blocks = [...overlay.querySelectorAll('.lr-period')]
             .filter(cb => cb.checked)
-            .map(cb => ({
-                name: cb.dataset.name,
-                startDate: cb.dataset.start,
-                endDate: cb.dataset.end,
-                holidayPeriodId: cb.value,
-                mode: cb.closest('.leave-period-row').querySelector('.lr-period-mode').value
-            }));
+            .map(cb => {
+                const rij = cb.closest('.leave-period-row');
+                const concepten = leaveDraftsForPeriod(cb.value);
+                const gekozenId = rij.querySelector('.lr-period-draft')?.value;
+                const concept = gekozenId
+                    ? concepten.find(d => String(d.id) === String(gekozenId))
+                    : concepten[0];
+                const blok = {
+                    name: cb.dataset.name,
+                    startDate: cb.dataset.start,
+                    endDate: cb.dataset.end,
+                    holidayPeriodId: cb.value,
+                    mode: rij.querySelector('.lr-period-mode').value
+                };
+                // Zonder concept blijft closedDates weg: dat betekent "onbekend",
+                // en dat is iets anders dan "alle weekends open".
+                if (concept) {
+                    blok.closedDates = closedDatesFromPattern(
+                        cb.dataset.start, cb.dataset.start, cb.dataset.end, concept.grid?._pattern);
+                    blok.closedSource = {
+                        draftId: String(concept.id),
+                        draftName: concept.name,
+                        holidayPeriodId: String(cb.value),
+                        syncedAt: new Date().toISOString(),
+                        syncedBy: AppState.currentUser?.id ?? null,
+                        syncedByName: AppState.currentUser?.name || ''
+                    };
+                }
+                return blok;
+            });
         if (!blocks.length) { showToast('Kies minstens één vakantieperiode', 'warning'); return; }
 
         try {
@@ -867,4 +1118,20 @@ function openLeaveRoundModal() {
             showToast('Aanmaken mislukt: ' + getUserFriendlyError(err), 'error');
         }
     });
+}
+
+// De pure helpers (weekindeling, gesloten dagen, voortgang) hebben geen DOM
+// nodig en worden in Node getest. In de browser bestaat `module` niet, dus
+// deze guard verandert daar niets.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        leaveClosedSet,
+        closedDatesFromPattern,
+        leaveWeeksOfBlock,
+        leaveWeekendInfo,
+        leaveDaysOfBlock,
+        leaveOpenDaysOfBlock,
+        leaveBlockProgress,
+        weekStatus,
+    };
 }

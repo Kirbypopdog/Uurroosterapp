@@ -146,6 +146,7 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - `PUT /api/v1/leave-rounds/:id/entries` - Invulling opslaan (eigen; beheerder ook voor anderen)
 - `POST /api/v1/leave-rounds/:id/submit` - Indienen
 - `PUT /api/v1/leave-rounds/:id/submissions/:userId` - Goedkeuren/afwijzen
+- `PUT /api/v1/leave-rounds/:id/blocks/:blockId` - Weekends van een blok opnieuw uit het concept overnemen (409 op een gesloten ronde zonder `?force=1`)
 - `POST /api/v1/leave-rounds/:id/apply` - Goedgekeurd verlof → availability
 
 ### Admin
@@ -160,7 +161,8 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - **Modals**: `openShiftModal(shift, canEdit)` - view vs edit mode op basis van permissies
 - **Scroll preservation**: ScrollY wordt bewaard bij planner re-renders
 - **Validation**: `validation.js` draait client-side checks voor shift toewijzingen
-- **Verlofplanning**: één ronde = één SCHOOLJAAR, opgebouwd uit blokken (`leave_round_blocks`) die verwijzen naar `settings.holidayPeriods` — dus geen tweede plek waar vakantiedatums staan. Modus staat per BLOK: `binair` (kleine vakanties: werken/verlof) of `voorkeur` (zomer: werken/liever_niet/zeker_niet). De UI groepeert blokken in tabs zoals de Excel: alle binaire blokken samen onder "Kleine vakanties", de voorkeurblokken onder "Zomer". Invulling per DAG (week-snelknoppen in de UI, want de praktijk vult per werkweek + weekend apart in). Een dag moet binnen één van de blokken vallen — de schoolweken ertussen zijn geen geldige invoer. Bij een voorkeurblok legt de beheerder ná het sluiten de definitieve verdeling vast (entries op `verlof` zetten) vóór `apply`. Matrix zichtbaar voor iedereen; invullen enkel voor jezelf.
+- **Verlofplanning**: één ronde = één SCHOOLJAAR, opgebouwd uit blokken (`leave_round_blocks`) die verwijzen naar `settings.holidayPeriods` — dus geen tweede plek waar vakantiedatums staan. Modus staat per BLOK: `binair` (kleine vakanties: werken/verlof) of `voorkeur` (zomer: werken/liever_niet/zeker_niet). De UI groepeert blokken in tabs zoals de Excel: alle binaire blokken samen onder "Kleine vakanties", de voorkeurblokken onder "Zomer". Invulling per DAG (week-snelknoppen in de UI, want de praktijk vult per werkweek + weekend apart in). Een dag moet binnen één van de blokken vallen — de schoolweken ertussen zijn geen geldige invoer. Bij een voorkeurblok legt de beheerder ná het sluiten de definitieve verdeling vast (entries op `verlof` zetten) vóór `apply`. Matrix zichtbaar voor iedereen; invullen enkel voor jezelf, en enkel per WEEK (de dag-modus is voorbehouden aan beheerders, die na het sluiten van een voorkeurblok de definitieve verdeling vastleggen).
+- **Gesloten dagen in een verlofronde**: welke dagen tijdens een vakantie gesloten zijn, wordt beslist in het roosterconcept (`draft.grid._pattern.weeks[i].closedDays`, JS-daggetallen met 0=zo, 6=za). De ronde neemt dat bij het openen over in `leave_round_blocks.closed_dates` (absolute datums), zodat een medewerker het ziet zonder `GET /schedule-drafts` te mogen lezen én zodat later na te gaan is welke weekends toen werkweekends waren. Drie toestanden: `null` = onbekend (geen concept gekoppeld), `[]` = alles open, `[...]` = deze dagen dicht — die mogen nooit op één hoop. Bijwerken gebeurt expliciet via de knop "Weekends bijwerken uit concept", nooit automatisch. **WEEKCONVENTIE**: `_pattern.weeks["i"]` betekent "de i-de maandagweek van de vakantieperiode" — dat is wat de bouwer toont (`getBuilderVakantieWeekStart`), NIET het resultaat van `getWeekNumber()`. `closedDatesFromPattern()` in `app-leave.js` en de shiftgeneratie in `server.js` volgen die conventie.
 - **Feestdagen**: `DataStore._publicHolidaysCache` — lazy geladen via `fetchPublicHolidays(year)`. Gebruik `getPublicHoliday(date)` voor rendering. Let op: gebruik hier plain `fetch()`, niet `dataApiFetch()` (endpoint vereist geen auth)
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.
@@ -217,7 +219,7 @@ Zie `DEPLOY.md` voor deployment instructies en `STAGING.md` voor de eenmalige se
 
 ```bash
 cd backend
-npm test           # Alle tests uitvoeren (188 tests, ~5 seconden)
+npm test           # Alle tests uitvoeren (236 tests, ~6 seconden)
 ```
 
 Testbestanden in `backend/tests/`:
