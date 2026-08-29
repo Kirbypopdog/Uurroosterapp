@@ -302,7 +302,11 @@ function renderLeaveBlokScherm(round, block, entries, submissions) {
     entries.filter(e => Number(e.userId) === me).forEach(e => { entryMap[e.date] = e.status; });
     AppState.leaveDraft = { ...(AppState.leaveDraft || {}), ...entryMap };
 
-    const weergave = AppState.leaveFillMode || 'week';
+    // Medewerkers duiden hun vakantie per week aan. Per dag is enkel voor
+    // beheerders: die leggen na het sluiten van een voorkeurblok de
+    // definitieve verdeling vast, en dat kan wel op losse dagen uitkomen.
+    const magPerDag = canManageLeave();
+    const weergave = magPerDag ? (AppState.leaveFillMode || 'week') : 'week';
     const bewerkbaar = round.status === 'open' || canManageLeave();
 
     return `
@@ -316,10 +320,11 @@ function renderLeaveBlokScherm(round, block, entries, submissions) {
         </div>
         <div class="leave-fill">
             <div class="leave-fill-toolbar">
-                <div class="leave-viewtoggle">
-                    <button class="leave-viewtoggle-btn ${weergave === 'week' ? 'active' : ''}" data-leave-fillmode="week">Per week</button>
-                    <button class="leave-viewtoggle-btn ${weergave === 'dag' ? 'active' : ''}" data-leave-fillmode="dag">Per dag</button>
-                </div>
+                ${magPerDag ? `
+                    <div class="leave-viewtoggle">
+                        <button class="leave-viewtoggle-btn ${weergave === 'week' ? 'active' : ''}" data-leave-fillmode="week">Per week</button>
+                        <button class="leave-viewtoggle-btn ${weergave === 'dag' ? 'active' : ''}" data-leave-fillmode="dag">Per dag</button>
+                    </div>` : ''}
                 <div class="leave-legend">
                     ${leaveOptionsFor(block.mode).map(s =>
                         `<span class="leave-legend-chip ${LEAVE_STATUS[s].klasse}">${LEAVE_STATUS[s].label}</span>`).join('')}
@@ -630,7 +635,7 @@ function refreshLeaveFillBody(blocks) {
     const block = blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
     if (!block) return;
     const bewerkbaar = round?.status === 'open' || canManageLeave();
-    body.innerHTML = (AppState.leaveFillMode === 'dag')
+    body.innerHTML = (AppState.leaveFillMode === 'dag' && canManageLeave())
         ? renderLeaveFillDays(block, AppState.leaveDraft, bewerkbaar)
         : renderLeaveFillWeeks(block, AppState.leaveDraft, bewerkbaar);
     bindLeaveChoiceButtons(body, blocks);
