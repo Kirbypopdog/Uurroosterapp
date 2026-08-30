@@ -337,7 +337,7 @@ global.formatDateYYYYMMDD = (d) =>
 const {
   closedDatesFromPattern,
   leaveWeeksOfBlock,
-  leaveWeekendInfo,
+  leaveClosedInfo,
   leaveOpenDaysOfBlock,
   leaveBlockProgress
 } = require('../../frontend/app-leave.js');
@@ -384,8 +384,8 @@ describe('leaveWeeksOfBlock met gesloten dagen', () => {
 
   test('benoemt het weekend per week', () => {
     const weken = leaveWeeksOfBlock(blok);
-    expect(leaveWeekendInfo(weken[0])).toMatchObject({ open: false, label: 'weekend gesloten' });
-    expect(leaveWeekendInfo(weken[1])).toMatchObject({ open: true, label: 'weekend open' });
+    expect(leaveClosedInfo(weken[0])).toMatchObject({ open: false, label: 'weekend gesloten' });
+    expect(leaveClosedInfo(weken[1])).toMatchObject({ open: true, label: 'weekend open' });
   });
 
   // Een concept kan ook een doordeweekse dag sluiten — 25 december, 11 juli.
@@ -394,20 +394,20 @@ describe('leaveWeeksOfBlock met gesloten dagen', () => {
     const kerstdag = { ...KERST, closedDates: ['2026-12-25'] };
     const weken = leaveWeeksOfBlock(kerstdag);
     expect(weken[0].openDays).toHaveLength(6);
-    expect(leaveWeekendInfo(weken[0])).toMatchObject({ open: true, label: 'vr gesloten' });
+    expect(leaveClosedInfo(weken[0])).toMatchObject({ open: true, label: 'vr gesloten' });
   });
 
   test('somt weekdag en weekend samen op', () => {
     const nieuwjaar = { ...KERST, closedDates: ['2027-01-01', '2027-01-02', '2027-01-03'] };
     const weken = leaveWeeksOfBlock(nieuwjaar);
-    expect(leaveWeekendInfo(weken[1])).toMatchObject({ open: false, label: 'vr, za, zo gesloten' });
+    expect(leaveClosedInfo(weken[1])).toMatchObject({ open: false, label: 'vr, za, zo gesloten' });
   });
 
   // Zonder gekoppeld concept weten we niets: dan tonen we ook niets.
   test('zegt niets over het weekend zonder closedDates', () => {
     const weken = leaveWeeksOfBlock(KERST);
     expect(weken[0].openDays).toHaveLength(7);
-    expect(leaveWeekendInfo(weken[0])).toBeNull();
+    expect(leaveClosedInfo(weken[0])).toBeNull();
   });
 });
 

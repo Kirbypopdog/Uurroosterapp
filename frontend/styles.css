@@ -13377,17 +13377,17 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .leave-mixed { font-size: 11.5px; color: var(--alert-warning-text); flex-basis: 100%; }
 
-/* Weekendindeling uit het roosterconcept. Elke week krijgt een chip zodra de
-   ronde weekendinfo heeft — ook "open", want alleen "gesloten" tonen zou niet
-   te onderscheiden zijn van "we weten het niet". */
-.leave-weekend-chip {
+/* Gesloten dagen uit het roosterconcept. Elke week krijgt een chip zodra de
+   ronde die info heeft — ook wanneer alles open is, want alleen "gesloten"
+   tonen zou niet te onderscheiden zijn van "we weten het niet". */
+.leave-closed-chip {
     display: inline-block;
     font-size: 11px; font-weight: 700;
     padding: 1px 8px; border-radius: 20px;
     border: 1px solid transparent;
 }
-.leave-weekend-chip.is-open  { background: var(--ok-bg);  color: var(--ok); }
-.leave-weekend-chip.is-dicht { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); }
+.leave-closed-chip.is-open  { background: var(--ok-bg);  color: var(--ok); }
+.leave-closed-chip.is-dicht { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); }
 
 .leave-week-row.is-gesloten, .leave-day-row.is-gesloten { opacity: .72; }
 .leave-week-dicht, .leave-day-dicht {
