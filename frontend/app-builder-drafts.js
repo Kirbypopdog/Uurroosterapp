@@ -13,7 +13,22 @@ async function saveBuilderDraft() {
             hasAnyData = true;
         }
     }
-    if (!hasAnyData) return;
+
+    // Een concept is meer dan zijn diensten. Wie enkel vastlegt welke dagen
+    // gesloten zijn — precies wat een verlofronde nodig heeft — moet dat ook
+    // kunnen bewaren. Vroeger keek deze check alleen naar ingevulde diensten
+    // en stopte hij zwijgend, zodat de knop niets leek te doen.
+    const heeftGeslotenDagen = Object.values(AppState.builderPattern?.weeks || {})
+        .some(w => Array.isArray(w?.closedDays) && w.closedDays.length > 0);
+    const heeftBezettingsregels = Object.keys(AppState.builderStaffingRulesByWeek || {}).length > 0
+        || Object.keys(AppState.builderStaffingRules || {}).length > 0;
+    const heeftVergaderingen = Object.values(AppState.builderMeetings || {})
+        .some(v => Array.isArray(v) && v.length > 0);
+
+    if (!hasAnyData && !heeftGeslotenDagen && !heeftBezettingsregels && !heeftVergaderingen) {
+        showToast('Er valt nog niets op te slaan — vul een dienst in, sluit een dag of stel bezetting in', 'warning');
+        return;
+    }
 
     // If a draft is loaded, UPDATE it directly (no modal needed)
     if (AppState.builderLoadedDraftId) {
