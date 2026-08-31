@@ -44,7 +44,10 @@ function renderAvailability() {
                     <button id="availability-today" class="btn btn-secondary btn-sm">Vandaag</button>
                     <button id="availability-next-week" class="nav-arrow-btn" aria-label="Volgende week">${IconHelper.html(ICONS.right, 'sm')}</button>
                 </div>
-                <div class="period-display">${formatDate(weekDates[0])} – ${formatDate(weekDates[6])}</div>
+                <div id="availability-period" class="period-display period-display--clickable" title="Klik om naar een datum te springen">
+                    <span>${formatDate(weekDates[0])} – ${formatDate(weekDates[6])}</span>
+                    <input type="date" id="availability-week-jump" class="week-jump-input" aria-label="Spring naar week">
+                </div>
                 <div class="controls-spacer"></div>
                 <div class="availability-legend-inline">
                     <span class="legend-chip available">Beschikbaar</span>
@@ -205,6 +208,30 @@ function renderAvailability() {
         updateShiftRefreshRange();
         renderAvailability();
     });
+
+    // Springen naar een datum, net als in de planning: daar kon je op de
+    // periode klikken om een kalender te openen, hier niet.
+    const availJump = document.getElementById('availability-week-jump');
+    const availPeriod = document.getElementById('availability-period');
+    if (availJump && availPeriod) {
+        availPeriod.addEventListener('click', () => {
+            if (AppState.currentWeekStart) availJump.value = formatDateYYYYMMDD(AppState.currentWeekStart);
+            if (availJump.showPicker) availJump.showPicker(); else availJump.click();
+        });
+        availJump.addEventListener('change', e => {
+            const [y, m, d] = e.target.value.split('-').map(Number);
+            if (!y || !m || !d) return;
+            const gekozen = new Date(y, m - 1, d);
+            if (isNaN(gekozen.getTime())) return;
+            AppState.currentWeekStart = getMonday(gekozen);
+            // Op mobiel toont deze tab één dag: die mee laten springen,
+            // anders land je op de maandag van een week die je niet koos.
+            const dow = gekozen.getDay();
+            AppState.availabilityMobileDayIndex = dow === 0 ? 6 : dow - 1;
+            updateShiftRefreshRange();
+            renderAvailability();
+        });
+    }
 
     document.getElementById('availability-today').addEventListener('click', () => {
         AppState.currentWeekStart = getMonday(new Date());
