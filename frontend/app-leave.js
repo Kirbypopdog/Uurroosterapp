@@ -676,13 +676,12 @@ function renderLeaveMatrixBlock(block, medewerkers, perUser, statusPil) {
     if (!dagen.length) return '';
 
     const gesloten = leaveClosedSet(block);
-    // Op een gesloten dag is iedereen vrij; die meetellen zou een valse piek
-    // geven en de "druk"-markering onterecht laten afgaan.
-    const perDagVrij = dagen.map(d => gesloten?.has(d) ? null :
-        medewerkers.filter(m => {
-            const s = (perUser[Number(m.id)] || {})[d];
-            return s && s !== 'werken';
-        }).length
+    // Tellen wie er wérkt, niet wie vrij is: dat is het getal waarop je een
+    // vakantie plant. Alleen wie 'werken' invulde telt mee; van wie niets
+    // invulde weten we het simpelweg niet. Op een gesloten dag is er niets te
+    // tellen, vandaar een streepje in plaats van een nul.
+    const perDagWerkt = dagen.map(d => gesloten?.has(d) ? null :
+        medewerkers.filter(m => (perUser[Number(m.id)] || {})[d] === 'werken').length
     );
 
     return `
@@ -698,7 +697,7 @@ function renderLeaveMatrixBlock(block, medewerkers, perUser, statusPil) {
                         <tr>
                             <th class="leave-matrix-day">Dag</th>
                             ${medewerkers.map(m => `<th class="leave-matrix-person">${escapeHtml(leaveShortName(m.name))}</th>`).join('')}
-                            <th class="leave-matrix-count-head" data-tooltip="Aantal mensen dat die dag niet werkt" data-tooltip-pos="top">vrij</th>
+                            <th class="leave-matrix-count-head" data-tooltip="Aantal mensen dat die dag werkt" data-tooltip-pos="top">werkt</th>
                         </tr>
                         <tr class="leave-matrix-substatus">
                             <th></th>
@@ -724,7 +723,7 @@ function renderLeaveMatrixBlock(block, medewerkers, perUser, statusPil) {
                                         data-tooltip="${escapeHtml(m.name)} · ${leaveDayLabel(datum)} · ${st ? st.label : 'niet ingevuld'}"
                                         data-tooltip-pos="top"></td>`;
                                 }).join('')}
-                                <td class="leave-matrix-count ${perDagVrij[i] !== null && perDagVrij[i] > medewerkers.length / 2 ? 'leave-druk' : ''}">${perDagVrij[i] === null ? '—' : perDagVrij[i]}</td>
+                                <td class="leave-matrix-count ${perDagWerkt[i] !== null && perDagWerkt[i] <= 1 ? 'leave-druk' : ''}">${perDagWerkt[i] === null ? '—' : perDagWerkt[i]}</td>
                             </tr>`;
                         }).join('')}
                     </tbody>
