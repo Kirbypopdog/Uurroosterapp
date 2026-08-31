@@ -389,7 +389,16 @@ function renderBuilderControls(role, userTeam) {
                     <button class="btn btn-secondary btn-sm" id="builder-load-base">Huidig basisrooster laden</button>
                     <button class="btn btn-secondary btn-sm" id="builder-load-blank">Leeg beginnen</button>
                     ${getBuilderCycleLength() > 1 ? `<button class="btn btn-secondary btn-sm" id="builder-copy-week"><i data-lucide="copy" class="lucide-xs"></i> Kopieer week</button>` : ''}
-                    ${AppState.builderConceptType === 'vakantie' ? `<button class="btn btn-sm ${AppState.builderHideOnLeave ? 'btn-primary' : 'btn-secondary'} builder-hide-leave-toggle" id="builder-hide-leave-toggle"><i data-lucide="${AppState.builderHideOnLeave ? 'eye-off' : 'eye'}" class="lucide-xs"></i> ${AppState.builderHideOnLeave ? 'Verlof verborgen' : 'Verberg verlof'}</button>` : ''}
+                    ${AppState.builderConceptType === 'vakantie' ? (() => {
+                        // Het verlof staat sinds kort gewoon in het raster; deze knop
+                        // kort enkel de lijst in tot wie die week beschikbaar is.
+                        const metVerlof = (AppState.builderTeamFilter ? getEmployeesByTeam(AppState.builderTeamFilter) : getAllEmployees(true))
+                            .filter(e => getBuilderLeaveDays(e.id, AppState.builderWeekNumber).length > 0).length;
+                        return `<button class="btn btn-sm ${AppState.builderHideOnLeave ? 'btn-primary' : 'btn-secondary'} builder-hide-leave-toggle" id="builder-hide-leave-toggle"
+                            title="Verbergt wie deze week verlof heeft">
+                            <i data-lucide="${AppState.builderHideOnLeave ? 'eye-off' : 'users'}" class="lucide-xs"></i>
+                            Alleen beschikbaren${metVerlof ? ` (${metVerlof} met verlof)` : ''}</button>`;
+                    })() : ''}
                 </div>
                 ${AppState.builderLoadedDraftName ? `
                     <div class="builder-loaded-draft">
@@ -579,6 +588,22 @@ function isInMeeting(userId, hour, dayIndex) {
     return false;
 }
 
+// Verlof is alleen te kennen in een vakantieconcept: daar hangen de weken aan
+// echte datums. Een basisrooster is een herhalende cyclus zonder kalender.
+function getBuilderLeaveDays(employeeId, weekNumber) {
+    if (AppState.builderConceptType !== 'vakantie') return [];
+    const weekStart = getBuilderVakantieWeekStart(weekNumber);
+    if (!weekStart) return [];
+    const dagen = [];
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() + i);
+        const avail = getAvailability(employeeId, formatDateYYYYMMDD(d));
+        if (avail && avail.type === 'verlof') dagen.push(i);   // 0 = maandag
+    }
+    return dagen;
+}
+
 function renderBuilderEmployeeRow(employee) {
     const empGrid = AppState.builderGrid[employee.id] || {};
     let totalHours = 0;
@@ -588,11 +613,14 @@ function renderBuilderEmployeeRow(employee) {
 
     const _empColor = DataStore.settings.teams?.[employee.mainTeam]?.color || '#8d897c';
     const _empInitials = escapeHtml(getInitials(employee.name || ''));
+    const verlofDagen = getBuilderLeaveDays(employee.id, AppState.builderWeekNumber);
     html += `<div class="builder-name-cell">
         <span class="emp-avatar" style="background:${_empColor}">${_empInitials}</span>
         <div class="builder-name-cell-text">
             <span class="emp-name">${escapeHtml(employee.name)}</span>
-            <span class="emp-contract">${contractHours}u/week</span>
+            <span class="emp-contract">${contractHours}u/week${verlofDagen.length
+                ? ` · <span class="emp-verlof">${verlofDagen.length === 7 ? 'hele week verlof' : verlofDagen.length + ' ' + (verlofDagen.length === 1 ? 'dag' : 'dagen') + ' verlof'}</span>`
+                : ''}</span>
         </div>
     </div>`;
 
@@ -614,6 +642,11 @@ function renderBuilderEmployeeRow(employee) {
         const assignment = empGrid[dayIndex];
 
         let cellClass = 'builder-cell';
+        // Verlof verbergt de medewerker niet meer, het staat gewoon in het
+        // raster. Inplannen kan nog: soms komt iemand toch, of is het verlof
+        // nog niet definitief — vandaar een markering en geen slot.
+        const heeftVerlof = verlofDagen.includes(dayIndex);
+        if (heeftVerlof) cellClass += ' has-leave';
 
         // Check 11-hour rule against adjacent days
         let hasError = false;
@@ -634,7 +667,8 @@ function renderBuilderEmployeeRow(employee) {
         }
         if (hasError) cellClass += ' has-error';
 
-        html += `<div class="${cellClass}" data-employee-id="${employee.id}" data-day="${dayIndex}">`;
+        html += `<div class="${cellClass}" data-employee-id="${employee.id}" data-day="${dayIndex}"${heeftVerlof ? ' data-verlof="1"' : ''}>`;
+        if (heeftVerlof && !assignment) html += '<span class="cell-verlof">verlof</span>';
 
         // Toon staart van nachtdienst van vorige week's zondag in maandag-cel
         if (dayIndex === 0) {
@@ -1032,6 +1066,11 @@ function renderBuilderDrafts() {
 // --- Builder: Cell Editing ---
 
 function openBuilderShiftModal(employeeId, dayIndex) {
+    // Inplannen op een verlofdag mag, maar niet ongemerkt.
+    if (getBuilderLeaveDays(employeeId, AppState.builderWeekNumber).includes(dayIndex)) {
+        const naam = getEmployee(employeeId)?.name || 'Deze medewerker';
+        showToast(`${naam} heeft die dag verlof — je kan toch inplannen`, 'warning');
+    }
     const employee = getEmployee(employeeId);
     if (!employee) return;
 
