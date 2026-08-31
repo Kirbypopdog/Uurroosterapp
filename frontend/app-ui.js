@@ -169,11 +169,11 @@ function showToast(message, type = 'info', duration = null) {
 function getUserFriendlyError(err) {
     if (!err) return 'Er is een onbekende fout opgetreden.';
     const msg = err.message || err.error || String(err);
-    if (msg.includes('constraint')) return 'Dit kan niet worden opgeslagen — controleer de gegevens.';
+    if (msg.includes('constraint')) return 'Dit kan niet worden opgeslagen. Controleer de gegevens.';
     if (msg.includes('duplicate')) return 'Deze waarde bestaat al.';
     if (msg.includes('not found') || msg.includes('404')) return 'Dit item werd niet gevonden.';
     if (msg.includes('unauthorized') || msg.includes('401')) return 'Je bent niet gemachtigd voor deze actie.';
-    if (msg.includes('network') || msg.includes('fetch') || msg.includes('Failed to fetch')) return 'Verbindingsfout — controleer je internetverbinding.';
+    if (msg.includes('network') || msg.includes('fetch') || msg.includes('Failed to fetch')) return 'Verbindingsfout. Controleer je internetverbinding.';
     if (msg.includes('Te veel verzoeken')) return msg;
     return msg;
 }

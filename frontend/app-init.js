@@ -512,7 +512,7 @@ function setupEventListeners() {
             const d = new Date(date + 'T00:00:00');
             const dateLabel = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' });
             const confirmed = await showConfirm(
-                `${emp.name} — ${dateLabel}\n\nDe dag wordt teruggegeven aan het concept. Bij de volgende concepttoepassing krijgt ${emp.name} hier opnieuw een shift.\n\nDoorgaan?`,
+                `${emp.name} · ${dateLabel}\n\nDe dag wordt teruggegeven aan het concept. Bij de volgende concepttoepassing krijgt ${emp.name} hier opnieuw een shift.\n\nDoorgaan?`,
                 'Dag vrijgeven aan concept'
             );
             if (!confirmed) return;

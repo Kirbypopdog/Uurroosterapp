@@ -1126,14 +1126,14 @@ const BuilderDragHandler = {
         const prev = grid[targetDay - 1];
         if (prev?.endTime) {
             const gap = gapHours(toMin(prev.endTime), startMin);
-            if (gap < 11) return { level: 'error', message: `Onvoldoende rust — ${gap.toFixed(1)}u na vorige dienst (min. 11u)` };
+            if (gap < 11) return { level: 'error', message: `Onvoldoende rust: ${gap.toFixed(1)}u na vorige dienst (min. 11u)` };
         }
 
         // Check rest gap with next day's assignment
         const next = grid[targetDay + 1];
         if (next?.startTime) {
             const gap = gapHours(endMin, toMin(next.startTime));
-            if (gap < 11) return { level: 'error', message: `Onvoldoende rust — ${gap.toFixed(1)}u voor volgende dienst (min. 11u)` };
+            if (gap < 11) return { level: 'error', message: `Onvoldoende rust: ${gap.toFixed(1)}u voor volgende dienst (min. 11u)` };
         }
 
         return { level: 'ok', message: '' };

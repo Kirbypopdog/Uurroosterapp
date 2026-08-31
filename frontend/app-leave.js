@@ -435,8 +435,8 @@ function renderLeaveOverzichtScherm(round, blocks, entries, submissions) {
 }
 
 function renderLeaveStatusBanner(round, mySub, alleKlaar) {
-    if (round.status === 'concept')   return '<div class="leave-banner leave-banner-info">Concept — nog niet zichtbaar voor medewerkers.</div>';
-    if (round.status === 'toegepast') return '<div class="leave-banner leave-banner-ok">Verwerkt — het verlof staat in de planning.</div>';
+    if (round.status === 'concept')   return '<div class="leave-banner leave-banner-info">Nog een concept, dus nog niet zichtbaar voor medewerkers.</div>';
+    if (round.status === 'toegepast') return '<div class="leave-banner leave-banner-ok">Verwerkt. Het verlof staat in de planning.</div>';
     if (round.status === 'gesloten')  return '<div class="leave-banner leave-banner-info">Deze ronde is gesloten.</div>';
     if (mySub?.approved === true)     return '<div class="leave-banner leave-banner-ok">Je verlof is goedgekeurd.</div>';
     if (mySub?.approved === false)    return `<div class="leave-banner leave-banner-warn">Je aanvraag is afgewezen.${
@@ -478,7 +478,7 @@ function renderLeaveFillWeeks(block, entryMap, bewerkbaar) {
                                 data-week-set="${week.maandag}" data-block="${block.id}" data-status="${s}"
                                 ${bewerkbaar ? '' : 'disabled'}>${LEAVE_STATUS[s].label}</button>`).join('')}
                 </div>`}
-                ${status === null && !volledigDicht ? '<span class="leave-mixed">gemengd — klik een keuze om de hele week te zetten</span>' : ''}
+                ${status === null && !volledigDicht ? '<span class="leave-mixed">gemengd. Klik een keuze om de hele week te zetten</span>' : ''}
             </div>`;
         }).join('')}
     </div>`;
@@ -551,7 +551,7 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
     return `
         <button class="leave-back" id="leave-back">${IconHelper.html('chevron-left', 'sm')} Terug</button>
         <div class="leave-detail-head">
-            <h3>Verlof verdelen — ${escapeHtml(block.name)}</h3>
+            <h3>Verlof verdelen voor ${escapeHtml(block.name)}</h3>
             <p class="text-muted text-sm">
                 Het voorstel geeft iedereen wat hij vroeg. Klik een vakje om het om te zetten;
                 onderaan zie je hoeveel mensen die week nog werken.
@@ -586,7 +586,7 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
                                 const wens = leaveWeekWens(w, map);
                                 return `<td class="leave-cell leave-verdeel-cel ${keuze === 'verlof' ? 'leave-verlof' : 'leave-werken'}"
                                     data-verdeel-user="${m.id}" data-verdeel-week="${w.maandag}"
-                                    data-tooltip="${escapeHtml(m.name)} — ${leaveWeekLabel(w)} — ${keuze === 'verlof' ? 'verlof' : 'werken'}${wens ? ', vroeg ' + LEAVE_STATUS[wens].label.toLowerCase() : ', niets ingevuld'}"
+                                    data-tooltip="${escapeHtml(m.name)} · ${leaveWeekLabel(w)} · ${keuze === 'verlof' ? 'verlof' : 'werken'}${wens ? ', vroeg ' + LEAVE_STATUS[wens].label.toLowerCase() : ', niets ingevuld'}"
                                     data-tooltip-pos="top">${wens ? LEAVE_STATUS[wens].kort : ''}</td>`;
                             }).join('')}
                         </tr>`;
@@ -717,11 +717,11 @@ function renderLeaveMatrixBlock(block, medewerkers, perUser, statusPil) {
                                     // Gesloten moet visueel verschillen van niet ingevuld,
                                     // anders lijkt het alsof iedereen achterloopt.
                                     if (dicht) return `<td class="leave-cell leave-gesloten"
-                                        data-tooltip="${leaveDayLabel(datum)} — gesloten" data-tooltip-pos="top"></td>`;
+                                        data-tooltip="${leaveDayLabel(datum)} · gesloten" data-tooltip-pos="top"></td>`;
                                     const s = (perUser[Number(m.id)] || {})[d];
                                     const st = s ? LEAVE_STATUS[s] : null;
                                     return `<td class="leave-cell ${st ? st.klasse : 'leave-leeg'}"
-                                        data-tooltip="${escapeHtml(m.name)} — ${leaveDayLabel(datum)} — ${st ? st.label : 'niet ingevuld'}"
+                                        data-tooltip="${escapeHtml(m.name)} · ${leaveDayLabel(datum)} · ${st ? st.label : 'niet ingevuld'}"
                                         data-tooltip-pos="top"></td>`;
                                 }).join('')}
                                 <td class="leave-matrix-count ${perDagVrij[i] !== null && perDagVrij[i] > medewerkers.length / 2 ? 'leave-druk' : ''}">${perDagVrij[i] === null ? '—' : perDagVrij[i]}</td>
@@ -1128,7 +1128,7 @@ function leaveClosedTelling(periode, pattern) {
 function renderLeavePeriodConcept(p) {
     const concepten = leaveDraftsForPeriod(p.id);
     if (!concepten.length) {
-        return `<span class="leave-period-concept is-leeg">Geen vakantieconcept — geen info over gesloten dagen</span>`;
+        return `<span class="leave-period-concept is-leeg">Geen vakantieconcept, dus geen info over gesloten dagen</span>`;
     }
     const beschrijf = d => {
         const n = leaveClosedTelling(p, d.grid?._pattern);
@@ -1139,7 +1139,7 @@ function renderLeavePeriodConcept(p) {
     }
     return `<span class="leave-period-concept">Gesloten dagen uit:
         <select class="lr-period-draft form-input form-input-xs">
-            ${concepten.map(d => `<option value="${escapeHtml(String(d.id))}">${escapeHtml(d.name)} — ${beschrijf(d)}</option>`).join('')}
+            ${concepten.map(d => `<option value="${escapeHtml(String(d.id))}">${escapeHtml(d.name)} · ${beschrijf(d)}</option>`).join('')}
         </select></span>`;
 }
 

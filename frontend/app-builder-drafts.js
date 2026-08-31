@@ -1029,7 +1029,7 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                 </div>
                 <div class="modal-footer">
                     <span class="modal-footer-left">
-                        <button class="btn btn-ghost btn-sm" id="draft-apply-reset" data-tooltip="Verwijdert ook manuele aanpassingen — volledig terugzetten naar het concept" data-tooltip-pos="top" style="color:var(--color-danger,#dc2626)">Reset alles</button>
+                        <button class="btn btn-ghost btn-sm" id="draft-apply-reset" data-tooltip="Verwijdert ook manuele aanpassingen en zet alles terug naar het concept" data-tooltip-pos="top" style="color:var(--color-danger,#dc2626)">Reset alles</button>
                     </span>
                     <button class="btn btn-secondary btn-sm" id="draft-apply-cancel">Annuleren</button>
                     <button class="btn btn-primary btn-sm" id="draft-apply-confirm">Toepassen</button>

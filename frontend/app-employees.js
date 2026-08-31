@@ -688,7 +688,7 @@ function renderEmployeeCard(emp) {
     const contractHours = emp.contractHours || 0;
     const teamName = (DataStore.settings.teams || {})[emp.mainTeam]?.name || emp.mainTeam || '';
     const teamColor = (DataStore.settings.teams || {})[emp.mainTeam]?.color || '#94a3b8';
-    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" title="Geen e-mail — voeg toe om welkomstmail te sturen">Geen email</span>` : '';
+    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" title="Geen e-mail, voeg er een toe om een welkomstmail te sturen">Geen email</span>` : '';
 
     // Hours for admin/planner view
     const weekStart = getEmployeeWeekStart(emp.id);

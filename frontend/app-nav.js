@@ -720,7 +720,7 @@ function renderHomeRequests(user, role) {
                 <div class="home-request-item" data-action="view-leave">
                     <div class="home-request-info">
                         <div class="home-request-type">Verlof</div>
-                        <div class="home-request-detail">${escapeHtml(r.name)} — ${escapeHtml(deadline)}</div>
+                        <div class="home-request-detail">${escapeHtml(r.name)} · ${escapeHtml(deadline)}</div>
                     </div>
                     <span class="home-request-status needs-action">${label}</span>
                 </div>

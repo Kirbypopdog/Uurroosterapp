@@ -179,12 +179,12 @@ function renderCoverageHeatmap() {
                 let tooltipText;
                 if (required >= 0) {
                     tooltipText = netto < bruto
-                        ? `${timeLabel} — ${netto}/${required} mdw (${bruto - netto} in activiteit)`
-                        : `${timeLabel} — ${netto}/${required} mdw`;
+                        ? `${timeLabel} · ${netto}/${required} mdw (${bruto - netto} in activiteit)`
+                        : `${timeLabel} · ${netto}/${required} mdw`;
                 } else {
                     tooltipText = netto < bruto
-                        ? `${timeLabel} — ${netto} beschikbaar (${bruto} ingepland, ${bruto - netto} in activiteit)`
-                        : `${timeLabel} — ${bruto} medewerkers`;
+                        ? `${timeLabel} · ${netto} beschikbaar (${bruto} ingepland, ${bruto - netto} in activiteit)`
+                        : `${timeLabel} · ${bruto} medewerkers`;
                 }
                 html += `<span class="${segClass}" style="left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%"
                     data-tooltip="${tooltipText}" data-tooltip-pos="top"></span>`;
@@ -736,7 +736,7 @@ function renderTimelineView() {
                         // Toon "niet werkzaam" markering op lege cellen (#173)
                         const cellAvail = getAvailability(emp.id, date);
                         if (!shiftBlock && shifts.length === 0 && cellAvail?.type === 'vrij') {
-                            const nwReason = cellAvail.reason ? ` — ${escapeHtml(cellAvail.reason)}` : '';
+                            const nwReason = cellAvail.reason ? ` · ${escapeHtml(cellAvail.reason)}` : '';
                             html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
                         }
 
@@ -950,7 +950,7 @@ function renderTimelineView() {
 
                         const cellAvail2 = getAvailability(emp.id, date);
                         if (!shiftBlock2 && shifts.length === 0 && cellAvail2?.type === 'vrij') {
-                            const nwReason2 = cellAvail2.reason ? ` — ${escapeHtml(cellAvail2.reason)}` : '';
+                            const nwReason2 = cellAvail2.reason ? ` · ${escapeHtml(cellAvail2.reason)}` : '';
                             html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason2}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
                         }
 

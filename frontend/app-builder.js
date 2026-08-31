@@ -872,7 +872,7 @@ function renderBuilderStaffingHeatmap() {
             const widthPct = (0.5 / 17) * 100;
             const timeLabel = formatStaffingHour(h);
             html += `<span class="${segClass}" style="left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%"
-                data-tooltip="${timeLabel} — ${actual}${required >= 0 ? '/' + required : ''} mdw${required >= 0 ? ' (min ' + required + ')' : ''}" data-tooltip-pos="top"></span>`;
+                data-tooltip="${timeLabel} · ${actual}${required >= 0 ? '/' + required : ''} mdw${required >= 0 ? ' (min ' + required + ')' : ''}" data-tooltip-pos="top"></span>`;
         }
 
         html += '</div>';
@@ -1291,7 +1291,7 @@ function renderBuilderSaveStatus() {
 
     if (state === 'mislukt') {
         return `<button type="button" id="builder-autosave-status" class="builder-autosave-status is-mislukt">
-            ${IconHelper.html('triangle-alert', 'xs')} Niet bewaard — opnieuw proberen
+            ${IconHelper.html('triangle-alert', 'xs')} Niet bewaard. Opnieuw proberen
         </button>`;
     }
     if (state === 'bezig' || AppState.builderIsDirty) {

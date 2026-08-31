@@ -310,7 +310,7 @@ function showAddUserModal(teams) {
                     </div>
                     <div class="form-group">
                         <label for="new-user-email">Email</label>
-                        <input type="email" id="new-user-email" class="form-input" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen" />
+                        <input type="email" id="new-user-email" class="form-input" placeholder="Optioneel, welkomstmail wordt gestuurd bij invullen" />
                     </div>
                     <div class="form-group">
                         <label for="new-user-password">Wachtwoord</label>
@@ -424,7 +424,7 @@ function showEditAccountModal(user, teams, onSave) {
                         </div>
                         <div class="form-group flex-1">
                             <label for="edit-user-email">Email</label>
-                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email || '')}" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen" />
+                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email || '')}" placeholder="Optioneel, welkomstmail wordt gestuurd bij invullen" />
                         </div>
                     </div>
                     <div class="form-row d-flex gap-10">
@@ -672,9 +672,9 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 String(s.employeeId) === String(departingUser.id) && s.date >= fromDate
             );
             summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${fromDate})`;
-            summaryHtml += `<br><small class="text-muted">Telling op basis van geladen planning — werkelijk aantal kan hoger zijn</small></li>`;
+            summaryHtml += `<br><small class="text-muted">Telling op basis van de geladen planning, het werkelijke aantal kan hoger zijn</small></li>`;
         } else {
-            summaryHtml += `<li>Geen diensten overgedragen — pas het actief concept opnieuw toe via Rooster Bouwen</li>`;
+            summaryHtml += `<li>Geen diensten overgedragen. Pas het actieve concept opnieuw toe via Rooster Bouwen</li>`;
         }
 
         summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
@@ -763,7 +763,7 @@ function renderClosedDatesList() {
     const items = closedDates.map(cd => {
         const d = parseDateOnly(cd.date);
         const label = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const reasonHtml = cd.reason ? ' — ' + escapeHtml(cd.reason) : '';
+        const reasonHtml = cd.reason ? ' · ' + escapeHtml(cd.reason) : '';
         return `<li class="closed-date-item">
             <span>${IconHelper.html(ICONS.lock,'xs')} <strong>${escapeHtml(label)}</strong>${reasonHtml}</span>
             <button class="btn btn-sm btn-danger" onclick="handleRemoveClosedDate('${cd.date}')" title="Verwijder">
