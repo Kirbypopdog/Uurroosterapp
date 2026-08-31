@@ -12436,7 +12436,6 @@ body[data-view-mode="day"] .timeline-day-cell {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin-right: auto;          /* duwt de knop naar rechts */
     padding: 6px 12px;
     border-radius: 20px;
     font-size: 12.5px;
@@ -12478,8 +12477,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 .builder-autosave-status.is-mislukt:hover { filter: brightness(0.96); }
 
 @media (max-width: 768px) {
-    /* .builder-actions wordt daar een kolom; dan is auto-marge zinloos */
-    .builder-autosave-status { margin-right: 0; justify-content: center; }
+    /* .builder-actions wordt daar een kolom */
+    .builder-autosave-status { justify-content: center; }
 }
 
 @media (max-width: 768px) {
