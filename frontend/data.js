@@ -52,6 +52,9 @@ function normalizeSettings(settings) {
     if (!Array.isArray(merged.holidayPeriods)) {
         merged.holidayPeriods = defaults.holidayPeriods || [];
     }
+    if (!Array.isArray(merged.conceptClosedDates)) {
+        merged.conceptClosedDates = [];
+    }
     if (!merged.holidayRules || typeof merged.holidayRules !== 'object') {
         merged.holidayRules = defaults.holidayRules || {};
     } else if (defaults.holidayRules) {
@@ -252,6 +255,7 @@ async function loadDataFromAPI() {
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
             closedDates: apiSettings.closedDates || DataStore.settings.closedDates,
+            conceptClosedDates: apiSettings.conceptClosedDates || DataStore.settings.conceptClosedDates || [],
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
             // planningHorizon: legacy, replaced by school year logic
             schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
@@ -1014,6 +1018,7 @@ async function refreshSettings() {
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
             closedDates: apiSettings.closedDates || DataStore.settings.closedDates,
+            conceptClosedDates: apiSettings.conceptClosedDates || DataStore.settings.conceptClosedDates || [],
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
             schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
             schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern,
@@ -1399,6 +1404,10 @@ function getWeekLabel(weekNumber, forDate) {
 function isDayClosed(date) {
     const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
     if (isDateManuallyClosed(dateStr)) return true;
+    // Een vakantieconcept schrijft zijn patroon niet naar schedule_pattern —
+    // die cyclus is vakantie-relatief. Zijn gesloten dagen staan daarom als
+    // absolute datums in conceptClosedDates.
+    if (isDateClosedByDraft(dateStr)) return true;
     const d = parseDateOnly(date);
     const dayOfWeek = d.getDay();
     const weekNumber = getWeekNumber(date);
@@ -1535,9 +1544,20 @@ function isDateManuallyClosed(date) {
     return (DataStore.settings.closedDates || []).some(d => d.date === dateStr);
 }
 
+// Gesloten dagen die uit een toegepast VAKANTIEconcept komen. Ze staan apart
+// van closedDates omdat die lijst van de gebruiker is: deze horen bij hun
+// concept, worden bij elke toepassing vervangen, en verschijnen daarom niet
+// in het lijstje "manueel gesloten datums" in Instellingen.
+function isDateClosedByDraft(date) {
+    const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
+    return (DataStore.settings.conceptClosedDates || []).some(d => d.date === dateStr);
+}
+
 function getClosedDateInfo(date) {
     const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
-    return (DataStore.settings.closedDates || []).find(d => d.date === dateStr) || null;
+    return (DataStore.settings.closedDates || []).find(d => d.date === dateStr)
+        || (DataStore.settings.conceptClosedDates || []).find(d => d.date === dateStr)
+        || null;
 }
 
 async function addClosedDate(date, reason = '') {

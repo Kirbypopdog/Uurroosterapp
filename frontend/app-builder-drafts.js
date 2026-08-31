@@ -1,5 +1,22 @@
 // ===== ROOSTERBOUWER: CONCEPTEN (opslaan, laden, toepassen, vergelijken) =====
 
+// Een concept is meer dan zijn diensten. Wie enkel vastlegt welke dagen
+// gesloten zijn — precies wat een verlofronde nodig heeft — moet dat ook kunnen
+// bewaren. Vroeger keken beide opslaanpaden alleen naar ingevulde diensten en
+// stopten ze zwijgend, zodat de knop niets leek te doen.
+function builderHeeftInhoud(hasAnyData) {
+    const heeftGeslotenDagen = Object.values(AppState.builderPattern?.weeks || {})
+        .some(w => Array.isArray(w?.closedDays) && w.closedDays.length > 0);
+    const heeftBezettingsregels = Object.keys(AppState.builderStaffingRulesByWeek || {}).length > 0
+        || Object.keys(AppState.builderStaffingRules || {}).length > 0;
+    const heeftVergaderingen = Object.values(AppState.builderMeetings || {})
+        .some(v => Array.isArray(v) && v.length > 0);
+
+    if (hasAnyData || heeftGeslotenDagen || heeftBezettingsregels || heeftVergaderingen) return true;
+    showToast('Er valt nog niets op te slaan — vul een dienst in, sluit een dag of stel bezetting in', 'warning');
+    return false;
+}
+
 async function saveBuilderDraft() {
     // Sync current week to cache before saving
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
@@ -14,21 +31,7 @@ async function saveBuilderDraft() {
         }
     }
 
-    // Een concept is meer dan zijn diensten. Wie enkel vastlegt welke dagen
-    // gesloten zijn — precies wat een verlofronde nodig heeft — moet dat ook
-    // kunnen bewaren. Vroeger keek deze check alleen naar ingevulde diensten
-    // en stopte hij zwijgend, zodat de knop niets leek te doen.
-    const heeftGeslotenDagen = Object.values(AppState.builderPattern?.weeks || {})
-        .some(w => Array.isArray(w?.closedDays) && w.closedDays.length > 0);
-    const heeftBezettingsregels = Object.keys(AppState.builderStaffingRulesByWeek || {}).length > 0
-        || Object.keys(AppState.builderStaffingRules || {}).length > 0;
-    const heeftVergaderingen = Object.values(AppState.builderMeetings || {})
-        .some(v => Array.isArray(v) && v.length > 0);
-
-    if (!hasAnyData && !heeftGeslotenDagen && !heeftBezettingsregels && !heeftVergaderingen) {
-        showToast('Er valt nog niets op te slaan — vul een dienst in, sluit een dag of stel bezetting in', 'warning');
-        return;
-    }
+    if (!builderHeeftInhoud(hasAnyData)) return;
 
     // If a draft is loaded, UPDATE it directly (no modal needed)
     if (AppState.builderLoadedDraftId) {
@@ -153,7 +156,7 @@ async function saveBuilderDraftAs() {
             hasAnyData = true;
         }
     }
-    if (!hasAnyData) return;
+    if (!builderHeeftInhoud(hasAnyData)) return;
 
     const result = await showDraftSaveModal();
     if (!result) return;
@@ -756,7 +759,9 @@ async function applyBuilderDraft(draftId) {
             // je in de bouwer niet meer ziet omdat de dag intussen gesloten is.
             const gesloten = result.closedDaySkips
                 ? `, ${result.closedDaySkips} overgeslagen op gesloten dagen` : '';
-            showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt${gesloten})`, 'success');
+            const dicht = result.conceptClosedCount
+                ? `, ${result.conceptClosedCount} dagen gesloten in de planning` : '';
+            showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt${gesloten}${dicht})`, 'success');
 
             const draftToMark = drafts.find(d => d.id === draftId);
             if (draftToMark) {
@@ -766,7 +771,8 @@ async function applyBuilderDraft(draftId) {
                 draftToMark.lastAppliedUntil = hp.endDate;
             }
 
-            await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshActivities()]);
+            // settings mee: de gesloten dagen van dit concept komen daarvandaan
+            await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshActivities(), refreshSettings()]);
             renderBuilder();
         } catch (error) {
             console.error('Error applying vakantie draft:', error);

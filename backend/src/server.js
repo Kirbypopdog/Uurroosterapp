@@ -3828,6 +3828,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       if (Array.isArray(cfg?.closedDays)) patternClosedDays[w] = cfg.closedDays;
     });
     let closedDaySkips = 0;
+    let conceptClosedCount = 0;
 
     let appliedCount = 0;
     let totalCreated = 0;
@@ -4196,6 +4197,40 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       }
     }
 
+    // 3b. Gesloten dagen van een VAKANTIEconcept vastleggen als absolute datums.
+    //
+    // Een basisrooster schrijft zijn patroon naar settings.schedule_pattern en
+    // dan weet isDayClosed() ervan. Een vakantieconcept doet dat bewust niet —
+    // zijn cyclus is vakantie-relatief en zou het jaarpatroon verzieken. Zonder
+    // deze stap wist de planning dus niets van een gesloten vakantiedag: hij
+    // werd niet gearceerd en je kon er gewoon shifts in zetten.
+    //
+    // Ze staan apart van settings.closedDates (dat blijft van de gebruiker):
+    // deze horen bij hun concept en worden bij elke toepassing vervangen.
+    if (isVakantie) {
+      const uitConcept = [];
+      const vakStart = parseLocalDate(effectiveStartDate);
+      const vakEind = parseLocalDate(effectiveEndDate);
+      const vakMonday = getMonday(vakStart);
+      for (let d = new Date(vakStart.getFullYear(), vakStart.getMonth(), vakStart.getDate());
+           d <= vakEind; d.setDate(d.getDate() + 1)) {
+        const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+        const diffWeeks = Math.round((currMonday.getTime() - vakMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
+        if ((patternClosedDays[String(diffWeeks + 1)] || []).includes(d.getDay())) {
+          uitConcept.push({ date: formatDateYYYYMMDD(d), reason: draft.name, draftId });
+        }
+      }
+      const huidigRes = await client.query(`SELECT value FROM settings WHERE key = 'conceptClosedDates'`);
+      const behouden = (huidigRes.rows[0]?.value || []).filter(c => String(c.draftId) !== String(draftId));
+      const nieuweLijst = [...behouden, ...uitConcept].sort((a, b) => a.date.localeCompare(b.date));
+      await client.query(
+        `INSERT INTO settings (key, value, updated_at) VALUES ('conceptClosedDates', $1::jsonb, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = NOW()`,
+        [JSON.stringify(nieuweLijst)]
+      );
+      conceptClosedCount = uitConcept.length;
+    }
+
     // 4. Mark draft as applied (including the date range that was applied)
     await client.query(
       `UPDATE schedule_drafts SET last_applied_at = NOW(), last_applied_by = $1,
@@ -4226,7 +4261,8 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       manualShiftsPreserved: preservedManualCount,
       // Aantal keer dat een gridcel niet is uitgevoerd omdat die dag in het
       // concept gesloten staat. Zichtbaar maken, niet stil overslaan.
-      closedDaySkips
+      closedDaySkips,
+      conceptClosedCount
     });
 
   } catch (err) {
