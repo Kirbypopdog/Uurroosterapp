@@ -339,7 +339,9 @@ const {
   leaveWeeksOfBlock,
   leaveClosedInfo,
   leaveOpenDaysOfBlock,
-  leaveBlockProgress
+  leaveBlockProgress,
+  leaveVerdeelVoorstel,
+  leaveWeekWens
 } = require('../../frontend/app-leave.js');
 
 // Kerstvakantie 21 dec 2026 t/m 3 jan 2027 = twee volle maandagweken.
@@ -429,5 +431,78 @@ describe('leaveBlockProgress', () => {
   test('een volledig gesloten blok is meteen klaar', () => {
     const dicht = { startDate: '2026-12-26', endDate: '2026-12-27', closedDates: ['2026-12-26', '2026-12-27'] };
     expect(leaveBlockProgress(dicht, {}).klaar).toBe(true);
+  });
+});
+
+// ===== VERDELING VAN EEN ZOMERBLOK =====
+//
+// In een voorkeurblok kiezen mensen werken/liever niet/zeker niet, maar `apply`
+// neemt alleen 'verlof' over. De beheerder legt daarom de definitieve verdeling
+// vast; deze functie zet het voorstel klaar.
+describe('leaveVerdeelVoorstel', () => {
+  // 5 juli t/m 18 juli 2027 = twee volle weken; het eerste weekend is dicht.
+  const ZOMER = { startDate: '2027-07-05', endDate: '2027-07-18', closedDates: ['2027-07-10', '2027-07-11'] };
+  const MENSEN = [{ id: 2 }, { id: 3 }, { id: 4 }];
+
+  test('zeker niet en liever niet worden allebei verlof', () => {
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, {
+      2: { '2027-07-05': 'zeker_niet' },
+      3: { '2027-07-12': 'liever_niet' },
+      4: {}
+    });
+    expect(v[2]['2027-07-05']).toBe('verlof');
+    expect(v[3]['2027-07-12']).toBe('verlof');
+  });
+
+  test('alleen werken blijft werken', () => {
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, { 2: { '2027-07-05': 'werken', '2027-07-06': 'werken' } });
+    expect(v[2]['2027-07-05']).toBe('werken');
+  });
+
+  // Nooit ongevraagd verlof toekennen aan wie niets indiende.
+  test('wie niets invulde krijgt werken', () => {
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, {});
+    expect(v[4]['2027-07-05']).toBe('werken');
+    expect(v[4]['2027-07-12']).toBe('werken');
+  });
+
+  // Na het vastleggen staan er verlof/werken in plaats van voorkeuren. Zonder
+  // deze regel zou heropenen de verdeling terugzetten naar 'iedereen werkt'.
+  test('een al vastgelegde verdeling blijft staan', () => {
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, {
+      2: { '2027-07-05': 'verlof', '2027-07-06': 'verlof', '2027-07-12': 'werken' }
+    });
+    expect(v[2]['2027-07-05']).toBe('verlof');
+    expect(v[2]['2027-07-12']).toBe('werken');
+  });
+
+  test('een volledig gesloten week komt niet in het voorstel', () => {
+    const dicht = {
+      startDate: '2027-07-05', endDate: '2027-07-18',
+      closedDates: ['2027-07-05','2027-07-06','2027-07-07','2027-07-08','2027-07-09','2027-07-10','2027-07-11']
+    };
+    const v = leaveVerdeelVoorstel(dicht, MENSEN, {});
+    expect(Object.keys(v[2])).toEqual(['2027-07-12']);
+  });
+
+  // Het voorstel corrigeert niets: als iedereen weg wil, toont het scherm dat
+  // en beslist de mens. Zo blijft het voorspelbaar.
+  test('als iedereen vrij wil, werkt niemand in het voorstel', () => {
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, {
+      2: { '2027-07-05': 'zeker_niet' }, 3: { '2027-07-05': 'zeker_niet' }, 4: { '2027-07-05': 'liever_niet' }
+    });
+    expect(MENSEN.every(m => v[m.id]['2027-07-05'] === 'verlof')).toBe(true);
+  });
+});
+
+describe('leaveWeekWens', () => {
+  const week = { days: ['2027-07-05','2027-07-06'], openDays: ['2027-07-05','2027-07-06'], closedDays: [], closedBekend: true };
+
+  test('de zwaarste wens weegt door', () => {
+    expect(leaveWeekWens(week, { '2027-07-05': 'werken', '2027-07-06': 'zeker_niet' })).toBe('zeker_niet');
+  });
+
+  test('geeft niets terug als er niets ingevuld is', () => {
+    expect(leaveWeekWens(week, {})).toBeNull();
   });
 });

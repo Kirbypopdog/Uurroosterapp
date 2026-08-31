@@ -298,6 +298,11 @@ function renderLeaveRoundHtml(rounds, data) {
     const scherm = AppState.leaveScreen || 'rondes';
 
     if (scherm === 'overzicht') return renderLeaveOverzichtScherm(round, blocks, entries, submissions);
+    if (scherm === 'verdelen') {
+        const vBlock = blocks.find(b => String(b.id) === String(AppState.leaveVerdeelBlockId));
+        if (vBlock) return renderLeaveVerdeelScherm(round, vBlock, entries, submissions);
+        AppState.leaveScreen = 'landing';
+    }
     if (scherm === 'blok') {
         const block = blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
         if (block) return renderLeaveBlokScherm(round, block, entries, submissions);
@@ -393,11 +398,8 @@ function renderLeaveBlokScherm(round, block, entries, submissions) {
     entries.filter(e => Number(e.userId) === me).forEach(e => { entryMap[e.date] = e.status; });
     AppState.leaveDraft = { ...(AppState.leaveDraft || {}), ...entryMap };
 
-    // Medewerkers duiden hun vakantie per week aan. Per dag is enkel voor
-    // beheerders: die leggen na het sluiten van een voorkeurblok de
-    // definitieve verdeling vast, en dat kan wel op losse dagen uitkomen.
-    const magPerDag = canManageLeave();
-    const weergave = magPerDag ? (AppState.leaveFillMode || 'week') : 'week';
+    // Iedereen duidt per week aan, ook beheerders. De definitieve verdeling
+    // van een voorkeurblok gebeurt niet hier maar in het verdeelscherm.
     const bewerkbaar = round.status === 'open' || canManageLeave();
 
     return `
@@ -411,20 +413,13 @@ function renderLeaveBlokScherm(round, block, entries, submissions) {
         </div>
         <div class="leave-fill">
             <div class="leave-fill-toolbar">
-                ${magPerDag ? `
-                    <div class="leave-viewtoggle">
-                        <button class="leave-viewtoggle-btn ${weergave === 'week' ? 'active' : ''}" data-leave-fillmode="week">Per week</button>
-                        <button class="leave-viewtoggle-btn ${weergave === 'dag' ? 'active' : ''}" data-leave-fillmode="dag">Per dag</button>
-                    </div>` : ''}
                 <div class="leave-legend">
                     ${leaveOptionsFor(block.mode).map(s =>
                         `<span class="leave-legend-chip ${LEAVE_STATUS[s].klasse}">${LEAVE_STATUS[s].label}</span>`).join('')}
                 </div>
             </div>
             <div id="leave-fill-body">
-                ${weergave === 'dag'
-                    ? renderLeaveFillDays(block, AppState.leaveDraft, bewerkbaar)
-                    : renderLeaveFillWeeks(block, AppState.leaveDraft, bewerkbaar)}
+                ${renderLeaveFillWeeks(block, AppState.leaveDraft, bewerkbaar)}
             </div>
             ${bewerkbaar ? `
                 <div class="leave-fill-actions">
@@ -483,40 +478,143 @@ function renderLeaveFillWeeks(block, entryMap, bewerkbaar) {
                                 data-week-set="${week.maandag}" data-block="${block.id}" data-status="${s}"
                                 ${bewerkbaar ? '' : 'disabled'}>${LEAVE_STATUS[s].label}</button>`).join('')}
                 </div>`}
-                ${status === null && !volledigDicht ? '<span class="leave-mixed">gemengd — zie "per dag"</span>' : ''}
+                ${status === null && !volledigDicht ? '<span class="leave-mixed">gemengd — klik een keuze om de hele week te zetten</span>' : ''}
             </div>`;
         }).join('')}
     </div>`;
 }
 
-function renderLeaveFillDays(block, entryMap, bewerkbaar) {
-    const opties = leaveOptionsFor(block.mode);
-    const dagNamen = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
-    return `<div class="leave-day-list">
-        ${leaveWeeksOfBlock(block).map(week => `
-            <div class="leave-day-week">
-                <div class="leave-day-week-head">${leaveWeekLabel(week)}</div>
-                ${week.days.map(d => {
-                    const dt = parseDateOnly(d);
-                    const status = entryMap[d] || null;
-                    const dicht = week.closedDays.includes(d);
-                    return `
-                    <div class="leave-day-row ${dicht ? 'is-gesloten' : ''}">
-                        <div class="leave-day-label">
-                            <strong>${dagNamen[dt.getDay()]}</strong>
-                            <span>${dt.getDate()}/${dt.getMonth() + 1}</span>
-                        </div>
-                        ${dicht ? '<span class="leave-day-dicht">gesloten</span>' : `
-                        <div class="leave-day-choices">
-                            ${opties.map(s => `
-                                <button class="leave-choice leave-choice-sm ${LEAVE_STATUS[s].klasse} ${status === s ? 'active' : ''}"
-                                        data-day-set="${d}" data-status="${s}" ${bewerkbaar ? '' : 'disabled'}
-                                        data-tooltip="${LEAVE_STATUS[s].label}" data-tooltip-pos="top" aria-label="${LEAVE_STATUS[s].label}">${LEAVE_STATUS[s].kort}</button>`).join('')}
-                        </div>`}
-                    </div>`;
-                }).join('')}
-            </div>`).join('')}
-    </div>`;
+
+// ===== VERDELING VAN EEN VOORKEURBLOK =====
+//
+// In een zomerblok kiezen mensen werken / liever niet / zeker niet. `apply`
+// neemt echter alleen dagen met status 'verlof' over, dus zonder deze stap
+// levert een zomerronde nul verlofdagen op. De beheerder legt hier per week
+// vast wie effectief vrij is.
+//
+// Het voorstel bevat bewust geen regels: wie iets anders dan werken vroeg,
+// krijgt verlof. Geen bezetting, geen limieten — die komen later. De beheerder
+// ziet per week hoeveel mensen er dan nog werken en stuurt zelf bij.
+function leaveVerdeelVoorstel(block, medewerkers, entriesPerUser) {
+    const weken = leaveWeeksOfBlock(block).filter(w => w.openDays.length > 0);
+    const voorstel = {};
+    medewerkers.forEach(m => {
+        const map = entriesPerUser[Number(m.id)] || {};
+        voorstel[Number(m.id)] = {};
+        weken.forEach(w => {
+            // 'verlof' staat er al zodra een eerdere verdeling is vastgelegd —
+            // die moet blijven staan, anders zet heropenen alles weer op werken.
+            const wilWeg = w.openDays.some(d =>
+                map[d] === 'zeker_niet' || map[d] === 'liever_niet' || map[d] === 'verlof');
+            // Wie niets invulde krijgt werken: nooit ongevraagd verlof.
+            voorstel[Number(m.id)][w.maandag] = wilWeg ? 'verlof' : 'werken';
+        });
+    });
+    return voorstel;
+}
+
+// De sterkste wens die iemand die week uitsprak — de reden waarop de beheerder
+// beslist, dus die hoort in beeld te staan.
+function leaveWeekWens(week, entryMap) {
+    for (const s of ['zeker_niet', 'liever_niet', 'verlof', 'werken']) {
+        if (week.openDays.some(d => entryMap[d] === s)) return s;
+    }
+    return null;
+}
+
+// Het verdeelscherm: rijen zijn medewerkers, kolommen de weken van het blok.
+// Elke cel toont wat het voorstel is (kleur) én waarop dat gebaseerd is (de
+// wens als letter). Klikken wisselt tussen verlof en werken.
+function renderLeaveVerdeelScherm(round, block, entries, submissions) {
+    const medewerkers = getAllEmployees(true);
+    const perUser = {};
+    entries.forEach(e => {
+        const id = Number(e.userId);
+        (perUser[id] = perUser[id] || {})[e.date] = e.status;
+    });
+    const subMap = {};
+    submissions.forEach(sub => { subMap[Number(sub.userId)] = sub; });
+
+    const weken = leaveWeeksOfBlock(block).filter(w => w.openDays.length > 0);
+    if (!AppState.leaveVerdeling) {
+        AppState.leaveVerdeling = leaveVerdeelVoorstel(block, medewerkers, perUser);
+    }
+    const verdeling = AppState.leaveVerdeling;
+
+    const aanHetWerk = weken.map(w =>
+        medewerkers.filter(m => verdeling[Number(m.id)]?.[w.maandag] !== 'verlof').length);
+
+    // apply slaat niet-goedgekeurde mensen over, dus dat moet zichtbaar zijn
+    // vóór je vastlegt — anders lijkt alles klaar en gebeurt er niets.
+    const nietGoedgekeurd = medewerkers.filter(m => subMap[Number(m.id)]?.approved !== true);
+
+    return `
+        <button class="leave-back" id="leave-back">${IconHelper.html('chevron-left', 'sm')} Terug</button>
+        <div class="leave-detail-head">
+            <h3>Verlof verdelen — ${escapeHtml(block.name)}</h3>
+            <p class="text-muted text-sm">
+                Het voorstel geeft iedereen wat hij vroeg. Klik een vakje om het om te zetten;
+                onderaan zie je hoeveel mensen die week nog werken.
+            </p>
+        </div>
+        ${nietGoedgekeurd.length ? `
+            <div class="leave-banner leave-banner-warn">
+                Nog niet goedgekeurd (${nietGoedgekeurd.length}): ${nietGoedgekeurd.map(m => escapeHtml(m.name)).join(', ')}.
+                Hun verlof wordt niet toegepast zolang dat zo blijft.
+            </div>` : ''}
+        <div class="leave-legend">
+            <span class="leave-legend-item"><span class="leave-legend-swatch leave-verlof"></span>verlof</span>
+            <span class="leave-legend-item"><span class="leave-legend-swatch leave-werken"></span>werken</span>
+            <span class="leave-legend-title">letter = wat die persoon vroeg</span>
+        </div>
+        <div class="leave-matrix-scroll">
+            <table class="leave-matrix leave-verdeel">
+                <thead>
+                    <tr>
+                        <th class="leave-matrix-day">Medewerker</th>
+                        ${weken.map(w => `<th class="leave-matrix-week" data-tooltip="${leaveWeekLabel(w)}" data-tooltip-pos="top">${leaveWeekShortLabel(w)}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${medewerkers.map(m => {
+                        const map = perUser[Number(m.id)] || {};
+                        const open = subMap[Number(m.id)]?.approved !== true;
+                        return `<tr class="${open ? 'leave-rij-onbeslist' : ''}">
+                            <td class="leave-matrix-day">${escapeHtml(m.name)}</td>
+                            ${weken.map(w => {
+                                const keuze = verdeling[Number(m.id)]?.[w.maandag] || 'werken';
+                                const wens = leaveWeekWens(w, map);
+                                return `<td class="leave-cell leave-verdeel-cel ${keuze === 'verlof' ? 'leave-verlof' : 'leave-werken'}"
+                                    data-verdeel-user="${m.id}" data-verdeel-week="${w.maandag}"
+                                    data-tooltip="${escapeHtml(m.name)} — ${leaveWeekLabel(w)} — ${keuze === 'verlof' ? 'verlof' : 'werken'}${wens ? ', vroeg ' + LEAVE_STATUS[wens].label.toLowerCase() : ', niets ingevuld'}"
+                                    data-tooltip-pos="top">${wens ? LEAVE_STATUS[wens].kort : ''}</td>`;
+                            }).join('')}
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td class="leave-matrix-day">Aan het werk</td>
+                        ${aanHetWerk.map(n => `
+                            <td class="leave-matrix-count ${n <= 1 ? 'leave-druk' : ''}">${n}</td>`).join('')}
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        <div class="leave-fill-actions">
+            <button class="btn btn-secondary" id="leave-verdeel-reset">Voorstel opnieuw</button>
+            <button class="btn btn-primary" id="leave-verdeel-save" data-block="${block.id}">Verdeling vastleggen</button>
+        </div>`;
+}
+
+// Korte kolomkop voor een week: "5–11/7"
+function leaveWeekShortLabel(week) {
+    const eerste = parseDateOnly(week.days[0]);
+    const laatste = parseDateOnly(week.days[week.days.length - 1]);
+    const m = d => d.getMonth() + 1;
+    return m(eerste) === m(laatste)
+        ? `${eerste.getDate()}–${laatste.getDate()}/${m(laatste)}`
+        : `${eerste.getDate()}/${m(eerste)}–${laatste.getDate()}/${m(laatste)}`;
 }
 
 // ===== OVERZICHT (matrix zoals de Excel) =====
@@ -566,7 +664,7 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
 
             ${blocks.map(b => renderLeaveMatrixBlock(b, medewerkers, perUser, statusPil)).join('')}
 
-            ${canManageLeave() ? renderLeaveManagerActions(round, medewerkers, subMap, nogNiet) : ''}
+            ${canManageLeave() ? renderLeaveManagerActions(round, medewerkers, subMap, nogNiet, blocks) : ''}
         </div>`;
 }
 
@@ -652,7 +750,10 @@ function leaveShortName(naam) {
     return delen.length < 2 ? delen[0] || '' : `${delen[0]} ${delen[delen.length - 1][0]}.`;
 }
 
-function renderLeaveManagerActions(round, medewerkers, subMap, nogNiet) {
+function renderLeaveManagerActions(round, medewerkers, subMap, nogNiet, blocks = []) {
+    // Alleen een voorkeurblok (de zomer) moet verdeeld worden: bij een binair
+    // blok staat 'verlof' er al in en kan apply meteen zijn werk doen.
+    const voorkeurBlok = blocks.find(b => b.mode === 'voorkeur');
     const teBeoordelen = medewerkers.filter(m => subMap[Number(m.id)]?.submittedAt && subMap[Number(m.id)]?.approved == null);
     return `
         <div class="leave-manager">
@@ -670,7 +771,9 @@ function renderLeaveManagerActions(round, medewerkers, subMap, nogNiet) {
                 </div>` : '<p class="text-muted text-sm">Niets te beoordelen.</p>'}
             <div class="leave-manager-actions">
                 ${round.status === 'open' ? `<button class="btn btn-secondary" id="leave-close" data-open="${nogNiet.length}">Ronde sluiten</button>` : ''}
-                ${round.status === 'gesloten' ? '<button class="btn btn-primary" id="leave-apply">Verlof toepassen op planning</button>' : ''}
+                ${round.status === 'gesloten' && voorkeurBlok
+                    ? `<button class="btn btn-primary" id="leave-verdeel" data-block="${voorkeurBlok.id}">Verlof verdelen (${escapeHtml(voorkeurBlok.name)})</button>` : ''}
+                ${round.status === 'gesloten' ? '<button class="btn btn-secondary" id="leave-apply">Verlof toepassen op planning</button>' : ''}
                 <button class="btn btn-secondary" id="leave-resync">Gesloten dagen bijwerken uit concept</button>
                 <button class="btn btn-secondary" id="leave-export">Exporteren (CSV)</button>
             </div>
@@ -699,15 +802,37 @@ function bindLeaveEvents(container, data) {
         }));
     container.querySelector('#leave-back')?.addEventListener('click', () => {
         AppState.leaveScreen = 'landing';
+        AppState.leaveVerdeling = null;
         renderLeave();
     });
+
+    // ===== Verlof verdelen =====
+    container.querySelector('#leave-verdeel')?.addEventListener('click', e => {
+        AppState.leaveVerdeelBlockId = e.currentTarget.dataset.block;
+        AppState.leaveVerdeling = null;   // vers voorstel bij elk bezoek
+        AppState.leaveScreen = 'verdelen';
+        renderLeave();
+    });
+    container.querySelector('#leave-verdeel-reset')?.addEventListener('click', () => {
+        AppState.leaveVerdeling = null;
+        renderLeave();
+    });
+    container.querySelectorAll('[data-verdeel-user]').forEach(cel => {
+        cel.addEventListener('click', () => {
+            const uid = Number(cel.dataset.verdeelUser);
+            const week = cel.dataset.verdeelWeek;
+            const huidig = AppState.leaveVerdeling?.[uid]?.[week];
+            if (!AppState.leaveVerdeling[uid]) AppState.leaveVerdeling[uid] = {};
+            AppState.leaveVerdeling[uid][week] = huidig === 'verlof' ? 'werken' : 'verlof';
+            renderLeave();
+        });
+    });
+    container.querySelector('#leave-verdeel-save')?.addEventListener('click', e =>
+        saveLeaveVerdeling(data, e.currentTarget.dataset.block));
     container.querySelector('#leave-goto-overzicht')?.addEventListener('click', () => {
         AppState.leaveScreen = 'overzicht';
         renderLeave();
     });
-
-    container.querySelectorAll('[data-leave-fillmode]').forEach(btn =>
-        btn.addEventListener('click', () => { AppState.leaveFillMode = btn.dataset.leaveFillmode; renderLeave(); }));
 
     bindLeaveChoiceButtons(container, blocks);
 
@@ -740,12 +865,6 @@ function bindLeaveChoiceButtons(root, blocks) {
             refreshLeaveFillBody(blocks);
         });
     });
-    root.querySelectorAll('[data-day-set]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            AppState.leaveDraft[btn.dataset.daySet] = btn.dataset.status;
-            refreshLeaveFillBody(blocks);
-        });
-    });
 }
 
 // Alleen het invulgedeelte hertekenen — scheelt flikkeren bij elke tik
@@ -756,10 +875,46 @@ function refreshLeaveFillBody(blocks) {
     const block = blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
     if (!block) return;
     const bewerkbaar = round?.status === 'open' || canManageLeave();
-    body.innerHTML = (AppState.leaveFillMode === 'dag' && canManageLeave())
-        ? renderLeaveFillDays(block, AppState.leaveDraft, bewerkbaar)
-        : renderLeaveFillWeeks(block, AppState.leaveDraft, bewerkbaar);
+    body.innerHTML = renderLeaveFillWeeks(block, AppState.leaveDraft, bewerkbaar);
     bindLeaveChoiceButtons(body, blocks);
+}
+
+// De verdeling wordt per DAG opgeslagen: de matrix, de export en apply werken
+// allemaal per dag. Gesloten dagen krijgen niets — daar valt niet te werken en
+// ook niet vrij te zijn.
+async function saveLeaveVerdeling(data, blockId) {
+    const { round, blocks = [] } = data;
+    const block = blocks.find(b => String(b.id) === String(blockId));
+    if (!block || !AppState.leaveVerdeling) return;
+
+    const weken = leaveWeeksOfBlock(block).filter(w => w.openDays.length > 0);
+    const entries = [];
+    Object.entries(AppState.leaveVerdeling).forEach(([uid, perWeek]) => {
+        weken.forEach(w => {
+            const status = perWeek[w.maandag] === 'verlof' ? 'verlof' : 'werken';
+            w.openDays.forEach(d => entries.push({ userId: Number(uid), date: d, status }));
+        });
+    });
+
+    const vrij = entries.filter(e => e.status === 'verlof').length;
+    const bevestigd = await showConfirm(
+        `${escapeHtml(block.name)}\n\n${vrij} verlofdagen worden vastgelegd. Dit vervangt wat mensen zelf invulden voor deze vakantie; de andere vakanties blijven ongemoeid.\n\nDoorgaan?`,
+        'Verdeling vastleggen'
+    );
+    if (!bevestigd) return;
+
+    try {
+        await dataApiFetch(`/leave-rounds/${round.id}/blocks/${block.id}/entries`, {
+            method: 'PUT', body: JSON.stringify({ entries })
+        });
+        showToast('Verdeling vastgelegd — je kan het verlof nu toepassen', 'success');
+        AppState.leaveVerdeling = null;
+        AppState.leaveScreen = 'overzicht';
+        renderLeave();
+    } catch (err) {
+        console.error('Verdeling vastleggen mislukt:', err);
+        showToast('Vastleggen mislukt: ' + getUserFriendlyError(err), 'error');
+    }
 }
 
 async function saveLeaveDraft(round, ookIndienen, opties = {}) {
@@ -1128,5 +1283,7 @@ if (typeof module !== 'undefined' && module.exports) {
         leaveOpenDaysOfBlock,
         leaveBlockProgress,
         weekStatus,
+        leaveVerdeelVoorstel,
+        leaveWeekWens,
     };
 }

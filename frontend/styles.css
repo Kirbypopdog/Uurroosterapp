@@ -13322,28 +13322,7 @@ body[data-view-mode="day"] .timeline-day-cell {
     flex-wrap: wrap;
     margin-bottom: 12px;
 }
-.leave-viewtoggle {
-    display: flex;
-    gap: 2px;
-    background: var(--surface-2);
-    border: 1px solid var(--line);
-    padding: 3px;
-    border-radius: 9px;
-}
-.leave-viewtoggle-btn {
-    padding: 6px 13px;
-    border: none;
-    background: transparent;
-    color: var(--ink-2);
-    font-family: inherit;
-    font-weight: 600;
-    font-size: 12.5px;
-    border-radius: 6px;
-    cursor: pointer;
-}
-.leave-viewtoggle-btn.active { background: var(--surface-color); color: var(--ink); }
-
-.leave-week-list, .leave-day-list { display: flex; flex-direction: column; gap: 8px; }
+.leave-week-list { display: flex; flex-direction: column; gap: 8px; }
 
 .leave-week-row {
     display: flex;
@@ -13373,7 +13352,6 @@ body[data-view-mode="day"] .timeline-day-cell {
 .leave-choice:hover:not(:disabled) { opacity: 0.75; }
 .leave-choice.active { opacity: 1; border-color: currentColor; }
 .leave-choice:disabled { cursor: not-allowed; }
-.leave-choice-sm { padding: 6px 0; width: 34px; text-align: center; border-radius: 8px; }
 
 .leave-mixed { font-size: 11.5px; color: var(--alert-warning-text); flex-basis: 100%; }
 
@@ -13389,8 +13367,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 .leave-closed-chip.is-open  { background: var(--ok-bg);  color: var(--ok); }
 .leave-closed-chip.is-dicht { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); }
 
-.leave-week-row.is-gesloten, .leave-day-row.is-gesloten { opacity: .72; }
-.leave-week-dicht, .leave-day-dicht {
+.leave-week-row.is-gesloten { opacity: .72; }
+.leave-week-dicht {
     font-size: 12px; font-weight: 600; color: var(--ink-3);
     padding: 4px 10px; background: var(--surface-2);
     border: 1px dashed var(--line); border-radius: var(--radius-md);
@@ -13404,35 +13382,24 @@ body[data-view-mode="day"] .timeline-day-cell {
 .leave-legend-swatch.leave-gesloten {
     background-color: color-mix(in srgb, var(--ink-3) 52%, var(--surface-color));
 }
+/* Verdeelscherm: rijen zijn mensen, kolommen weken. De cellen zijn knoppen,
+   dus ze moeten er ook zo uitzien. */
+.leave-verdeel-cel {
+    cursor: pointer;
+    font-size: 11px; font-weight: 700;
+    color: var(--ink-2);
+    user-select: none;
+}
+.leave-verdeel-cel:hover { outline: 2px solid var(--sage); outline-offset: -2px; }
+.leave-verdeel .leave-matrix-week { font-size: 11px; font-weight: 600; }
+/* Wie nog niet goedgekeurd is telt niet mee bij het toepassen */
+.leave-rij-onbeslist .leave-matrix-day { color: var(--ink-3); font-style: italic; }
+.leave-rij-onbeslist .leave-cell { opacity: .55; }
+
 .leave-dicht-tag {
     font-size: 10px; font-weight: 700; text-transform: uppercase;
     letter-spacing: .04em; color: var(--ink-3);
 }
-
-.leave-day-week {
-    background: var(--surface-color);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-}
-.leave-day-week-head {
-    padding: 8px 14px;
-    background: var(--surface-2);
-    font-weight: 700;
-    font-size: 12.5px;
-    border-bottom: 1px solid var(--border-color);
-}
-.leave-day-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 7px 14px;
-    border-bottom: 1px solid var(--line);
-}
-.leave-day-row:last-child { border-bottom: none; }
-.leave-day-label { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
-.leave-day-label span { color: var(--text-secondary); font-size: 12px; }
-.leave-day-choices { display: flex; gap: 5px; }
 
 .leave-validation { margin: 12px 0; display: flex; flex-direction: column; gap: 6px; }
 .leave-check {
@@ -13564,8 +13531,8 @@ body.dark-mode {
     .leave-week-choices .leave-choice { flex: 1; }
     .leave-fill-actions { flex-direction: column-reverse; }
     .leave-fill-actions .btn { width: 100%; }
-    .leave-tabs, .leave-viewtoggle { width: 100%; }
-    .leave-tab, .leave-viewtoggle-btn { flex: 1; }
+    .leave-tabs { width: 100%; }
+    .leave-tab { flex: 1; }
     .leave-approve-row { flex-direction: column; align-items: stretch; }
 }
 

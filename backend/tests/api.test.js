@@ -1746,6 +1746,94 @@ describe('Verlofrondes', () => {
     expect(res.body.entriesRemoved).toBe(3);
   });
 
+  // ===== Verdeling van een voorkeurblok =====
+
+  test('PUT blocks/entries weigert een medewerker', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/blocks/2/entries')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ entries: [] });
+    expect(res.status).toBe(403);
+  });
+
+  test('PUT blocks/entries geeft 404 als het blok bij een andere ronde hoort', async () => {
+    mockActiveUser();
+    const client = { query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(client);
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/blocks/999/entries')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ entries: [] });
+    expect(res.status).toBe(404);
+  });
+
+  // Bij een open ronde kunnen medewerkers hun invulling nog wijzigen; een
+  // verdeling zou dan stil overschreven worden.
+  test('PUT blocks/entries geeft 409 zolang de ronde niet gesloten is', async () => {
+    mockActiveUser();
+    const client = {
+      query: jest.fn().mockResolvedValue({ rows: [{
+        id: 2, name: 'Zomer', startDate: '2027-07-05', endDate: '2027-07-18', status: 'open'
+      }], rowCount: 1 }),
+      release: jest.fn()
+    };
+    pool.connect.mockResolvedValueOnce(client);
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/blocks/2/entries')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ entries: [{ userId: 3, date: '2027-07-05', status: 'verlof' }] });
+    expect(res.status).toBe(409);
+  });
+
+  test('PUT blocks/entries weigert een datum buiten het blok', async () => {
+    mockActiveUser();
+    const client = {
+      query: jest.fn().mockResolvedValue({ rows: [{
+        id: 2, name: 'Zomer', startDate: '2027-07-05', endDate: '2027-07-18', status: 'gesloten'
+      }], rowCount: 1 }),
+      release: jest.fn()
+    };
+    pool.connect.mockResolvedValueOnce(client);
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/blocks/2/entries')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ entries: [{ userId: 3, date: '2026-12-25', status: 'verlof' }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/buiten/i);
+  });
+
+  // De kern: de DELETE moet begrensd zijn op het blok én op de meegegeven
+  // medewerkers, anders wist het vastleggen van de zomer de kleine vakanties.
+  test('PUT blocks/entries wist alleen binnen het blok en voor de meegegeven mensen', async () => {
+    mockActiveUser();
+    const client = {
+      query: jest.fn().mockImplementation((sql) => {
+        if (/FROM leave_round_blocks b JOIN leave_rounds/i.test(sql)) {
+          return Promise.resolve({ rows: [{
+            id: 2, name: 'Zomer', startDate: '2027-07-05', endDate: '2027-07-18', status: 'gesloten'
+          }], rowCount: 1 });
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      }),
+      release: jest.fn()
+    };
+    pool.connect.mockResolvedValueOnce(client);
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/1/blocks/2/entries')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ entries: [
+        { userId: 3, date: '2027-07-05', status: 'verlof' },
+        { userId: 4, date: '2027-07-05', status: 'werken' }
+      ] });
+    expect(res.status).toBe(200);
+    const del = client.query.mock.calls.find(c => /DELETE FROM leave_round_entries/i.test(c[0]));
+    expect(del[0]).toMatch(/date BETWEEN/i);
+    expect(del[1]).toEqual(['1', [3, 4], '2027-07-05', '2027-07-18']);
+    expect(res.body.saved).toBe(2);
+    expect(res.body.medewerkers).toBe(2);
+  });
+
   test('PUT entries: medewerker mag niet voor iemand anders invullen', async () => {
     mockActiveUser();
     const res = await request(app)

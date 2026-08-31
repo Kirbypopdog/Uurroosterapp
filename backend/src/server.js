@@ -4669,6 +4669,81 @@ v1.put('/leave-rounds/:id/blocks/:blockId', requireAuth, requireRole(...LEAVE_MA
   }
 });
 
+// De definitieve verdeling van een voorkeurblok (de zomer) vastleggen.
+//
+// Bewust NIET via PUT /leave-rounds/:id/entries: dat vervangt alle entries van
+// een gebruiker in de héle ronde, en een ronde beslaat het volledige schooljaar.
+// Dit endpoint blijft binnen één blok en raakt de kleine vakanties dus nooit.
+v1.put('/leave-rounds/:id/blocks/:blockId/entries', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const { entries } = req.body || {};
+  if (!Array.isArray(entries)) return res.status(400).json({ error: 'entries moet een array zijn' });
+
+  const client = await pool.connect();
+  try {
+    const blokRes = await client.query(
+      `SELECT b.id, b.name, b.start_date::text AS "startDate", b.end_date::text AS "endDate", r.status
+       FROM leave_round_blocks b JOIN leave_rounds r ON r.id = b.round_id
+       WHERE b.id = $1 AND b.round_id = $2`,
+      [req.params.blockId, req.params.id]
+    );
+    if (blokRes.rows.length === 0) return res.status(404).json({ error: 'Blok niet gevonden in deze ronde' });
+    const blok = blokRes.rows[0];
+
+    // Bij een open ronde kunnen medewerkers hun invulling nog wijzigen; een
+    // verdeling zou dan stil overschreven worden.
+    if (blok.status !== 'gesloten') {
+      return res.status(409).json({
+        error: 'De verdeling kan pas vastgelegd worden als de ronde gesloten is',
+        status: blok.status
+      });
+    }
+
+    const valid = ['werken', 'verlof', 'liever_niet', 'zeker_niet'];
+    const userIds = new Set();
+    for (const e of entries) {
+      if (!e || !Number.isInteger(Number(e.userId))) {
+        return res.status(400).json({ error: 'Elke regel heeft een geldige userId nodig' });
+      }
+      if (typeof e.date !== 'string' || e.date < blok.startDate || e.date > blok.endDate) {
+        return res.status(400).json({ error: `Datum ${e.date} valt buiten "${blok.name}"` });
+      }
+      if (!valid.includes(e.status)) {
+        return res.status(400).json({ error: `Ongeldige status ${e.status}` });
+      }
+      userIds.add(Number(e.userId));
+    }
+
+    await client.query('BEGIN');
+    if (userIds.size > 0) {
+      await client.query(
+        `DELETE FROM leave_round_entries
+         WHERE round_id = $1 AND user_id = ANY($2::int[]) AND date BETWEEN $3 AND $4`,
+        [req.params.id, [...userIds], blok.startDate, blok.endDate]
+      );
+      for (const e of entries) {
+        await client.query(
+          `INSERT INTO leave_round_entries (round_id, user_id, date, status)
+           VALUES ($1, $2, $3, $4)`,
+          [req.params.id, Number(e.userId), e.date, e.status]
+        );
+      }
+    }
+    await client.query('COMMIT');
+
+    await logAudit(req, 'UPDATE', 'settings', String(req.params.id), {
+      type: 'leave_block_verdeling', blockId: blok.id,
+      medewerkers: userIds.size, dagen: entries.length
+    });
+    res.json({ ok: true, saved: entries.length, medewerkers: userIds.size });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error saving leave distribution:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
 v1.delete('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM leave_rounds WHERE id = $1 RETURNING name', [req.params.id]);

@@ -20,7 +20,6 @@ const AppState = {
     leaveRoundId: null,       // welke ronde staat open in de view
     leaveScreen: 'landing',   // 'landing' | 'blok' | 'overzicht'
     leaveBlockId: null,       // welke vakantie staat open
-    leaveFillMode: 'week',    // 'week' | 'dag'
     leaveDraft: {},           // { 'YYYY-MM-DD': status } vóór opslaan
     schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
