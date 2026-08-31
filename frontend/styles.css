@@ -10989,8 +10989,10 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 /* Team section headers */
 .builder-team-section {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     padding: 6px 12px;
     font-weight: 600;
     font-size: 13px;
@@ -10998,7 +11000,37 @@ body[data-view-mode="day"] .timeline-day-cell {
     margin: 8px 0 2px 0;
     background: var(--bg-color);
     border-radius: var(--radius-sm);
+    cursor: pointer;
+    user-select: none;
 }
+.builder-team-section:hover { background: var(--surface-2); }
+.builder-team-section:focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; }
+
+/* Inklappen, zoals de teamkaarten in de planning */
+.builder-team-toggle {
+    display: inline-flex;
+    color: var(--ink-3);
+    transition: transform .18s ease;
+}
+.builder-team-section.collapsed .builder-team-toggle { transform: rotate(180deg); }
+.builder-team-body.collapsed { display: none; }
+
+/* Oudere concepten kunnen aan één team vastzitten; zonder keuzemenu moet dat
+   zichtbaar én op te heffen zijn. */
+.builder-team-locked {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 6px 4px 10px;
+    border-radius: 20px;
+    background: var(--alert-info-bg);
+    color: var(--alert-info-text);
+    font-size: 12px; font-weight: 600;
+}
+.builder-team-locked button {
+    display: inline-flex; align-items: center;
+    border: none; background: transparent; cursor: pointer;
+    color: inherit; padding: 2px; border-radius: 50%;
+}
+.builder-team-locked button:hover { background: rgba(0,0,0,.08); }
 
 .builder-team-section.team-vlot1 { border-left-color: var(--team-vlot1); }
 .builder-team-section.team-vlot2 { border-left-color: var(--team-vlot2); }

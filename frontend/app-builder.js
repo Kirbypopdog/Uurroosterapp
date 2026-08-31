@@ -336,14 +336,20 @@ function toggleBuilderClosedDay(jsDow) {
 function renderBuilderControls(role, userTeam) {
     const wn = AppState.builderWeekNumber;
 
-    // Team filter - dropdown for all roles that can access builder
+    // De teamkeuze zat in een keuzemenu; teams zijn nu inklapbare groepen in
+    // het raster zelf, net als in de planning. Je ziet dus alle teams staan en
+    // klapt weg wat je even niet nodig hebt.
+    //
+    // Oudere concepten kunnen nog een teamfilter dragen. Die beperkt óók welke
+    // medewerkers bij het toepassen een shift krijgen, dus we laten hem staan —
+    // maar zonder keuzemenu zou je eraan vastzitten. Vandaar dit chipje.
     const teams = DataStore.settings.teams || {};
-    const teamFilterHtml = `<select id="builder-team-select" class="form-input w-auto">
-        <option value="">Alle teams</option>
-        ${Object.entries(teams).map(([key, t]) =>
-            `<option value="${key}" ${AppState.builderTeamFilter === key ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
-        ).join('')}
-    </select>`;
+    const teamFilterHtml = AppState.builderTeamFilter ? `
+        <div class="builder-team-locked">
+            ${IconHelper.html('filter', 'xs')}
+            Enkel ${escapeHtml(teams[AppState.builderTeamFilter]?.name || AppState.builderTeamFilter)}
+            <button type="button" id="builder-clear-team-filter" title="Alle teams tonen">${IconHelper.html(ICONS.close, 'xs')}</button>
+        </div>` : '';
 
     return `
         <div class="builder-controls">
@@ -380,11 +386,9 @@ function renderBuilderControls(role, userTeam) {
                         return btns;
                     })()}
                 </div>
-                <div class="builder-team-filter">
-                    ${teamFilterHtml}
-                </div>
             </div>
             <div class="builder-controls-row">
+                ${teamFilterHtml}
                 <div class="builder-load-options">
                     <button class="btn btn-secondary btn-sm" id="builder-load-base">Huidig basisrooster laden</button>
                     <button class="btn btn-secondary btn-sm" id="builder-load-blank">Leeg beginnen</button>
@@ -528,20 +532,32 @@ function renderBuilderGrid(role, userTeam) {
         if (teamEmployees.length === 0) return;
 
         const teamName = teams[teamKey]?.name || teamKey;
-        html += `<div class="builder-team-section team-${teamKey}">
+        const dicht = AppState.collapsedTeams.has(teamKey);
+        html += `<div class="builder-team-section team-${teamKey}${dicht ? ' collapsed' : ''}" data-builder-team="${teamKey}" role="button" tabindex="0"
+                      aria-expanded="${!dicht}" title="Klik om in of uit te klappen">
             <span>${escapeHtml(teamName)} (${teamEmployees.length})</span>
+            <span class="builder-team-toggle">${IconHelper.html('chevron-up', 'sm')}</span>
         </div>`;
 
+        html += `<div class="builder-team-body${dicht ? ' collapsed' : ''}" data-builder-team-body="${teamKey}">`;
         teamEmployees.forEach(emp => {
             html += renderBuilderEmployeeRow(emp);
         });
+        html += '</div>';
     });
 
     const knownTeams = new Set(teamOrder);
     const otherEmployees = employees.filter(e => !knownTeams.has(e.mainTeam));
     if (otherEmployees.length > 0) {
-        html += `<div class="builder-team-section"><span>Overig (${otherEmployees.length})</span></div>`;
+        const overigDicht = AppState.collapsedTeams.has('_builder_overig');
+        html += `<div class="builder-team-section${overigDicht ? ' collapsed' : ''}" data-builder-team="_builder_overig" role="button" tabindex="0"
+                      aria-expanded="${!overigDicht}" title="Klik om in of uit te klappen">
+            <span>Overig (${otherEmployees.length})</span>
+            <span class="builder-team-toggle">${IconHelper.html('chevron-up', 'sm')}</span>
+        </div>`;
+        html += `<div class="builder-team-body${overigDicht ? ' collapsed' : ''}" data-builder-team-body="_builder_overig">`;
         otherEmployees.forEach(emp => { html += renderBuilderEmployeeRow(emp); });
+        html += '</div>';
     }
 
     html += '</div>';
@@ -1672,19 +1688,30 @@ function attachBuilderEventListeners(container) {
         });
     });
 
-    // Team filter
-    const teamSelect = document.getElementById('builder-team-select');
-    if (teamSelect) {
-        teamSelect.addEventListener('change', (e) => {
-            AppState.builderTeamFilter = e.target.value || null;
-            AppState.builderGrid = {};
-            AppState.builderGridByWeek = {};
-            AppState.builderStaffingRules = {};
-            AppState.builderStaffingRulesByWeek = {};
-            AppState.builderIsDirty = false;
-            renderBuilder();
+    document.getElementById('builder-clear-team-filter')?.addEventListener('click', () => {
+        AppState.builderTeamFilter = null;
+        setBuilderDirty();
+        renderBuilder();
+    });
+
+    // Teamgroepen in- en uitklappen, net als in de planning. Alleen de weergave
+    // verandert; het rooster zelf blijft ongemoeid — vandaar geen renderBuilder,
+    // dat zou je scrollpositie kosten.
+    container.querySelectorAll('[data-builder-team]').forEach(kop => {
+        const wissel = () => {
+            const teamKey = kop.dataset.builderTeam;
+            const body = container.querySelector(`[data-builder-team-body="${CSS.escape(teamKey)}"]`);
+            const dicht = kop.classList.toggle('collapsed');
+            body?.classList.toggle('collapsed', dicht);
+            kop.setAttribute('aria-expanded', String(!dicht));
+            if (dicht) AppState.collapsedTeams.add(teamKey);
+            else AppState.collapsedTeams.delete(teamKey);
+        };
+        kop.addEventListener('click', wissel);
+        kop.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); wissel(); }
         });
-    }
+    });
 
     // Load buttons
     const loadBase = document.getElementById('builder-load-base');
