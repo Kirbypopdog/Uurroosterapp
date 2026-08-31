@@ -586,6 +586,8 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
                                 const wens = leaveWeekWens(w, map);
                                 return `<td class="leave-cell leave-verdeel-cel ${keuze === 'verlof' ? 'leave-verlof' : 'leave-werken'}"
                                     data-verdeel-user="${m.id}" data-verdeel-week="${w.maandag}"
+                                    data-naam="${escapeHtml(m.name)}" data-weeklabel="${leaveWeekLabel(w)}"
+                                    data-wens="${wens ? ', vroeg ' + LEAVE_STATUS[wens].label.toLowerCase() : ', niets ingevuld'}"
                                     data-tooltip="${escapeHtml(m.name)} · ${leaveWeekLabel(w)} · ${keuze === 'verlof' ? 'verlof' : 'werken'}${wens ? ', vroeg ' + LEAVE_STATUS[wens].label.toLowerCase() : ', niets ingevuld'}"
                                     data-tooltip-pos="top">${wens ? LEAVE_STATUS[wens].kort : ''}</td>`;
                             }).join('')}
@@ -595,8 +597,8 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
                 <tfoot>
                     <tr>
                         <td class="leave-matrix-day">Aan het werk</td>
-                        ${aanHetWerk.map(n => `
-                            <td class="leave-matrix-count ${n <= 1 ? 'leave-druk' : ''}">${n}</td>`).join('')}
+                        ${aanHetWerk.map((n, i) => `
+                            <td class="leave-matrix-count ${n <= 1 ? 'leave-druk' : ''}" data-weekteller="${weken[i].maandag}">${n}</td>`).join('')}
                     </tr>
                 </tfoot>
             </table>
@@ -816,14 +818,28 @@ function bindLeaveEvents(container, data) {
         AppState.leaveVerdeling = null;
         renderLeave();
     });
+    // Alleen de aangeklikte cel en de teller van die week bijwerken. Een
+    // volledige renderLeave() haalde de ronde opnieuw op bij de server, wat
+    // bij elke klik een flikkering van de hele matrix gaf.
     container.querySelectorAll('[data-verdeel-user]').forEach(cel => {
         cel.addEventListener('click', () => {
             const uid = Number(cel.dataset.verdeelUser);
             const week = cel.dataset.verdeelWeek;
-            const huidig = AppState.leaveVerdeling?.[uid]?.[week];
             if (!AppState.leaveVerdeling[uid]) AppState.leaveVerdeling[uid] = {};
-            AppState.leaveVerdeling[uid][week] = huidig === 'verlof' ? 'werken' : 'verlof';
-            renderLeave();
+            const nieuw = AppState.leaveVerdeling[uid][week] === 'verlof' ? 'werken' : 'verlof';
+            AppState.leaveVerdeling[uid][week] = nieuw;
+
+            cel.classList.toggle('leave-verlof', nieuw === 'verlof');
+            cel.classList.toggle('leave-werken', nieuw !== 'verlof');
+            cel.dataset.tooltip = `${cel.dataset.naam} · ${cel.dataset.weeklabel} · ${nieuw}${cel.dataset.wens}`;
+
+            const teller = container.querySelector(`[data-weekteller="${CSS.escape(week)}"]`);
+            if (teller) {
+                const aantal = [...container.querySelectorAll(`[data-verdeel-week="${CSS.escape(week)}"]`)]
+                    .filter(c => !c.classList.contains('leave-verlof')).length;
+                teller.textContent = aantal;
+                teller.classList.toggle('leave-druk', aantal <= 1);
+            }
         });
     });
     container.querySelector('#leave-verdeel-save')?.addEventListener('click', e =>
