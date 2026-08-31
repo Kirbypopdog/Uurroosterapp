@@ -1,18 +1,27 @@
 // ===== ROOSTERBOUWER: CONCEPTEN (opslaan, laden, toepassen, vergelijken) =====
 
-// Een concept is meer dan zijn diensten. Wie enkel vastlegt welke dagen
-// gesloten zijn — precies wat een verlofronde nodig heeft — moet dat ook kunnen
-// bewaren. Vroeger keken beide opslaanpaden alleen naar ingevulde diensten en
-// stopten ze zwijgend, zodat de knop niets leek te doen.
-function builderHeeftInhoud(hasAnyData) {
-    const heeftGeslotenDagen = Object.values(AppState.builderPattern?.weeks || {})
-        .some(w => Array.isArray(w?.closedDays) && w.closedDays.length > 0);
-    const heeftBezettingsregels = Object.keys(AppState.builderStaffingRulesByWeek || {}).length > 0
-        || Object.keys(AppState.builderStaffingRules || {}).length > 0;
-    const heeftVergaderingen = Object.values(AppState.builderMeetings || {})
-        .some(v => Array.isArray(v) && v.length > 0);
+// Een concept is meer dan zijn diensten: gesloten dagen, bezettingsregels en
+// vergaderingen tellen evengoed. Deze ene bron bepaalt zowel of de
+// opslaanknoppen aan staan als of opslaan zin heeft — anders raken die twee
+// uit elkaar, zoals eerder gebeurde: een concept met enkel gesloten dagen kon
+// je niet opslaan én de knop stond grijs.
+function builderHeeftIets() {
+    const vulling = g => g && Object.keys(g).length > 0
+        && Object.values(g).some(d => d && Object.keys(d).length > 0);
 
-    if (hasAnyData || heeftGeslotenDagen || heeftBezettingsregels || heeftVergaderingen) return true;
+    if (vulling(AppState.builderGrid)) return true;
+    if (Object.values(AppState.builderGridByWeek || {}).some(vulling)) return true;
+    if (Object.values(AppState.builderPattern?.weeks || {})
+        .some(w => Array.isArray(w?.closedDays) && w.closedDays.length > 0)) return true;
+    if (Object.keys(AppState.builderStaffingRulesByWeek || {}).length > 0
+        || Object.keys(AppState.builderStaffingRules || {}).length > 0) return true;
+    if (Object.values(AppState.builderMeetings || {})
+        .some(v => Array.isArray(v) && v.length > 0)) return true;
+    return false;
+}
+
+function builderHeeftInhoud() {
+    if (builderHeeftIets()) return true;
     showToast('Er valt nog niets op te slaan — vul een dienst in, sluit een dag of stel bezetting in', 'warning');
     return false;
 }
@@ -31,7 +40,7 @@ async function saveBuilderDraft() {
         }
     }
 
-    if (!builderHeeftInhoud(hasAnyData)) return;
+    if (!builderHeeftInhoud()) return;
 
     // If a draft is loaded, UPDATE it directly (no modal needed)
     if (AppState.builderLoadedDraftId) {
@@ -156,7 +165,7 @@ async function saveBuilderDraftAs() {
             hasAnyData = true;
         }
     }
-    if (!builderHeeftInhoud(hasAnyData)) return;
+    if (!builderHeeftInhoud()) return;
 
     const result = await showDraftSaveModal();
     if (!result) return;

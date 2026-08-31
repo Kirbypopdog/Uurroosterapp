@@ -851,8 +851,10 @@ function getStaffingRequirement(dayIndex, hour) {
 
 // Convert old per-hour format to new range-based format
 function renderBuilderActions() {
-    const hasData = Object.keys(AppState.builderGrid).length > 0 &&
-        Object.values(AppState.builderGrid).some(d => Object.keys(d).length > 0);
+    // Zelfde maatstaf als het opslaan zelf: ook gesloten dagen, bezettingsregels
+    // en vergaderingen maken een concept de moeite waard. En over álle weken,
+    // niet enkel de week die je toevallig open hebt staan.
+    const hasData = builderHeeftIets();
 
     const saveLabel = AppState.builderLoadedDraftId ? 'Opslaan' : 'Concept opslaan';
     const showSaveAs = !!AppState.builderLoadedDraftId;
