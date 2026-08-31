@@ -731,7 +731,8 @@ function renderBuilderEmployeeRow(employee) {
                 <span class="btb-time">${assignment.startTime}-${assignment.endTime}</span>
             </div>`;
 
-        } else {
+        } else if (!heeftVerlof) {
+            // Op een verlofdag staat al "verlof"; een plusje ernaast leest raar.
             html += '<span class="cell-empty">+</span>';
         }
 
@@ -1085,7 +1086,7 @@ function openBuilderShiftModal(employeeId, dayIndex) {
     // Inplannen op een verlofdag mag, maar niet ongemerkt.
     if (getBuilderLeaveDays(employeeId, AppState.builderWeekNumber).includes(dayIndex)) {
         const naam = getEmployee(employeeId)?.name || 'Deze medewerker';
-        showToast(`${naam} heeft die dag verlof — je kan toch inplannen`, 'warning');
+        showToast(`${naam} heeft die dag verlof.\nJe kan hem toch inplannen.`, 'warning');
     }
     const employee = getEmployee(employeeId);
     if (!employee) return;

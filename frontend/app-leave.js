@@ -907,7 +907,7 @@ async function saveLeaveVerdeling(data, blockId) {
         await dataApiFetch(`/leave-rounds/${round.id}/blocks/${block.id}/entries`, {
             method: 'PUT', body: JSON.stringify({ entries })
         });
-        showToast('Verdeling vastgelegd — je kan het verlof nu toepassen', 'success');
+        showToast('Verdeling vastgelegd.\nJe kan het verlof nu toepassen.', 'success');
         AppState.leaveVerdeling = null;
         AppState.leaveScreen = 'overzicht';
         renderLeave();
@@ -928,7 +928,7 @@ async function saveLeaveDraft(round, ookIndienen, opties = {}) {
     const me = Number(AppState.currentUser?.id);
     const opServer = (AppState.leaveRound?.entries || []).some(e => Number(e.userId) === me);
     if (entries.length === 0 && opServer) {
-        showToast('Er is niets om op te slaan — je invulling is niet gewijzigd', 'warning');
+        showToast('Er is niets om op te slaan.\nJe invulling is niet gewijzigd.', 'warning');
         return;
     }
 
@@ -1052,7 +1052,7 @@ async function resyncLeaveClosedDays(data) {
             });
             gewist += res.entriesRemoved || 0;
         }
-        showToast(gewist ? `Gesloten dagen bijgewerkt — ${gewist} ingevulde dagen vervallen` : 'Gesloten dagen bijgewerkt', 'success');
+        showToast(gewist ? `Gesloten dagen bijgewerkt.\n${gewist} ingevulde dagen vervallen.` : 'Gesloten dagen bijgewerkt', 'success');
         renderLeave();
     } catch (err) {
         console.error('Gesloten dagen bijwerken mislukt:', err);

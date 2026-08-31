@@ -10562,6 +10562,8 @@ body[data-view-mode="day"] .timeline-day-cell {
     color: #1f2937;
     font-size: 14px;
     line-height: 1.4;
+    /* Meldingen mogen op twee regels: leest rustiger dan alles achter elkaar */
+    white-space: pre-line;
 }
 
 .toast-close {

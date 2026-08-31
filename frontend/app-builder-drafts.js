@@ -22,7 +22,7 @@ function builderHeeftIets() {
 
 function builderHeeftInhoud() {
     if (builderHeeftIets()) return true;
-    showToast('Er valt nog niets op te slaan — vul een dienst in, sluit een dag of stel bezetting in', 'warning');
+    showToast('Er valt nog niets op te slaan.\nVul een dienst in, sluit een dag of stel bezetting in.', 'warning');
     return false;
 }
 
