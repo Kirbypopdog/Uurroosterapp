@@ -1386,10 +1386,19 @@ function attachBuilderEventListeners(container) {
     const backBtn = document.getElementById('builder-back-to-overview');
     if (backBtn) {
         backBtn.addEventListener('click', async () => {
+            // Weggaan bewaart. De autosave draait pas na 3 seconden, dus wie
+            // snel doorklikt verloor anders zijn laatste wijziging — en een
+            // vraag "wil je weggooien?" is geen goede plek om dat op te lossen.
             if (AppState.builderIsDirty) {
-                const ok = await showConfirm('Je hebt onopgeslagen wijzigingen. Wil je terug zonder op te slaan?');
-                if (!ok) return;
                 stopBuilderAutoSave();
+                if (AppState.builderLoadedDraftId) {
+                    await autoSaveBuilderDraft();
+                } else if (builderHeeftIets()) {
+                    // Nog nooit bewaard: dan is er geen id om stil in te
+                    // schrijven, dus vragen we alsnog om een naam.
+                    await saveBuilderDraft();
+                    if (AppState.builderIsDirty) return;   // geannuleerd
+                }
             }
             await unlockScheduleDraft(AppState.builderLoadedDraftId);
             AppState.builderLoadedDraftId = null;
