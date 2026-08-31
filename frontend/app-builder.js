@@ -28,7 +28,6 @@ function renderBuilderEditor(container) {
         <span class="builder-editor-title">
             ${AppState.builderLoadedDraftName ? escapeHtml(AppState.builderLoadedDraftName) : 'Nieuw concept'}
         </span>
-        ${renderBuilderSaveStatus()}
     </div>`;
 
     html += renderBuilderControls(role, userTeam);
@@ -858,8 +857,11 @@ function renderBuilderActions() {
     // Geen "Opslaan" meer: de autosave doet dat en de statusregel in de topbar
     // zegt hoe het ervoor staat. "Opslaan als..." blijft wél — die maakt een
     // kopie onder een nieuwe naam, en dat kan de autosave niet.
+    // De status hoort bij het opslaan, dus staat hij naast de knop die daarover
+    // gaat — niet los bovenaan waar hij makkelijk over het hoofd wordt gezien.
     return `
         <div class="builder-actions">
+            ${renderBuilderSaveStatus()}
             <button class="btn btn-secondary" id="builder-save-draft-as" ${!hasData ? 'disabled' : ''}>Opslaan als...</button>
         </div>
     `;
@@ -1237,11 +1239,15 @@ function renderBuilderSaveStatus() {
         </button>`;
     }
     if (state === 'bezig' || AppState.builderIsDirty) {
-        return `<span id="builder-autosave-status" class="builder-autosave-status is-bezig">Bewaren…</span>`;
+        return `<span id="builder-autosave-status" class="builder-autosave-status is-bezig">
+            <span class="builder-save-dot"></span> Bewaren…
+        </span>`;
     }
     if (state === 'bewaard') {
         const tijd = AppState.builderAutoSavedAt ? ` om ${AppState.builderAutoSavedAt}` : '';
-        return `<span id="builder-autosave-status" class="builder-autosave-status is-bewaard">Alle wijzigingen bewaard${tijd}</span>`;
+        return `<span id="builder-autosave-status" class="builder-autosave-status is-bewaard">
+            ${IconHelper.html('check', 'xs')} Bewaard${tijd}
+        </span>`;
     }
     return `<span id="builder-autosave-status" class="builder-autosave-status"></span>`;
 }
