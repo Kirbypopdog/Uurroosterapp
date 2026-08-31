@@ -12428,17 +12428,32 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-weight: 600;
     font-size: 1.1rem;
 }
-.builder-dirty-badge {
-    font-weight: 400;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-    font-style: italic;
-}
+/* Zonder opslaanknop is dit het enige wat vertelt of je werk veilig is, dus
+   het mag niet wegvallen tegen de achtergrond — zeker de foutstand niet. */
 .builder-autosave-status {
     margin-left: auto;
     font-size: 0.8rem;
     color: var(--text-secondary);
     font-style: italic;
+    white-space: nowrap;
+}
+.builder-autosave-status.is-bezig   { color: var(--ink-3); }
+.builder-autosave-status.is-bewaard { color: var(--ok); font-style: normal; }
+.builder-autosave-status.is-mislukt {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-style: normal; font-weight: 700;
+    color: var(--alert-error-text);
+    background: var(--alert-error-bg);
+    border: 1px solid var(--alert-error-text);
+    border-radius: 20px;
+    padding: 3px 11px;
+    cursor: pointer;
+    font-family: inherit;
+}
+.builder-autosave-status.is-mislukt:hover { filter: brightness(0.96); }
+
+@media (max-width: 640px) {
+    .builder-autosave-status { white-space: normal; text-align: right; }
 }
 
 @media (max-width: 768px) {

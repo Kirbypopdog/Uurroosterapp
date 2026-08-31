@@ -27,9 +27,8 @@ function renderBuilderEditor(container) {
         </button>
         <span class="builder-editor-title">
             ${AppState.builderLoadedDraftName ? escapeHtml(AppState.builderLoadedDraftName) : 'Nieuw concept'}
-            ${AppState.builderIsDirty ? ' <span class="builder-dirty-badge">(gewijzigd)</span>' : ''}
         </span>
-        <span id="builder-autosave-status" class="builder-autosave-status">${AppState.builderAutoSavedAt ? `Automatisch opgeslagen om ${AppState.builderAutoSavedAt}` : ''}</span>
+        ${renderBuilderSaveStatus()}
     </div>`;
 
     html += renderBuilderControls(role, userTeam);
@@ -856,15 +855,12 @@ function renderBuilderActions() {
     // niet enkel de week die je toevallig open hebt staan.
     const hasData = builderHeeftIets();
 
-    const saveLabel = AppState.builderLoadedDraftId ? 'Opslaan' : 'Concept opslaan';
-    const showSaveAs = !!AppState.builderLoadedDraftId;
-
+    // Geen "Opslaan" meer: de autosave doet dat en de statusregel in de topbar
+    // zegt hoe het ervoor staat. "Opslaan als..." blijft wél — die maakt een
+    // kopie onder een nieuwe naam, en dat kan de autosave niet.
     return `
         <div class="builder-actions">
-            <button class="btn btn-primary" id="builder-save-draft" ${!hasData ? 'disabled' : ''}>
-                ${saveLabel}
-            </button>
-            ${showSaveAs ? `<button class="btn btn-secondary" id="builder-save-draft-as" ${!hasData ? 'disabled' : ''}>Opslaan als...</button>` : ''}
+            <button class="btn btn-secondary" id="builder-save-draft-as" ${!hasData ? 'disabled' : ''}>Opslaan als...</button>
         </div>
     `;
 }
@@ -1228,8 +1224,47 @@ function loadBuilderFromBaseSchedules() {
 
 // --- Builder: Auto-save ---
 
+// Er is geen opslaanknop meer: deze regel is het enige wat vertelt of je werk
+// veilig is. Eén functie voor zowel de render als de losse bijwerking, anders
+// lopen die twee uiteen — en dan liegt het scherm.
+function renderBuilderSaveStatus() {
+    const state = AppState.builderSaveState
+        || (AppState.builderIsDirty ? 'bezig' : (AppState.builderAutoSavedAt ? 'bewaard' : ''));
+
+    if (state === 'mislukt') {
+        return `<button type="button" id="builder-autosave-status" class="builder-autosave-status is-mislukt">
+            ${IconHelper.html('triangle-alert', 'xs')} Niet bewaard — opnieuw proberen
+        </button>`;
+    }
+    if (state === 'bezig' || AppState.builderIsDirty) {
+        return `<span id="builder-autosave-status" class="builder-autosave-status is-bezig">Bewaren…</span>`;
+    }
+    if (state === 'bewaard') {
+        const tijd = AppState.builderAutoSavedAt ? ` om ${AppState.builderAutoSavedAt}` : '';
+        return `<span id="builder-autosave-status" class="builder-autosave-status is-bewaard">Alle wijzigingen bewaard${tijd}</span>`;
+    }
+    return `<span id="builder-autosave-status" class="builder-autosave-status"></span>`;
+}
+
+// Alleen dit ene element vervangen: een volledige re-render zou tijdens het
+// bewerken je scrollpositie en focus stelen.
+function updateBuilderSaveStatus(state) {
+    if (state) AppState.builderSaveState = state;
+    const el = document.getElementById('builder-autosave-status');
+    if (!el) return;
+    const tijdelijk = document.createElement('div');
+    tijdelijk.innerHTML = renderBuilderSaveStatus();
+    const nieuw = tijdelijk.firstElementChild;
+    el.replaceWith(nieuw);
+    IconHelper.init(nieuw.parentElement || document.body);
+    if (nieuw.tagName === 'BUTTON') {
+        nieuw.addEventListener('click', () => autoSaveBuilderDraft());
+    }
+}
+
 function setBuilderDirty() {
     AppState.builderIsDirty = true;
+    updateBuilderSaveStatus('bezig');
     scheduleBuilderAutoSave();
 }
 
@@ -1252,7 +1287,7 @@ function stopBuilderAutoSave() {
 
 async function autoSaveBuilderDraft() {
     AppState.builderAutoSaveTimer = null;
-    if (!AppState.builderIsDirty || !AppState.builderLoadedDraftId) return;
+    if (!AppState.builderIsDirty || !AppState.builderLoadedDraftId) return true;
 
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
     const multiGrid = { _multiWeek: true };
@@ -1276,6 +1311,7 @@ async function autoSaveBuilderDraft() {
     }
     updateData.grid._teamMeetings = AppState.builderMeetings || {};
 
+    updateBuilderSaveStatus('bezig');
     try {
         await updateScheduleDraft(AppState.builderLoadedDraftId, updateData);
         const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
@@ -1287,10 +1323,18 @@ async function autoSaveBuilderDraft() {
         AppState.builderIsDirty = false;
         const now = new Date();
         AppState.builderAutoSavedAt = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        const statusEl = document.getElementById('builder-autosave-status');
-        if (statusEl) statusEl.textContent = `Automatisch opgeslagen om ${AppState.builderAutoSavedAt}`;
+        updateBuilderSaveStatus('bewaard');
+        return true;
     } catch (err) {
+        // Dit was vroeger stil: enkel een console.error, terwijl je werk niet
+        // bewaard was. Nu er geen opslaanknop meer is, moet dit zichtbaar zijn
+        // én zelf opnieuw proberen.
         console.error('Auto-save failed:', err);
+        AppState.builderIsDirty = true;
+        updateBuilderSaveStatus('mislukt');
+        if (AppState.builderAutoSaveTimer) clearTimeout(AppState.builderAutoSaveTimer);
+        AppState.builderAutoSaveTimer = setTimeout(() => autoSaveBuilderDraft(), 10000);
+        return false;
     }
 }
 
@@ -1392,7 +1436,10 @@ function attachBuilderEventListeners(container) {
             if (AppState.builderIsDirty) {
                 stopBuilderAutoSave();
                 if (AppState.builderLoadedDraftId) {
-                    await autoSaveBuilderDraft();
+                    // Lukt het bewaren niet, dan blijf je hier met de melding
+                    // in beeld. Weggaan zou je werk stil kosten.
+                    const ok = await autoSaveBuilderDraft();
+                    if (!ok) return;
                 } else if (builderHeeftIets()) {
                     // Nog nooit bewaard: dan is er geen id om stil in te
                     // schrijven, dus vragen we alsnog om een naam.
@@ -1645,11 +1692,13 @@ function attachBuilderEventListeners(container) {
         BuilderDragHandler.init();
     }
 
-    // Save draft button
-    const saveDraftBtn = document.getElementById('builder-save-draft');
-    if (saveDraftBtn) saveDraftBtn.addEventListener('click', saveBuilderDraft);
+    // Statusregel is bij een mislukte opslag een knop: opnieuw proberen
+    const statusBtn = document.getElementById('builder-autosave-status');
+    if (statusBtn && statusBtn.tagName === 'BUTTON') {
+        statusBtn.addEventListener('click', () => autoSaveBuilderDraft());
+    }
 
-    // Save As button (only visible when a draft is loaded)
+    // Save As button
     const saveDraftAsBtn = document.getElementById('builder-save-draft-as');
     if (saveDraftAsBtn) saveDraftAsBtn.addEventListener('click', saveBuilderDraftAs);
 
