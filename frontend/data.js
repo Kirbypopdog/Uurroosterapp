@@ -616,9 +616,17 @@ function getActivitiesByEmployee(userId, date) {
     );
 }
 
-async function deleteShift(id) {
+// skipBlock=true slaat het aanmaken van een shift_block over. Gebruik dat bij
+// systeemopkuis, waar het verwijderen geen bewuste keuze is om de cel leeg te
+// laten. Zonder blokkade vult een concept de dag bij een volgende toepassing
+// gewoon weer.
+//
+// #189: deze parameter werd wel meegegeven door 'Dag sluiten' maar bestond hier
+// niet, dus hij werd stilzwijgend genegeerd en er kwam alsnog een blokkade.
+async function deleteShift(id, skipBlock = false) {
     try {
-        await dataApiFetch(`/shifts/${id}`, { method: 'DELETE' });
+        const url = `/shifts/${id}` + (skipBlock ? '?skipBlock=true' : '');
+        await dataApiFetch(url, { method: 'DELETE' });
 
         await refreshShifts();
         await fetchShiftBlocks();

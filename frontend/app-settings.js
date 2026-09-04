@@ -807,19 +807,27 @@ async function openAddClosedDateDialog() {
         if (shiftsOnDate.length > 0) {
             const dateLabel = new Date(date + 'T12:00:00').toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' });
             const ok = await showConfirm(
-                `Er staan ${shiftsOnDate.length} shift(s) ingepland op ${dateLabel}. Deze worden verwijderd bij het sluiten.`,
+                `Er staan ${shiftsOnDate.length} dienst(en) ingepland op ${dateLabel}. Deze worden verwijderd bij het sluiten.`,
                 'Dag sluiten'
             );
             if (!ok) return;
-            for (const shift of shiftsOnDate) {
-                await deleteShift(shift.id);
-            }
         }
 
-        await addClosedDate(date, reason);
-        renderPlanning();
-        const listEl = document.getElementById('closed-dates-list');
-        if (listEl) { listEl.innerHTML = renderClosedDatesList(); IconHelper.init(listEl); }
+        // #189: zonder foutafhandeling waren de diensten weg terwijl de dag
+        // niet gesloten raakte, en zag de gebruiker daar niets van.
+        try {
+            for (const shift of shiftsOnDate) {
+                await deleteShift(shift.id, true);
+            }
+            await addClosedDate(date, reason);
+            showToast('Dag gesloten', 'success');
+        } catch (error) {
+            showToast('Dag sluiten mislukt: ' + getUserFriendlyError(error), 'error');
+        } finally {
+            renderPlanning();
+            const listEl = document.getElementById('closed-dates-list');
+            if (listEl) { listEl.innerHTML = renderClosedDatesList(); IconHelper.init(listEl); }
+        }
     });
 }
 
@@ -2759,20 +2767,41 @@ function setupSettingsCollapsibles(scope = document) {
             closeBtn.addEventListener('click', async () => {
                 closeDayContextMenu();
                 const shiftsOnDate = DataStore.shifts.filter(s => s.date === dateStr);
+
+                // #189: hier werd eerst verwijderd en pas daarna om een reden
+                // gevraagd. Wie op Annuleer klikte, was zijn diensten kwijt
+                // terwijl de dag niet gesloten werd, zonder enige melding en
+                // zonder dat het scherm werd bijgewerkt.
+                //
+                // Alle vragen komen nu vóór de eerste wijziging, zodat afbreken
+                // op elk moment betekent dat er niets gebeurd is.
+                const reason = await promptReason('Reden (optioneel):');
+                if (reason === null) return;
+
                 if (shiftsOnDate.length > 0) {
                     const ok = await showConfirm(
-                        `Er staan ${shiftsOnDate.length} shift(s) ingepland op ${label}. Deze worden verwijderd bij het sluiten.`,
+                        `Er staan ${shiftsOnDate.length} dienst(en) ingepland op ${label}. Deze worden verwijderd bij het sluiten.`,
                         'Dag sluiten'
                     );
                     if (!ok) return;
+                }
+
+                try {
                     for (const shift of shiftsOnDate) {
+                        // skipBlock: het sluiten van de dag houdt hem al leeg,
+                        // een blokkade per medewerker is overbodig en blijft
+                        // achter als de dag later heropend wordt.
                         await deleteShift(shift.id, true);
                     }
+                    await addClosedDate(dateStr, reason);
+                    showToast(`Dag gesloten: ${label}`, 'success');
+                } catch (error) {
+                    showToast('Dag sluiten mislukt: ' + getUserFriendlyError(error), 'error');
+                } finally {
+                    // Ook in het foutpad, anders toont het scherm diensten die
+                    // er niet meer zijn.
+                    renderPlanning();
                 }
-                const reason = await promptReason('Reden (optioneel):');
-                if (reason === null) return;
-                await addClosedDate(dateStr, reason);
-                renderPlanning();
             });
             menu.appendChild(closeBtn);
         } else {
