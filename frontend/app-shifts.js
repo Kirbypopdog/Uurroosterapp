@@ -95,8 +95,8 @@ function updateShiftBlockNotice() {
     melding.innerHTML = `
         <span class="source-icon">${IconHelper.html('circle-slash', 'sm')}</span>
         <span class="source-text">
-            Deze dag is eerder handmatig leeggemaakt voor ${escapeHtml(wie)}.
-            Het basisrooster vult hem daarom niet meer automatisch in.
+            ${escapeHtml(blockReasonLabel(block.reason))} voor ${escapeHtml(wie)}.
+            Het basisrooster vult deze dag daarom niet meer automatisch in.
         </span>`;
     DOM.shiftValidationErrors.prepend(melding);
     IconHelper.init(melding);

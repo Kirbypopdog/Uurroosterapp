@@ -868,6 +868,34 @@ function isValidTime(t) {
  * @param {number|null} excludeId - shift-id uitsluiten bij PUT
  * @returns {Promise<{ valid: boolean, message?: string }>}
  */
+// Legt vast dat een medewerkerdag bewust leeg is, zodat een concept hem bij
+// een volgende toepassing niet opnieuw vult.
+//
+// Nodig omdat een dienst die WEGBEWEEGT van iemands dag geen spoor achterliet:
+// verslepen, ruilen en overnemen zetten user_id of date om, waardoor de
+// oorspronkelijke dag leeg achterbleef zonder blokkade. Het concept vulde die
+// dag dan opnieuw en de medewerker stond twee keer ingepland, of er stonden
+// twee mensen op één dienst. Verwijderen deed dit al wel.
+//
+// Alleen blokkeren als de dag daarna écht leeg is. Bij een ruil op dezelfde
+// dag houdt de medewerker een dienst over, en dan zou een blokkade een
+// misleidende indicator opleveren op een dag waar gewoon gewerkt wordt.
+async function blockDayIfEmpty(db, userId, date, createdBy, reason) {
+  if (!userId || !date) return false;
+  const nog = await db.query(
+    'SELECT 1 FROM shifts WHERE user_id = $1 AND date = $2::date LIMIT 1',
+    [userId, date]
+  );
+  if (nog.rows.length > 0) return false;
+  await db.query(
+    `INSERT INTO shift_blocks (user_id, date, created_by, reason)
+     VALUES ($1, $2::date, $3, $4)
+     ON CONFLICT (user_id, date) DO NOTHING`,
+    [userId, date, createdBy || null, reason]
+  );
+  return true;
+}
+
 async function validateShiftRules(db, userId, newShift, excludeId = null, skipRestCheck = false) {
   const MIN_REST = 11;
   const rangeStart = new Date(newShift.date);
@@ -2115,8 +2143,23 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Dienst niet gevonden' });
     }
-    await logAudit(req, 'UPDATE', 'shift', id, { before: oldShift, after: result.rows[0] });
-    res.json({ shift: result.rows[0] });
+    // Is de dienst verhuisd naar een andere dag of een andere medewerker, dan
+    // blijft de oorspronkelijke plek leeg achter. Zonder blokkade vult het
+    // concept die bij een volgende toepassing gewoon weer op en staat er
+    // opeens dubbele bezetting. Verslepen in de planning loopt via dit
+    // endpoint, dus dit dekt drag en drop mee.
+    const nieuw = result.rows[0];
+    const verhuisd = oldShift && (
+      String(oldShift.date) !== String(nieuw.date) ||
+      Number(oldShift.userId) !== Number(nieuw.userId)
+    );
+    let blockedOrigin = false;
+    if (verhuisd) {
+      blockedOrigin = await blockDayIfEmpty(pool, oldShift.userId, oldShift.date, req.user.id, 'manual_move');
+    }
+
+    await logAudit(req, 'UPDATE', 'shift', id, { before: oldShift, after: nieuw, blockedOrigin });
+    res.json({ shift: nieuw, blockedOrigin });
   } catch (err) {
     console.error('PUT /shifts/:id error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -2991,6 +3034,14 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
       [swap.requester_current_user, swap.target_shift_id]
     );
 
+    // Na de ruil is de dag van de aanvrager leeg, en die van de doelpersoon
+    // ook. Zonder blokkade vult het concept beide bij een volgende toepassing
+    // weer op, en dan werkt iedereen zijn oude én zijn geruilde dienst.
+    // blockDayIfEmpty raakt niets aan als de medewerker die dag toch nog een
+    // dienst heeft, bijvoorbeeld bij een ruil binnen dezelfde dag.
+    await blockDayIfEmpty(client, swap.requester_current_user, swap.requester_date, req.user.id, 'manual_swap');
+    await blockDayIfEmpty(client, swap.target_current_user, swap.target_date, req.user.id, 'manual_swap');
+
     // Update swap request status
     await client.query(
       `UPDATE shift_swap_requests
@@ -3288,6 +3339,11 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
       `UPDATE shifts SET user_id = $1, source = 'manual' WHERE id = $2`,
       [currentUserId, request.requester_shift_id]
     );
+
+    // De dag van wie de dienst afstond is nu leeg. Zonder blokkade vult het
+    // concept die opnieuw op en werkt hij alsnog de dienst die hij net had
+    // weggegeven, terwijl de collega hem ook heeft.
+    await blockDayIfEmpty(client, request.requester_user_id, request.date, req.user.id, 'manual_takeover');
 
     // Update request status
     await client.query(

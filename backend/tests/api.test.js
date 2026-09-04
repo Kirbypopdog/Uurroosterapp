@@ -655,6 +655,96 @@ describe('PUT /shifts/:id', () => {
     expect(res.body.error).toMatch(/Dienst afstaan/i);
   });
 
+  // Een dienst die WEGBEWEEGT van iemands dag liet die dag leeg achter zonder
+  // blokkade, waarna het concept hem bij een volgende toepassing opnieuw
+  // vulde. De medewerker stond dan twee keer ingepland.
+  test('een verplaatste dienst blokkeert de oorspronkelijke dag', async () => {
+    mockActiveUser();
+    const oud = { id: 30, userId: 2, employeeId: 2, team: 'vlot2', date: '2027-01-04',
+                  startTime: '08:00', endTime: '16:00', notes: '', source: 'auto' };
+    const nieuw = { ...oud, date: '2027-01-05', source: 'manual' };
+    pool.query
+      .mockResolvedValueOnce({ rows: [oud] })       // oude dienst ophalen
+      .mockResolvedValueOnce({ rows: [] })          // closedDates
+      .mockResolvedValueOnce({ rows: [] })          // validateShiftRules
+      .mockResolvedValueOnce({ rows: [nieuw] })     // UPDATE RETURNING
+      .mockResolvedValueOnce({ rows: [] })          // blockDayIfEmpty: staat er nog iets?
+      .mockResolvedValue({ rows: [] });             // INSERT block, logAudit
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .put('/shifts/30')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ date: '2027-01-05' });
+    expect(res.status).toBe(200);
+    expect(res.body.blockedOrigin).toBe(true);
+
+    const block = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO shift_blocks')
+    );
+    expect(block).toBeTruthy();
+    expect(block[1][0]).toBe(2);            // de oorspronkelijke medewerker
+    expect(block[1][1]).toBe('2027-01-04'); // de oorspronkelijke dag
+    expect(block[1][3]).toBe('manual_move');
+  });
+
+  // Blijft de dienst op dezelfde dag en bij dezelfde medewerker, dan is er
+  // niets weggegaan en hoort er geen blokkade te komen.
+  test('een gewone tijdswijziging blokkeert niets', async () => {
+    mockActiveUser();
+    const oud = { id: 31, userId: 2, employeeId: 2, team: 'vlot2', date: '2027-01-04',
+                  startTime: '08:00', endTime: '16:00', notes: '', source: 'auto' };
+    const nieuw = { ...oud, startTime: '09:00', source: 'manual' };
+    pool.query
+      .mockResolvedValueOnce({ rows: [oud] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [nieuw] })
+      .mockResolvedValue({ rows: [] });
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .put('/shifts/31')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ startTime: '09:00', endTime: '16:00' });
+    expect(res.status).toBe(200);
+    expect(res.body.blockedOrigin).toBe(false);
+
+    const block = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO shift_blocks')
+    );
+    expect(block).toBeUndefined();
+  });
+
+  // Houdt de medewerker die dag nog een andere dienst over, dan is de dag niet
+  // leeg en zou een blokkade een misleidende indicator geven.
+  test('geen blokkade als de medewerker die dag nog een dienst heeft', async () => {
+    mockActiveUser();
+    const oud = { id: 32, userId: 2, employeeId: 2, team: 'vlot2', date: '2027-01-04',
+                  startTime: '08:00', endTime: '16:00', notes: '', source: 'auto' };
+    const nieuw = { ...oud, userId: 3, employeeId: 3, source: 'manual' };
+    // Zonder datumwijziging draait de gesloten-dagencontrole niet, dus die
+    // query zit hier niet in de reeks.
+    pool.query
+      .mockResolvedValueOnce({ rows: [oud] })                // oude dienst
+      .mockResolvedValueOnce({ rows: [] })                   // validateShiftRules
+      .mockResolvedValueOnce({ rows: [nieuw] })              // UPDATE RETURNING
+      .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })  // er staat nog een dienst
+      .mockResolvedValue({ rows: [] });
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .put('/shifts/32')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 3 });
+    expect(res.status).toBe(200);
+    expect(res.body.blockedOrigin).toBe(false);
+
+    const block = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO shift_blocks')
+    );
+    expect(block).toBeUndefined();
+  });
+
   // Keerzijde: de eigen tijden aanpassen blijft toegestaan. Dat is een
   // bewuste keuze en staat zo in de rollentabel.
   test('medewerker can still edit the times of their own shift (#262)', async () => {

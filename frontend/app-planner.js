@@ -9,6 +9,21 @@ function getAppScrollEl() {
     return document.scrollingElement || document.documentElement;
 }
 
+// Waarom is deze dag bewust leeg? De reden staat op de blokkade en bepaalt
+// wat er in de tooltip en in de dienstmodal komt te staan. Een dag die is
+// vrijgekomen door een ruil is iets anders dan een dag die iemand heeft
+// leeggemaakt, en "leeggemaakt" klopt dan gewoon niet.
+const BLOCK_REASON_LABELS = {
+    manual_delete:   'Dienst hier verwijderd',
+    manual_move:     'Dienst verplaatst naar een andere dag of collega',
+    manual_swap:     'Dienst weggeruild',
+    manual_takeover: 'Dienst afgestaan aan een collega'
+};
+
+function blockReasonLabel(reason) {
+    return BLOCK_REASON_LABELS[reason] || 'Dag manueel leeggemaakt';
+}
+
 function renderPlanning() {
     // Save scroll position before re-rendering
     const scrollEl = getAppScrollEl();
@@ -725,7 +740,7 @@ function renderTimelineView() {
                         if (shiftBlock) {
                             const canRelease = hasPermission('MANAGE_SHIFTS');
                             const releaseTip = canRelease ? ' · Klik om dag terug vrij te geven aan het concept' : '';
-                            html += `<div class="shift-block-indicator${canRelease ? ' shift-block-indicator--clickable' : ''}" data-block-id="${shiftBlock.id}" data-employee="${emp.id}" data-date="${date}" data-tooltip="Dag manueel leeggemaakt${releaseTip}" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
+                            html += `<div class="shift-block-indicator${canRelease ? ' shift-block-indicator--clickable' : ''}" data-block-id="${shiftBlock.id}" data-employee="${emp.id}" data-date="${date}" data-tooltip="${blockReasonLabel(shiftBlock.reason)}${releaseTip}" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
                         }
 
                         // Get shifts for this employee on this date
@@ -945,7 +960,7 @@ function renderTimelineView() {
                         if (shiftBlock2) {
                             const canRelease2 = hasPermission('MANAGE_SHIFTS');
                             const releaseTip2 = canRelease2 ? ' · Klik om dag terug vrij te geven aan het concept' : '';
-                            html += `<div class="shift-block-indicator${canRelease2 ? ' shift-block-indicator--clickable' : ''}" data-block-id="${shiftBlock2.id}" data-employee="${emp.id}" data-date="${date}" data-tooltip="Dag manueel leeggemaakt${releaseTip2}" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
+                            html += `<div class="shift-block-indicator${canRelease2 ? ' shift-block-indicator--clickable' : ''}" data-block-id="${shiftBlock2.id}" data-employee="${emp.id}" data-date="${date}" data-tooltip="${blockReasonLabel(shiftBlock2.reason)}${releaseTip2}" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
                         }
 
                         const cellAvail2 = getAvailability(emp.id, date);
