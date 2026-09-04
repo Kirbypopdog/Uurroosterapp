@@ -2326,4 +2326,134 @@ describe('Verlofrondes', () => {
       .set('Authorization', `Bearer ${makeToken(medewerker)}`);
     expect(res.status).toBe(404);
   });
+
+  // ===== #194: entries opslaan =====
+
+  function arrangeEntries() {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [] });
+    mockClient.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.includes('FROM leave_rounds WHERE id')) {
+        return Promise.resolve({ rows: [{ status: 'open', start_date: '2026-09-01', end_date: '2027-08-31' }] });
+      }
+      if (sql.includes('FROM leave_round_blocks')) {
+        return Promise.resolve({ rows: [
+          { start_date: '2026-12-21', end_date: '2027-01-03' },
+          { start_date: '2027-07-01', end_date: '2027-08-31' }
+        ] });
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 });
+    });
+    return mockClient;
+  }
+
+  // Regressie #194: dit verving ALLE invulling van de medewerker in de hele
+  // ronde. Wie zijn kerstvakantie bijwerkte, wiste zijn zomervoorkeuren.
+  test('PUT entries vervangt alleen het bereik uit de aanvraag (#194)', async () => {
+    const mockClient = arrangeEntries();
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/6/entries')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ entries: [
+        { date: '2026-12-21', status: 'verlof' },
+        { date: '2026-12-23', status: 'verlof' }
+      ] });
+    expect(res.status).toBe(200);
+
+    const del = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('DELETE FROM leave_round_entries')
+    );
+    expect(del).toBeTruthy();
+    expect(del[0]).toContain('date BETWEEN');
+    // Enkel de kerstdagen uit de aanvraag, niet de hele ronde
+    expect(del[1]).toEqual(['6', 3, '2026-12-21', '2026-12-23']);
+  });
+
+  // Regressie #194: een wijziging ná de goedkeuring liet die goedkeuring staan.
+  test('PUT entries trekt een bestaande goedkeuring in (#194)', async () => {
+    const mockClient = arrangeEntries();
+    await request(app)
+      .put('/api/v1/leave-rounds/6/entries')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ entries: [{ date: '2026-12-21', status: 'verlof' }] });
+
+    const sub = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO leave_round_submissions')
+    );
+    expect(sub).toBeTruthy();
+    expect(sub[0]).toContain('approved = NULL');
+  });
+
+  // Een lege lijst mag niets wissen. Dat was een eerdere fix en moet zo blijven.
+  test('PUT entries met een lege lijst verwijdert niets (#194)', async () => {
+    const mockClient = arrangeEntries();
+    await request(app)
+      .put('/api/v1/leave-rounds/6/entries')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ entries: [] });
+
+    const del = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('DELETE FROM leave_round_entries')
+    );
+    expect(del).toBeUndefined();
+  });
+
+  // ===== #201: toepassen vóór verdelen =====
+
+  test('POST /apply weigert zolang een voorkeurblok niet verdeeld is (#201)', async () => {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] });
+    pool.query.mockResolvedValue({ rows: [] });
+    mockClient.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.includes('SELECT name FROM leave_rounds')) return Promise.resolve({ rows: [{ name: 'Schooljaar' }] });
+      if (sql.includes("b.mode = 'voorkeur'")) {
+        return Promise.resolve({ rows: [{ id: 11, name: 'Zomervakantie' }] });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/apply')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/Leg eerst de verdeling vast/i);
+    expect(res.body.undistributedBlocks[0].name).toBe('Zomervakantie');
+    // De ronde mag niet op 'toegepast' gezet zijn
+    const upd = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes("status = 'toegepast'")
+    );
+    expect(upd).toBeUndefined();
+  });
+
+  // De verdeling moet ook nog kunnen als er per ongeluk al toegepast is,
+  // anders is er geen weg vooruit meer (#201).
+  test('PUT blocks/:id/entries mag ook bij status toegepast (#201)', async () => {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] });
+    pool.query.mockResolvedValue({ rows: [] });
+    mockClient.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.includes('FROM leave_round_blocks b JOIN leave_rounds r')) {
+        return Promise.resolve({ rows: [{
+          id: 11, name: 'Zomervakantie', startDate: '2027-07-01', endDate: '2027-08-31',
+          status: 'toegepast'
+        }] });
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 });
+    });
+
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/6/blocks/11/entries')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ entries: [{ userId: 2, date: '2027-07-05', status: 'verlof' }] });
+
+    expect(res.status).toBe(200);
+  });
 });

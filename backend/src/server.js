@@ -3777,7 +3777,8 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
     // 1. Load draft with FOR UPDATE lock
     const draftResult = await client.query(
-      `SELECT id, name, week_number, team_filter, grid, created_by, valid_from, valid_until, type, holiday_period_id
+      `SELECT id, name, week_number, team_filter, grid, created_by, valid_from, valid_until, type, holiday_period_id,
+              last_applied_from::text AS last_applied_from
        FROM schedule_drafts WHERE id = $1 FOR UPDATE`,
       [draftId]
     );
@@ -3975,6 +3976,40 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       if (patternResult.rows.length > 0 && patternResult.rows[0].value) {
         if (patternResult.rows[0].value.cycleLength) cycleLength = patternResult.rows[0].value.cycleLength;
         if (patternResult.rows[0].value.referenceDate) referenceDate = patternResult.rows[0].value.referenceDate;
+      }
+    }
+
+    // #211: de backend genereerde vanaf het anker in het concept, en de
+    // frontend zette daarna het globale anker op de maandag van de startdatum.
+    // Die twee liepen uiteen, en of het misging hing zuiver aan de pariteit van
+    // het aantal weken ertussen. Bij een tweewekelijkse cyclus was dat de helft
+    // van de gevallen, en dan stond het hele rooster een cycluspositie
+    // verschoven ten opzichte van wat de bouwer en de planning toonden.
+    //
+    // Eén anker dus. Bij de EERSTE toepassing wordt dat de maandag van de
+    // startdatum, want dat is wat de bouwer belooft: de week waar je begint is
+    // week 1. Bij een volgende toepassing blijft het staande anker gelden, ook
+    // als je maar een deel van de periode opnieuw toepast, zodat de fase niet
+    // verspringt ten opzichte van wat er al gepland staat.
+    //
+    // Vakantieconcepten hebben hier niets mee te maken: die nummeren
+    // vakantie-relatief en schrijven bewust geen schedulePattern weg.
+    if (!isVakantie) {
+      const eerdersToegepast = !!draft.last_applied_from;
+      if (!eerdersToegepast) {
+        referenceDate = formatDateYYYYMMDD(getMonday(parseLocalDate(effectiveStartDate)));
+      }
+      // Vastleggen in het concept, zodat het anker niet meer kan wegdrijven en
+      // de frontend precies dit kan publiceren in plaats van zelf te rekenen.
+      if (rawGrid._pattern && rawGrid._pattern.referenceDate !== referenceDate) {
+        await client.query(
+          `UPDATE schedule_drafts
+              SET grid = jsonb_set(grid, '{_pattern,referenceDate}', to_jsonb($1::text), true),
+                  updated_at = NOW()
+            WHERE id = $2`,
+          [referenceDate, draftId]
+        );
+        rawGrid._pattern.referenceDate = referenceDate;
       }
     }
 
@@ -4446,7 +4481,12 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       // Aantal keer dat een gridcel niet is uitgevoerd omdat die dag in het
       // concept gesloten staat. Zichtbaar maken, niet stil overslaan.
       closedDaySkips,
-      conceptClosedCount
+      conceptClosedCount,
+      // #211: het anker waarmee de diensten daadwerkelijk gegenereerd zijn.
+      // De frontend publiceert dit in schedule_pattern in plaats van er zelf
+      // een te berekenen, zodat rooster en weergave dezelfde fase aanhouden.
+      referenceDate,
+      cycleLength
     });
 
   } catch (err) {
@@ -4964,7 +5004,13 @@ v1.put('/leave-rounds/:id/blocks/:blockId/entries', requireAuth, requireRole(...
 
     // Bij een open ronde kunnen medewerkers hun invulling nog wijzigen; een
     // verdeling zou dan stil overschreven worden.
-    if (blok.status !== 'gesloten') {
+    //
+    // #201: 'toegepast' hoort hier ook bij. Die reden geldt daar namelijk net
+    // zo min als bij 'gesloten', want de ronde staat voor medewerkers dicht.
+    // Wie per ongeluk toepaste vóór het verdelen, liep anders vast: de
+    // verdeling werd geweigerd met een 409 en er was geen weg vooruit. Nu kan
+    // hij alsnog verdelen en daarna opnieuw toepassen.
+    if (blok.status !== 'gesloten' && blok.status !== 'toegepast') {
       return res.status(409).json({
         error: 'De verdeling kan pas vastgelegd worden als de ronde gesloten is',
         status: blok.status
@@ -5071,8 +5117,25 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
     }
 
     await client.query('BEGIN');
-    // Volledige vervanging van de invulling van deze medewerker in deze ronde
-    await client.query('DELETE FROM leave_round_entries WHERE round_id = $1 AND user_id = $2', [req.params.id, targetUserId]);
+
+    // #194: dit verving ALLE invulling van deze medewerker in de hele ronde,
+    // ook die van vakanties waar de aanvraag niet over ging. De app stuurt
+    // altijd de volledige ronde mee, dus via de knoppen ging er niets verloren,
+    // maar elke andere aanroep kon iemands zomervoorkeuren wissen door één
+    // kerstweek op te slaan. Het blok-scoped endpoint begrenst wel al netjes.
+    //
+    // De vervanging blijft nu binnen het bereik dat in de aanvraag zit. Een
+    // lege lijst raakt dus niets aan, wat ook de eerdere fix bewaart dat leeg
+    // indienen de invulling niet mag wissen.
+    const datums = entries.map(e => e.date).sort();
+    if (datums.length > 0) {
+      await client.query(
+        `DELETE FROM leave_round_entries
+         WHERE round_id = $1 AND user_id = $2 AND date BETWEEN $3 AND $4`,
+        [req.params.id, targetUserId, datums[0], datums[datums.length - 1]]
+      );
+    }
+
     for (const e of entries) {
       await client.query(
         `INSERT INTO leave_round_entries (round_id, user_id, date, status, note)
@@ -5080,10 +5143,20 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
         [req.params.id, targetUserId, e.date, e.status, e.note || '']
       );
     }
-    // Zorg dat er een submissierij bestaat (nog niet ingediend)
+
+    // #194: een wijziging ná de goedkeuring liet die goedkeuring gewoon staan,
+    // met de oorspronkelijke datum. De beheerder zag in het overzicht nog
+    // altijd "goedgekeurd" zonder enig signaal dat er daarna iets veranderd
+    // was, en apply nam over wat er op dat moment stond.
+    //
+    // Elke wijziging trekt de goedkeuring nu in, precies zoals submit dat al
+    // deed. De medewerker moet dus opnieuw indienen en de beheerder opnieuw
+    // beslissen. Een beheerder die voor iemand anders invult raakt zijn eigen
+    // goedkeuring niet kwijt, want targetUserId bepaalt wiens rij het is.
     await client.query(
       `INSERT INTO leave_round_submissions (round_id, user_id) VALUES ($1, $2)
-       ON CONFLICT (round_id, user_id) DO NOTHING`,
+       ON CONFLICT (round_id, user_id)
+       DO UPDATE SET approved = NULL, approved_by = NULL, approved_at = NULL`,
       [req.params.id, targetUserId]
     );
     await client.query('COMMIT');
@@ -5149,6 +5222,37 @@ v1.post('/leave-rounds/:id/apply', requireAuth, requireRole(...LEAVE_MANAGER_ROL
     const roundRes = await client.query('SELECT name FROM leave_rounds WHERE id = $1', [req.params.id]);
     if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
     const roundName = roundRes.rows[0].name;
+
+    // #201: apply neemt alleen dagen met status 'verlof' over, maar in een
+    // voorkeurblok staat op dat moment uitsluitend werken, liever_niet of
+    // zeker_niet. Wie op 'Verlof toepassen' drukte vóór 'Verlof verdelen',
+    // kreeg dus nul zomerdagen terwijl de melding als succes las, en beide
+    // knoppen verdwenen omdat die alleen bij status 'gesloten' verschijnen.
+    //
+    // We weigeren nu zolang een voorkeurblok nog niets op 'verlof' heeft
+    // staan. Een blok waarin niemand verlof kreeg is ononderscheidbaar van
+    // een onverdeeld blok, maar dat is een randgeval dat in de praktijk niet
+    // voorkomt: er wordt altijd iemand ingewilligd.
+    const onverdeeld = await client.query(
+      `SELECT b.id, b.name
+         FROM leave_round_blocks b
+        WHERE b.round_id = $1
+          AND b.mode = 'voorkeur'
+          AND NOT EXISTS (
+            SELECT 1 FROM leave_round_entries e
+             WHERE e.round_id = b.round_id
+               AND e.status = 'verlof'
+               AND e.date BETWEEN b.start_date AND b.end_date
+          )`,
+      [req.params.id]
+    );
+    if (onverdeeld.rows.length > 0) {
+      const namen = onverdeeld.rows.map(b => b.name).join(', ');
+      return res.status(409).json({
+        error: `Leg eerst de verdeling vast voor: ${namen}. Zonder verdeling levert het toepassen voor die vakantie geen enkele verlofdag op.`,
+        undistributedBlocks: onverdeeld.rows.map(b => ({ id: b.id, name: b.name }))
+      });
+    }
 
     // Enkel dagen met status 'verlof' van goedgekeurde medewerkers
     const rows = await client.query(

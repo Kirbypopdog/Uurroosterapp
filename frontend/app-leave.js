@@ -772,9 +772,14 @@ function renderLeaveManagerActions(round, medewerkers, subMap, nogNiet, blocks =
                 </div>` : '<p class="text-muted text-sm">Niets te beoordelen.</p>'}
             <div class="leave-manager-actions">
                 ${round.status === 'open' ? `<button class="btn btn-secondary" id="leave-close" data-open="${nogNiet.length}">Ronde sluiten</button>` : ''}
-                ${round.status === 'gesloten' && voorkeurBlok
+                ${/* #201: 'Verlof verdelen' stond alleen bij status 'gesloten'.
+                      Wie per ongeluk eerst toepaste, zag beide knoppen
+                      verdwijnen en had geen zichtbare weg terug, terwijl de
+                      verdeling er wel degelijk nog kon. Nu ook bij 'toegepast',
+                      zodat je alsnog kan verdelen en opnieuw toepassen. */''}
+                ${(round.status === 'gesloten' || round.status === 'toegepast') && voorkeurBlok
                     ? `<button class="btn btn-primary" id="leave-verdeel" data-block="${voorkeurBlok.id}">Verlof verdelen (${escapeHtml(voorkeurBlok.name)})</button>` : ''}
-                ${round.status === 'gesloten' ? '<button class="btn btn-secondary" id="leave-apply">Verlof toepassen op planning</button>' : ''}
+                ${(round.status === 'gesloten' || round.status === 'toegepast') ? '<button class="btn btn-secondary" id="leave-apply">Verlof toepassen op planning</button>' : ''}
                 <button class="btn btn-secondary" id="leave-resync">Gesloten dagen bijwerken uit concept</button>
                 <button class="btn btn-secondary" id="leave-export">Exporteren (CSV)</button>
             </div>

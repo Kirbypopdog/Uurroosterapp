@@ -917,8 +917,19 @@ async function applyBuilderDraft(draftId) {
             draftToMark.lastAppliedUntil = applyResult.endDate;
         }
 
-        // Auto-update school year start for week numbering
-        await saveSchoolYearStart(applyResult.startDate);
+        // #207: hier stond `await saveSchoolYearStart(applyResult.startDate)`,
+        // onvoorwaardelijk, dus ook voor een vakantieconcept en ook voor een
+        // toepassing midden in het jaar.
+        //
+        // De schooljaarstart is niet zomaar een etiket: getFourWeekPeriodDates
+        // verankert er de vaste vierwekenperiodes aan, en die bepalen het getal
+        // "X/152u" dat in de planning onder elke naam staat. Een concept
+        // toepassen op 17 november verschoof de periodegrenzen een week en
+        // veranderde ieders periodetotaal, zonder dat er één dienst was
+        // bijgekomen of verdwenen. De knop "Vanaf nu" maakte dat één klik weg.
+        //
+        // De schooljaarstart wordt voortaan alleen nog handmatig gezet, in
+        // Instellingen, waar hij toch al te zetten is.
 
         // Apply pattern + rotation from draft globally (date-aware)
         {
@@ -929,9 +940,17 @@ async function applyBuilderDraft(draftId) {
 
             if (applyGrid._pattern) {
                 const currentPattern = getSchedulePattern();
-                // Auto-set referentiedatum op maandag van apply-from datum
-                const applyMonday = getMonday(applyFromDate);
-                const autoRefDate = formatDateYYYYMMDD(applyMonday);
+                // #211: hier werd zelf een anker berekend, de maandag van de
+                // startdatum, terwijl de backend met het anker uit het concept
+                // genereerde. Die twee liepen uiteen en dan stond het rooster
+                // een cycluspositie verschoven ten opzichte van wat je zag.
+                //
+                // De backend geeft nu terug welk anker hij écht gebruikt heeft.
+                // Dat publiceren we, zodat er maar één waarheid is. De oude
+                // berekening blijft als terugval voor een backend die het veld
+                // nog niet meestuurt.
+                const autoRefDate = result.referenceDate
+                    || formatDateYYYYMMDD(getMonday(applyFromDate));
 
                 let newPatternSetting;
 
