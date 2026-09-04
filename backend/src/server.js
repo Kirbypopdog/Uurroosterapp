@@ -3662,11 +3662,33 @@ v1.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'ro
     );
 
     // 3. Collect user IDs from grid
+    //
+    // #213: er bestaan twee vormen van een conceptraster, en de sleutels staan
+    // er precies omgekeerd in:
+    //   single-week : { "<empId>": { "0": {...} }, _pattern: ... }
+    //   multi-week  : { _multiWeek: true, "1": { "<empId>": {...} } }
+    //
+    // Deze lus nam blind het TWEEDE niveau als medewerker-id. Bij een
+    // single-week raster leverde dat de dagnummers 0 tot 6 op, die daarna als
+    // gebruikers-id's de verwijdering in gingen. apply doet die controle wel
+    // (isMultiWeek), deactivate niet. Nu allebei.
+    const isMultiWeek = !!grid._multiWeek;
     const userIds = new Set();
-    for (const [key, weekGrid] of Object.entries(grid)) {
-      if (key.startsWith('_')) continue;
-      if (typeof weekGrid === 'object' && weekGrid !== null) {
-        Object.keys(weekGrid).forEach(id => { const n = parseInt(id); if (!isNaN(n)) userIds.add(n); });
+    const onthoud = (id) => { const n = parseInt(id); if (!isNaN(n)) userIds.add(n); };
+
+    if (isMultiWeek) {
+      // Bovenste niveau is het weeknummer, daaronder staan de medewerkers.
+      for (const [key, weekGrid] of Object.entries(grid)) {
+        if (key.startsWith('_')) continue;
+        if (typeof weekGrid === 'object' && weekGrid !== null) {
+          Object.keys(weekGrid).forEach(onthoud);
+        }
+      }
+    } else {
+      // Bovenste niveau is de medewerker zelf.
+      for (const key of Object.keys(grid)) {
+        if (key.startsWith('_')) continue;
+        onthoud(key);
       }
     }
 

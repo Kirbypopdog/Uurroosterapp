@@ -1528,6 +1528,121 @@ describe('GET /calendar/:token.ics', () => {
   });
 });
 
+// ===== POST /schedule-drafts/:id/deactivate =====
+
+describe('POST /schedule-drafts/:id/deactivate', () => {
+  function arrange(grid, extra = {}) {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [] });                     // logAudit
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                          // BEGIN
+      .mockResolvedValueOnce({ rows: [{
+        id: 'c1', name: 'Concept', grid, team_filter: null,
+        lastAppliedFrom: null, lastAppliedUntil: null, ...extra
+      }] })
+      .mockResolvedValue({ rows: [], rowCount: 0 });                // UPDATE, DELETEs, COMMIT
+    return mockClient;
+  }
+
+  // Regressie #213: bij een single-week raster staan de medewerkers op het
+  // BOVENSTE niveau en de dagnummers eronder. De oude code nam blind het
+  // tweede niveau, en wiste zo de diensten van "gebruikers" 0 tot 6.
+  test('reads employee ids from the top level for a single-week grid (#213)', async () => {
+    const singleWeek = {
+      _pattern: { cycleLength: 2 },
+      '42': { '0': { startTime: '08:00', endTime: '16:00' } },
+      '43': { '3': { startTime: '09:00', endTime: '17:00' } }
+    };
+    const mockClient = arrange(singleWeek, {
+      lastAppliedFrom: '2026-01-01', lastAppliedUntil: '2026-12-31'
+    });
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/api/v1/schedule-drafts/c1/deactivate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ endDate: '2026-06-30' });
+    expect(res.status).toBe(200);
+
+    const legacy = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('draft_id IS NULL')
+    );
+    expect(legacy).toBeTruthy();
+    // De medewerkers, niet de dagnummers 0 en 3
+    expect(legacy[1][0].sort()).toEqual([42, 43]);
+  });
+
+  test('reads employee ids from the second level for a multi-week grid (#213)', async () => {
+    const multiWeek = {
+      _multiWeek: true,
+      '1': { '42': { '0': { startTime: '08:00', endTime: '16:00' } } },
+      '2': { '43': { '3': { startTime: '09:00', endTime: '17:00' } } }
+    };
+    const mockClient = arrange(multiWeek, {
+      lastAppliedFrom: '2026-01-01', lastAppliedUntil: '2026-12-31'
+    });
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/api/v1/schedule-drafts/c1/deactivate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ endDate: '2026-06-30' });
+    expect(res.status).toBe(200);
+
+    const legacy = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('draft_id IS NULL')
+    );
+    expect(legacy).toBeTruthy();
+    expect(legacy[1][0].sort()).toEqual([42, 43]);
+  });
+
+  // Regressie #185: de verwijdering hoort begrensd te zijn op het concept en
+  // op zijn toepassingsbereik, niet op 'alles na endDate'.
+  test('deletes by draft_id and bounds legacy shifts to the applied range (#185)', async () => {
+    const mockClient = arrange(
+      { _multiWeek: true, '1': { '42': {} } },
+      { lastAppliedFrom: '2027-04-05', lastAppliedUntil: '2027-04-18' }
+    );
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    await request(app)
+      .post('/api/v1/schedule-drafts/c1/deactivate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ endDate: '2026-08-31' });
+
+    const byDraft = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('DELETE FROM shifts WHERE draft_id = $1')
+    );
+    expect(byDraft).toBeTruthy();
+    expect(byDraft[1]).toEqual(['c1', '2026-08-31']);
+
+    const legacy = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('draft_id IS NULL')
+    );
+    // Onder- en bovengrens uit het toepassingsbereik van het concept
+    expect(legacy[1]).toEqual([[42], '2026-08-31', '2027-04-05', '2027-04-18']);
+  });
+
+  // Een concept dat nooit is toegepast heeft niets gegenereerd, dus de
+  // opruiming van oude diensten mag daar helemaal niet draaien.
+  test('does not touch legacy shifts when the draft was never applied (#185)', async () => {
+    const mockClient = arrange({ _multiWeek: true, '1': { '42': {} } });
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    await request(app)
+      .post('/api/v1/schedule-drafts/c1/deactivate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ endDate: '2026-08-31' });
+
+    const legacy = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('draft_id IS NULL')
+    );
+    expect(legacy).toBeUndefined();
+  });
+});
+
 // ===== POST /schedule-drafts/:id/apply =====
 
 describe('POST /api/v1/schedule-drafts/:id/apply', () => {
