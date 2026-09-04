@@ -631,9 +631,9 @@ describe('PUT /shifts/:id', () => {
 
   test('medewerker cannot change the team of their own shift (#262)', async () => {
     mockActiveUser();
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ user_id: 6 }] })   // eigenaarscontrole
-      .mockResolvedValueOnce({ rows: [eigenDienst] });     // oude dienst ophalen
+    // De eigenaarscontrole gebruikt sinds #215 dezelfde query als hieronder,
+    // dus er is maar één ophaling meer.
+    pool.query.mockResolvedValueOnce({ rows: [eigenDienst] });
     const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
     const res = await request(app)
       .put('/shifts/20')
@@ -645,9 +645,7 @@ describe('PUT /shifts/:id', () => {
 
   test('medewerker cannot reassign their own shift to a colleague (#262)', async () => {
     mockActiveUser();
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ user_id: 6 }] })
-      .mockResolvedValueOnce({ rows: [eigenDienst] });
+    pool.query.mockResolvedValueOnce({ rows: [eigenDienst] });
     const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
     const res = await request(app)
       .put('/shifts/20')
@@ -663,7 +661,6 @@ describe('PUT /shifts/:id', () => {
     mockActiveUser();
     const bijgewerkt = { ...eigenDienst, startTime: '15:00', endTime: '23:00' };
     pool.query
-      .mockResolvedValueOnce({ rows: [{ user_id: 6 }] })   // eigenaarscontrole
       .mockResolvedValueOnce({ rows: [eigenDienst] })      // oude dienst ophalen
       .mockResolvedValueOnce({ rows: [] })                 // validateShiftRules: buurdiensten
       .mockResolvedValueOnce({ rows: [bijgewerkt] })       // UPDATE RETURNING

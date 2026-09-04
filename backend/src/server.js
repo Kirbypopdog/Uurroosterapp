@@ -699,7 +699,13 @@ async function runMigrations() {
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         console.error(`  Migratie mislukt (${migration.name}): ${err.message}`);
-        // Niet opnieuw gooien — log en ga verder met volgende migratie
+        // #193: hier werd de fout ingeslikt en ging de lus gewoon door. Als
+        // migratie 020 mislukte, draaiden 021 en verder alsnog tegen een schema
+        // dat mist wat 020 had moeten toevoegen, en daarna ging de API luisteren
+        // tegen een half gemigreerde database.
+        //
+        // Nu stopt het hier. De aanroeper laat de server niet starten.
+        throw new Error(`Migratie ${migration.name} mislukt: ${err.message}`);
       }
     }
   } finally {
@@ -1682,7 +1688,7 @@ v1.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
     await client.query('BEGIN');
     const deletedUser = await client.query('SELECT name, email, role FROM users WHERE id = $1 FOR UPDATE', [userId]);
     if (deletedUser.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Gebruiker niet gevonden' });
     }
     // Anonymize audit log before deleting — GDPR: actor_name stays queryable but
@@ -1696,7 +1702,7 @@ v1.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
     await logAudit(req, 'DELETE', 'user', userId, { user: deletedUser.rows[0] });
     res.json({ ok: true });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -1801,11 +1807,11 @@ v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) 
     );
 
     if (oldUserResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Vertrekkende medewerker niet gevonden' });
     }
     if (newUserResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Nieuwe medewerker niet gevonden' });
     }
 
@@ -1899,7 +1905,7 @@ v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) 
       hint: transferShiftsFrom ? null : 'apply_concept'
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Replace user error:', err);
     res.status(500).json({ error: 'Server error bij vervanging' });
   } finally {
@@ -2030,14 +2036,7 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Tijdstip moet HH:MM zijn' });
   }
 
-  // Permission check: medewerker can only edit own shifts
   const { role, id: currentUserId } = req.user;
-  if (role === 'medewerker') {
-    const existing = await pool.query('SELECT user_id FROM shifts WHERE id = $1', [id]);
-    if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
-      return res.status(403).json({ error: 'Je kunt alleen je eigen diensten bewerken' });
-    }
-  }
 
   // When editing, automatically set source to 'manual' to protect from auto-regeneration
   // Unless explicitly setting to 'auto' (for reset-to-base functionality)
@@ -2050,6 +2049,14 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
     );
     const oldShift = oldResult.rows[0] || null;
 
+    // Permission check: medewerker can only edit own shifts.
+    //
+    // #215: deze controle stond hiervoor VÓÓR de try, met een eigen
+    // pool.query. Ging de database onderuit, dan verliet die afwijzing de
+    // handler onafgehandeld en nam Node het proces mee. Nu staat hij binnen de
+    // try, en gebruikt hij de dienst die hier toch al opgehaald wordt, dus het
+    // scheelt ook een query.
+    //
     // #262: een medewerker mag zijn eigen dienst bewerken, maar hem niet naar
     // een ander team of naar een andere collega verplaatsen. Het teamveld bleef
     // in de modal bewerkbaar en de UPDATE hieronder liet zowel team als user_id
@@ -2057,6 +2064,9 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
     // of zijn dienst aan een collega toewijzen. Daar bestaat 'Dienst afstaan'
     // voor, met een verzoek dat de ander kan aanvaarden.
     if (role === 'medewerker' && oldShift) {
+      if (oldShift.userId !== currentUserId) {
+        return res.status(403).json({ error: 'Je kunt alleen je eigen diensten bewerken' });
+      }
       if (team !== undefined && team !== null && team !== oldShift.team) {
         return res.status(403).json({ error: 'Je kunt het team van een dienst niet wijzigen' });
       }
@@ -2131,7 +2141,7 @@ v1.delete('/shifts/:id', requireAuth, async (req, res) => {
     );
 
     if (shiftResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Shift niet gevonden' });
     }
 
@@ -2150,11 +2160,11 @@ v1.delete('/shifts/:id', requireAuth, async (req, res) => {
     } else if (role === 'medewerker') {
       // Een medewerker mag alleen zijn eigen dienst verwijderen
       if (shift.user_id !== userId) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK').catch(() => {});
         return res.status(403).json({ error: 'Je kunt alleen je eigen diensten verwijderen' });
       }
     } else {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
     }
 
@@ -2180,7 +2190,7 @@ v1.delete('/shifts/:id', requireAuth, async (req, res) => {
     await client.query('COMMIT');
     res.json({ ok: true });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('ERROR in DELETE /shifts/:id:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -2279,7 +2289,7 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
     await logAudit(req, 'CREATE', 'shift', '', { action: 'bulk_create', count: createdShifts.length, skipped: skipped.length, overwriteExisting: !!overwriteExisting });
     res.status(201).json({ shifts: createdShifts, count: createdShifts.length, skipped });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('POST /shifts/bulk error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -2359,16 +2369,19 @@ v1.put('/shift-activities/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   const { startTime, endTime, type, description } = req.body || {};
 
-  // Permission check: medewerker can only edit own activities
   const { role, id: currentUserId } = req.user;
-  if (role === 'medewerker') {
-    const existing = await pool.query('SELECT user_id FROM shift_activities WHERE id = $1', [id]);
-    if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
-      return res.status(403).json({ error: 'Je kunt alleen je eigen activiteiten bewerken' });
-    }
-  }
 
   try {
+    // Permission check: medewerker can only edit own activities.
+    // #215: stond hiervoor buiten de try, waardoor een databasestoring hier
+    // een onafgehandelde afwijzing opleverde en het proces meenam.
+    if (role === 'medewerker') {
+      const existing = await pool.query('SELECT user_id FROM shift_activities WHERE id = $1', [id]);
+      if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
+        return res.status(403).json({ error: 'Je kunt alleen je eigen activiteiten bewerken' });
+      }
+    }
+
     const result = await pool.query(`
       UPDATE shift_activities
       SET start_time = COALESCE($1, start_time),
@@ -2394,16 +2407,18 @@ v1.put('/shift-activities/:id', requireAuth, async (req, res) => {
 v1.delete('/shift-activities/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
 
-  // Permission check: medewerker can only delete own activities
   const { role, id: currentUserId } = req.user;
-  if (role === 'medewerker') {
-    const existing = await pool.query('SELECT user_id FROM shift_activities WHERE id = $1', [id]);
-    if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
-      return res.status(403).json({ error: 'Je kunt alleen je eigen activiteiten verwijderen' });
-    }
-  }
 
   try {
+    // Permission check: medewerker can only delete own activities.
+    // #215: zie de PUT hierboven, zelfde reden.
+    if (role === 'medewerker') {
+      const existing = await pool.query('SELECT user_id FROM shift_activities WHERE id = $1', [id]);
+      if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
+        return res.status(403).json({ error: 'Je kunt alleen je eigen activiteiten verwijderen' });
+      }
+    }
+
     const result = await pool.query('DELETE FROM shift_activities WHERE id = $1 RETURNING id', [id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Activiteit niet gevonden' });
@@ -2538,7 +2553,7 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
     }
 
     if (dates.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Geen geldige datums in bereik' });
     }
 
@@ -2635,7 +2650,7 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
       conflictingShifts: conflictingShiftCount
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('POST /availability/sick-with-takeover error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -2930,7 +2945,7 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     );
 
     if (swapResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Swap request niet gevonden' });
     }
 
@@ -2938,19 +2953,19 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
 
     // Verify status is pending
     if (swap.status !== 'pending') {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Swap request is al verwerkt' });
     }
 
     // Permission check: only target user can approve
     if (swap.target_user_id !== currentUserId) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(403).json({ error: 'Alleen de doelpersoon kan dit ruilverzoek accepteren' });
     }
 
     // Verify shift ownership hasn't changed since swap was created
     if (swap.requester_current_user !== swap.requester_user_id || swap.target_current_user !== swap.target_user_id) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Een van de diensten is inmiddels hertoegewezen. Dit ruilverzoek is niet meer geldig.' });
     }
 
@@ -2961,7 +2976,7 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     const targetDate = new Date(swap.target_date);
 
     if (requesterDate < now || targetDate < now) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Shifts zijn al voorbij' });
     }
 
@@ -3010,7 +3025,7 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
 
     res.json({ ok: true, message: 'Swap geaccepteerd en uitgevoerd' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('PUT /swap-requests/:id/target-approve error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -3039,7 +3054,7 @@ v1.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
     );
 
     if (swapResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Swap request niet gevonden' });
     }
 
@@ -3047,13 +3062,13 @@ v1.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
 
     // Verify status is pending
     if (swap.status !== 'pending') {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Swap request is al verwerkt' });
     }
 
     // Permission check: only target user can reject
     if (swap.target_user_id !== currentUserId) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(403).json({ error: 'Alleen de doelpersoon kan dit ruilverzoek afwijzen' });
     }
 
@@ -3091,7 +3106,7 @@ v1.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
 
     res.json({ ok: true, message: 'Swap afgewezen' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('PUT /swap-requests/:id/target-reject error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -3121,7 +3136,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     );
 
     if (shiftResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Shift niet gevonden' });
     }
 
@@ -3133,7 +3148,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     const isRoosterverantwoordelijke = role === 'roosterverantwoordelijke';
 
     if (!isOwnShift && !isAdmin && !isRoosterverantwoordelijke) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(403).json({ error: 'Je kunt alleen je eigen shifts aanbieden, tenzij je admin of verantwoordelijke bent' });
     }
 
@@ -3143,7 +3158,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     const shiftDate = new Date(shift.date);
 
     if (shiftDate < now) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Shift ligt in het verleden' });
     }
 
@@ -3181,7 +3196,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
 
     res.json({ ok: true, message: 'Open verzoek aangemaakt' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('POST /shift-requests/takeover error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -3210,7 +3225,7 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
     );
 
     if (requestResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Verzoek niet gevonden' });
     }
 
@@ -3218,19 +3233,19 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
 
     // Verify it's a takeover request
     if (request.request_type !== 'takeover') {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Dit is geen open verzoek' });
     }
 
     // Verify status is pending
     if (request.status !== 'pending') {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Verzoek is al verwerkt' });
     }
 
     // Verify user is not the requester
     if (request.requester_user_id === currentUserId) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(403).json({ error: 'Je kunt je eigen verzoek niet accepteren' });
     }
 
@@ -3264,7 +3279,7 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
     const shiftDate = new Date(request.date);
 
     if (shiftDate < now) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Shift ligt in het verleden' });
     }
 
@@ -3309,7 +3324,7 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
 
     res.json({ ok: true, message: 'Shift overgenomen' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('PUT /shift-requests/:id/takeover-accept error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -3646,7 +3661,7 @@ v1.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'ro
       [req.params.id]
     );
     if (draftResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Concept niet gevonden' });
     }
 
@@ -3742,7 +3757,7 @@ v1.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'ro
     });
     res.json({ ok: true, shiftsDeleted });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('POST /schedule-drafts/:id/deactivate error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -3768,7 +3783,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
     );
 
     if (draftResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Concept niet gevonden' });
     }
 
@@ -3822,14 +3837,14 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
     // Vakantieconcept: force date-range mode from holiday period dates
     if (isVakantie) {
       if (!draft.holiday_period_id) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK').catch(() => {});
         return res.status(400).json({ error: 'Vakantieconcept heeft geen gekoppelde vakantieperiode' });
       }
       const hpResult = await client.query(`SELECT value FROM settings WHERE key = 'holidayPeriods'`);
       const holidayPeriods = hpResult.rows.length > 0 ? (hpResult.rows[0].value || []) : [];
       const linkedPeriod = holidayPeriods.find(p => String(p.id) === String(draft.holiday_period_id));
       if (!linkedPeriod) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK').catch(() => {});
         return res.status(400).json({ error: 'Gekoppelde vakantieperiode niet gevonden' });
       }
       effectiveStartDate = linkedPeriod.startDate;
@@ -3838,13 +3853,13 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
     // Date range is verplicht — concepten hebben altijd een van/tot datum
     if (!effectiveStartDate || !effectiveEndDate) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Start- en einddatum zijn verplicht bij concept toepassen' });
     }
 
     // Validate date range
     if (effectiveStartDate >= effectiveEndDate) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Startdatum moet voor einddatum liggen' });
     }
 
@@ -3866,7 +3881,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
         [draftId, effectiveStartDate, effectiveEndDate]
       );
       if (overlapping.rows.length > 0) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK').catch(() => {});
         return res.json({
           needsOverlapConfirmation: true,
           overlappingDrafts: overlapping.rows.map(d => ({
@@ -4435,7 +4450,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
     });
 
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('POST /schedule-drafts/:id/apply error:', err);
     res.status(500).json({ error: 'Server error bij concept toepassen', detail: err.message, code: err.code });
   } finally {
@@ -5220,7 +5235,7 @@ v1.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
     };
     res.json({ ok: true, message: messages[scope] });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -5403,7 +5418,7 @@ v1.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
 
     res.json({ ok: true, results });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Migration error:', err);
     res.status(500).json({ error: 'Migration failed' });
   } finally {
@@ -5449,13 +5464,43 @@ app.use('/api/v1', v1);
 // Backward-compat: oude routes zonder prefix blijven werken — verwijderen na v1.3
 app.use('/', v1);
 
+// #215: laatste vangnet. Elke route zou zijn eigen fouten moeten afhandelen,
+// maar één vergeten plek mag niet de hele dienst kosten. Express 4 vangt een
+// afgewezen promise uit een async handler niet op, en zonder deze handler
+// beëindigt Node 22 het proces. Loggen en doordraaien is hier veiliger: een
+// enkel verzoek faalt dan, in plaats van iedereen tegelijk.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
+
+// Express-foutmiddleware. Moet ná alle routes staan en vier parameters hebben,
+// anders herkent Express hem niet als foutafhandelaar.
+app.use((err, req, res, _next) => {
+  console.error(`[express] ${req.method} ${req.originalUrl}:`, err && err.stack ? err.stack : err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Server error' });
+});
+
 if (process.env.NODE_ENV !== 'test') {
   runMigrations()
     .then(() => ensureBootstrapData())
     .then(() => archiveOldShifts())
-    .catch(err => console.error('[startup] Fout:', err.message))
-    .finally(() => {
+    .then(() => {
       app.listen(PORT, () => console.log(`API running on :${PORT}`));
+    })
+    .catch(err => {
+      // #193: hier stond een .catch die alleen logde, gevolgd door een
+      // .finally die tóch ging luisteren. Een mislukte migratie leverde dus
+      // een API op die tegen een half gemigreerd schema draait, met als enig
+      // spoor een regel in het Render-log.
+      //
+      // Een server die niet opkomt is luidruchtig en veilig. Eentje die op een
+      // half schema draait is stil en gevaarlijk.
+      console.error('[startup] Opstarten afgebroken:', err && err.stack ? err.stack : err);
+      process.exit(1);
     });
 }
 
