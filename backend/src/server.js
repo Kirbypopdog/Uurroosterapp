@@ -2125,21 +2125,24 @@ v1.delete('/shifts/:id', requireAuth, async (req, res) => {
     const shift = shiftResult.rows[0];
     const { role, id: userId, team_id: userTeam } = req.user;
 
-    // AUTO shifts can be deleted by anyone (they're temporary/regenerated)
-    if (shift.source !== 'auto') {
-      // Permission checks for MANUAL shifts based on role
-      if (role === 'admin' || role === 'roosterverantwoordelijke') {
-        // Admin/roosterverantwoordelijke can delete anything
-      } else if (role === 'medewerker') {
-        // Medewerker can only delete own shifts
-        if (shift.user_id !== userId) {
-          await client.query('ROLLBACK');
-          return res.status(403).json({ error: 'Je kunt alleen je eigen diensten verwijderen' });
-        }
-      } else {
+    // #184: hier stond `if (shift.source !== 'auto')` om deze hele controle
+    // heen. Elke medewerker kon daardoor de auto-dienst van eender welke
+    // collega verwijderen, ook uit een ander team. De redenering was dat
+    // auto-diensten toch opnieuw worden aangemaakt, maar diezelfde handler
+    // maakt hieronder een shift_block aan dat precies dat verhindert. De dag
+    // bleef dus permanent leeg. De rolcontrole geldt nu voor elke dienst,
+    // ongeacht de bron.
+    if (role === 'admin' || role === 'roosterverantwoordelijke') {
+      // Admin en roosterverantwoordelijke mogen elke dienst verwijderen
+    } else if (role === 'medewerker') {
+      // Een medewerker mag alleen zijn eigen dienst verwijderen
+      if (shift.user_id !== userId) {
         await client.query('ROLLBACK');
-        return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
+        return res.status(403).json({ error: 'Je kunt alleen je eigen diensten verwijderen' });
       }
+    } else {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
     }
 
     // Delete the shift (CASCADE handles shift_activities with shift_id set)
@@ -3216,6 +3219,30 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
     if (request.requester_user_id === currentUserId) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Je kunt je eigen verzoek niet accepteren' });
+    }
+
+    // #188: de dienst mag intussen niet aan iemand anders zijn toegewezen.
+    // current_shift_owner werd hierboven wel geselecteerd maar nergens gebruikt.
+    // Daardoor kon een oud, nog openstaand overnameverzoek de dienst afpakken
+    // van de collega die hem intussen had gekregen, bijvoorbeeld doordat de
+    // roosterverantwoordelijke het gat zelf had opgevuld. Die collega werd
+    // niets gevraagd en kreeg geen bericht, want de melding gaat naar de
+    // oorspronkelijke aanvrager.
+    //
+    // Het zusterendpoint voor gewone ruilverzoeken doet deze controle al
+    // (zie 'Verify shift ownership hasn't changed' hierboven).
+    if (request.current_shift_owner !== request.requester_user_id) {
+      // Het verzoek kan nooit meer slagen, dus zetten we het meteen op een
+      // eindstatus. Anders blijft de kaart onder 'Actie vereist' staan en
+      // geeft elke klik dezelfde fout, wat precies de val uit #316 is.
+      await client.query(
+        `UPDATE shift_swap_requests SET status = 'expired', responded_at = NOW() WHERE id = $1`,
+        [requestId]
+      );
+      await client.query('COMMIT');
+      return res.status(400).json({
+        error: 'Deze dienst is inmiddels aan iemand anders toegewezen. Dit overnameverzoek is niet meer geldig.'
+      });
     }
 
     // Verify shift is not in the past

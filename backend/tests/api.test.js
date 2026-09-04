@@ -681,6 +681,66 @@ describe('DELETE /shifts/:id', () => {
     );
     expect(blockInsert).toBeUndefined();
   });
+
+  // Regressie #184: de rolcontrole werd overgeslagen zodra source='auto',
+  // waardoor elke medewerker de auto-dienst van eender welke collega kon
+  // verwijderen — en er bleef een shift_block achter dat de dag permanent
+  // leeg hield.
+  test('medewerker cannot delete an auto shift of a colleague (#184)', async () => {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] });
+    pool.query.mockResolvedValue({ rows: [] });
+
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                                                                    // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 52, user_id: 8, team: 'cargo', source: 'auto', date: '2026-09-17' }] }) // SELECT shift (van iemand anders)
+      .mockResolvedValueOnce({ rows: [] });                                                                   // ROLLBACK
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .delete('/api/v1/shifts/52')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/eigen diensten/i);
+    // De dienst mag niet verwijderd zijn en er mag geen blokkade achterblijven
+    const del = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('DELETE FROM shifts')
+    );
+    expect(del).toBeUndefined();
+    const blockInsert = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO shift_blocks')
+    );
+    expect(blockInsert).toBeUndefined();
+  });
+
+  // Keerzijde van #184: zijn eigen dienst mag een medewerker wel verwijderen.
+  // Dat is een bewuste keuze (rollentabel in CLAUDE.md) en moet blijven werken.
+  test('medewerker can still delete their own auto shift (#184)', async () => {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] });
+    pool.query.mockResolvedValue({ rows: [] });
+
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                                                                    // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: 53, user_id: 6, team: 'vlot1', source: 'auto', date: '2026-09-17' }] }) // SELECT shift (eigen)
+      .mockResolvedValueOnce({ rows: [] })                                                                    // DELETE shift
+      .mockResolvedValueOnce({ rows: [] })                                                                    // INSERT shift_block
+      .mockResolvedValueOnce({ rows: [] });                                                                   // COMMIT
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .delete('/api/v1/shifts/53')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const del = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('DELETE FROM shifts')
+    );
+    expect(del).toBeTruthy();
+  });
 });
 
 // ===== GET /availability =====
@@ -1035,6 +1095,83 @@ describe('POST /swap-requests', () => {
       .send({ requesterShiftId: 1, targetShiftId: 2 });
     expect(res.status).toBe(201);
     expect(res.body.swapRequest.status).toBe('pending');
+  });
+});
+
+// ===== PUT /shift-requests/:id/takeover-accept =====
+
+describe('PUT /shift-requests/:id/takeover-accept', () => {
+  // Basis voor een geldig, openstaand overnameverzoek van gebruiker 4 op
+  // dienst 135. Per test passen we alleen aan wat ertoe doet.
+  const baseRequest = {
+    id: 7,
+    request_type: 'takeover',
+    status: 'pending',
+    requester_user_id: 4,
+    requester_shift_id: 135,
+    current_shift_owner: 4,
+    date: '2099-01-15',
+    start_time: '07:00',
+    end_time: '15:00',
+    team: 'vlot1'
+  };
+
+  function arrange(requestRow) {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [] });                     // logAudit, mail
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })              // BEGIN
+      .mockResolvedValueOnce({ rows: [requestRow] })    // SELECT verzoek + dienst
+      .mockResolvedValue({ rows: [] });                 // al de rest
+    return mockClient;
+  }
+
+  // Regressie #188: current_shift_owner werd geselecteerd maar nooit gebruikt.
+  // Een oud verzoek kon daardoor de dienst afpakken van wie hem intussen had.
+  test('rejects a takeover when the shift was reassigned in the meantime (#188)', async () => {
+    // De dienst staat nu op gebruiker 8, niet meer op de aanvrager (4)
+    const mockClient = arrange({ ...baseRequest, current_shift_owner: 8 });
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/shift-requests/7/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/inmiddels aan iemand anders toegewezen/i);
+    // De dienst mag niet zijn overgezet
+    const assign = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assign).toBeUndefined();
+    // Het verzoek gaat naar een eindstatus, zodat het niet eeuwig onder
+    // 'Actie vereist' blijft staan en bij elke klik dezelfde fout geeft (#316)
+    const expire = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes("status = 'expired'")
+    );
+    expect(expire).toBeTruthy();
+  });
+
+  // Keerzijde: een verzoek waarvan de dienst nog gewoon bij de aanvrager
+  // staat, moet blijven werken.
+  test('accepts a takeover when the shift is still with the requester (#188)', async () => {
+    const mockClient = arrange({ ...baseRequest });
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/shift-requests/7/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(200);
+    const assign = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assign).toBeTruthy();
+    expect(assign[1]).toEqual([6, 135]); // dienst 135 gaat naar gebruiker 6
   });
 });
 
