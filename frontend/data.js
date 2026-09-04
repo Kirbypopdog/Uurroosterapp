@@ -52,6 +52,9 @@ function normalizeSettings(settings) {
     if (!Array.isArray(merged.holidayPeriods)) {
         merged.holidayPeriods = defaults.holidayPeriods || [];
     }
+    if (!Array.isArray(merged.conceptClosedDates)) {
+        merged.conceptClosedDates = [];
+    }
     if (!merged.holidayRules || typeof merged.holidayRules !== 'object') {
         merged.holidayRules = defaults.holidayRules || {};
     } else if (defaults.holidayRules) {
@@ -184,7 +187,14 @@ async function dataApiFetch(path, options = {}) {
         const data = await response.json().catch(() => ({}));
         const msg = data.error || `HTTP ${response.status}`;
         const detail = data.detail ? ` (${data.detail})` : '';
-        throw new Error(msg + detail);
+        const fout = new Error(msg + detail);
+        // De statuscode en het volledige antwoord meegeven, zodat een aanroeper
+        // kan reageren op wat de backend zegt in plaats van op de tekst te
+        // moeten matchen. Gebruikt door de ruil- en overnameknoppen, die bij
+        // canOverride een bevestiging tonen en het opnieuw proberen met force.
+        fout.status = response.status;
+        fout.data = data;
+        throw fout;
     }
 
     return response.json();
@@ -204,14 +214,33 @@ async function loadDataFromAPI() {
     try {
         // Load all data in parallel - users now includes employee/schedule data
         const loadErrors = [];
-        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData] = await Promise.all([
+
+        // /schedule-drafts is admin-only. Voor een medewerker gaf dit bij elke
+        // login een rode 403 in de console — opgevangen, maar verwarrend.
+        // Let op: de échte rol, niet getEffectiveRole(): een admin die een
+        // medewerker simuleert moet de concepten wél geladen hebben.
+        const echteRol = AppState.currentUser?.role;
+        const magConcepten = ['admin', 'roosterverantwoordelijke',
+            'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(echteRol);
+        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData, leaveRoundsData, swapRequestsData] = await Promise.all([
             dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
             dataApiFetch(`/shifts?startDate=${_getInitialWindowStart()}&endDate=${_getInitialWindowEnd()}`).catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
             dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
             dataApiFetch('/shift-blocks').catch(err => { loadErrors.push('shift-blocks'); console.error('[LoadData] Failed to load shift-blocks:', err); return []; }),
             dataApiFetch('/settings').catch(err => { loadErrors.push('settings'); console.error('[LoadData] Failed to load settings:', err); return { settings: {} }; }),
-            dataApiFetch('/schedule-drafts').catch(err => { console.log('[LoadData] Schedule drafts not available (using settings fallback)'); return { drafts: null }; }),
-            dataApiFetch('/shift-activities').catch(err => { console.log('[LoadData] Activities not available'); return { activities: [] }; })
+            magConcepten
+                ? dataApiFetch('/schedule-drafts').catch(err => { console.log('[LoadData] Schedule drafts not available (using settings fallback)'); return { drafts: null }; })
+                : Promise.resolve({ drafts: null }),
+            dataApiFetch('/shift-activities').catch(err => { console.log('[LoadData] Activities not available'); return { activities: [] }; }),
+            // Nodig op de startpagina: daar herinneren we mensen eraan dat een
+            // verlofronde nog op hen wacht, zonder dat ze de verloftab openen.
+            dataApiFetch('/leave-rounds').catch(err => { console.log('[LoadData] Verlofrondes niet beschikbaar'); return { rounds: [] }; }),
+            // #198: ruilverzoeken werden pas geladen bij het openen van de
+            // ruiltab. Daardoor zweeg de kaart "Vraagt je aandacht" op de
+            // startpagina precies bij het inloggen, en las de sleepbescherming
+            // uit #175 een lege lijst. Wie inlogde, home bekeek en weer wegging
+            // miste elke ruil- of overnamevraag.
+            dataApiFetch('/swap-requests').catch(err => { loadErrors.push('ruilverzoeken'); console.error('[LoadData] Failed to load swap-requests:', err); return { swapRequests: [] }; })
         ]);
 
         if (loadErrors.length > 0) {
@@ -227,6 +256,8 @@ async function loadDataFromAPI() {
         DataStore.activities = (activitiesData.activities || []).map(normalizeActivity);
         DataStore.availability = (availabilityData.availability || []).map(normalizeAvailability);
         DataStore.shiftBlocks = (Array.isArray(shiftBlocksData) ? shiftBlocksData : []).map(normalizeShiftBlock);
+        AppState.leaveRounds = leaveRoundsData.rounds || [];
+        DataStore.swapRequests = swapRequestsData.swapRequests || [];
 
         // Merge API settings with defaults
         const apiSettings = settingsData.settings || {};
@@ -238,6 +269,7 @@ async function loadDataFromAPI() {
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
             closedDates: apiSettings.closedDates || DataStore.settings.closedDates,
+            conceptClosedDates: apiSettings.conceptClosedDates || DataStore.settings.conceptClosedDates || [],
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
             // planningHorizon: legacy, replaced by school year logic
             schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
@@ -463,6 +495,9 @@ async function updateShift(id, updates) {
 // Herladen van specifieke data types van de server (DataStore als pure cache)
 
 async function refreshShifts({ startDate, endDate, merge = false } = {}) {
+    // Geen actieve sessie → niets ophalen. Voorkomt 401-ruis wanneer init-code
+    // (bv. setCurrentWeek) een refresh triggert vóór de gebruiker is ingelogd.
+    if (!sessionStorage.getItem('hetvlot_token')) return DataStore.shifts;
     try {
         // Auto-use active range if set and no explicit params given
         if (!startDate && !endDate && _activeShiftRange) {
@@ -528,6 +563,11 @@ async function fetchShiftBlocks() {
     }
 }
 
+async function deleteShiftBlock(blockId) {
+    await dataApiFetch(`/shift-blocks/${blockId}`, { method: 'DELETE' });
+    DataStore.shiftBlocks = DataStore.shiftBlocks.filter(b => b.id !== blockId);
+}
+
 async function refreshActivities() {
     try {
         const params = new URLSearchParams();
@@ -590,9 +630,17 @@ function getActivitiesByEmployee(userId, date) {
     );
 }
 
-async function deleteShift(id) {
+// skipBlock=true slaat het aanmaken van een shift_block over. Gebruik dat bij
+// systeemopkuis, waar het verwijderen geen bewuste keuze is om de cel leeg te
+// laten. Zonder blokkade vult een concept de dag bij een volgende toepassing
+// gewoon weer.
+//
+// #189: deze parameter werd wel meegegeven door 'Dag sluiten' maar bestond hier
+// niet, dus hij werd stilzwijgend genegeerd en er kwam alsnog een blokkade.
+async function deleteShift(id, skipBlock = false) {
     try {
-        await dataApiFetch(`/shifts/${id}`, { method: 'DELETE' });
+        const url = `/shifts/${id}` + (skipBlock ? '?skipBlock=true' : '');
+        await dataApiFetch(url, { method: 'DELETE' });
 
         await refreshShifts();
         await fetchShiftBlocks();
@@ -906,11 +954,11 @@ async function cancelSwapRequest(id) {
     }
 }
 
-async function targetApproveSwapRequest(id, responseNotes) {
+async function targetApproveSwapRequest(id, responseNotes, force = false) {
     try {
         await dataApiFetch(`/swap-requests/${id}/target-approve`, {
             method: 'PUT',
-            body: JSON.stringify({ responseNotes })
+            body: JSON.stringify({ responseNotes, ...(force ? { force: true } : {}) })
         });
 
         // Refresh swap requests + shifts (target approval executes the swap)
@@ -964,11 +1012,11 @@ async function createTakeoverRequest(shiftId, message) {
     }
 }
 
-async function acceptTakeoverRequest(id, responseNotes) {
+async function acceptTakeoverRequest(id, responseNotes, force = false) {
     try {
         await dataApiFetch(`/shift-requests/${id}/takeover-accept`, {
             method: 'PUT',
-            body: JSON.stringify({ responseNotes })
+            body: JSON.stringify({ responseNotes, ...(force ? { force: true } : {}) })
         });
         await getSwapRequests();
         return true;
@@ -992,6 +1040,7 @@ async function refreshSettings() {
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
             closedDates: apiSettings.closedDates || DataStore.settings.closedDates,
+            conceptClosedDates: apiSettings.conceptClosedDates || DataStore.settings.conceptClosedDates || [],
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
             schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
             schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern,
@@ -1377,6 +1426,10 @@ function getWeekLabel(weekNumber, forDate) {
 function isDayClosed(date) {
     const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
     if (isDateManuallyClosed(dateStr)) return true;
+    // Een vakantieconcept schrijft zijn patroon niet naar schedule_pattern —
+    // die cyclus is vakantie-relatief. Zijn gesloten dagen staan daarom als
+    // absolute datums in conceptClosedDates.
+    if (isDateClosedByDraft(dateStr)) return true;
     const d = parseDateOnly(date);
     const dayOfWeek = d.getDay();
     const weekNumber = getWeekNumber(date);
@@ -1513,9 +1566,20 @@ function isDateManuallyClosed(date) {
     return (DataStore.settings.closedDates || []).some(d => d.date === dateStr);
 }
 
+// Gesloten dagen die uit een toegepast VAKANTIEconcept komen. Ze staan apart
+// van closedDates omdat die lijst van de gebruiker is: deze horen bij hun
+// concept, worden bij elke toepassing vervangen, en verschijnen daarom niet
+// in het lijstje "manueel gesloten datums" in Instellingen.
+function isDateClosedByDraft(date) {
+    const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
+    return (DataStore.settings.conceptClosedDates || []).some(d => d.date === dateStr);
+}
+
 function getClosedDateInfo(date) {
     const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
-    return (DataStore.settings.closedDates || []).find(d => d.date === dateStr) || null;
+    return (DataStore.settings.closedDates || []).find(d => d.date === dateStr)
+        || (DataStore.settings.conceptClosedDates || []).find(d => d.date === dateStr)
+        || null;
 }
 
 async function addClosedDate(date, reason = '') {

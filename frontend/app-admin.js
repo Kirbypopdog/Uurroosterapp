@@ -7,6 +7,10 @@ function exportData() {
         users: users,
         employees: users, // Backward compatibility
         shifts: DataStore.shifts,
+        // #206: afwezigheid ontbrak volledig in de backup. Dat is precies de
+        // data die niemand achteraf uit zijn hoofd kan reconstrueren: wie
+        // wanneer ziek was of verlof had.
+        availability: DataStore.availability || [],
         settings: DataStore.settings,
         exportDate: new Date().toISOString()
     };
@@ -315,12 +319,29 @@ async function importData(event) {
                 return;
             }
 
-            if (!await showConfirm(`${usersToImport.length} medewerkers gevonden. Importeren naar de database?\n\nNieuwe medewerkers krijgen het standaard wachtwoord (DEFAULT_RESET_PASSWORD — stel in via Render).`, 'Backup importeren')) {
+            // #217: hier ging alleen `users` mee. Diensten, afwezigheid en
+            // instellingen stonden wel in het bestand maar werden nooit
+            // verstuurd, dus na een reset kwamen vakantieperiodes, gesloten
+            // dagen, roosterregels en dienstsjablonen niet terug.
+            const shiftsToImport = Array.isArray(data.shifts) ? data.shifts : [];
+            const availabilityToImport = Array.isArray(data.availability) ? data.availability : [];
+            const settingsToImport = (data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings))
+                ? data.settings : null;
+
+            const onderdelen = [`${usersToImport.length} medewerkers`];
+            if (shiftsToImport.length) onderdelen.push(`${shiftsToImport.length} diensten`);
+            if (availabilityToImport.length) onderdelen.push(`${availabilityToImport.length} afwezigheden`);
+            if (settingsToImport) onderdelen.push(`${Object.keys(settingsToImport).length} instellingen`);
+
+            if (!await showConfirm(`Gevonden in de backup:\n${onderdelen.map(o => '• ' + o).join('\n')}\n\nImporteren naar de database?\n\nNieuwe medewerkers krijgen het standaard wachtwoord (DEFAULT_RESET_PASSWORD, in te stellen via Render).`, 'Backup importeren')) {
                 return;
             }
 
             // Import via bulk API endpoint
             const importPayload = {
+                shifts: shiftsToImport,
+                availability: availabilityToImport,
+                ...(settingsToImport ? { settings: settingsToImport } : {}),
                 users: usersToImport.map(emp => ({
                     name: emp.name || 'Onbekend',
                     email: emp.email || null,

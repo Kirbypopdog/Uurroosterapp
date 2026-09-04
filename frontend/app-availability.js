@@ -1,19 +1,20 @@
 // HET VLOT ROOSTERPLANNING - AFWEZIGHEID TAB EN MODAL
 
+const ABSENCE_LABELS = {
+    'verlof': 'Verlof',
+    'ziek': 'Ziekte',
+    'overuren': 'Overuren',
+    'vorming': 'Vorming',
+    'andere': 'Andere',
+    'vrij': 'Vrij'
+};
+
 function renderAvailability() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
     const role = getEffectiveRole();
     let employees = getAllEmployees(true);
     const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
-
-    const absenceLabels = {
-        'verlof': 'Verlof',
-        'ziek': 'Ziekte',
-        'overuren': 'Overuren',
-        'vorming': 'Vorming',
-        'andere': 'Andere'
-    };
 
     // Group employees by team (same order as Timeline)
     let teamOrder = getTeamOrder();
@@ -36,14 +37,18 @@ function renderAvailability() {
     });
 
     let html = `
-        <div class="availability-controls">
-            <div class="date-navigation">
-                <button id="availability-prev-week" class="btn btn-nav">${IconHelper.html(ICONS.left, 'sm')}</button>
-                <button id="availability-today" class="btn">Vandaag</button>
-                <button id="availability-next-week" class="btn btn-nav">${IconHelper.html(ICONS.right, 'sm')}</button>
-            </div>
-            <div class="period-display">${formatDate(weekDates[0])} - ${formatDate(weekDates[6])}</div>
-            <div class="availability-actions">
+        <div class="planning-controls">
+            <div class="planning-controls-row">
+                <div class="date-navigation">
+                    <button id="availability-prev-week" class="nav-arrow-btn" aria-label="Vorige week">${IconHelper.html(ICONS.left, 'sm')}</button>
+                    <button id="availability-today" class="btn btn-secondary btn-sm">Vandaag</button>
+                    <button id="availability-next-week" class="nav-arrow-btn" aria-label="Volgende week">${IconHelper.html(ICONS.right, 'sm')}</button>
+                </div>
+                <div id="availability-period" class="period-display period-display--clickable" title="Klik om naar een datum te springen">
+                    <span>${formatDate(weekDates[0])} – ${formatDate(weekDates[6])}</span>
+                    <input type="date" id="availability-week-jump" class="week-jump-input" aria-label="Spring naar week">
+                </div>
+                <div class="controls-spacer"></div>
                 <div class="availability-legend-inline">
                     <span class="legend-chip available">Beschikbaar</span>
                     <span class="legend-chip absent">Afwezig</span>
@@ -69,12 +74,14 @@ function renderAvailability() {
     `;
 
     // Header with days
+    const todayStr = formatDateYYYYMMDD(new Date());
     weekDates.forEach((date, index) => {
         const d = parseDateOnly(date);
         const dayOfWeek = d.getDay();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
         const isClosed = isDayClosed(date);
         let dayClass = 'availability-day-col';
+        if (date === todayStr) dayClass += ' today';
         if (isClosed) dayClass += ' closed';
         else if (isWeekend) dayClass += ' weekend';
 
@@ -92,9 +99,11 @@ function renderAvailability() {
         if (teamEmployees.length === 0) return;
 
         const teamName = escapeHtml(DataStore.settings.teams[teamId]?.name || teamId);
+        const teamColor = DataStore.settings.teams[teamId]?.color || '#8d897c';
 
-        // Team header
-        html += `<div class="availability-team-header ${teamId}">
+        // Team header (rustige stijl met team-kleur-dot, consistent met planning/medewerkers)
+        html += `<div class="availability-team-header">
+            <span class="team-header-dot" style="background:${teamColor}"></span>
             <span class="team-name">${teamName}</span>
             <span class="team-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</span>
         </div>`;
@@ -102,8 +111,10 @@ function renderAvailability() {
         // Employee rows for this team
         teamEmployees.forEach(emp => {
             const isCurrentUser = emp.id === AppState.currentUser?.id;
+            const initials = escapeHtml(getInitials(emp.name || ''));
             html += `<div class="availability-employee-row${isCurrentUser ? ' current-user' : ''}">
                 <div class="availability-employee-col">
+                    <span class="emp-avatar" style="background:${teamColor}">${initials}</span>
                     <span class="emp-name">${escapeHtml(emp.name)}</span>
                 </div>
             `;
@@ -137,7 +148,7 @@ function renderAvailability() {
                     // Afwezigheid heeft prioriteit
                     if (absence && absence.type) {
                         statusClass = 'absent';
-                        statusText = absenceLabels[absence.type] || 'Afwezig';
+                        statusText = ABSENCE_LABELS[absence.type] || 'Afwezig';
                         tooltipText = absence.reason ? `${statusText}: ${absence.reason}` : statusText;
 
                         // Check voor conflict met dienst
@@ -188,13 +199,39 @@ function renderAvailability() {
     // Add event listeners for navigation
     document.getElementById('availability-prev-week').addEventListener('click', () => {
         AppState.currentWeekStart.setDate(AppState.currentWeekStart.getDate() - 7);
+        updateShiftRefreshRange();
         renderAvailability();
     });
 
     document.getElementById('availability-next-week').addEventListener('click', () => {
         AppState.currentWeekStart.setDate(AppState.currentWeekStart.getDate() + 7);
+        updateShiftRefreshRange();
         renderAvailability();
     });
+
+    // Springen naar een datum, net als in de planning: daar kon je op de
+    // periode klikken om een kalender te openen, hier niet.
+    const availJump = document.getElementById('availability-week-jump');
+    const availPeriod = document.getElementById('availability-period');
+    if (availJump && availPeriod) {
+        availPeriod.addEventListener('click', () => {
+            if (AppState.currentWeekStart) availJump.value = formatDateYYYYMMDD(AppState.currentWeekStart);
+            if (availJump.showPicker) availJump.showPicker(); else availJump.click();
+        });
+        availJump.addEventListener('change', e => {
+            const [y, m, d] = e.target.value.split('-').map(Number);
+            if (!y || !m || !d) return;
+            const gekozen = new Date(y, m - 1, d);
+            if (isNaN(gekozen.getTime())) return;
+            AppState.currentWeekStart = getMonday(gekozen);
+            // Op mobiel toont deze tab één dag: die mee laten springen,
+            // anders land je op de maandag van een week die je niet koos.
+            const dow = gekozen.getDay();
+            AppState.availabilityMobileDayIndex = dow === 0 ? 6 : dow - 1;
+            updateShiftRefreshRange();
+            renderAvailability();
+        });
+    }
 
     document.getElementById('availability-today').addEventListener('click', () => {
         AppState.currentWeekStart = getMonday(new Date());
@@ -202,6 +239,7 @@ function renderAvailability() {
         const today = new Date();
         const dayOfWeek = today.getDay();
         AppState.availabilityMobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        updateShiftRefreshRange();
         renderAvailability();
     });
 
@@ -322,7 +360,7 @@ function updateAbsenceDateInfo() {
                 if (conflictDates.length > 0) {
                     conflictDiv.innerHTML = `<div class="absence-conflict-alert">
                         ${IconHelper.html('alert-triangle', 'sm')}
-                        <span>${conflictDates.length} shift${conflictDates.length !== 1 ? 's' : ''} ingepland op deze dag${conflictDates.length !== 1 ? 'en' : ''} — ${conflictDates.map(d => formatDate(d)).join(', ')}</span>
+                        <span>${conflictDates.length} shift${conflictDates.length !== 1 ? 's' : ''} ingepland op deze dag${conflictDates.length !== 1 ? 'en' : ''}: ${conflictDates.map(d => formatDate(d)).join(', ')}</span>
                     </div>`;
                     IconHelper.init(conflictDiv);
 
@@ -430,7 +468,16 @@ function openAvailabilityModal(employeeId = null, date = null) {
     } else {
         // Opening fresh (e.g., from button)
         modalTitle.textContent = 'Afwezigheid registreren';
-        employeeSelect.value = '';
+        // #205: hier stond onvoorwaardelijk `employeeSelect.value = ''`, wat de
+        // voorselectie wiste die populateAbsenceEmployeeDropdown net had gezet.
+        // Voor een medewerker bleef het veld op disabled staan zonder waarde,
+        // dus opslaan gaf "Selecteer een medewerker" en er was geen weg uit het
+        // venster. De knop "+ Afwezigheid" werkte daarmee niet voor de grootste
+        // gebruikersgroep.
+        //
+        // Wie maar één persoon mag kiezen houdt zijn voorselectie. Wie er
+        // meerdere mag kiezen begint met een leeg veld, zoals voorheen.
+        if (!employeeSelect.disabled) employeeSelect.value = '';
         startDateInput.value = '';
         endDateInput.value = '';
         absenceTypeSelect.value = '';
@@ -481,6 +528,7 @@ async function handleAvailabilitySave() {
     try {
         // Check for conflicts first
         let conflictDates = [];
+        const alleDatums = [];
         // Use string dates to avoid timezone conversion issues
         const startParts = startDate.split('-').map(Number);
         const endParts = endDate.split('-').map(Number);
@@ -494,11 +542,40 @@ async function handleAvailabilitySave() {
             const day = String(checkDate.getDate()).padStart(2, '0');
             const dateStr = `${year}-${month}-${day}`;
 
+            alleDatums.push(dateStr);
+
             const shifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
             if (shifts.length > 0) {
                 conflictDates.push(dateStr);
             }
             checkDate.setDate(checkDate.getDate() + 1);
+        }
+
+        // #203: een bestaande afwezigheid werd stil overschreven. Wie op een dag
+        // 'vrij' stond met reden 'Vaste vrije dag' werd zonder enige melding
+        // 'ziek', en de oude waarde was daarna nergens meer terug te vinden.
+        // Eén registratie per persoon per dag blijft de regel, maar je hoort te
+        // weten dat je iets vervangt. De backend houdt het nu ook bij in de
+        // audit log.
+        const teVervangen = alleDatums
+            .map(dateStr => ({ dateStr, bestaand: getAvailability(employeeId, dateStr) }))
+            .filter(({ bestaand }) => bestaand && bestaand.type && bestaand.type !== absenceType);
+
+        if (teVervangen.length > 0) {
+            const naam = getEmployee(employeeId)?.name || 'Deze medewerker';
+            const nieuwLabel = ABSENCE_LABELS[absenceType] || 'afwezigheid';
+            const regels = teVervangen.slice(0, 5).map(({ dateStr, bestaand }) => {
+                const label = ABSENCE_LABELS[bestaand.type] || bestaand.type;
+                return `${formatDateShort(parseDateOnly(dateStr))}: ${label}${bestaand.reason ? ` (${bestaand.reason})` : ''}`;
+            });
+            if (teVervangen.length > 5) regels.push(`en nog ${teVervangen.length - 5} dag(en)`);
+
+            const bevestigd = await showConfirm(
+                `${naam} staat al genoteerd op ${teVervangen.length} dag${teVervangen.length !== 1 ? 'en' : ''}:\n\n` +
+                regels.join('\n') +
+                `\n\nVervangen door ${nieuwLabel}? De oude registratie gaat verloren.`
+            );
+            if (!bevestigd) return;
         }
 
         // Read takeover preference from inline checkbox (no confirm dialogs needed)
@@ -522,11 +599,11 @@ async function handleAvailabilitySave() {
         const employee = getEmployee(employeeId);
         const employeeName = employee?.name || 'de medewerker';
         const daysSet = result.availability?.length || 0;
-        const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid' }[absenceType] || 'Afwezigheid';
+        const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid', 'vrij': 'Vrij' }[absenceType] || 'Afwezigheid';
 
         let msg = `${typeName} geregistreerd voor ${employeeName} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
         if (result.takeoverRequests > 0) {
-            msg += ` — ${result.takeoverRequests} shift${result.takeoverRequests !== 1 ? 's' : ''} aangeboden voor overname`;
+            msg += `, ${result.takeoverRequests} shift${result.takeoverRequests !== 1 ? 's' : ''} aangeboden voor overname`;
         }
         showToast(msg, 'success');
 

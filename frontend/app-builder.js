@@ -27,9 +27,7 @@ function renderBuilderEditor(container) {
         </button>
         <span class="builder-editor-title">
             ${AppState.builderLoadedDraftName ? escapeHtml(AppState.builderLoadedDraftName) : 'Nieuw concept'}
-            ${AppState.builderIsDirty ? ' <span class="builder-dirty-badge">(gewijzigd)</span>' : ''}
         </span>
-        <span id="builder-autosave-status" class="builder-autosave-status">${AppState.builderAutoSavedAt ? `Automatisch opgeslagen om ${AppState.builderAutoSavedAt}` : ''}</span>
     </div>`;
 
     html += renderBuilderControls(role, userTeam);
@@ -201,10 +199,17 @@ function renderConceptCard(draft, newestActiveId) {
     if (isAdmin) menuItems += `<button class="concept-menu-item concept-card-download" data-draft-id="${dId}">${IconHelper.html('download', 'xs')} Download</button>`;
     menuItems += `<hr><button class="concept-menu-item danger concept-card-delete" data-draft-id="${dId}">${IconHelper.html(ICONS.delete, 'xs')} Verwijderen</button>`;
 
+    const teamDotColor = draft.teamFilter
+        ? (DataStore.settings.teams?.[draft.teamFilter]?.color || '#8d897c')
+        : 'var(--ink-3)';
+
     return `
         <div class="builder-concept-card draft-status-${statusCls}" data-draft-id="${escapeHtml(draft.id)}">
             <div class="concept-card-header">
-                <span class="concept-card-name">${escapeHtml(draft.name)}</span>
+                <span class="concept-card-name-row">
+                    <span class="concept-card-dot" style="background:${teamDotColor}" title="${escapeHtml(teamLabel)}"></span>
+                    <span class="concept-card-name">${escapeHtml(draft.name)}</span>
+                </span>
                 <div class="concept-card-menu">
                     <button class="concept-card-menu-trigger" data-draft-id="${dId}">
                         <i data-lucide="more-vertical" class="lucide-sm"></i>
@@ -331,14 +336,20 @@ function toggleBuilderClosedDay(jsDow) {
 function renderBuilderControls(role, userTeam) {
     const wn = AppState.builderWeekNumber;
 
-    // Team filter - dropdown for all roles that can access builder
+    // De teamkeuze zat in een keuzemenu; teams zijn nu inklapbare groepen in
+    // het raster zelf, net als in de planning. Je ziet dus alle teams staan en
+    // klapt weg wat je even niet nodig hebt.
+    //
+    // Oudere concepten kunnen nog een teamfilter dragen. Die beperkt óók welke
+    // medewerkers bij het toepassen een shift krijgen, dus we laten hem staan —
+    // maar zonder keuzemenu zou je eraan vastzitten. Vandaar dit chipje.
     const teams = DataStore.settings.teams || {};
-    const teamFilterHtml = `<select id="builder-team-select" class="form-input w-auto">
-        <option value="">Alle teams</option>
-        ${Object.entries(teams).map(([key, t]) =>
-            `<option value="${key}" ${AppState.builderTeamFilter === key ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
-        ).join('')}
-    </select>`;
+    const teamFilterHtml = AppState.builderTeamFilter ? `
+        <div class="builder-team-locked">
+            ${IconHelper.html('filter', 'xs')}
+            Enkel ${escapeHtml(teams[AppState.builderTeamFilter]?.name || AppState.builderTeamFilter)}
+            <button type="button" id="builder-clear-team-filter" title="Alle teams tonen">${IconHelper.html(ICONS.close, 'xs')}</button>
+        </div>` : '';
 
     return `
         <div class="builder-controls">
@@ -375,16 +386,23 @@ function renderBuilderControls(role, userTeam) {
                         return btns;
                     })()}
                 </div>
-                <div class="builder-team-filter">
-                    ${teamFilterHtml}
-                </div>
             </div>
             <div class="builder-controls-row">
+                ${teamFilterHtml}
                 <div class="builder-load-options">
                     <button class="btn btn-secondary btn-sm" id="builder-load-base">Huidig basisrooster laden</button>
                     <button class="btn btn-secondary btn-sm" id="builder-load-blank">Leeg beginnen</button>
                     ${getBuilderCycleLength() > 1 ? `<button class="btn btn-secondary btn-sm" id="builder-copy-week"><i data-lucide="copy" class="lucide-xs"></i> Kopieer week</button>` : ''}
-                    ${AppState.builderConceptType === 'vakantie' ? `<button class="btn btn-sm ${AppState.builderHideOnLeave ? 'btn-primary' : 'btn-secondary'} builder-hide-leave-toggle" id="builder-hide-leave-toggle"><i data-lucide="${AppState.builderHideOnLeave ? 'eye-off' : 'eye'}" class="lucide-xs"></i> ${AppState.builderHideOnLeave ? 'Verlof verborgen' : 'Verberg verlof'}</button>` : ''}
+                    ${AppState.builderConceptType === 'vakantie' ? (() => {
+                        // Het verlof staat sinds kort gewoon in het raster; deze knop
+                        // kort enkel de lijst in tot wie die week beschikbaar is.
+                        const metVerlof = (AppState.builderTeamFilter ? getEmployeesByTeam(AppState.builderTeamFilter) : getAllEmployees(true))
+                            .filter(e => getBuilderLeaveDays(e.id, AppState.builderWeekNumber).length > 0).length;
+                        return `<button class="btn btn-sm ${AppState.builderHideOnLeave ? 'btn-primary' : 'btn-secondary'} builder-hide-leave-toggle" id="builder-hide-leave-toggle"
+                            title="Verbergt wie deze week verlof heeft">
+                            <i data-lucide="${AppState.builderHideOnLeave ? 'eye-off' : 'users'}" class="lucide-xs"></i>
+                            Alleen beschikbaren${metVerlof ? ` (${metVerlof} met verlof)` : ''}</button>`;
+                    })() : ''}
                 </div>
                 ${AppState.builderLoadedDraftName ? `
                     <div class="builder-loaded-draft">
@@ -514,20 +532,32 @@ function renderBuilderGrid(role, userTeam) {
         if (teamEmployees.length === 0) return;
 
         const teamName = teams[teamKey]?.name || teamKey;
-        html += `<div class="builder-team-section team-${teamKey}">
+        const dicht = AppState.collapsedTeams.has(teamKey);
+        html += `<div class="builder-team-section team-${teamKey}${dicht ? ' collapsed' : ''}" data-builder-team="${teamKey}" role="button" tabindex="0"
+                      aria-expanded="${!dicht}" title="Klik om in of uit te klappen">
             <span>${escapeHtml(teamName)} (${teamEmployees.length})</span>
+            <span class="builder-team-toggle">${IconHelper.html('chevron-up', 'sm')}</span>
         </div>`;
 
+        html += `<div class="builder-team-body${dicht ? ' collapsed' : ''}" data-builder-team-body="${teamKey}">`;
         teamEmployees.forEach(emp => {
             html += renderBuilderEmployeeRow(emp);
         });
+        html += '</div>';
     });
 
     const knownTeams = new Set(teamOrder);
     const otherEmployees = employees.filter(e => !knownTeams.has(e.mainTeam));
     if (otherEmployees.length > 0) {
-        html += `<div class="builder-team-section"><span>Overig (${otherEmployees.length})</span></div>`;
+        const overigDicht = AppState.collapsedTeams.has('_builder_overig');
+        html += `<div class="builder-team-section${overigDicht ? ' collapsed' : ''}" data-builder-team="_builder_overig" role="button" tabindex="0"
+                      aria-expanded="${!overigDicht}" title="Klik om in of uit te klappen">
+            <span>Overig (${otherEmployees.length})</span>
+            <span class="builder-team-toggle">${IconHelper.html('chevron-up', 'sm')}</span>
+        </div>`;
+        html += `<div class="builder-team-body${overigDicht ? ' collapsed' : ''}" data-builder-team-body="_builder_overig">`;
         otherEmployees.forEach(emp => { html += renderBuilderEmployeeRow(emp); });
+        html += '</div>';
     }
 
     html += '</div>';
@@ -574,6 +604,22 @@ function isInMeeting(userId, hour, dayIndex) {
     return false;
 }
 
+// Verlof is alleen te kennen in een vakantieconcept: daar hangen de weken aan
+// echte datums. Een basisrooster is een herhalende cyclus zonder kalender.
+function getBuilderLeaveDays(employeeId, weekNumber) {
+    if (AppState.builderConceptType !== 'vakantie') return [];
+    const weekStart = getBuilderVakantieWeekStart(weekNumber);
+    if (!weekStart) return [];
+    const dagen = [];
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() + i);
+        const avail = getAvailability(employeeId, formatDateYYYYMMDD(d));
+        if (avail && avail.type === 'verlof') dagen.push(i);   // 0 = maandag
+    }
+    return dagen;
+}
+
 function renderBuilderEmployeeRow(employee) {
     const empGrid = AppState.builderGrid[employee.id] || {};
     let totalHours = 0;
@@ -581,9 +627,17 @@ function renderBuilderEmployeeRow(employee) {
 
     let html = `<div class="builder-row" data-employee-id="${employee.id}">`;
 
+    const _empColor = DataStore.settings.teams?.[employee.mainTeam]?.color || '#8d897c';
+    const _empInitials = escapeHtml(getInitials(employee.name || ''));
+    const verlofDagen = getBuilderLeaveDays(employee.id, AppState.builderWeekNumber);
     html += `<div class="builder-name-cell">
-        <span class="emp-name">${escapeHtml(employee.name)}</span>
-        <span class="emp-contract">${contractHours}u/week</span>
+        <span class="emp-avatar" style="background:${_empColor}">${_empInitials}</span>
+        <div class="builder-name-cell-text">
+            <span class="emp-name">${escapeHtml(employee.name)}</span>
+            <span class="emp-contract">${contractHours}u/week${verlofDagen.length
+                ? ` · <span class="emp-verlof">${verlofDagen.length === 7 ? 'hele week verlof' : verlofDagen.length + ' ' + (verlofDagen.length === 1 ? 'dag' : 'dagen') + ' verlof'}</span>`
+                : ''}</span>
+        </div>
     </div>`;
 
     // Gesloten dagen voor huidige builder week
@@ -604,6 +658,11 @@ function renderBuilderEmployeeRow(employee) {
         const assignment = empGrid[dayIndex];
 
         let cellClass = 'builder-cell';
+        // Verlof verbergt de medewerker niet meer, het staat gewoon in het
+        // raster. Inplannen kan nog: soms komt iemand toch, of is het verlof
+        // nog niet definitief — vandaar een markering en geen slot.
+        const heeftVerlof = verlofDagen.includes(dayIndex);
+        if (heeftVerlof) cellClass += ' has-leave';
 
         // Check 11-hour rule against adjacent days
         let hasError = false;
@@ -624,7 +683,8 @@ function renderBuilderEmployeeRow(employee) {
         }
         if (hasError) cellClass += ' has-error';
 
-        html += `<div class="${cellClass}" data-employee-id="${employee.id}" data-day="${dayIndex}">`;
+        html += `<div class="${cellClass}" data-employee-id="${employee.id}" data-day="${dayIndex}"${heeftVerlof ? ' data-verlof="1"' : ''}>`;
+        if (heeftVerlof && !assignment) html += '<span class="cell-verlof">verlof</span>';
 
         // Toon staart van nachtdienst van vorige week's zondag in maandag-cel
         if (dayIndex === 0) {
@@ -671,7 +731,8 @@ function renderBuilderEmployeeRow(employee) {
                 <span class="btb-time">${assignment.startTime}-${assignment.endTime}</span>
             </div>`;
 
-        } else {
+        } else if (!heeftVerlof) {
+            // Op een verlofdag staat al "verlof"; een plusje ernaast leest raar.
             html += '<span class="cell-empty">+</span>';
         }
 
@@ -811,7 +872,7 @@ function renderBuilderStaffingHeatmap() {
             const widthPct = (0.5 / 17) * 100;
             const timeLabel = formatStaffingHour(h);
             html += `<span class="${segClass}" style="left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%"
-                data-tooltip="${timeLabel} — ${actual}${required >= 0 ? '/' + required : ''} mdw${required >= 0 ? ' (min ' + required + ')' : ''}" data-tooltip-pos="top"></span>`;
+                data-tooltip="${timeLabel} · ${actual}${required >= 0 ? '/' + required : ''} mdw${required >= 0 ? ' (min ' + required + ')' : ''}" data-tooltip-pos="top"></span>`;
         }
 
         html += '</div>';
@@ -839,18 +900,20 @@ function getStaffingRequirement(dayIndex, hour) {
 
 // Convert old per-hour format to new range-based format
 function renderBuilderActions() {
-    const hasData = Object.keys(AppState.builderGrid).length > 0 &&
-        Object.values(AppState.builderGrid).some(d => Object.keys(d).length > 0);
+    // Zelfde maatstaf als het opslaan zelf: ook gesloten dagen, bezettingsregels
+    // en vergaderingen maken een concept de moeite waard. En over álle weken,
+    // niet enkel de week die je toevallig open hebt staan.
+    const hasData = builderHeeftIets();
 
-    const saveLabel = AppState.builderLoadedDraftId ? 'Opslaan' : 'Concept opslaan';
-    const showSaveAs = !!AppState.builderLoadedDraftId;
-
+    // Geen "Opslaan" meer: de autosave doet dat en de statusregel in de topbar
+    // zegt hoe het ervoor staat. "Opslaan als..." blijft wél — die maakt een
+    // kopie onder een nieuwe naam, en dat kan de autosave niet.
+    // De status hoort bij het opslaan, dus staat hij naast de knop die daarover
+    // gaat — niet los bovenaan waar hij makkelijk over het hoofd wordt gezien.
     return `
         <div class="builder-actions">
-            <button class="btn btn-primary" id="builder-save-draft" ${!hasData ? 'disabled' : ''}>
-                ${saveLabel}
-            </button>
-            ${showSaveAs ? `<button class="btn btn-secondary" id="builder-save-draft-as" ${!hasData ? 'disabled' : ''}>Opslaan als...</button>` : ''}
+            ${renderBuilderSaveStatus()}
+            <button class="btn btn-secondary" id="builder-save-draft-as" ${!hasData ? 'disabled' : ''}>Opslaan als...</button>
         </div>
     `;
 }
@@ -1020,6 +1083,11 @@ function renderBuilderDrafts() {
 // --- Builder: Cell Editing ---
 
 function openBuilderShiftModal(employeeId, dayIndex) {
+    // Inplannen op een verlofdag mag, maar niet ongemerkt.
+    if (getBuilderLeaveDays(employeeId, AppState.builderWeekNumber).includes(dayIndex)) {
+        const naam = getEmployee(employeeId)?.name || 'Deze medewerker';
+        showToast(`${naam} heeft die dag verlof.\nJe kan hem toch inplannen.`, 'warning');
+    }
     const employee = getEmployee(employeeId);
     if (!employee) return;
 
@@ -1201,11 +1269,12 @@ function loadBuilderFromBaseSchedules() {
     });
 
     AppState.builderGridByWeek[weekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
-    AppState.builderLoadedDraftId = null;
-    AppState.builderLoadedDraftName = null;
-    AppState.builderPattern = null;
-    AppState.builderConceptType = 'basis';
-    AppState.builderHolidayPeriodId = null;
+    // Geen reset van builderLoadedDraftId/-Name/-Pattern/-ConceptType/-HolidayPeriodId hier:
+    // zodra je in de editor bent (nieuw of bestaand concept) is er altijd al een opgeslagen
+    // concept-ID (nieuwe concepten worden meteen leeg aangemaakt in app-builder-drafts.js).
+    // Deze velden resetten koppelt het concept los, waardoor "Opslaan" verandert in
+    // "Concept opslaan" (dupliceert i.p.v. bij te werken) en een vakantieconcept stilletjes
+    // terug type 'basis' wordt.
     setBuilderDirty();
     renderBuilder();
     showToast(`Basisrooster week ${weekNumber} geladen`, 'success');
@@ -1213,8 +1282,51 @@ function loadBuilderFromBaseSchedules() {
 
 // --- Builder: Auto-save ---
 
+// Er is geen opslaanknop meer: deze regel is het enige wat vertelt of je werk
+// veilig is. Eén functie voor zowel de render als de losse bijwerking, anders
+// lopen die twee uiteen — en dan liegt het scherm.
+function renderBuilderSaveStatus() {
+    const state = AppState.builderSaveState
+        || (AppState.builderIsDirty ? 'bezig' : (AppState.builderAutoSavedAt ? 'bewaard' : ''));
+
+    if (state === 'mislukt') {
+        return `<button type="button" id="builder-autosave-status" class="builder-autosave-status is-mislukt">
+            ${IconHelper.html('triangle-alert', 'xs')} Niet bewaard. Opnieuw proberen
+        </button>`;
+    }
+    if (state === 'bezig' || AppState.builderIsDirty) {
+        return `<span id="builder-autosave-status" class="builder-autosave-status is-bezig">
+            <span class="builder-save-dot"></span> Bewaren…
+        </span>`;
+    }
+    if (state === 'bewaard') {
+        const tijd = AppState.builderAutoSavedAt ? ` om ${AppState.builderAutoSavedAt}` : '';
+        return `<span id="builder-autosave-status" class="builder-autosave-status is-bewaard">
+            ${IconHelper.html('check', 'xs')} Bewaard${tijd}
+        </span>`;
+    }
+    return `<span id="builder-autosave-status" class="builder-autosave-status"></span>`;
+}
+
+// Alleen dit ene element vervangen: een volledige re-render zou tijdens het
+// bewerken je scrollpositie en focus stelen.
+function updateBuilderSaveStatus(state) {
+    if (state) AppState.builderSaveState = state;
+    const el = document.getElementById('builder-autosave-status');
+    if (!el) return;
+    const tijdelijk = document.createElement('div');
+    tijdelijk.innerHTML = renderBuilderSaveStatus();
+    const nieuw = tijdelijk.firstElementChild;
+    el.replaceWith(nieuw);
+    IconHelper.init(nieuw.parentElement || document.body);
+    if (nieuw.tagName === 'BUTTON') {
+        nieuw.addEventListener('click', () => autoSaveBuilderDraft());
+    }
+}
+
 function setBuilderDirty() {
     AppState.builderIsDirty = true;
+    updateBuilderSaveStatus('bezig');
     scheduleBuilderAutoSave();
 }
 
@@ -1237,7 +1349,7 @@ function stopBuilderAutoSave() {
 
 async function autoSaveBuilderDraft() {
     AppState.builderAutoSaveTimer = null;
-    if (!AppState.builderIsDirty || !AppState.builderLoadedDraftId) return;
+    if (!AppState.builderIsDirty || !AppState.builderLoadedDraftId) return true;
 
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
     const multiGrid = { _multiWeek: true };
@@ -1261,6 +1373,7 @@ async function autoSaveBuilderDraft() {
     }
     updateData.grid._teamMeetings = AppState.builderMeetings || {};
 
+    updateBuilderSaveStatus('bezig');
     try {
         await updateScheduleDraft(AppState.builderLoadedDraftId, updateData);
         const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
@@ -1272,10 +1385,18 @@ async function autoSaveBuilderDraft() {
         AppState.builderIsDirty = false;
         const now = new Date();
         AppState.builderAutoSavedAt = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        const statusEl = document.getElementById('builder-autosave-status');
-        if (statusEl) statusEl.textContent = `Automatisch opgeslagen om ${AppState.builderAutoSavedAt}`;
+        updateBuilderSaveStatus('bewaard');
+        return true;
     } catch (err) {
+        // Dit was vroeger stil: enkel een console.error, terwijl je werk niet
+        // bewaard was. Nu er geen opslaanknop meer is, moet dit zichtbaar zijn
+        // én zelf opnieuw proberen.
         console.error('Auto-save failed:', err);
+        AppState.builderIsDirty = true;
+        updateBuilderSaveStatus('mislukt');
+        if (AppState.builderAutoSaveTimer) clearTimeout(AppState.builderAutoSaveTimer);
+        AppState.builderAutoSaveTimer = setTimeout(() => autoSaveBuilderDraft(), 10000);
+        return false;
     }
 }
 
@@ -1371,10 +1492,22 @@ function attachBuilderEventListeners(container) {
     const backBtn = document.getElementById('builder-back-to-overview');
     if (backBtn) {
         backBtn.addEventListener('click', async () => {
+            // Weggaan bewaart. De autosave draait pas na 3 seconden, dus wie
+            // snel doorklikt verloor anders zijn laatste wijziging — en een
+            // vraag "wil je weggooien?" is geen goede plek om dat op te lossen.
             if (AppState.builderIsDirty) {
-                const ok = await showConfirm('Je hebt onopgeslagen wijzigingen. Wil je terug zonder op te slaan?');
-                if (!ok) return;
                 stopBuilderAutoSave();
+                if (AppState.builderLoadedDraftId) {
+                    // Lukt het bewaren niet, dan blijf je hier met de melding
+                    // in beeld. Weggaan zou je werk stil kosten.
+                    const ok = await autoSaveBuilderDraft();
+                    if (!ok) return;
+                } else if (builderHeeftIets()) {
+                    // Nog nooit bewaard: dan is er geen id om stil in te
+                    // schrijven, dus vragen we alsnog om een naam.
+                    await saveBuilderDraft();
+                    if (AppState.builderIsDirty) return;   // geannuleerd
+                }
             }
             await unlockScheduleDraft(AppState.builderLoadedDraftId);
             AppState.builderLoadedDraftId = null;
@@ -1556,19 +1689,30 @@ function attachBuilderEventListeners(container) {
         });
     });
 
-    // Team filter
-    const teamSelect = document.getElementById('builder-team-select');
-    if (teamSelect) {
-        teamSelect.addEventListener('change', (e) => {
-            AppState.builderTeamFilter = e.target.value || null;
-            AppState.builderGrid = {};
-            AppState.builderGridByWeek = {};
-            AppState.builderStaffingRules = {};
-            AppState.builderStaffingRulesByWeek = {};
-            AppState.builderIsDirty = false;
-            renderBuilder();
+    document.getElementById('builder-clear-team-filter')?.addEventListener('click', () => {
+        AppState.builderTeamFilter = null;
+        setBuilderDirty();
+        renderBuilder();
+    });
+
+    // Teamgroepen in- en uitklappen, net als in de planning. Alleen de weergave
+    // verandert; het rooster zelf blijft ongemoeid — vandaar geen renderBuilder,
+    // dat zou je scrollpositie kosten.
+    container.querySelectorAll('[data-builder-team]').forEach(kop => {
+        const wissel = () => {
+            const teamKey = kop.dataset.builderTeam;
+            const body = container.querySelector(`[data-builder-team-body="${CSS.escape(teamKey)}"]`);
+            const dicht = kop.classList.toggle('collapsed');
+            body?.classList.toggle('collapsed', dicht);
+            kop.setAttribute('aria-expanded', String(!dicht));
+            if (dicht) AppState.collapsedTeams.add(teamKey);
+            else AppState.collapsedTeams.delete(teamKey);
+        };
+        kop.addEventListener('click', wissel);
+        kop.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); wissel(); }
         });
-    }
+    });
 
     // Load buttons
     const loadBase = document.getElementById('builder-load-base');
@@ -1621,11 +1765,13 @@ function attachBuilderEventListeners(container) {
         BuilderDragHandler.init();
     }
 
-    // Save draft button
-    const saveDraftBtn = document.getElementById('builder-save-draft');
-    if (saveDraftBtn) saveDraftBtn.addEventListener('click', saveBuilderDraft);
+    // Statusregel is bij een mislukte opslag een knop: opnieuw proberen
+    const statusBtn = document.getElementById('builder-autosave-status');
+    if (statusBtn && statusBtn.tagName === 'BUTTON') {
+        statusBtn.addEventListener('click', () => autoSaveBuilderDraft());
+    }
 
-    // Save As button (only visible when a draft is loaded)
+    // Save As button
     const saveDraftAsBtn = document.getElementById('builder-save-draft-as');
     if (saveDraftAsBtn) saveDraftAsBtn.addEventListener('click', saveBuilderDraftAs);
 

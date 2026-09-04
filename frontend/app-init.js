@@ -7,7 +7,7 @@ function initDOM() {
     DOM.loginForm = document.getElementById('login-form');
     DOM.usernameInput = document.getElementById('username');
     DOM.passwordInput = document.getElementById('password');
-    DOM.navButtons = document.querySelectorAll('.nav-center .nav-btn');
+    DOM.navButtons = document.querySelectorAll('#nav-menu .nav-btn');
     DOM.logoutBtn = document.getElementById('logout-btn');
     DOM.homeView = document.getElementById('home-view');
     DOM.planningView = document.getElementById('planning-view');
@@ -17,12 +17,14 @@ function initDOM() {
     DOM.availabilityView = document.getElementById('availability-view');
     DOM.builderView = document.getElementById('builder-view');
     DOM.swapsView = document.getElementById('swaps-view');
+    DOM.leaveView = document.getElementById('leave-view');
     DOM.settingsView = document.getElementById('settings-view');
-    DOM.addShiftBtn = document.getElementById('add-shift-btn');
+    DOM.addShiftBtn = null; // button removed from UI
     DOM.prevWeekBtn = document.getElementById('prev-week');
     DOM.nextWeekBtn = document.getElementById('next-week');
     DOM.todayBtn = document.getElementById('today-btn');
     DOM.currentPeriod = document.getElementById('current-period-text');
+    DOM.currentWeekLabel = document.getElementById('current-week-label');
     DOM.viewToggleBtns = document.querySelectorAll('.view-toggle-btn');
     DOM.rosterCalendar = document.getElementById('roster-calendar');
     DOM.validationAlerts = document.getElementById('validation-alerts');
@@ -117,13 +119,64 @@ function setupEventListeners() {
         });
     }
 
-    // Mobile menu toggle
+    // Mobile menu toggle — schuift de sidebar in/uit met backdrop
     const mobileMenuBtn = document.getElementById('mobile-menu-btn');
     const navMenu = document.getElementById('nav-menu');
+    const sidebarScrim = document.getElementById('sidebar-scrim');
+    const closeSidebar = () => {
+        mobileMenuBtn?.classList.remove('active');
+        navMenu?.classList.remove('open');
+        document.body.classList.remove('nav-open');
+    };
     if (mobileMenuBtn && navMenu) {
         mobileMenuBtn.addEventListener('click', () => {
             mobileMenuBtn.classList.toggle('active');
             navMenu.classList.toggle('open');
+            document.body.classList.toggle('nav-open');
+        });
+    }
+    if (sidebarScrim) {
+        sidebarScrim.addEventListener('click', closeSidebar);
+    }
+
+    // Desktop sidebar collapse
+    const collapseBtn = document.getElementById('sidebar-collapse-btn');
+    if (collapseBtn) {
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            document.body.classList.add('nav-collapsed');
+        }
+        collapseBtn.addEventListener('click', () => {
+            const collapsed = document.body.classList.toggle('nav-collapsed');
+            localStorage.setItem('sidebarCollapsed', collapsed);
+            const icon = collapseBtn.querySelector('[data-lucide]');
+            if (icon) {
+                icon.setAttribute('data-lucide', collapsed ? 'panel-left-open' : 'panel-left-close');
+                IconHelper.init(collapseBtn);
+            }
+        });
+        // Sync icon on load if already collapsed
+        if (document.body.classList.contains('nav-collapsed')) {
+            const icon = collapseBtn.querySelector('[data-lucide]');
+            if (icon) icon.setAttribute('data-lucide', 'panel-left-open');
+        }
+    }
+
+    // Dark mode toggle
+    const darkBtn = document.getElementById('dark-mode-btn');
+    if (darkBtn) {
+        if (localStorage.getItem('darkMode') === 'true') {
+            document.body.classList.add('dark-mode');
+            const icon = darkBtn.querySelector('[data-lucide]');
+            if (icon) icon.setAttribute('data-lucide', 'sun');
+        }
+        darkBtn.addEventListener('click', () => {
+            const isDark = document.body.classList.toggle('dark-mode');
+            localStorage.setItem('darkMode', isDark);
+            const icon = darkBtn.querySelector('[data-lucide]');
+            if (icon) {
+                icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+                IconHelper.init(darkBtn);
+            }
         });
     }
 
@@ -136,14 +189,25 @@ function setupEventListeners() {
     DOM.navButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             // Close mobile menu on navigation
-            if (mobileMenuBtn && navMenu) {
-                mobileMenuBtn.classList.remove('active');
-                navMenu.classList.remove('open');
-            }
+            closeSidebar();
             switchView(btn.dataset.view);
         });
     });
-    DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
+    // Collapsible team cards — delegate from stable roster container
+    DOM.rosterCalendar.addEventListener('click', (e) => {
+        const head = e.target.closest('.tcard-head');
+        if (!head) return;
+        const card = head.closest('.tcard');
+        if (!card) return;
+        const teamKey = card.dataset.tcardTeam;
+        if (card.classList.toggle('collapsed')) {
+            AppState.collapsedTeams.add(teamKey);
+        } else {
+            AppState.collapsedTeams.delete(teamKey);
+        }
+    });
+
+    if (DOM.addShiftBtn) DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
     DOM.prevWeekBtn.addEventListener('click', () => {
         if (AppState.viewMode === 'month') {
             changeMonth(-1);
@@ -232,6 +296,9 @@ function setupEventListeners() {
     // Team toggle buttons for employees view — attached dynamically via renderEmployeeTeamToggles()
 
     DOM.addEmployeeBtn.addEventListener('click', openAddEmployeeModal);
+    // Melding "dag handmatig leeggemaakt" bijwerken zodra medewerker of datum wijzigt
+    DOM.shiftEmployee?.addEventListener('change', () => { if (typeof updateShiftBlockNotice === 'function') updateShiftBlockNotice(); });
+    DOM.shiftDate?.addEventListener('change', () => { if (typeof updateShiftBlockNotice === 'function') updateShiftBlockNotice(); });
     DOM.shiftForm.addEventListener('submit', handleShiftSubmit);
     DOM.shiftForm.addEventListener('input', () => {
         if (AppState._shiftForceOverride) {
@@ -258,17 +325,19 @@ function setupEventListeners() {
         btn.addEventListener('click', closeEmployeeModal);
     });
     DOM.warningDetailsClose.addEventListener('click', closeWarningDetailsModal);
-    DOM.warningDetailsModal.addEventListener('click', (e) => {
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert en
+    // de muis buiten het kader loslaat (click-target wordt dan de backdrop).
+    DOM.warningDetailsModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.warningDetailsModal) closeWarningDetailsModal();
     });
     DOM.errorDetailsClose.addEventListener('click', closeErrorDetailsModal);
-    DOM.errorDetailsModal.addEventListener('click', (e) => {
+    DOM.errorDetailsModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.errorDetailsModal) closeErrorDetailsModal();
     });
-    DOM.shiftModal.addEventListener('click', (e) => {
+    DOM.shiftModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.shiftModal) closeShiftModal();
     });
-    DOM.employeeModal.addEventListener('click', (e) => {
+    DOM.employeeModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.employeeModal) closeEmployeeModal();
     });
 
@@ -429,6 +498,32 @@ function setupEventListeners() {
             e.stopPropagation();
             const { userId, date, shiftStart, shiftEnd, shiftId } = addActivityBtn.dataset;
             if (userId && date) openAddActivityModal(parseInt(userId, 10), date, shiftStart, shiftEnd, shiftId ? parseInt(shiftId, 10) : null);
+        }
+
+        // Shift-block indicator click → release the cell back to the concept (#146)
+        const blockIndicator = e.target.closest('.shift-block-indicator--clickable');
+        if (blockIndicator) {
+            e.stopPropagation();
+            const blockId = parseInt(blockIndicator.dataset.blockId, 10);
+            const emp = getEmployee(parseInt(blockIndicator.dataset.employee, 10));
+            const date = blockIndicator.dataset.date;
+            if (!blockId || !emp || !date) return;
+
+            const d = new Date(date + 'T00:00:00');
+            const dateLabel = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' });
+            const confirmed = await showConfirm(
+                `${emp.name} · ${dateLabel}\n\nDe dag wordt teruggegeven aan het concept. Bij de volgende concepttoepassing krijgt ${emp.name} hier opnieuw een shift.\n\nDoorgaan?`,
+                'Dag vrijgeven aan concept'
+            );
+            if (!confirmed) return;
+
+            try {
+                await deleteShiftBlock(blockId);
+                renderPlanning();
+                showToast(`${emp.name}: ${dateLabel} teruggegeven aan het concept`, 'success');
+            } catch (err) {
+                showToast('Fout bij vrijgeven: ' + (err.message || 'onbekende fout'), 'error');
+            }
         }
     });
 }

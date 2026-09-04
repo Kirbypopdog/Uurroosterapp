@@ -45,7 +45,13 @@ async function handleLogin(e) {
         showApp();
     } catch (error) {
         console.error('Login error:', error);
-        showToast('Ongeldige gebruikersnaam of wachtwoord', 'error');
+        const isDeactivated = error.message && error.message.includes('gedeactiveerd');
+        showToast(
+            isDeactivated
+                ? 'Je account is gedeactiveerd. Neem contact op met een beheerder.'
+                : 'Ongeldige gebruikersnaam of wachtwoord',
+            'error'
+        );
 
         // Clear any existing session to prevent staying logged in with old credentials
         AppState.currentUser = null;
@@ -102,6 +108,9 @@ async function checkSession() {
 }
 
 function showLogin() {
+    // Sessie blijkt ongeldig/afwezig → de anti-flits-klasse uit index.html
+    // moet weg, anders blijft het loginscherm verborgen.
+    document.documentElement.classList.remove('session-restoring');
     DOM.loginContainer.classList.remove('hidden');
     DOM.appContainer.classList.add('hidden');
     DOM.usernameInput.value = '';
@@ -174,6 +183,7 @@ function applyRoleVisibility() {
     // All roles get basic views
     allowedViews.add('availability');
     allowedViews.add('swaps');
+    allowedViews.add('leave');
 
     // Employees tab: NOT for medewerker role (they manage their schedule via profile)
     if (role !== 'medewerker') {
@@ -196,11 +206,12 @@ function applyRoleVisibility() {
         btn.classList.toggle('hidden', !isAllowed);
     });
 
-    // Show/hide admin nav group based on whether any admin buttons are visible
-    const adminGroup = document.querySelector('.nav-group-admin');
-    if (adminGroup) {
-        const hasVisibleBtn = Array.from(adminGroup.querySelectorAll('.nav-btn')).some(b => !b.classList.contains('hidden'));
-        adminGroup.classList.toggle('hidden', !hasVisibleBtn);
+    // Show/hide the "Beheer" sidebar label based on whether any admin button is visible
+    const adminLabel = document.querySelector('.sidebar-nav-label.nav-group-admin');
+    if (adminLabel) {
+        const adminBtns = document.querySelectorAll('.nav-btn.nav-group-admin');
+        const hasVisibleBtn = Array.from(adminBtns).some(b => !b.classList.contains('hidden'));
+        adminLabel.classList.toggle('hidden', !hasVisibleBtn);
     }
 
     if (!allowedViews.has(AppState.currentView)) {

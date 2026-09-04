@@ -275,27 +275,39 @@ function renderSwapRequestCard(swapRequest, mode) {
         `;
     }
 
+    const _teams = DataStore.settings.teams || {};
+    const reqColor = _teams[swapRequest.requester_shift_team]?.color || '#8d897c';
+    const tgtColor = _teams[swapRequest.target_shift_team]?.color || '#8d897c';
+    const reqInitials = escapeHtml(getInitials(swapRequest.requester_name || ''));
+    const tgtInitials = escapeHtml(getInitials(swapRequest.target_name || ''));
+    const reqTeamName = escapeHtml(_teams[swapRequest.requester_shift_team]?.name || swapRequest.requester_shift_team || '');
+    const tgtTeamName = escapeHtml(_teams[swapRequest.target_shift_team]?.name || swapRequest.target_shift_team || '');
+
     return `
         <div class="swap-request-card">
             <div class="swap-request-header">
-                <h4>${escapeHtml(swapRequest.requester_name)} ${IconHelper.html(ICONS.swap, 'sm')} ${escapeHtml(swapRequest.target_name)}</h4>
+                <div class="swap-people">
+                    <span class="swap-person"><span class="emp-avatar" style="background:${reqColor}">${reqInitials}</span>${escapeHtml(swapRequest.requester_name)}</span>
+                    <span class="swap-people-arrow">${IconHelper.html(ICONS.swap, 'xs')}</span>
+                    <span class="swap-person"><span class="emp-avatar" style="background:${tgtColor}">${tgtInitials}</span>${escapeHtml(swapRequest.target_name)}</span>
+                </div>
                 <span class="swap-status-badge status-${swapRequest.status}">
                     ${statusLabels[swapRequest.status] || swapRequest.status}
                 </span>
             </div>
             <div class="swap-request-body">
-                <div class="swap-request-shift">
+                <div class="swap-request-shift" style="border-left:3px solid ${reqColor}">
                     <strong>${escapeHtml(swapRequest.requester_name)}</strong>
                     ${formatDate(swapRequest.requester_shift_date)} |
                     ${swapRequest.requester_shift_start} - ${swapRequest.requester_shift_end} |
-                    ${escapeHtml(swapRequest.requester_shift_team || '')}
+                    ${reqTeamName}
                 </div>
                 <div class="swap-request-arrow">${IconHelper.html(ICONS.swap, 'sm')}</div>
-                <div class="swap-request-shift">
+                <div class="swap-request-shift" style="border-left:3px solid ${tgtColor}">
                     <strong>${escapeHtml(swapRequest.target_name)}</strong>
                     ${formatDate(swapRequest.target_shift_date)} |
                     ${swapRequest.target_shift_start} - ${swapRequest.target_shift_end} |
-                    ${escapeHtml(swapRequest.target_shift_team || '')}
+                    ${tgtTeamName}
                 </div>
             </div>
             ${messageHtml}
@@ -383,19 +395,23 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
     const statusClass = takeoverRequest.status === 'pending' ? 'status-available' : `status-${takeoverRequest.status}`;
     const statusLabel = statusLabels[takeoverRequest.status] || takeoverRequest.status;
 
+    // Team color voor avatar + accent
+    const takeoverColor = (shift.team && DataStore.settings.teams?.[shift.team]?.color) || '#8d897c';
+    const reqInitials = escapeHtml(getInitials(takeoverRequest.requester_name || ''));
+
     // Title based on mode
-    const title = mode === 'view'
-        ? 'Je zoekt iemand voor deze shift'
-        : `${escapeHtml(takeoverRequest.requester_name)} zoekt iemand`;
+    const titleHtml = mode === 'view'
+        ? '<span class="swap-person-name">Je zoekt iemand voor deze shift</span>'
+        : `<span class="swap-person"><span class="emp-avatar" style="background:${takeoverColor}">${reqInitials}</span>${escapeHtml(takeoverRequest.requester_name)} zoekt iemand</span>`;
 
     return `
         <div class="swap-request-card takeover-card">
             <div class="swap-request-header">
-                <h4>${title}</h4>
+                <div class="swap-people">${titleHtml}</div>
                 <span class="swap-status-badge ${statusClass}">${statusLabel}</span>
             </div>
             <div class="swap-request-body">
-                <div class="takeover-shift-info">
+                <div class="takeover-shift-info" style="border-left:3px solid ${takeoverColor}">
                     <strong>Shift:</strong>
                     ${formatDate(shift.date)} |
                     ${shift.startTime} - ${shift.endTime} |
@@ -413,6 +429,37 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
     `;
 }
 
+/**
+ * Zegt of de backend deze weigering laat doordrukken.
+ *
+ * #202: ruilen en overnemen sloegen de roosterregels volledig over. Nu weigert
+ * de backend, maar een weigering zonder uitweg is even onbruikbaar als geen
+ * controle. De app kent dat patroon al bij een dienst opslaan ("Toch opslaan"),
+ * en de backend volgt dezelfde afspraak: force slaat enkel de 11-uur rust over,
+ * nooit een overlap. Bij een overlap staat er canOverride: false en tonen we
+ * dus geen uitweg, want op twee plekken tegelijk staan kan niet.
+ */
+function magRusttijdOverrulen(error) {
+    return !!(error && error.data && error.data.canOverride);
+}
+
+/**
+ * Toont de bevestiging waarmee een te korte rusttijd doorgedrukt mag worden.
+ * @returns {Promise<boolean>} true als de gebruiker wil doordrukken
+ */
+function bevestigRusttijdOverride(error, bevestigTekst) {
+    const data = error.data;
+    const uitleg = data.wie === 'aanvrager'
+        ? 'De aanvrager houdt hierdoor te weinig rust tussen twee diensten.'
+        : 'Je houdt hierdoor te weinig rust tussen twee diensten.';
+
+    return showConfirm(
+        `${data.error}\n\n${uitleg}\n\nDe 11-uur rust is een wettelijke norm. Doordrukken kan, en wordt bijgehouden in de audit log.`,
+        'Te weinig rust',
+        { confirmText: bevestigTekst, cancelText: 'Annuleren', danger: true }
+    );
+}
+
 function attachSwapActionListeners() {
     // Target approve buttons
     document.querySelectorAll('.btn-target-approve-swap').forEach(btn => {
@@ -425,6 +472,27 @@ function attachSwapActionListeners() {
                     showToast('Ruil geaccepteerd! De shifts zijn omgewisseld.', 'success');
                     switchView('planning'); // Go to planning to see the result
                 } catch (error) {
+                    // #202: de backend controleert nu overlap en rusttijd. Een te
+                    // korte rust mag doorgedrukt worden na bevestiging, zoals bij
+                    // een dienst opslaan; een overlap nooit, want dan sta je op
+                    // twee plekken tegelijk.
+                    if (magRusttijdOverrulen(error)) {
+                        if (!await bevestigRusttijdOverride(error, 'Ruil toch accepteren')) {
+                            // Bewust afgezien: dat is geen fout, dus ook geen foutmelding.
+                            showToast('Ruil niet geaccepteerd.', 'info');
+                            return;
+                        }
+                        try {
+                            await targetApproveSwapRequest(swapId, notes, true);
+                            showToast('Ruil geaccepteerd, met minder dan 11 uur rust.', 'warning');
+                            switchView('planning');
+                            return;
+                        } catch (tweede) {
+                            console.error('Error approving swap (force):', tweede);
+                            showToast('Fout bij accepteren: ' + getUserFriendlyError(tweede), 'error');
+                            return;
+                        }
+                    }
                     console.error('Error approving swap:', error);
                     showToast('Fout bij accepteren: ' + getUserFriendlyError(error), 'error');
                 }
@@ -484,6 +552,25 @@ function attachSwapActionListeners() {
                         showToast('Shift overgenomen! Je kunt hem nu zien in je planning.', 'success');
                         switchView('planning'); // Go to planning to see the new shift
                     } catch (error) {
+                        // #202: zie de toelichting bij de ruilknop hierboven.
+                        if (magRusttijdOverrulen(error)) {
+                            if (!await bevestigRusttijdOverride(error, 'Toch overnemen')) {
+                                // Bewust afgezien: dat is geen fout, dus ook geen foutmelding.
+                                showToast('Shift niet overgenomen.', 'info');
+                                return;
+                            }
+                            try {
+                                await acceptTakeoverRequest(requestId, notes, true);
+                                await Promise.all([refreshShifts(), getSwapRequests()]);
+                                showToast('Shift overgenomen, met minder dan 11 uur rust.', 'warning');
+                                switchView('planning');
+                                return;
+                            } catch (tweede) {
+                                console.error('Error accepting takeover (force):', tweede);
+                                showToast('Fout bij overnemen: ' + getUserFriendlyError(tweede), 'error');
+                                return;
+                            }
+                        }
                         console.error('Error accepting takeover:', error);
                         showToast('Fout bij overnemen: ' + getUserFriendlyError(error), 'error');
                     }

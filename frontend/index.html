@@ -7,71 +7,86 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232d6a4f'/><text x='16' y='23' font-size='20' text-anchor='middle' fill='white'>📋</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="vlot.css?v=20260611a">
+    <link rel="stylesheet" href="styles.css?v=20260830g">
     <script src="https://unpkg.com/lucide@0.577.0" onerror="
         var s=document.createElement('script');
         s.src='https://cdn.jsdelivr.net/npm/lucide@0.577.0';
         s.onerror=function(){document.documentElement.classList.add('no-lucide')};
         document.head.appendChild(s);
     "></script>
+    <script>
+        // Voorkomt een flits van het loginscherm bij herladen met een actieve
+        // sessie: #login-container staat zichtbaar in de HTML en werd pas
+        // verborgen NADAT de /me-sessiecheck terugkwam (lokaal ~130ms, op een
+        // trage mobiele verbinding een stuk langer en duidelijk zichtbaar).
+        // Deze check leest sessionStorage synchroon vóór de eerste paint.
+        // showLogin() haalt de klasse weer weg als de sessie ongeldig blijkt.
+        try {
+            if (sessionStorage.getItem('hetvlot_token')) {
+                document.documentElement.classList.add('session-restoring');
+            }
+        } catch (e) { /* sessionStorage geblokkeerd — dan gewoon login tonen */ }
+    </script>
 </head>
 <body>
     <!-- Login Scherm -->
-    <div id="login-container" class="container">
-        <div class="login-box">
-            <div class="logo">
-                <h1>Het Vlot</h1>
-                <p class="subtitle">Roosterplanning</p>
+    <div id="login-container">
+        <div class="login-brandside">
+            <div class="login-brand-top">
+                <div class="login-brand-mark">V</div>
+                <div>
+                    <div class="login-brand-name">Het Vlot</div>
+                </div>
             </div>
-            <form id="login-form">
-                <div class="form-group">
-                <label for="username">Email</label>
-                <input type="email" id="username" required autocomplete="username">
-                </div>
-                <div class="form-group">
-                    <label for="password">Wachtwoord</label>
-                    <input type="password" id="password" required autocomplete="current-password">
-                </div>
-                <button type="submit" class="btn btn-primary">Inloggen</button>
-            </form>
-            <p class="info-text">Gebruik je eigen accountgegevens om in te loggen</p>
-            <p class="info-text text-muted" style="font-size:12px;margin-top:8px">Wachtwoord vergeten? Neem contact op met je leidinggevende.</p>
+            <div class="login-brand-mid">
+                <div class="login-bigline">Roosters die <em>werken.</em></div>
+            </div>
+        </div>
+        <div class="login-formside">
+            <div class="login-box">
+                <h1 class="login-title">Welkom terug</h1>
+                <p class="login-lead">Log in om je rooster te bekijken</p>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="username">E-mail</label>
+                        <input type="email" id="username" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Wachtwoord</label>
+                        <input type="password" id="password" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Inloggen</button>
+                </form>
+                <p class="info-text">Gebruik je eigen accountgegevens om in te loggen</p>
+                <p class="info-text text-muted" style="font-size:12px;margin-top:8px">Wachtwoord vergeten? Neem contact op met je leidinggevende.</p>
+            </div>
         </div>
     </div>
 
     <!-- Hoofdapplicatie -->
     <div id="app-container" class="container hidden">
-        <!-- Sidebar toggle (CSS-only) -->
-        <input type="checkbox" id="sidebar-toggle" class="sidebar-toggle-input" aria-hidden="true">
-
-        <!-- Navigatie -->
-        <nav class="main-nav">
-            <div class="nav-left">
-                <label for="sidebar-toggle" class="sidebar-toggle-label" aria-label="Sidebar inklappen">
-                    <span class="sidebar-toggle-icon"></span>
-                </label>
-                <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu">
-                    <span class="hamburger-line"></span>
-                    <span class="hamburger-line"></span>
-                    <span class="hamburger-line"></span>
-                </button>
-                <h1 class="app-title">Het Vlot</h1>
-            </div>
-            <div class="nav-center" id="nav-menu">
-                <div class="nav-group-primary">
-                    <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i> Home</button>
-                    <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i> Planning</button>
-                    <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i> Afwezigheid</button>
-                    <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i> Ruilen</button>
-                </div>
-                <div class="nav-group-admin">
-                    <button class="nav-btn" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
-                    <button class="nav-btn" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster Bouwen</button>
-                    <button class="nav-btn" data-view="settings"><i data-lucide="settings" class="nav-icon"></i> Instellingen</button>
+        <!-- Sidebar (linkernavigatie) -->
+        <aside class="app-sidebar" id="nav-menu">
+            <div class="sidebar-brand">
+                <div class="sidebar-brand-mark">V</div>
+                <div class="sidebar-brand-text">
+                    <div class="sidebar-brand-name">Het Vlot</div>
                 </div>
             </div>
-            <div class="nav-right">
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i><span class="nav-label"> Home</span></button>
+                <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i><span class="nav-label"> Planning</span></button>
+                <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i><span class="nav-label"> Afwezigheid</span></button>
+                <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i><span class="nav-label"> Ruilen</span></button>
+                <button class="nav-btn" data-view="leave"><i data-lucide="palmtree" class="nav-icon"></i><span class="nav-label"> Verlof</span></button>
+                <div class="sidebar-nav-label nav-group-admin">Beheer</div>
+                <button class="nav-btn nav-group-admin" data-view="employees"><i data-lucide="users" class="nav-icon"></i><span class="nav-label"> Medewerkers</span></button>
+                <button class="nav-btn nav-group-admin" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i><span class="nav-label"> Rooster bouwen</span></button>
+                <button class="nav-btn nav-group-admin" data-view="settings"><i data-lucide="settings" class="nav-icon"></i><span class="nav-label"> Instellingen</span></button>
+            </nav>
+            <div class="sidebar-foot">
                 <div id="role-switcher" class="role-switcher hidden">
                     <i data-lucide="flask-conical" class="lucide-sm role-switcher-icon"></i>
                     <select id="role-switch-select">
@@ -89,8 +104,36 @@
                         <i data-lucide="log-out" class="lucide-sm"></i>
                     </button>
                 </div>
+                <div class="sidebar-foot-actions">
+                    <button class="sidebar-icon-btn" id="dark-mode-btn" aria-label="Donker thema" title="Donker/licht thema">
+                        <i data-lucide="moon" class="lucide-sm"></i>
+                    </button>
+                    <button class="sidebar-icon-btn" id="sidebar-collapse-btn" aria-label="Zijbalk inklappen" title="Inklappen">
+                        <i data-lucide="panel-left-close" class="lucide-sm"></i>
+                    </button>
+                </div>
             </div>
-        </nav>
+        </aside>
+
+        <!-- Mobiele backdrop voor sidebar -->
+        <div class="sidebar-scrim" id="sidebar-scrim"></div>
+
+        <!-- Hoofdinhoud -->
+        <main class="app-main">
+            <!-- Mobiele topbar (enkel < 860px) -->
+            <header class="app-topbar">
+                <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu">
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                </button>
+                <div class="app-topbar-brand">
+                    <span class="sidebar-brand-mark sm">V</span>
+                    <span>Het Vlot</span>
+                </div>
+            </header>
+
+            <div class="app-views">
 
         <!-- Home View -->
         <div id="home-view" class="view active">
@@ -100,34 +143,32 @@
         <!-- Planning View -->
         <div id="planning-view" class="view">
             <div class="view-header">
-                <h2>Roosterplanning</h2>
-                <div class="header-actions">
-                    <button id="add-shift-btn" class="btn btn-primary btn-primary-lg"><i data-lucide="plus" class="lucide-sm"></i> Dienst toevoegen</button>
+                <div class="view-title">
+                    <span class="view-title-eyebrow">Planning</span>
+                    <h2>Weekoverzicht</h2>
                 </div>
-                <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
+                <div class="header-actions"></div>
             </div>
 
             <div class="planning-controls" id="planning-controls-wrapper">
                 <div class="planning-controls-row">
                     <div class="date-navigation">
-                        <button id="prev-week" class="btn" aria-label="Vorige week"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
-                        <button id="today-btn" class="btn">Vandaag</button>
-                        <button id="next-week" class="btn" aria-label="Volgende week"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+                        <button id="prev-week" class="nav-arrow-btn" aria-label="Vorige"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
+                        <button id="today-btn" class="btn btn-secondary btn-sm">Vandaag</button>
+                        <button id="next-week" class="nav-arrow-btn" aria-label="Volgende"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
                     </div>
                     <div id="current-period" class="period-display period-display--clickable" title="Klik om naar een datum te springen">
-                        <i data-lucide="calendar" class="lucide-xs period-calendar-icon"></i>
                         <span id="current-period-text"></span>
                         <input type="date" id="week-jump-input" class="week-jump-input" aria-label="Spring naar week">
                     </div>
+                    <div class="controls-spacer"></div>
                     <div class="view-toggle-controls">
-                        <button class="view-toggle-btn active" data-mode="week">Week</button>
                         <button class="view-toggle-btn" data-mode="day">Dag</button>
+                        <button class="view-toggle-btn active" data-mode="week">Week</button>
                     </div>
+                    <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
                 </div>
                 <div class="planning-controls-row hidden" id="planning-filters-row">
-                    <div class="team-toggles" id="team-toggles">
-                        <!-- Dynamisch gevuld via renderTeamToggles() -->
-                    </div>
                     <div class="planning-filter-buttons">
                         <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
                         <label class="toggle-switch-label" title="Verberg medewerkers zonder diensten">
@@ -181,7 +222,10 @@
         <!-- Profiel View -->
         <div id="profile-view" class="view">
             <div class="view-header">
-                <h2>Profiel</h2>
+                <div>
+                    <div class="view-title-eyebrow">Profiel</div>
+                    <h2 id="profile-view-title">Mijn profiel</h2>
+                </div>
             </div>
             <div id="profile-content"></div>
         </div>
@@ -221,10 +265,26 @@
             </div>
         </div>
 
+        <!-- Verlofplanning View -->
+        <div id="leave-view" class="view">
+            <div class="view-header">
+                <h2>Verlofplanning</h2>
+                <p class="view-description">Duid je verlof aan voor de vakantieperiodes</p>
+            </div>
+            <div id="leave-content"></div>
+            <div class="section-loading-overlay hidden">
+                <div class="section-loading-spinner"></div>
+                <span class="section-loading-text"></span>
+            </div>
+        </div>
+
         <!-- Instellingen View -->
         <div id="settings-view" class="view">
             <div class="view-header">
-                <h2>Instellingen</h2>
+                <div>
+                    <div class="view-title-eyebrow">Instellingen</div>
+                    <h2 id="settings-view-title">Instellingen</h2>
+                </div>
             </div>
             <div class="settings-tabs" id="settings-tabs">
                 <!-- Dynamically rendered based on role -->
@@ -234,7 +294,8 @@
             </div>
         </div>
 
-        <!-- Footer verwijderd in redesign -->
+            </div><!-- /.app-views -->
+        </main><!-- /.app-main -->
     </div>
 
     <!-- Modal: Dienst toevoegen/bewerken -->
@@ -403,7 +464,7 @@
                         </div>
                         <div class="form-group">
                             <label for="employee-email">E-mail</label>
-                            <input type="email" id="employee-email" class="form-input" placeholder="Optioneel — welkomstmail wordt verzonden zodra e-mail ingevuld is">
+                            <input type="email" id="employee-email" class="form-input" placeholder="Optioneel, welkomstmail wordt verzonden zodra e-mail ingevuld is">
                         </div>
                     </div>
                     <div class="form-row">
@@ -481,7 +542,9 @@
                         <option value="verlof">Verlof</option>
                         <option value="ziek">Ziekte</option>
                         <option value="overuren">Overuren opnemen</option>
+                        <option value="vorming">Vorming</option>
                         <option value="andere">Andere</option>
+                        <option value="vrij">Vrij</option>
                     </select>
                 </div>
 
@@ -753,26 +816,27 @@
         </div>
     </div>
 
-    <script src="config/settings.js"></script>
-    <script src="data.js"></script>
-    <script src="validation.js"></script>
-    <script src="drag-handler.js"></script>
-    <script src="app-globals.js"></script>
-    <script src="app-permissions.js"></script>
-    <script src="app-ui.js"></script>
-    <script src="app-auth.js"></script>
-    <script src="app-nav.js"></script>
-    <script src="app-planner.js"></script>
-    <script src="app-shifts.js"></script>
-    <script src="app-swaps.js"></script>
-    <script src="app-employees.js"></script>
-    <script src="app-availability.js"></script>
-    <script src="app-builder.js"></script>
-    <script src="app-builder-editors.js"></script>
-    <script src="app-builder-drafts.js"></script>
-    <script src="app-settings.js"></script>
-    <script src="app-admin.js"></script>
-    <script src="app-init.js"></script>
+    <script src="config/settings.js?v=20260611a"></script>
+    <script src="data.js?v=20260830a"></script>
+    <script src="validation.js?v=20260611a"></script>
+    <script src="drag-handler.js?v=20260830a"></script>
+    <script src="app-globals.js?v=20260611a"></script>
+    <script src="app-permissions.js?v=20260611a"></script>
+    <script src="app-ui.js?v=20260830a"></script>
+    <script src="app-auth.js?v=20260611a"></script>
+    <script src="app-nav.js?v=20260830a"></script>
+    <script src="app-planner.js?v=20260830a"></script>
+    <script src="app-shifts.js?v=20260611a"></script>
+    <script src="app-swaps.js?v=20260611a"></script>
+    <script src="app-leave.js?v=20260830e"></script>
+    <script src="app-employees.js?v=20260830a"></script>
+    <script src="app-availability.js?v=20260830b"></script>
+    <script src="app-builder.js?v=20260830g"></script>
+    <script src="app-builder-editors.js?v=20260830a"></script>
+    <script src="app-builder-drafts.js?v=20260830c"></script>
+    <script src="app-settings.js?v=20260830a"></script>
+    <script src="app-admin.js?v=20260830a"></script>
+    <script src="app-init.js?v=20260830a"></script>
     <script>
         if (typeof lucide !== 'undefined') {
             lucide.createIcons();

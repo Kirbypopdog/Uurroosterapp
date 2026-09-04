@@ -33,19 +33,27 @@ app.use(helmet());
 app.set('trust proxy', 1);
 
 // CORS: restrict to frontend origin(s) in production, open in development
+const defaultOrigins = [
+  'https://uurrooster-frontend.onrender.com',
+  'https://vlot-dashboard.site',
+  'https://www.vlot-dashboard.site',
+];
 const allowedOrigins = process.env.FRONTEND_URL
-  ? process.env.FRONTEND_URL.split(',').map(o => o.trim())
-  : ['https://uurrooster-frontend.onrender.com', 'https://vlot-dashboard.site'];
+  ? [...new Set([...process.env.FRONTEND_URL.split(',').map(o => o.trim()), ...defaultOrigins])]
+  : defaultOrigins;
 const corsOptions = process.env.NODE_ENV === 'production'
   ? { origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)), credentials: true }
   : {};
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Global rate limiter
+// Global rate limiter (disabled in test environment to avoid interference with the test suite)
+// Eén page-load doet ~10 API-calls; 600/min/IP geeft ruimte voor normaal gebruik
+// (navigatie, drag-drop, herladen) terwijl runaway loops/misbruik nog steeds geblokkeerd worden.
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: 600,
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Te veel verzoeken. Probeer later opnieuw.' }
@@ -62,6 +70,19 @@ const { getMonday, formatDateYYYYMMDD, parseLocalDate, getBelgianPublicHolidays,
 // All DDL uses IF NOT EXISTS so migrations are safe to re-run on existing DBs.
 
 const MIGRATIONS = [
+  {
+    // Basistabellen aanmaken op een verse database. schema.sql is volledig idempotent
+    // (enkel CREATE ... IF NOT EXISTS), dus op een bestaande database is dit een no-op.
+    // Hierdoor initialiseert elke nieuwe omgeving (bv. staging) zichzelf bij de eerste deploy,
+    // zonder handmatige `npm run db:setup` of shell-toegang.
+    name: '000_base_schema',
+    up: async (client) => {
+      const fs = require('fs');
+      const path = require('path');
+      const schema = fs.readFileSync(path.join(__dirname, '../sql/schema.sql'), 'utf8');
+      await client.query(schema);
+    }
+  },
   {
     name: '001_user_employee_columns',
     up: async (client) => {
@@ -320,7 +341,7 @@ const MIGRATIONS = [
         SET shift_id = (
           SELECT s.id FROM shifts s
           WHERE s.user_id = sa.user_id AND s.date = sa.date
-          ORDER BY ABS(EXTRACT(EPOCH FROM (s.start_time - sa.start_time)))
+          ORDER BY ABS(EXTRACT(EPOCH FROM (s.start_time::TIME - sa.start_time)))
           LIMIT 1
         )
         WHERE sa.shift_id IS NULL
@@ -471,6 +492,210 @@ const MIGRATIONS = [
     up: async (client) => {
       await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ical_feed_token TEXT UNIQUE`);
     }
+  },
+  {
+    // #158 GDPR: ensure all user-referencing FKs have correct ON DELETE behaviour.
+    // Fresh DBs created via schema.sql already have the right constraints, but
+    // databases created before these constraints were added need them enforced.
+    name: '033_gdpr_fk_on_delete',
+    up: async (client) => {
+      const tables = [
+        { table: 'shifts',              col: 'user_id',            ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'availability',        col: 'user_id',            ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'shift_blocks',        col: 'user_id',            ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'shift_activities',    col: 'user_id',            ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'shift_swap_requests', col: 'requester_user_id',  ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'shift_swap_requests', col: 'target_user_id',     ref: 'users(id)',  action: 'CASCADE'  },
+        { table: 'shift_swap_requests', col: 'responded_by',       ref: 'users(id)',  action: 'SET NULL' },
+        { table: 'audit_log',           col: 'actor_id',           ref: 'users(id)',  action: 'SET NULL' },
+        { table: 'schedule_drafts',     col: 'created_by',         ref: 'users(id)',  action: 'SET NULL' },
+        { table: 'schedule_drafts',     col: 'updated_by',         ref: 'users(id)',  action: 'SET NULL' },
+      ];
+      for (const { table, col, ref, action } of tables) {
+        // Find the FK constraint name for this column
+        const res = await client.query(`
+          SELECT tc.constraint_name, rc.delete_rule
+          FROM information_schema.table_constraints tc
+          JOIN information_schema.key_column_usage kcu
+            ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
+          JOIN information_schema.referential_constraints rc
+            ON tc.constraint_name = rc.constraint_name
+          WHERE tc.constraint_type = 'FOREIGN KEY'
+            AND tc.table_name = $1 AND kcu.column_name = $2
+        `, [table, col]);
+        for (const row of res.rows) {
+          const currentAction = row.delete_rule; // e.g. 'NO ACTION', 'CASCADE', 'SET NULL'
+          const expected = action.replace(' ', '_'); // normalize for comparison
+          if (currentAction !== expected && currentAction !== action) {
+            await client.query(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS "${row.constraint_name}"`);
+            await client.query(`ALTER TABLE ${table} ADD FOREIGN KEY (${col}) REFERENCES ${ref} ON DELETE ${action}`);
+          }
+        }
+        // If no FK existed yet, add it
+        if (res.rows.length === 0) {
+          await client.query(`ALTER TABLE ${table} ADD FOREIGN KEY (${col}) REFERENCES ${ref} ON DELETE ${action}`);
+        }
+      }
+    }
+  },
+  {
+    // Verlofplanning: vervangt de gedeelde Excel ("Verlofplanning 2025-2026").
+    // Twee modi in één model:
+    //   'binair'   → kleine vakanties: werken / verlof
+    //   'voorkeur' → zomer: werken / liever_niet / zeker_niet (voorkeuren die
+    //                de planner daarna verdeelt)
+    // Invulling is per DAG; de UI biedt week-snelknoppen omdat de praktijk
+    // per werkweek + weekend apart werkt.
+    name: '034_create_leave_rounds',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS leave_rounds (
+          id                SERIAL PRIMARY KEY,
+          name              TEXT NOT NULL,
+          mode              TEXT NOT NULL DEFAULT 'binair' CHECK (mode IN ('binair', 'voorkeur')),
+          start_date        DATE NOT NULL,
+          end_date          DATE NOT NULL,
+          deadline          DATE,
+          status            TEXT NOT NULL DEFAULT 'concept' CHECK (status IN ('concept', 'open', 'gesloten', 'toegepast')),
+          holiday_period_id TEXT,
+          rules             JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          created_at        TIMESTAMP DEFAULT NOW(),
+          updated_at        TIMESTAMP DEFAULT NOW()
+        )
+      `);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS leave_round_entries (
+          id        SERIAL PRIMARY KEY,
+          round_id  INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+          user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          date      DATE NOT NULL,
+          status    TEXT NOT NULL CHECK (status IN ('werken', 'verlof', 'liever_niet', 'zeker_niet')),
+          note      TEXT DEFAULT '',
+          UNIQUE (round_id, user_id, date)
+        )
+      `);
+      // Eén rij per medewerker per ronde: dekt de "niet goedgekeurd verlof"-tab
+      // (wie heeft nog niet ingediend / nog niet goedgekeurd gekregen).
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS leave_round_submissions (
+          id            SERIAL PRIMARY KEY,
+          round_id      INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+          user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          submitted_at  TIMESTAMP,
+          approved      BOOLEAN,
+          approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          approved_at   TIMESTAMP,
+          response_note TEXT DEFAULT '',
+          UNIQUE (round_id, user_id)
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_entries_round ON leave_round_entries(round_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_entries_user  ON leave_round_entries(user_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_subs_round    ON leave_round_submissions(round_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_rounds_status ON leave_rounds(status)`);
+    }
+  },
+  {
+    // Een verlofronde dekt een heel SCHOOLJAAR, niet één vakantie: in de
+    // Excel stonden herfst/kerst/krokus/paas samen in één tab, met de zomer
+    // (andere regels) in een aparte tab. Een ronde bestaat daarom uit
+    // blokken die elk naar een vakantieperiode uit de instellingen wijzen
+    // en een eigen modus hebben. De modus verhuist dus van ronde naar blok.
+    name: '035_leave_round_blocks',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS leave_round_blocks (
+          id                SERIAL PRIMARY KEY,
+          round_id          INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+          name              TEXT NOT NULL,
+          mode              TEXT NOT NULL DEFAULT 'binair' CHECK (mode IN ('binair', 'voorkeur')),
+          start_date        DATE NOT NULL,
+          end_date          DATE NOT NULL,
+          holiday_period_id TEXT,
+          sort_order        INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_leave_blocks_round ON leave_round_blocks(round_id)`);
+
+      // Bestaande rondes (staging-testdata) krijgen één blok dat de hele
+      // ronde beslaat, zodat ze blijven werken onder het nieuwe model.
+      await client.query(`
+        INSERT INTO leave_round_blocks (round_id, name, mode, start_date, end_date, holiday_period_id, sort_order)
+        SELECT r.id, r.name, r.mode, r.start_date, r.end_date, r.holiday_period_id, 0
+        FROM leave_rounds r
+        WHERE NOT EXISTS (SELECT 1 FROM leave_round_blocks b WHERE b.round_id = r.id)
+      `);
+    }
+  },
+  {
+    // Welke weekends van een vakantie open of gesloten zijn, wordt beslist in
+    // het roosterconcept. De verlofronde neemt die beslissing bij het openen
+    // over als eigen gegeven: wie invult moet weten waar hij aan toe is, en
+    // over een jaar moet nog na te gaan zijn welke weekends toen werkweekends
+    // waren. Een concept kan intussen gewijzigd of verwijderd zijn.
+    //
+    // NULL = onbekend (geen concept gekoppeld) · [] = bekend, alles open ·
+    // [...] = deze dagen zijn gesloten. Die drie moeten uit elkaar blijven,
+    // anders tonen we "weekend open" terwijl we niets weten.
+    name: '036_leave_block_closed_dates',
+    up: async (client) => {
+      await client.query(`ALTER TABLE leave_round_blocks ADD COLUMN IF NOT EXISTS closed_dates JSONB`);
+      await client.query(`ALTER TABLE leave_round_blocks ADD COLUMN IF NOT EXISTS closed_source JSONB NOT NULL DEFAULT '{}'::jsonb`);
+    }
+  },
+  {
+    // #185 / #187: shifts legden nergens vast uit welk concept ze kwamen.
+    // Daardoor konden 'uitplannen' en 'overlap bevestigen' alleen op datum en
+    // medewerker begrenzen, en werd stelselmatig te veel gewist.
+    // ON DELETE SET NULL: een verwijderd concept mag nooit diensten meeslepen.
+    // Bestaande diensten houden NULL — die vallen terug op de oude, maar nu wel
+    // begrensde, verwijderlogica.
+    name: '037_shifts_draft_id',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS draft_id TEXT`);
+      const fk = await client.query(`
+        SELECT 1 FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_name = 'shifts' AND kcu.column_name = 'draft_id'
+      `);
+      if (fk.rows.length === 0) {
+        await client.query(
+          `ALTER TABLE shifts ADD FOREIGN KEY (draft_id) REFERENCES schedule_drafts(id) ON DELETE SET NULL`
+        );
+      }
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_shifts_draft_id ON shifts(draft_id) WHERE draft_id IS NOT NULL`
+      );
+    }
+  },
+  {
+    // #376: hetzelfde probleem als bij shifts, nu voor teamvergaderingen. Het
+    // toepassen van een concept wiste ALLE activiteiten van het type
+    // 'vergadering' in het bereik, ongeacht team en ongeacht of iemand ze met
+    // de hand had ingevoerd. Zonder herkomst kan de opruiming dat onderscheid
+    // niet maken.
+    name: '038_shift_activities_draft_id',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS draft_id TEXT`);
+      const fk = await client.query(`
+        SELECT 1 FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_name = 'shift_activities' AND kcu.column_name = 'draft_id'
+      `);
+      if (fk.rows.length === 0) {
+        await client.query(
+          `ALTER TABLE shift_activities ADD FOREIGN KEY (draft_id) REFERENCES schedule_drafts(id) ON DELETE SET NULL`
+        );
+      }
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_shift_activities_draft_id ON shift_activities(draft_id) WHERE draft_id IS NOT NULL`
+      );
+    }
   }
 ];
 
@@ -500,7 +725,13 @@ async function runMigrations() {
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         console.error(`  Migratie mislukt (${migration.name}): ${err.message}`);
-        // Niet opnieuw gooien — log en ga verder met volgende migratie
+        // #193: hier werd de fout ingeslikt en ging de lus gewoon door. Als
+        // migratie 020 mislukte, draaiden 021 en verder alsnog tegen een schema
+        // dat mist wat 020 had moeten toevoegen, en daarna ging de API luisteren
+        // tegen een half gemigreerde database.
+        //
+        // Nu stopt het hier. De aanroeper laat de server niet starten.
+        throw new Error(`Migratie ${migration.name} mislukt: ${err.message}`);
       }
     }
   } finally {
@@ -508,17 +739,84 @@ async function runMigrations() {
   }
 }
 
-async function archiveOldShifts() {
+// Zorgt dat een verse database bruikbaar is: standaardteams + een admin-account.
+// Puur additief (ON CONFLICT DO NOTHING) → op een bestaande productie-DB volledig no-op,
+// en een bestaand admin-wachtwoord wordt NOOIT overschreven.
+async function ensureBootstrapData() {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminEmail || !adminPassword) return; // geen gegevens → niets te doen
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
-      `UPDATE shifts SET archived = true
-       WHERE archived = false AND date < CURRENT_DATE - INTERVAL '12 months'`
-    );
-    if (result.rowCount > 0) console.log(`[archive] ${result.rowCount} shifts gearchiveerd`);
+    const defaultTeams = [
+      ['vlot1', 'Vlot 1 (Begeleiding)', '#4a7c6f'],
+      ['vlot2', 'Vlot 2 (Begeleiding)', '#c08a4a'],
+      ['cargo', 'Cargo (Dagbesteding)', '#5b7fa6'],
+      ['overkoepelend', 'Overkoepelend (Kantoor)', '#9a6a9e'],
+      ['jobstudent', 'Jobstudenten/Stagiairs', '#b9656a']
+    ];
+    for (const [id, name, color] of defaultTeams) {
+      await client.query(
+        `INSERT INTO teams (id, name, color) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING`,
+        [id, name, color]
+      );
+    }
+    const existing = await client.query('SELECT 1 FROM users WHERE LOWER(email) = LOWER($1)', [adminEmail]);
+    if (existing.rows.length === 0) {
+      const passwordHash = await bcrypt.hash(adminPassword, 12);
+      await client.query(
+        `INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'admin')
+         ON CONFLICT (email) DO NOTHING`,
+        ['Admin', adminEmail.toLowerCase(), passwordHash]
+      );
+      console.log('[bootstrap] Admin-account aangemaakt');
+    }
   } catch (err) {
-    console.error('[archive] Fout bij archiveren:', err.message);
+    console.error('[bootstrap] Fout:', err.message);
+  } finally {
+    client.release();
   }
 }
+
+// #151 GDPR bewaartermijnen — loopt bij elke startup (idempotent)
+// Termijnen: shifts 5j, availability 5j, audit_log 2j, swap_requests 2j
+async function enforceRetentionPolicies() {
+  const steps = [
+    {
+      label: 'archive shifts (>12 maanden)',
+      sql: `UPDATE shifts SET archived = true WHERE archived = false AND date < CURRENT_DATE - INTERVAL '12 months'`,
+    },
+    {
+      label: 'verwijder gearchiveerde shifts (>5 jaar)',
+      sql: `DELETE FROM shifts WHERE archived = true AND date < CURRENT_DATE - INTERVAL '5 years'`,
+    },
+    {
+      label: 'verwijder beschikbaarheidsdata (>5 jaar)',
+      sql: `DELETE FROM availability WHERE date < CURRENT_DATE - INTERVAL '5 years'`,
+    },
+    {
+      label: 'verwijder audit_log (>2 jaar)',
+      sql: `DELETE FROM audit_log WHERE created_at < NOW() - INTERVAL '2 years'`,
+    },
+    {
+      label: 'verwijder afgeronde ruilverzoeken (>2 jaar)',
+      sql: `DELETE FROM shift_swap_requests
+            WHERE status IN ('approved','rejected','cancelled','expired')
+              AND created_at < NOW() - INTERVAL '2 years'`,
+    },
+  ];
+  for (const step of steps) {
+    try {
+      const r = await pool.query(step.sql);
+      if (r.rowCount > 0) console.log(`[retention] ${step.label}: ${r.rowCount} rijen`);
+    } catch (err) {
+      console.error(`[retention] Fout bij "${step.label}": ${err.message}`);
+    }
+  }
+}
+
+// Legacy alias — kept so any future direct calls still work
+const archiveOldShifts = enforceRetentionPolicies;
 
 function signToken(user) {
   return jwt.sign(
@@ -584,6 +882,10 @@ async function logAudit(req, action, resourceType, resourceId, details = {}) {
 
 // ===== SHIFT VALIDATIE =====
 
+function isValidTime(t) {
+  return typeof t === 'string' && /^\d{2}:\d{2}$/.test(t);
+}
+
 /**
  * Controleert overlap en 11-uur rust voor een nieuwe/gewijzigde shift.
  * @param {object} db - pool (of mock in tests)
@@ -592,6 +894,34 @@ async function logAudit(req, action, resourceType, resourceId, details = {}) {
  * @param {number|null} excludeId - shift-id uitsluiten bij PUT
  * @returns {Promise<{ valid: boolean, message?: string }>}
  */
+// Legt vast dat een medewerkerdag bewust leeg is, zodat een concept hem bij
+// een volgende toepassing niet opnieuw vult.
+//
+// Nodig omdat een dienst die WEGBEWEEGT van iemands dag geen spoor achterliet:
+// verslepen, ruilen en overnemen zetten user_id of date om, waardoor de
+// oorspronkelijke dag leeg achterbleef zonder blokkade. Het concept vulde die
+// dag dan opnieuw en de medewerker stond twee keer ingepland, of er stonden
+// twee mensen op één dienst. Verwijderen deed dit al wel.
+//
+// Alleen blokkeren als de dag daarna écht leeg is. Bij een ruil op dezelfde
+// dag houdt de medewerker een dienst over, en dan zou een blokkade een
+// misleidende indicator opleveren op een dag waar gewoon gewerkt wordt.
+async function blockDayIfEmpty(db, userId, date, createdBy, reason) {
+  if (!userId || !date) return false;
+  const nog = await db.query(
+    'SELECT 1 FROM shifts WHERE user_id = $1 AND date = $2::date LIMIT 1',
+    [userId, date]
+  );
+  if (nog.rows.length > 0) return false;
+  await db.query(
+    `INSERT INTO shift_blocks (user_id, date, created_by, reason)
+     VALUES ($1, $2::date, $3, $4)
+     ON CONFLICT (user_id, date) DO NOTHING`,
+    [userId, date, createdBy || null, reason]
+  );
+  return true;
+}
+
 async function validateShiftRules(db, userId, newShift, excludeId = null, skipRestCheck = false) {
   const MIN_REST = 11;
   const rangeStart = new Date(newShift.date);
@@ -611,13 +941,18 @@ async function validateShiftRules(db, userId, newShift, excludeId = null, skipRe
 
   for (const existing of rows) {
     if (shiftsOverlapCheck(existing, newShift)) {
-      return { valid: false, message: 'Overlap: medewerker heeft al een shift op dit tijdstip.' };
+      // rule: 'overlap' is nooit te overrulen. Iemand kan niet op twee plekken
+      // tegelijk staan, dus dat is geen beleidskeuze maar een feit. force=true
+      // slaat alleen de rusttijd over, hier en bij POST/PUT /shifts.
+      return { valid: false, rule: 'overlap', message: 'Overlap: medewerker heeft al een shift op dit tijdstip.' };
     }
     if (!skipRestCheck) {
       const hours = hoursBetweenShifts(existing, newShift);
       if (hours >= 0 && hours < MIN_REST) {
         return {
           valid: false,
+          rule: 'rest',
+          hours: Number(hours.toFixed(1)),
           message: `11-uur regel: slechts ${hours.toFixed(1)}u rust tussen shifts (minimum ${MIN_REST}u).`
         };
       }
@@ -678,6 +1013,7 @@ v1.post('/auth/register', requireAuth, requireAdmin, async (req, res) => {
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10,
+  skip: () => process.env.NODE_ENV === 'test',
   message: { success: false, message: 'Te veel inlogpogingen. Probeer opnieuw over 15 minuten.' },
   standardHeaders: true,
   legacyHeaders: false
@@ -717,6 +1053,11 @@ v1.post('/auth/login', loginLimiter, async (req, res) => {
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) {
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    // Gedeactiveerde accounts: juist wachtwoord maar geen toegang. Aparte 403
+    // zodat de frontend de gebruiker niet ten onrechte "fout wachtwoord" toont.
+    if (user.active === false) {
+      return res.status(403).json({ error: 'Account is gedeactiveerd' });
     }
     const token = signToken(user);
     delete user.password_hash;
@@ -764,8 +1105,21 @@ v1.get('/me', requireAuth, async (req, res) => {
   }
 });
 
+// #196: dit endpoint aanvaardde ook mainTeam, contractHours en het volledige
+// basisrooster, zonder enige rolcontrole. Een medewerker kon daarmee zijn eigen
+// team en contracturen bepalen, en zijn basisrooster zetten terwijl de
+// rollentabel zegt dat hij dat niet mag. Erger nog: main_team werd bijgewerkt
+// zonder team_id, en die twee moeten altijd gelijk zijn (CLAUDE.md regel 2),
+// anders wijst de app hem in het ene team aan en de autorisatie in het andere.
+//
+// PUT /users/:id blokkeert diezelfde velden al uitdrukkelijk. Er waren dus twee
+// wegen naar hetzelfde veld en maar één ervan was bewaakt.
+//
+// Dit endpoint gaat nu alleen nog over je eigen profiel: naam, e-mail en
+// wachtwoord. Precies wat de profielmodal stuurt. De rest loopt via de
+// beheerderspaden, waar team_id en main_team samen worden bijgewerkt.
 v1.put('/me', requireAuth, async (req, res) => {
-  const { name, email, password, mainTeam, contractHours, weekScheduleWeek1, weekScheduleWeek2, weekSchedules } = req.body || {};
+  const { name, email, password } = req.body || {};
   if (!name || !email) {
     return res.status(400).json({ error: 'Missing fields' });
   }
@@ -775,34 +1129,23 @@ v1.put('/me', requireAuth, async (req, res) => {
       passwordHash = await bcrypt.hash(password, 12);
     }
 
-    // Serialize JSONB data
-    const week1Json = weekScheduleWeek1 ? JSON.stringify(weekScheduleWeek1) : null;
-    const week2Json = weekScheduleWeek2 ? JSON.stringify(weekScheduleWeek2) : null;
-    const weekSchedulesJson = Array.isArray(weekSchedules) && weekSchedules.length > 0
-      ? JSON.stringify(weekSchedules)
-      : null;
+    // #154: rotate iCal token when password changes to invalidate leaked feed URLs
+    const newIcalToken = password ? crypto.randomUUID() : null;
 
     const result = await pool.query(
       `UPDATE users
        SET name = $1,
            email = $2,
            password_hash = COALESCE($3, password_hash),
-           main_team = COALESCE($4, main_team),
-           contract_hours = COALESCE($5, contract_hours),
-           week_schedule_week1 = COALESCE($6::jsonb, week_schedule_week1),
-           week_schedule_week2 = COALESCE($7::jsonb, week_schedule_week2),
-           week_schedules = COALESCE($8::jsonb, jsonb_build_array(
-             COALESCE($6::jsonb, week_schedule_week1),
-             COALESCE($7::jsonb, week_schedule_week2)
-           ))
-       WHERE id = $9
+           ical_feed_token = COALESCE($5, ical_feed_token)
+       WHERE id = $4
        RETURNING id, name, email, role, team_id,
                  main_team as "mainTeam", extra_teams as "extraTeams",
                  contract_hours as "contractHours", active,
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"`,
-      [name, email.toLowerCase(), passwordHash, mainTeam, contractHours, week1Json, week2Json, weekSchedulesJson, req.user.id]
+      [name, email.toLowerCase(), passwordHash, req.user.id, newIcalToken]
     );
     await logAudit(req, 'UPDATE', 'user', req.user.id, { action: 'self_update', name, email });
     res.json({ user: result.rows[0] });
@@ -889,8 +1232,8 @@ v1.get('/calendar/:token.ics', async (req, res) => {
         'BEGIN:VEVENT',
         `UID:shift-${s.id}@hetvlot`,
         `DTSTAMP:${now}`,
-        `DTSTART:${start}`,
-        `DTEND:${end}`,
+        `DTSTART;TZID=Europe/Brussels:${start}`,
+        `DTEND;TZID=Europe/Brussels:${end}`,
         `SUMMARY:${summary}`,
       ];
       if (s.notes) lines.push(`DESCRIPTION:${icalEscape(s.notes)}`);
@@ -906,6 +1249,7 @@ v1.get('/calendar/:token.ics', async (req, res) => {
       'METHOD:PUBLISH',
       `X-WR-CALNAME:Rooster ${icalEscape(user.name)}`,
       'X-WR-TIMEZONE:Europe/Brussels',
+      BRUSSELS_VTIMEZONE,
       events,
       'END:VCALENDAR',
     ].join('\r\n');
@@ -922,6 +1266,29 @@ v1.get('/calendar/:token.ics', async (req, res) => {
 function icalEscape(str) {
   return String(str || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
 }
+
+// VTIMEZONE-component voor Europe/Brussels (CET/CEST). Nodig zodat Outlook de
+// wall-clock tijd correct interpreteert i.p.v. de niet-officiële X-WR-TIMEZONE
+// te negeren en de kale tijd als UTC te lezen (zie issue #172).
+const BRUSSELS_VTIMEZONE = [
+  'BEGIN:VTIMEZONE',
+  'TZID:Europe/Brussels',
+  'BEGIN:DAYLIGHT',
+  'TZOFFSETFROM:+0100',
+  'TZOFFSETTO:+0200',
+  'TZNAME:CEST',
+  'DTSTART:19700329T020000',
+  'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
+  'END:DAYLIGHT',
+  'BEGIN:STANDARD',
+  'TZOFFSETFROM:+0200',
+  'TZOFFSETTO:+0100',
+  'TZNAME:CET',
+  'DTSTART:19701025T030000',
+  'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+  'END:STANDARD',
+  'END:VTIMEZONE',
+].join('\r\n');
 
 // PUT /me/onboarding-flags - Update onboarding flags (merge)
 v1.put('/me/onboarding-flags', requireAuth, async (req, res) => {
@@ -1207,7 +1574,7 @@ v1.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
     const result = await pool.query(
       `UPDATE users
        SET role = $1,
-           team_id = $2,
+           team_id = COALESCE($2, team_id),
            name = COALESCE($3, name),
            email = COALESCE($4, email),
            main_team = COALESCE($5, main_team),
@@ -1380,15 +1747,21 @@ v1.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
     await client.query('BEGIN');
     const deletedUser = await client.query('SELECT name, email, role FROM users WHERE id = $1 FOR UPDATE', [userId]);
     if (deletedUser.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Gebruiker niet gevonden' });
     }
+    // Anonymize audit log before deleting — GDPR: actor_name stays queryable but
+    // is no longer personal data. Must run before DELETE triggers SET NULL on actor_id.
+    await client.query(
+      `UPDATE audit_log SET actor_name = 'Verwijderde gebruiker' WHERE actor_id = $1`,
+      [userId]
+    );
     await client.query('DELETE FROM users WHERE id = $1', [userId]);
     await client.query('COMMIT');
     await logAudit(req, 'DELETE', 'user', userId, { user: deletedUser.rows[0] });
     res.json({ ok: true });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -1410,10 +1783,15 @@ v1.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req
     await logAudit(req, 'UPDATE', 'user', userId, { action: 'password_reset' });
     // Send password reset email (fire-and-forget)
     const userResult = await pool.query('SELECT name, email FROM users WHERE id = $1', [userId]);
-    if (userResult.rows[0]) {
-      emailService.notifyPasswordReset(userResult.rows[0]);
+    const targetUser = userResult.rows[0];
+    const hasEmail = !!(targetUser?.email);
+    if (hasEmail) {
+      emailService.notifyPasswordReset(targetUser);
     }
-    res.json({ ok: true, newPassword: DEFAULT_RESET_PASSWORD });
+    // Only expose the new password when there is no email address — the admin
+    // must hand it over manually. When an email exists, the user receives it
+    // via email and we never include it in the API response.
+    res.json({ ok: true, ...(hasEmail ? {} : { newPassword: DEFAULT_RESET_PASSWORD }) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -1421,6 +1799,43 @@ v1.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req
 });
 
 // ===== REPLACE EMPLOYEE =====
+
+// Hernoemt een medewerker-ID in een concept-grid van old → new, zónder de
+// dag-van-de-week-indexen (0-6) aan te raken. Vervangt de oude naïeve
+// tekstvervanging die elke dagindex met datzelfde nummer corrumpeerde (#141).
+// Ondersteunt beide layouts:
+//   single-week : { "<empId>": { "0": {...}, "3": {...} }, _pattern: ... }
+//   multi-week  : { _multiWeek: true, "1": { "<empId>": {...} }, ... }
+function remapDraftGridUser(grid, oldId, newId) {
+  if (!grid || typeof grid !== 'object') return { grid, changed: false };
+  const oldKey = String(oldId);
+  const newKey = String(newId);
+  let changed = false;
+
+  // Hernoemt de medewerker-sleutel binnen één employee-laag. Bij een conflict
+  // (newKey bestaat al) mergen we per dag, waarbij de overgedragen (oude)
+  // toewijzingen winnen.
+  const remapEmployeeLayer = (layer) => {
+    if (!layer || typeof layer !== 'object' || !(oldKey in layer)) return layer;
+    const out = { ...layer };
+    const moved = out[oldKey];
+    delete out[oldKey];
+    out[newKey] = (out[newKey] && typeof out[newKey] === 'object' && moved && typeof moved === 'object')
+      ? { ...out[newKey], ...moved }
+      : moved;
+    changed = true;
+    return out;
+  };
+
+  if (grid._multiWeek) {
+    const out = {};
+    for (const [key, val] of Object.entries(grid)) {
+      out[key] = key.startsWith('_') ? val : remapEmployeeLayer(val);
+    }
+    return { grid: out, changed };
+  }
+  return { grid: remapEmployeeLayer(grid), changed };
+}
 
 v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) => {
   const oldUserId = Number(req.params.id);
@@ -1451,11 +1866,11 @@ v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) 
     );
 
     if (oldUserResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Vertrekkende medewerker niet gevonden' });
     }
     if (newUserResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Nieuwe medewerker niet gevonden' });
     }
 
@@ -1507,16 +1922,24 @@ v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) 
       [oldUserId]
     );
 
-    // 4. Update schedule_drafts: replace old user ID with new in grid
-    const oldIdStr = String(oldUserId);
-    const newIdStr = String(newUserId);
-    const draftsUpdateResult = await client.query(
-      `UPDATE schedule_drafts
-       SET grid = replace(grid::text, $1, $2)::jsonb, updated_at = NOW()
-       WHERE grid::text LIKE $3`,
-      ['"' + oldIdStr + '"', '"' + newIdStr + '"', '%"' + oldIdStr + '"%']
+    // 4. Update schedule_drafts: vervang oud medewerker-ID door nieuw in het grid.
+    //    We parsen het grid in code en hernoemen enkel de medewerker-sleutels,
+    //    zodat dag-van-de-week-indexen niet per ongeluk meeveranderen (#141).
+    const draftsResult = await client.query(
+      `SELECT id, grid FROM schedule_drafts WHERE grid::text LIKE $1 FOR UPDATE`,
+      ['%"' + String(oldUserId) + '"%']
     );
-    const draftsUpdated = draftsUpdateResult.rowCount;
+    let draftsUpdated = 0;
+    for (const row of draftsResult.rows) {
+      const { grid: newGrid, changed } = remapDraftGridUser(row.grid, oldUserId, newUserId);
+      if (changed) {
+        await client.query(
+          `UPDATE schedule_drafts SET grid = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+          [JSON.stringify(newGrid), row.id]
+        );
+        draftsUpdated++;
+      }
+    }
 
     // 5. No auto-regeneration — user should re-apply active concept via Rooster Bouwen
 
@@ -1541,7 +1964,7 @@ v1.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) 
       hint: transferShiftsFrom ? null : 'apply_concept'
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Replace user error:', err);
     res.status(500).json({ error: 'Server error bij vervanging' });
   } finally {
@@ -1572,8 +1995,16 @@ v1.post('/admin/test-email', requireAuth, requireRole('admin', 'roosterverantwoo
     if (!process.env.RESEND_API_KEY) {
       return res.status(503).json({ error: 'RESEND_API_KEY is niet geconfigureerd op de server.' });
     }
-    await emailService.notifyTestEmail(user);
-    res.json({ success: true, sentTo: user.email });
+    // #209: hiervoor stond hier alleen `await notifyTestEmail(user)` gevolgd door
+    // een vast success-antwoord. Deze knop is het enige instrument om te
+    // controleren of e-mail werkt, en hij zei altijd ja, ook wanneer Resend de
+    // mail weigerde. Nu antwoorden we op wat er echt gebeurd is.
+    const result = await emailService.notifyTestEmail(user);
+    if (!result || !result.ok) {
+      const reden = (result && result.error) || 'Onbekende fout bij de mailprovider.';
+      return res.status(502).json({ error: 'Testmail versturen mislukt: ' + reden });
+    }
+    res.json({ success: true, sentTo: user.email, messageId: result.id || null });
   } catch (err) {
     res.status(500).json({ error: 'Testmail versturen mislukt: ' + (err.message || 'Onbekende fout') });
   }
@@ -1609,6 +2040,9 @@ v1.post('/shifts', requireAuth, async (req, res) => {
   const { userId, team, date, startTime, endTime, notes, source, isReserve, force } = req.body || {};
   if (!userId || !date || !startTime || !endTime) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
+  }
+  if (!isValidTime(startTime) || !isValidTime(endTime)) {
+    return res.status(400).json({ error: 'Tijdstip moet HH:MM zijn' });
   }
 
   // Permission check: medewerker can only create shifts for themselves
@@ -1665,15 +2099,11 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
   if (!id) {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
-
-  // Permission check: medewerker can only edit own shifts
-  const { role, id: currentUserId } = req.user;
-  if (role === 'medewerker') {
-    const existing = await pool.query('SELECT user_id FROM shifts WHERE id = $1', [id]);
-    if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
-      return res.status(403).json({ error: 'Je kunt alleen je eigen diensten bewerken' });
-    }
+  if ((startTime !== undefined && !isValidTime(startTime)) || (endTime !== undefined && !isValidTime(endTime))) {
+    return res.status(400).json({ error: 'Tijdstip moet HH:MM zijn' });
   }
+
+  const { role, id: currentUserId } = req.user;
 
   // When editing, automatically set source to 'manual' to protect from auto-regeneration
   // Unless explicitly setting to 'auto' (for reset-to-base functionality)
@@ -1685,6 +2115,32 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
       [id]
     );
     const oldShift = oldResult.rows[0] || null;
+
+    // Permission check: medewerker can only edit own shifts.
+    //
+    // #215: deze controle stond hiervoor VÓÓR de try, met een eigen
+    // pool.query. Ging de database onderuit, dan verliet die afwijzing de
+    // handler onafgehandeld en nam Node het proces mee. Nu staat hij binnen de
+    // try, en gebruikt hij de dienst die hier toch al opgehaald wordt, dus het
+    // scheelt ook een query.
+    //
+    // #262: een medewerker mag zijn eigen dienst bewerken, maar hem niet naar
+    // een ander team of naar een andere collega verplaatsen. Het teamveld bleef
+    // in de modal bewerkbaar en de UPDATE hieronder liet zowel team als user_id
+    // ongecontroleerd door, dus iemand kon zichzelf in een ander team schrijven
+    // of zijn dienst aan een collega toewijzen. Daar bestaat 'Dienst afstaan'
+    // voor, met een verzoek dat de ander kan aanvaarden.
+    if (role === 'medewerker' && oldShift) {
+      if (oldShift.userId !== currentUserId) {
+        return res.status(403).json({ error: 'Je kunt alleen je eigen diensten bewerken' });
+      }
+      if (team !== undefined && team !== null && team !== oldShift.team) {
+        return res.status(403).json({ error: 'Je kunt het team van een dienst niet wijzigen' });
+      }
+      if (userId !== undefined && userId !== null && Number(userId) !== Number(oldShift.userId)) {
+        return res.status(403).json({ error: 'Je kunt een dienst niet aan iemand anders toewijzen. Gebruik daarvoor Dienst afstaan.' });
+      }
+    }
 
     // Blokeer verplaatsing naar manueel gesloten datum
     const effectiveDate = date || oldShift?.date;
@@ -1726,8 +2182,23 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Dienst niet gevonden' });
     }
-    await logAudit(req, 'UPDATE', 'shift', id, { before: oldShift, after: result.rows[0] });
-    res.json({ shift: result.rows[0] });
+    // Is de dienst verhuisd naar een andere dag of een andere medewerker, dan
+    // blijft de oorspronkelijke plek leeg achter. Zonder blokkade vult het
+    // concept die bij een volgende toepassing gewoon weer op en staat er
+    // opeens dubbele bezetting. Verslepen in de planning loopt via dit
+    // endpoint, dus dit dekt drag en drop mee.
+    const nieuw = result.rows[0];
+    const verhuisd = oldShift && (
+      String(oldShift.date) !== String(nieuw.date) ||
+      Number(oldShift.userId) !== Number(nieuw.userId)
+    );
+    let blockedOrigin = false;
+    if (verhuisd) {
+      blockedOrigin = await blockDayIfEmpty(pool, oldShift.userId, oldShift.date, req.user.id, 'manual_move');
+    }
+
+    await logAudit(req, 'UPDATE', 'shift', id, { before: oldShift, after: nieuw, blockedOrigin });
+    res.json({ shift: nieuw, blockedOrigin });
   } catch (err) {
     console.error('PUT /shifts/:id error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -1752,45 +2223,56 @@ v1.delete('/shifts/:id', requireAuth, async (req, res) => {
     );
 
     if (shiftResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Shift niet gevonden' });
     }
 
     const shift = shiftResult.rows[0];
     const { role, id: userId, team_id: userTeam } = req.user;
 
-    // AUTO shifts can be deleted by anyone (they're temporary/regenerated)
-    if (shift.source !== 'auto') {
-      // Permission checks for MANUAL shifts based on role
-      if (role === 'admin' || role === 'roosterverantwoordelijke') {
-        // Admin/roosterverantwoordelijke can delete anything
-      } else if (role === 'medewerker') {
-        // Medewerker can only delete own shifts
-        if (shift.user_id !== userId) {
-          await client.query('ROLLBACK');
-          return res.status(403).json({ error: 'Je kunt alleen je eigen diensten verwijderen' });
-        }
-      } else {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
+    // #184: hier stond `if (shift.source !== 'auto')` om deze hele controle
+    // heen. Elke medewerker kon daardoor de auto-dienst van eender welke
+    // collega verwijderen, ook uit een ander team. De redenering was dat
+    // auto-diensten toch opnieuw worden aangemaakt, maar diezelfde handler
+    // maakt hieronder een shift_block aan dat precies dat verhindert. De dag
+    // bleef dus permanent leeg. De rolcontrole geldt nu voor elke dienst,
+    // ongeacht de bron.
+    if (role === 'admin' || role === 'roosterverantwoordelijke') {
+      // Admin en roosterverantwoordelijke mogen elke dienst verwijderen
+    } else if (role === 'medewerker') {
+      // Een medewerker mag alleen zijn eigen dienst verwijderen
+      if (shift.user_id !== userId) {
+        await client.query('ROLLBACK').catch(() => {});
+        return res.status(403).json({ error: 'Je kunt alleen je eigen diensten verwijderen' });
       }
+    } else {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
     }
 
     // Delete the shift (CASCADE handles shift_activities with shift_id set)
     await client.query('DELETE FROM shifts WHERE id = $1', [id]);
     await logAudit(req, 'DELETE', 'shift', id, { shift: { id: shift.id, user_id: shift.user_id, team: shift.team, date: shift.date, source: shift.source } });
 
-    // Create shift block to prevent auto-regeneration
-    // Check if caller wants to skip block creation (for system cleanup operations)
+    // Een manuele verwijdering is een bewuste keuze om die cel leeg te laten.
+    // We leggen dat vast als shift_block zodat het concept de dag bij een
+    // volgende toepassing NIET opnieuw vult (#146, lek 2 — de stille killer).
+    // Systeemopkuis (bv. auto-shifts wissen vóór her-toepassen) geeft
+    // skipBlock=true mee en slaat dit over.
     const skipBlock = req.query.skipBlock === 'true';
-
-    // shift_blocks niet meer nodig — geen achtergrondregeneratie meer
-    // Shift verwijdering is definitief tenzij concept opnieuw wordt toegepast
+    if (!skipBlock) {
+      await client.query(
+        `INSERT INTO shift_blocks (user_id, date, created_by, reason)
+         VALUES ($1, $2::date, $3, 'manual_delete')
+         ON CONFLICT (user_id, date) DO NOTHING`,
+        [shift.user_id, shift.date, userId]
+      );
+    }
 
     await client.query('COMMIT');
     res.json({ ok: true });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('ERROR in DELETE /shifts/:id:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -1889,7 +2371,7 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
     await logAudit(req, 'CREATE', 'shift', '', { action: 'bulk_create', count: createdShifts.length, skipped: skipped.length, overwriteExisting: !!overwriteExisting });
     res.status(201).json({ shifts: createdShifts, count: createdShifts.length, skipped });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('POST /shifts/bulk error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -1969,16 +2451,19 @@ v1.put('/shift-activities/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   const { startTime, endTime, type, description } = req.body || {};
 
-  // Permission check: medewerker can only edit own activities
   const { role, id: currentUserId } = req.user;
-  if (role === 'medewerker') {
-    const existing = await pool.query('SELECT user_id FROM shift_activities WHERE id = $1', [id]);
-    if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
-      return res.status(403).json({ error: 'Je kunt alleen je eigen activiteiten bewerken' });
-    }
-  }
 
   try {
+    // Permission check: medewerker can only edit own activities.
+    // #215: stond hiervoor buiten de try, waardoor een databasestoring hier
+    // een onafgehandelde afwijzing opleverde en het proces meenam.
+    if (role === 'medewerker') {
+      const existing = await pool.query('SELECT user_id FROM shift_activities WHERE id = $1', [id]);
+      if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
+        return res.status(403).json({ error: 'Je kunt alleen je eigen activiteiten bewerken' });
+      }
+    }
+
     const result = await pool.query(`
       UPDATE shift_activities
       SET start_time = COALESCE($1, start_time),
@@ -2004,16 +2489,18 @@ v1.put('/shift-activities/:id', requireAuth, async (req, res) => {
 v1.delete('/shift-activities/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
 
-  // Permission check: medewerker can only delete own activities
   const { role, id: currentUserId } = req.user;
-  if (role === 'medewerker') {
-    const existing = await pool.query('SELECT user_id FROM shift_activities WHERE id = $1', [id]);
-    if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
-      return res.status(403).json({ error: 'Je kunt alleen je eigen activiteiten verwijderen' });
-    }
-  }
 
   try {
+    // Permission check: medewerker can only delete own activities.
+    // #215: zie de PUT hierboven, zelfde reden.
+    if (role === 'medewerker') {
+      const existing = await pool.query('SELECT user_id FROM shift_activities WHERE id = $1', [id]);
+      if (existing.rows.length > 0 && existing.rows[0].user_id !== currentUserId) {
+        return res.status(403).json({ error: 'Je kunt alleen je eigen activiteiten verwijderen' });
+      }
+    }
+
     const result = await pool.query('DELETE FROM shift_activities WHERE id = $1 RETURNING id', [id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Activiteit niet gevonden' });
@@ -2072,16 +2559,42 @@ v1.post('/availability', requireAuth, async (req, res) => {
 
 
   try {
+    // #203: dit is een upsert op (gebruiker, datum), dus een bestaande
+    // registratie werd stilzwijgend vervangen. Wie ergens 'vrij' stond met
+    // reden 'Vaste vrije dag' werd zonder melding 'ziek', het antwoord was
+    // 201 Created voor wat in feite een overschrijving was, en de audit log
+    // hield alleen de nieuwe waarde bij. Achteraf was dus niet meer na te gaan
+    // wat er stond. Eén afwezigheid per persoon per dag blijft de regel, maar
+    // de vervanging moet zichtbaar zijn en een spoor nalaten.
+    //
+    // De CTE leest de oude rij op de snapshot van vóór de insert, dus dit
+    // blijft één atomaire opdracht.
     const result = await pool.query(`
+      WITH vorige AS (
+        SELECT type, reason FROM availability WHERE user_id = $1 AND date = $2::date
+      )
       INSERT INTO availability (user_id, date, type, reason, updated_at)
       VALUES ($1, $2, $3, $4, NOW())
       ON CONFLICT (user_id, date)
       DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
-      RETURNING id, user_id as "userId", date::text as date, type, reason, updated_at as "updatedAt"
+      RETURNING id, user_id as "userId", date::text as date, type, reason, updated_at as "updatedAt",
+                (SELECT type FROM vorige) as "previousType",
+                (SELECT reason FROM vorige) as "previousReason"
     `, [userId, date, type, reason || '']);
 
-    await logAudit(req, 'CREATE', 'availability', result.rows[0].id, { availability: result.rows[0] });
-    res.status(201).json({ availability: result.rows[0] });
+    const row = result.rows[0];
+    const previousType = row.previousType;
+    const wasOverwrite = previousType !== null && previousType !== undefined;
+    const previous = wasOverwrite ? { type: previousType, reason: row.previousReason || '' } : null;
+
+    const availability = {
+      id: row.id, userId: row.userId, date: row.date,
+      type: row.type, reason: row.reason, updatedAt: row.updatedAt
+    };
+
+    await logAudit(req, wasOverwrite ? 'UPDATE' : 'CREATE', 'availability', availability.id,
+      wasOverwrite ? { availability, previous } : { availability });
+    res.status(wasOverwrite ? 200 : 201).json({ availability, previous });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -2148,9 +2661,22 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
     }
 
     if (dates.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Geen geldige datums in bereik' });
     }
+
+    // #203: lees eerst wat er al staat, zodat een overschrijving niet
+    // spoorloos is. Zie de toelichting bij POST /availability. Dit gebeurt in
+    // dezelfde transactie, dus de waarden kloppen met wat er zo meteen
+    // vervangen wordt.
+    const vorigeResult = await client.query(
+      `SELECT date::text as date, type, reason FROM availability
+       WHERE user_id = $1 AND date = ANY($2::date[])`,
+      [userId, dates]
+    );
+    const overwritten = vorigeResult.rows.filter(
+      r => r.type !== type || (r.reason || '') !== (reason || '')
+    );
 
     // 2. Upsert availability for each date
     const availability = [];
@@ -2213,12 +2739,13 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
     await client.query('COMMIT');
 
     // Audit log (outside transaction)
-    await logAudit(req, 'CREATE', 'availability', '', {
+    await logAudit(req, overwritten.length > 0 ? 'UPDATE' : 'CREATE', 'availability', '', {
       type: 'bulk_sick_with_takeover',
       userId, startDate, endDate, absenceType: type,
       daysCreated: dates.length,
       takeoverRequestsCreated: takeoverCount,
-      conflictingShifts: conflictingShiftCount
+      conflictingShifts: conflictingShiftCount,
+      overwritten
     });
 
     // Email notification to managers (fire-and-forget)
@@ -2242,10 +2769,11 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
     res.status(201).json({
       availability,
       takeoverRequests: takeoverCount,
-      conflictingShifts: conflictingShiftCount
+      conflictingShifts: conflictingShiftCount,
+      overwritten
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('POST /availability/sick-with-takeover error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -2516,7 +3044,7 @@ v1.post('/swap-requests', requireAuth, async (req, res) => {
 // Target approval endpoints
 v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
   const swapId = req.params.id;
-  const { responseNotes } = req.body;
+  const { responseNotes, force } = req.body;
   const { id: currentUserId } = req.user;
 
   const client = await pool.connect();
@@ -2527,9 +3055,9 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     // Fetch swap request met shifts info (FOR UPDATE locks rows to prevent concurrent modification)
     const swapResult = await client.query(
       `SELECT sr.*,
-              s1.user_id as requester_current_user, s1.team as requester_team, s1.date as requester_date,
+              s1.user_id as requester_current_user, s1.team as requester_team, s1.date::text as requester_date,
               s1.start_time as requester_start, s1.end_time as requester_end,
-              s2.user_id as target_current_user, s2.team as target_team, s2.date as target_date,
+              s2.user_id as target_current_user, s2.team as target_team, s2.date::text as target_date,
               s2.start_time as target_start, s2.end_time as target_end
        FROM shift_swap_requests sr
        JOIN shifts s1 ON sr.requester_shift_id = s1.id
@@ -2540,7 +3068,7 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     );
 
     if (swapResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Swap request niet gevonden' });
     }
 
@@ -2548,31 +3076,68 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
 
     // Verify status is pending
     if (swap.status !== 'pending') {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Swap request is al verwerkt' });
     }
 
     // Permission check: only target user can approve
     if (swap.target_user_id !== currentUserId) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(403).json({ error: 'Alleen de doelpersoon kan dit ruilverzoek accepteren' });
     }
 
     // Verify shift ownership hasn't changed since swap was created
     if (swap.requester_current_user !== swap.requester_user_id || swap.target_current_user !== swap.target_user_id) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Een van de diensten is inmiddels hertoegewezen. Dit ruilverzoek is niet meer geldig.' });
     }
 
     // Verify shifts not in past
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    const requesterDate = new Date(swap.requester_date);
-    const targetDate = new Date(swap.target_date);
+    const requesterDate = parseLocalDate(swap.requester_date);
+    const targetDate = parseLocalDate(swap.target_date);
 
     if (requesterDate < now || targetDate < now) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Shifts zijn al voorbij' });
+    }
+
+    // #202: een ruil ging tot nu toe volledig langs de roosterregels heen. De
+    // shifts wisselden van eigenaar zonder te controleren of de nieuwe eigenaar
+    // die dag al werkt of te weinig rust overhoudt. Dezelfde dienst via
+    // POST /shifts aanmaken wordt wel geweigerd, dus de ruil was een sluipweg
+    // om de overlapcontrole en de 11-uur regel te omzeilen.
+    //
+    // Elke medewerker staat zijn eigen dienst af, dus die telt niet mee als
+    // conflict: hij wordt uitgesloten via excludeId.
+    //
+    // force=true slaat, net als bij POST /shifts en PUT /shifts/:id, ALLEEN de
+    // 11-uur rust over en nooit de overlap. De frontend zet die vlag pas nadat
+    // de gebruiker de melding heeft gezien en bevestigd heeft.
+    const requesterShift = { date: swap.requester_date, start_time: swap.requester_start, end_time: swap.requester_end };
+    const targetShift = { date: swap.target_date, start_time: swap.target_start, end_time: swap.target_end };
+
+    const targetCheck = await validateShiftRules(client, swap.target_user_id, requesterShift, swap.target_shift_id, !!force);
+    if (!targetCheck.valid) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(422).json({
+        error: `Deze ruil kan niet doorgaan. ${targetCheck.message}`,
+        rule: targetCheck.rule,
+        wie: 'jij',
+        canOverride: targetCheck.rule === 'rest'
+      });
+    }
+
+    const requesterCheck = await validateShiftRules(client, swap.requester_user_id, targetShift, swap.requester_shift_id, !!force);
+    if (!requesterCheck.valid) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(422).json({
+        error: `Deze ruil kan niet doorgaan voor de aanvrager. ${requesterCheck.message}`,
+        rule: requesterCheck.rule,
+        wie: 'aanvrager',
+        canOverride: requesterCheck.rule === 'rest'
+      });
     }
 
     // Execute swap: swap user_ids atomically
@@ -2585,6 +3150,14 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
       `UPDATE shifts SET user_id = $1, source = 'manual' WHERE id = $2`,
       [swap.requester_current_user, swap.target_shift_id]
     );
+
+    // Na de ruil is de dag van de aanvrager leeg, en die van de doelpersoon
+    // ook. Zonder blokkade vult het concept beide bij een volgende toepassing
+    // weer op, en dan werkt iedereen zijn oude én zijn geruilde dienst.
+    // blockDayIfEmpty raakt niets aan als de medewerker die dag toch nog een
+    // dienst heeft, bijvoorbeeld bij een ruil binnen dezelfde dag.
+    await blockDayIfEmpty(client, swap.requester_current_user, swap.requester_date, req.user.id, 'manual_swap');
+    await blockDayIfEmpty(client, swap.target_current_user, swap.target_date, req.user.id, 'manual_swap');
 
     // Update swap request status
     await client.query(
@@ -2600,7 +3173,10 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     );
 
     await client.query('COMMIT');
-    await logAudit(req, 'APPROVE', 'swap_request', swapId, { swap: { requester: swap.requester_user_id, target: swap.target_user_id, type: 'swap' } });
+    await logAudit(req, 'APPROVE', 'swap_request', swapId, {
+      swap: { requester: swap.requester_user_id, target: swap.target_user_id, type: 'swap' },
+      ...(force ? { rusttijdOverruled: true } : {})
+    });
 
     // Email notification (fire-and-forget)
     (async () => {
@@ -2620,7 +3196,7 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
 
     res.json({ ok: true, message: 'Swap geaccepteerd en uitgevoerd' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('PUT /swap-requests/:id/target-approve error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -2649,7 +3225,7 @@ v1.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
     );
 
     if (swapResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Swap request niet gevonden' });
     }
 
@@ -2657,13 +3233,13 @@ v1.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
 
     // Verify status is pending
     if (swap.status !== 'pending') {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Swap request is al verwerkt' });
     }
 
     // Permission check: only target user can reject
     if (swap.target_user_id !== currentUserId) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(403).json({ error: 'Alleen de doelpersoon kan dit ruilverzoek afwijzen' });
     }
 
@@ -2701,7 +3277,7 @@ v1.put('/swap-requests/:id/target-reject', requireAuth, async (req, res) => {
 
     res.json({ ok: true, message: 'Swap afgewezen' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('PUT /swap-requests/:id/target-reject error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -2731,7 +3307,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     );
 
     if (shiftResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Shift niet gevonden' });
     }
 
@@ -2743,7 +3319,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     const isRoosterverantwoordelijke = role === 'roosterverantwoordelijke';
 
     if (!isOwnShift && !isAdmin && !isRoosterverantwoordelijke) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(403).json({ error: 'Je kunt alleen je eigen shifts aanbieden, tenzij je admin of verantwoordelijke bent' });
     }
 
@@ -2753,7 +3329,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     const shiftDate = new Date(shift.date);
 
     if (shiftDate < now) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Shift ligt in het verleden' });
     }
 
@@ -2791,7 +3367,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
 
     res.json({ ok: true, message: 'Open verzoek aangemaakt' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('POST /shift-requests/takeover error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -2801,7 +3377,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
 
 v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
   const requestId = req.params.id;
-  const { responseNotes } = req.body;
+  const { responseNotes, force } = req.body;
   const { id: currentUserId, team_id: acceptorTeam } = req.user;
 
   const client = await pool.connect();
@@ -2811,7 +3387,7 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
 
     // Fetch takeover request with shift info (FOR UPDATE locks rows to prevent concurrent modification)
     const requestResult = await client.query(
-      `SELECT sr.*, s.user_id as current_shift_owner, s.date, s.start_time, s.end_time, s.team
+      `SELECT sr.*, s.user_id as current_shift_owner, s.date::text as date, s.start_time, s.end_time, s.team
        FROM shift_swap_requests sr
        JOIN shifts s ON sr.requester_shift_id = s.id
        WHERE sr.id = $1
@@ -2820,7 +3396,7 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
     );
 
     if (requestResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Verzoek niet gevonden' });
     }
 
@@ -2828,30 +3404,75 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
 
     // Verify it's a takeover request
     if (request.request_type !== 'takeover') {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Dit is geen open verzoek' });
     }
 
     // Verify status is pending
     if (request.status !== 'pending') {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Verzoek is al verwerkt' });
     }
 
     // Verify user is not the requester
     if (request.requester_user_id === currentUserId) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(403).json({ error: 'Je kunt je eigen verzoek niet accepteren' });
+    }
+
+    // #188: de dienst mag intussen niet aan iemand anders zijn toegewezen.
+    // current_shift_owner werd hierboven wel geselecteerd maar nergens gebruikt.
+    // Daardoor kon een oud, nog openstaand overnameverzoek de dienst afpakken
+    // van de collega die hem intussen had gekregen, bijvoorbeeld doordat de
+    // roosterverantwoordelijke het gat zelf had opgevuld. Die collega werd
+    // niets gevraagd en kreeg geen bericht, want de melding gaat naar de
+    // oorspronkelijke aanvrager.
+    //
+    // Het zusterendpoint voor gewone ruilverzoeken doet deze controle al
+    // (zie 'Verify shift ownership hasn't changed' hierboven).
+    if (request.current_shift_owner !== request.requester_user_id) {
+      // Het verzoek kan nooit meer slagen, dus zetten we het meteen op een
+      // eindstatus. Anders blijft de kaart onder 'Actie vereist' staan en
+      // geeft elke klik dezelfde fout, wat precies de val uit #316 is.
+      await client.query(
+        `UPDATE shift_swap_requests SET status = 'expired', responded_at = NOW() WHERE id = $1`,
+        [requestId]
+      );
+      await client.query('COMMIT');
+      return res.status(400).json({
+        error: 'Deze dienst is inmiddels aan iemand anders toegewezen. Dit overnameverzoek is niet meer geldig.'
+      });
     }
 
     // Verify shift is not in the past
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    const shiftDate = new Date(request.date);
+    const shiftDate = parseLocalDate(request.date);
 
     if (shiftDate < now) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Shift ligt in het verleden' });
+    }
+
+    // #202: ook een overname sloeg de roosterregels over. Wie de dienst
+    // overneemt kon er een krijgen die overlapt met zijn eigen dienst, of die
+    // te kort op zijn vorige of volgende dienst volgt. De 11-uur rust is geen
+    // huisregel maar arbeidswetgeving, en dit is juist het scenario waar de
+    // planner het minst naar kijkt: een overname voelt als iets dat de
+    // collega's onderling geregeld hebben.
+    //
+    // force=true slaat, net als bij POST /shifts en PUT /shifts/:id, ALLEEN de
+    // 11-uur rust over en nooit de overlap. De frontend zet die vlag pas nadat
+    // de gebruiker de melding heeft gezien en bevestigd heeft.
+    const takeoverShift = { date: request.date, start_time: request.start_time, end_time: request.end_time };
+    const acceptorCheck = await validateShiftRules(client, currentUserId, takeoverShift, null, !!force);
+    if (!acceptorCheck.valid) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(422).json({
+        error: `Je kunt deze dienst niet overnemen. ${acceptorCheck.message}`,
+        rule: acceptorCheck.rule,
+        canOverride: acceptorCheck.rule === 'rest'
+      });
     }
 
     // Assign shift to acceptor, keep original team (don't change team on takeover)
@@ -2859,6 +3480,11 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
       `UPDATE shifts SET user_id = $1, source = 'manual' WHERE id = $2`,
       [currentUserId, request.requester_shift_id]
     );
+
+    // De dag van wie de dienst afstond is nu leeg. Zonder blokkade vult het
+    // concept die opnieuw op en werkt hij alsnog de dienst die hij net had
+    // weggegeven, terwijl de collega hem ook heeft.
+    await blockDayIfEmpty(client, request.requester_user_id, request.date, req.user.id, 'manual_takeover');
 
     // Update request status
     await client.query(
@@ -2875,7 +3501,10 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
     );
 
     await client.query('COMMIT');
-    await logAudit(req, 'APPROVE', 'swap_request', requestId, { type: 'takeover', requester: request.requester_user_id, acceptedBy: currentUserId });
+    await logAudit(req, 'APPROVE', 'swap_request', requestId, {
+      type: 'takeover', requester: request.requester_user_id, acceptedBy: currentUserId,
+      ...(force ? { rusttijdOverruled: true } : {})
+    });
 
     // Email notification to original owner (fire-and-forget)
     (async () => {
@@ -2895,7 +3524,7 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
 
     res.json({ ok: true, message: 'Shift overgenomen' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('PUT /shift-requests/:id/takeover-accept error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -3221,12 +3850,18 @@ v1.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'ro
     await client.query('BEGIN');
 
     // 1. Load draft
+    // last_applied_until wordt hieronder overschreven met endDate, dus we lezen
+    // de oorspronkelijke waarde hier uit: die is de bovengrens voor diensten
+    // van vóór migratie 037, die nog geen draft_id dragen.
     const draftResult = await client.query(
-      'SELECT id, name, grid, team_filter FROM schedule_drafts WHERE id = $1 FOR UPDATE',
+      `SELECT id, name, grid, team_filter,
+              last_applied_from::text  as "lastAppliedFrom",
+              last_applied_until::text as "lastAppliedUntil"
+       FROM schedule_drafts WHERE id = $1 FOR UPDATE`,
       [req.params.id]
     );
     if (draftResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Concept niet gevonden' });
     }
 
@@ -3240,36 +3875,89 @@ v1.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'ro
     );
 
     // 3. Collect user IDs from grid
+    //
+    // #213: er bestaan twee vormen van een conceptraster, en de sleutels staan
+    // er precies omgekeerd in:
+    //   single-week : { "<empId>": { "0": {...} }, _pattern: ... }
+    //   multi-week  : { _multiWeek: true, "1": { "<empId>": {...} } }
+    //
+    // Deze lus nam blind het TWEEDE niveau als medewerker-id. Bij een
+    // single-week raster leverde dat de dagnummers 0 tot 6 op, die daarna als
+    // gebruikers-id's de verwijdering in gingen. apply doet die controle wel
+    // (isMultiWeek), deactivate niet. Nu allebei.
+    const isMultiWeek = !!grid._multiWeek;
     const userIds = new Set();
-    for (const [key, weekGrid] of Object.entries(grid)) {
-      if (key.startsWith('_')) continue;
-      if (typeof weekGrid === 'object' && weekGrid !== null) {
-        Object.keys(weekGrid).forEach(id => { const n = parseInt(id); if (!isNaN(n)) userIds.add(n); });
+    const onthoud = (id) => { const n = parseInt(id); if (!isNaN(n)) userIds.add(n); };
+
+    if (isMultiWeek) {
+      // Bovenste niveau is het weeknummer, daaronder staan de medewerkers.
+      for (const [key, weekGrid] of Object.entries(grid)) {
+        if (key.startsWith('_')) continue;
+        if (typeof weekGrid === 'object' && weekGrid !== null) {
+          Object.keys(weekGrid).forEach(onthoud);
+        }
+      }
+    } else {
+      // Bovenste niveau is de medewerker zelf.
+      for (const key of Object.keys(grid)) {
+        if (key.startsWith('_')) continue;
+        onthoud(key);
       }
     }
 
+    // 4. Verwijder de diensten van DIT concept na endDate.
+    //
+    // #185: hier stond `user_id = ANY($1) AND date > $2`, zonder bovengrens en
+    // zonder koppeling met het concept. Het uitplannen van een paasconcept van
+    // twee weken wiste daardoor het volledige toekomstige rooster van iedereen
+    // die erin stond, inclusief diensten die een heel ander concept had gemaakt.
+    // Sinds migratie 037 draagt elke gegenereerde dienst een draft_id, dus we
+    // kunnen precies zijn.
     let shiftsDeleted = 0;
-    if (userIds.size > 0) {
-      const userIdArray = Array.from(userIds);
-      // Delete auto-generated shifts after endDate for these users
-      // source='auto' marks auto-generated shifts
-      let deleteQuery;
-      if (deleteManual) {
-        deleteQuery = 'DELETE FROM shifts WHERE user_id = ANY($1) AND date > $2';
-      } else {
-        deleteQuery = "DELETE FROM shifts WHERE user_id = ANY($1) AND date > $2 AND source = 'auto'";
+    const byDraft = await client.query(
+      `DELETE FROM shifts WHERE draft_id = $1 AND date > $2::date`,
+      [req.params.id, endDate]
+    );
+    shiftsDeleted += byDraft.rowCount;
+
+    // Diensten van vóór migratie 037 hebben geen draft_id. Die kunnen we niet
+    // exact toewijzen, dus blijven we binnen wat dit concept aantoonbaar
+    // besloeg: zijn eigen toepassingsbereik, zijn eigen medewerkers en zijn
+    // eigen teamfilter. Nooit verder.
+    //
+    // Beide grenzen zijn nodig. Alleen bovenaan begrenzen is niet genoeg: een
+    // paasconcept dat enkel 5 t/m 18 april 2027 besloeg wiste bij een endDate
+    // van 31 augustus 2026 anders alsnog alle diensten uit september 2026, die
+    // onmogelijk van dat concept konden komen.
+    //
+    // Is het concept nog nooit toegepast, dan heeft het ook niets gegenereerd
+    // en gebeurt hier niets.
+    const legacyFrom = draft.lastAppliedFrom;
+    const legacyUntil = draft.lastAppliedUntil;
+    if (userIds.size > 0 && legacyFrom && legacyUntil && legacyUntil > endDate) {
+      const params = [Array.from(userIds), endDate, legacyFrom, legacyUntil];
+      let legacyQuery = `DELETE FROM shifts
+        WHERE draft_id IS NULL
+          AND user_id = ANY($1::int[])
+          AND date > $2::date
+          AND date >= $3::date AND date <= $4::date`;
+      if (!deleteManual) legacyQuery += ` AND source = 'auto'`;
+      if (draft.team_filter) {
+        params.push(draft.team_filter);
+        legacyQuery += ` AND team = $${params.length}`;
       }
-      const result = await client.query(deleteQuery, [userIdArray, endDate]);
-      shiftsDeleted = result.rowCount;
+      const legacy = await client.query(legacyQuery, params);
+      shiftsDeleted += legacy.rowCount;
     }
 
     await client.query('COMMIT');
     await logAudit(req, 'UPDATE', 'settings', req.params.id, {
-      action: 'deactivate', endDate, shiftsDeleted, draftName: draft.name
+      action: 'deactivate', endDate, shiftsDeleted, draftName: draft.name,
+      scopedFrom: legacyFrom || null, scopedUntil: legacyUntil || null
     });
     res.json({ ok: true, shiftsDeleted });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('POST /schedule-drafts/:id/deactivate error:', err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -3289,13 +3977,14 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
     // 1. Load draft with FOR UPDATE lock
     const draftResult = await client.query(
-      `SELECT id, name, week_number, team_filter, grid, created_by, valid_from, valid_until, type, holiday_period_id
+      `SELECT id, name, week_number, team_filter, grid, created_by, valid_from, valid_until, type, holiday_period_id,
+              last_applied_from::text AS last_applied_from
        FROM schedule_drafts WHERE id = $1 FOR UPDATE`,
       [draftId]
     );
 
     if (draftResult.rows.length === 0) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(404).json({ error: 'Concept niet gevonden' });
     }
 
@@ -3349,14 +4038,14 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
     // Vakantieconcept: force date-range mode from holiday period dates
     if (isVakantie) {
       if (!draft.holiday_period_id) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK').catch(() => {});
         return res.status(400).json({ error: 'Vakantieconcept heeft geen gekoppelde vakantieperiode' });
       }
       const hpResult = await client.query(`SELECT value FROM settings WHERE key = 'holidayPeriods'`);
       const holidayPeriods = hpResult.rows.length > 0 ? (hpResult.rows[0].value || []) : [];
       const linkedPeriod = holidayPeriods.find(p => String(p.id) === String(draft.holiday_period_id));
       if (!linkedPeriod) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK').catch(() => {});
         return res.status(400).json({ error: 'Gekoppelde vakantieperiode niet gevonden' });
       }
       effectiveStartDate = linkedPeriod.startDate;
@@ -3365,13 +4054,13 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
     // Date range is verplicht — concepten hebben altijd een van/tot datum
     if (!effectiveStartDate || !effectiveEndDate) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Start- en einddatum zijn verplicht bij concept toepassen' });
     }
 
     // Validate date range
     if (effectiveStartDate >= effectiveEndDate) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Startdatum moet voor einddatum liggen' });
     }
 
@@ -3393,7 +4082,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
         [draftId, effectiveStartDate, effectiveEndDate]
       );
       if (overlapping.rows.length > 0) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK').catch(() => {});
         return res.json({
           needsOverlapConfirmation: true,
           overlappingDrafts: overlapping.rows.map(d => ({
@@ -3407,21 +4096,18 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       }
     }
 
-    // 2b. Handmatige wijzigingen detectie (niet voor vakantieconcepten)
-    if (effectiveConfirmOverwrite === null) {
+    // 2b. Tel manuele shifts in het bereik voor het succesrapport.
+    //     Manuele shifts worden standaard NIET verwijderd (enkel source='auto'),
+    //     dus er is geen bevestigingsvraag meer nodig — de teller gaat mee
+    //     in het eindresultaat zodat de gebruiker ziet wat bewaard is (#146).
+    let preservedManualCount = 0;
+    if (!isVakantie) {
       const manualResult = await client.query(
         `SELECT COUNT(*)::int as count FROM shifts WHERE source = 'manual'
          AND date >= $1::date AND date <= $2::date`,
         [effectiveStartDate, effectiveEndDate]
       );
-      const manualCount = manualResult.rows[0].count;
-      if (manualCount > 0) {
-        await client.query('ROLLBACK');
-        return res.json({
-          needsManualConfirmation: true,
-          manualShiftCount: manualCount
-        });
-      }
+      preservedManualCount = manualResult.rows[0].count;
     }
 
     // 2c. Bij bevestiging overlap: inkorten overlappende concepten
@@ -3455,11 +4141,26 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           );
         }
 
-        // Verwijder shifts van het oude concept in de overlappende periode
+        // Verwijder de diensten van het oude concept in de overlappende periode.
+        //
+        // #187: deze DELETE liep van de startdatum van het NIEUWE concept tot de
+        // einddatum van het OUDE, zonder filter op concept of team. Alles voorbij
+        // het bereik van het nieuwe concept werd dus gewist en nooit opnieuw
+        // gevuld, en teams waar het nieuwe concept niets mee te maken heeft
+        // gingen mee. De gebruiker bevestigde het inkorten van een concept, niet
+        // het leegmaken van maanden rooster voor de hele organisatie.
+        //
+        // Nu: alleen de diensten van dít oude concept, en alleen binnen het
+        // bereik dat het nieuwe concept daadwerkelijk gaat vullen. Wat daarbuiten
+        // valt blijft staan en blijft via draft_id beheerbaar met 'uitplannen'.
+        // Oude diensten zonder draft_id raken we hier bewust niet aan: de gewone
+        // bulk-delete verderop dekt het bereik van het nieuwe concept al af, voor
+        // precies de medewerkers en teams die het betreft.
         await client.query(
-          `DELETE FROM shifts WHERE source = 'auto'
-           AND date >= $1::date AND date <= $2::date`,
-          [effectiveStartDate, overlap.last_applied_until]
+          `DELETE FROM shifts
+           WHERE draft_id = $1
+             AND date >= $2::date AND date <= $3::date`,
+          [overlap.id, effectiveStartDate, effectiveEndDate]
         );
       }
     }
@@ -3477,6 +4178,48 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
         if (patternResult.rows[0].value.referenceDate) referenceDate = patternResult.rows[0].value.referenceDate;
       }
     }
+
+    // #211: de backend genereerde vanaf het anker in het concept, en de
+    // frontend zette daarna het globale anker op de maandag van de startdatum.
+    // Die twee liepen uiteen, en of het misging hing zuiver aan de pariteit van
+    // het aantal weken ertussen. Bij een tweewekelijkse cyclus was dat de helft
+    // van de gevallen, en dan stond het hele rooster een cycluspositie
+    // verschoven ten opzichte van wat de bouwer en de planning toonden.
+    //
+    // Eén anker dus. Bij de EERSTE toepassing wordt dat de maandag van de
+    // startdatum, want dat is wat de bouwer belooft: de week waar je begint is
+    // week 1. Bij een volgende toepassing blijft het staande anker gelden, ook
+    // als je maar een deel van de periode opnieuw toepast, zodat de fase niet
+    // verspringt ten opzichte van wat er al gepland staat.
+    //
+    // Vakantieconcepten hebben hier niets mee te maken: die nummeren
+    // vakantie-relatief en schrijven bewust geen schedulePattern weg.
+    if (!isVakantie) {
+      const eerdersToegepast = !!draft.last_applied_from;
+      if (!eerdersToegepast) {
+        referenceDate = formatDateYYYYMMDD(getMonday(parseLocalDate(effectiveStartDate)));
+      }
+      // Vastleggen in het concept, zodat het anker niet meer kan wegdrijven en
+      // de frontend precies dit kan publiceren in plaats van zelf te rekenen.
+      if (rawGrid._pattern && rawGrid._pattern.referenceDate !== referenceDate) {
+        await client.query(
+          `UPDATE schedule_drafts
+              SET grid = jsonb_set(grid, '{_pattern,referenceDate}', to_jsonb($1::text), true),
+                  updated_at = NOW()
+            WHERE id = $2`,
+          [referenceDate, draftId]
+        );
+        rawGrid._pattern.referenceDate = referenceDate;
+      }
+    }
+
+    // Gesloten dagen per week uit het patroon van het concept (0=zo … 6=za)
+    const patternClosedDays = {};
+    Object.entries(rawGrid._pattern?.weeks || {}).forEach(([w, cfg]) => {
+      if (Array.isArray(cfg?.closedDays)) patternClosedDays[w] = cfg.closedDays;
+    });
+    let closedDaySkips = 0;
+    let conceptClosedCount = 0;
 
     let appliedCount = 0;
     let totalCreated = 0;
@@ -3501,6 +4244,10 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
     for (const { weekNumber, grid } of weeksToApply) {
       gridByWeek[weekNumber] = grid;
     }
+
+    // Wie er echt in het conceptraster staat. Wordt in het blok hieronder gevuld
+    // en daarna hergebruikt door de week_schedules-sync (#186).
+    let empsInDraftForSync = [];
 
     // ===== GENERATE SHIFTS FROM DRAFT GRID =====
     {
@@ -3560,6 +4307,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           weekGrid && (weekGrid[String(emp.id)] || weekGrid[emp.id])
         )
       );
+      empsInDraftForSync = empsInDraft;
 
       // ===== BULK DELETE: employees IN draft =====
       if (empsInDraft.length > 0) {
@@ -3575,11 +4323,28 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
         }
         const bulkDeleteResult = await client.query(bulkDeleteQuery, bulkDeleteParams);
         totalDeleted += bulkDeleteResult.rowCount;
+
+        // Bij een expliciete "overschrijf alles" (incl. vakantie) wist de
+        // gebruiker bewust het hele venster terug naar het concept — dan
+        // vervallen ook de manuele leegmakingen (#146). In de veilige
+        // standaardmodus blijven blocks staan zodat manuele intentie wint.
+        if (effectiveConfirmOverwrite === true) {
+          let blockDelQuery = `DELETE FROM shift_blocks WHERE user_id = ANY($1::int[]) AND date >= $2::date AND date <= $3::date`;
+          const blockDelParams = [empIds, startStr, endStr];
+          if (vakantieSkipRanges.length > 0) {
+            vakantieSkipRanges.forEach((r) => {
+              blockDelQuery += ` AND NOT (date >= $${blockDelParams.length + 1}::date AND date <= $${blockDelParams.length + 2}::date)`;
+              blockDelParams.push(r.start, r.end);
+            });
+          }
+          await client.query(blockDelQuery, blockDelParams);
+        }
       }
 
-      // ===== BULK SELECT: occupied dates and absences for employees IN draft =====
+      // ===== BULK SELECT: occupied dates, absences and blocks for employees IN draft =====
       const occupiedByEmp = {};
       const absencesByEmp = {};
+      const blockedByEmp = {};
       if (empsInDraft.length > 0) {
         const empIds = empsInDraft.map(e => e.id);
         const occupiedResult = await client.query(
@@ -3598,6 +4363,16 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           if (!absencesByEmp[row.user_id]) absencesByEmp[row.user_id] = new Set();
           absencesByEmp[row.user_id].add(row.date);
         }
+        // Manueel leeggemaakte cellen (#146): een block betekent "mens koos
+        // bewust om deze dag leeg te laten" → concept vult hem niet opnieuw.
+        const blocksResult = await client.query(
+          `SELECT user_id, date::text as date FROM shift_blocks WHERE user_id = ANY($1::int[]) AND date >= $2::date AND date <= $3::date`,
+          [empIds, startStr, endStr]
+        );
+        for (const row of blocksResult.rows) {
+          if (!blockedByEmp[row.user_id]) blockedByEmp[row.user_id] = new Set();
+          blockedByEmp[row.user_id].add(row.date);
+        }
       }
 
       // ===== COMPUTE SHIFTS TO INSERT (pure JS, no DB calls) =====
@@ -3605,6 +4380,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       for (const emp of empsInDraft) {
         const occupiedDates = occupiedByEmp[emp.id] || new Set();
         const absenceDates = absencesByEmp[emp.id] || new Set();
+        const blockedDates = blockedByEmp[emp.id] || new Set();
         let createdCount = 0;
 
         for (let d = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
@@ -3614,15 +4390,26 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
           if (occupiedDates.has(dateStr)) continue;
           if (absenceDates.has(dateStr)) continue;
+          if (blockedDates.has(dateStr)) continue;
           if (closedDatesSet.has(dateStr)) continue;
           if (vakantieSkipRanges.some(r => dateStr >= r.start && dateStr <= r.end)) continue;
 
-          // Calculate cycle week number for this date
+          // Calculate cycle week number for this date.
+          //
+          // Een vakantieconcept telt zijn weken vanaf de eerste maandag van de
+          // vakantie — dat is wat de bouwer toont en wat de mens aanklikt
+          // (getBuilderVakantieWeekStart). De modulo-berekening hieronder gaat
+          // uit van een doorlopende cyclus vanaf een globale referentiedatum,
+          // en die erft een vakantieconcept bij aanmaak. Daardoor kreeg week 1
+          // van bv. de paasvakantie het rooster van week 2, en bij de zomer
+          // schoof het hele rooster op. Basisroosters houden de cyclus.
           const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
-          const diffMs = currMonday.getTime() - refMonday.getTime();
+          const ankerMonday = isVakantie ? getMonday(rangeStart) : refMonday;
+          const diffMs = currMonday.getTime() - ankerMonday.getTime();
           const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
-          const mod = diffWeeks % cycleLength;
-          const weekNumber = (mod < 0 ? mod + cycleLength : mod) + 1;
+          const weekNumber = isVakantie
+            ? diffWeeks + 1
+            : ((diffWeeks % cycleLength) < 0 ? (diffWeeks % cycleLength) + cycleLength : (diffWeeks % cycleLength)) + 1;
 
           const weekGrid = gridByWeek[weekNumber];
           if (!weekGrid) continue;
@@ -3635,6 +4422,16 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           const dayIndex = jsDow === 0 ? 6 : jsDow - 1;
           const assignment = empGrid[String(dayIndex)] || empGrid[dayIndex];
           if (!assignment) continue;
+
+          // Een dag die in de bouwer gesloten is levert geen shift op. Je kan
+          // zo'n dag daar niet invullen, dus een resterende gridcel komt van
+          // vóór het sluiten en is onzichtbaar geworden — die mag niet alsnog
+          // een dienst opleveren. Pas hier tellen, na de cel: anders telt de
+          // teller gesloten dagen in plaats van onderdrukte diensten.
+          if ((patternClosedDays[String(weekNumber)] || []).includes(jsDow)) {
+            closedDaySkips++;
+            continue;
+          }
 
           insertRows.push({
             userId: emp.id,
@@ -3653,16 +4450,27 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
         }
       }
 
-      // ===== BULK INSERT: alle shifts in één query =====
+      // ===== BULK INSERT =====
+      // draft_id legt vast uit welk concept elke dienst komt, zodat uitplannen
+      // en overlap-inkorting precies weten wat ze mogen verwijderen (#185, #187).
+      // Postgres bindt maximaal 65.535 parameters per query, dus in blokken:
+      // een volledig schooljaar met veertig medewerkers zit daar dicht tegenaan.
       if (insertRows.length > 0) {
-        const values = insertRows.map((_, i) =>
-          `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, 'auto', $${i * 6 + 6})`
-        ).join(', ');
-        const params = insertRows.flatMap(r => [r.userId, r.date, r.startTime, r.endTime, r.team, r.isReserve]);
-        await client.query(
-          `INSERT INTO shifts (user_id, date, start_time, end_time, team, source, is_reserve) VALUES ${values}`,
-          params
-        );
+        const COLS = 7;
+        const CHUNK = Math.floor(60000 / COLS);
+        for (let offset = 0; offset < insertRows.length; offset += CHUNK) {
+          const chunk = insertRows.slice(offset, offset + CHUNK);
+          const values = chunk.map((_, i) =>
+            `($${i * COLS + 1}, $${i * COLS + 2}, $${i * COLS + 3}, $${i * COLS + 4}, $${i * COLS + 5}, 'auto', $${i * COLS + 6}, $${i * COLS + 7})`
+          ).join(', ');
+          const params = chunk.flatMap(r => [
+            r.userId, r.date, r.startTime, r.endTime, r.team, r.isReserve, draftId
+          ]);
+          await client.query(
+            `INSERT INTO shifts (user_id, date, start_time, end_time, team, source, is_reserve, draft_id) VALUES ${values}`,
+            params
+          );
+        }
       }
 
       // ===== BULK DELETE: employees NOT in draft (auto-shifts only) =====
@@ -3685,7 +4493,19 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
     }
 
     // 3. Sync week_schedules op users vanuit het concept grid (read-only weergave voor medewerkers)
-    for (const emp of allEmployeesResult.rows) {
+    //
+    // #186: dit liep over ALLE actieve medewerkers en keek niet naar het soort
+    // concept. Een vakantieconcept toepassen verving daardoor het vaste
+    // jaarpatroon van iedereen door het vakantiepatroon, en wie niet in dat
+    // vakantieraster stond raakte zijn basisrooster helemaal kwijt. De oude
+    // waarde stond daarna nergens meer.
+    //
+    // Een vakantieconcept beschrijft een uitzondering van enkele weken, geen
+    // weekpatroon, dus het hoort het basisrooster niet aan te raken. En ook een
+    // basisconcept raakt alleen nog de medewerkers die er echt in staan: wie er
+    // niet in voorkomt houdt wat hij had.
+    const employeesToSync = isVakantie ? [] : empsInDraftForSync;
+    for (const emp of employeesToSync) {
       const allWeeks = [];
       for (let weekNumber = 1; weekNumber <= cycleLength; weekNumber++) {
         const weekGrid = gridByWeek[weekNumber];
@@ -3718,11 +4538,36 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
     // 4. Auto-create vergadering activities from _teamMeetings
     const teamMeetings = rawGrid._teamMeetings || {};
-    // Altijd bestaande auto-vergaderingen verwijderen in dit bereik,
-    // ook als het nieuwe concept geen vergaderingen heeft (zomerconcept)
+
+    // Altijd de eigen vergaderingen van dit concept opruimen in dit bereik, ook
+    // als het nieuwe concept er geen meer heeft (zomerconcept).
+    //
+    // #376: hier stond `DELETE ... WHERE type = 'vergadering' AND date BETWEEN`,
+    // zonder filter op concept, team of medewerker. Dat wiste ook vergaderingen
+    // die iemand met de hand had ingevoerd (dat type staat gewoon in de
+    // keuzelijst van de activiteitenmodal) en die van teams waar het concept
+    // niets mee te maken heeft. Vaak kwam er niets voor terug, want de
+    // regeneratie draait alleen als het concept _teamMeetings heeft.
+    //
+    // Sinds migratie 038 draagt elke gegenereerde vergadering een draft_id, en
+    // daar begrenzen we op. Niets anders wordt aangeraakt.
+    //
+    // Vergaderingen van vóór die migratie hebben geen draft_id, en er is geen
+    // betrouwbare manier om te zien of zo'n rij door een concept is gemaakt of
+    // door iemand met de hand: beide krijgen een shift_id en een vrije
+    // omschrijving. Gokken op de omschrijving zou handmatig werk kunnen wissen,
+    // en dat is precies het probleem dat hier wordt opgelost.
+    //
+    // Gevolg: vergaderingen die vóór deze migratie door een concept zijn
+    // aangemaakt blijven staan, en bij een concept met teamvergaderingen kan er
+    // daardoor één keer een dubbele verschijnen. Die is zichtbaar en met de
+    // hand te verwijderen. Vanaf de eerstvolgende toepassing klopt het vanzelf.
     await client.query(
-      `DELETE FROM shift_activities WHERE type = 'vergadering' AND date >= $1::date AND date <= $2::date`,
-      [effectiveStartDate, effectiveEndDate]
+      `DELETE FROM shift_activities
+        WHERE type = 'vergadering'
+          AND draft_id = $3
+          AND date >= $1::date AND date <= $2::date`,
+      [effectiveStartDate, effectiveEndDate, draftId]
     );
 
     if (Object.keys(teamMeetings).length > 0) {
@@ -3778,22 +4623,59 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
             const fromTime = `${String(fromH).padStart(2, '0')}:${String(fromM).padStart(2, '0')}`;
             const toTime = `${String(toH).padStart(2, '0')}:${String(toM).padStart(2, '0')}`;
 
+            // draft_id legt vast dat deze vergadering uit dit concept komt,
+            // zodat de opruiming hierboven hem later kan onderscheiden van een
+            // handmatig ingevoerde (#376).
             if (shiftIdExists) {
               await client.query(
-                `INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description)
-                 VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering')`,
-                [shift.user_id, shift.id, shift.date, fromTime, toTime]
+                `INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description, draft_id)
+                 VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering', $6)`,
+                [shift.user_id, shift.id, shift.date, fromTime, toTime, draftId]
               );
             } else {
               await client.query(
-                `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description)
-                 VALUES ($1, $2, $3, $4, 'vergadering', 'Teamvergadering')`,
-                [shift.user_id, shift.date, fromTime, toTime]
+                `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description, draft_id)
+                 VALUES ($1, $2, $3, $4, 'vergadering', 'Teamvergadering', $5)`,
+                [shift.user_id, shift.date, fromTime, toTime, draftId]
               );
             }
           }
         }
       }
+    }
+
+    // 3b. Gesloten dagen van een VAKANTIEconcept vastleggen als absolute datums.
+    //
+    // Een basisrooster schrijft zijn patroon naar settings.schedule_pattern en
+    // dan weet isDayClosed() ervan. Een vakantieconcept doet dat bewust niet —
+    // zijn cyclus is vakantie-relatief en zou het jaarpatroon verzieken. Zonder
+    // deze stap wist de planning dus niets van een gesloten vakantiedag: hij
+    // werd niet gearceerd en je kon er gewoon shifts in zetten.
+    //
+    // Ze staan apart van settings.closedDates (dat blijft van de gebruiker):
+    // deze horen bij hun concept en worden bij elke toepassing vervangen.
+    if (isVakantie) {
+      const uitConcept = [];
+      const vakStart = parseLocalDate(effectiveStartDate);
+      const vakEind = parseLocalDate(effectiveEndDate);
+      const vakMonday = getMonday(vakStart);
+      for (let d = new Date(vakStart.getFullYear(), vakStart.getMonth(), vakStart.getDate());
+           d <= vakEind; d.setDate(d.getDate() + 1)) {
+        const currMonday = getMonday(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+        const diffWeeks = Math.round((currMonday.getTime() - vakMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
+        if ((patternClosedDays[String(diffWeeks + 1)] || []).includes(d.getDay())) {
+          uitConcept.push({ date: formatDateYYYYMMDD(d), reason: draft.name, draftId });
+        }
+      }
+      const huidigRes = await client.query(`SELECT value FROM settings WHERE key = 'conceptClosedDates'`);
+      const behouden = (huidigRes.rows[0]?.value || []).filter(c => String(c.draftId) !== String(draftId));
+      const nieuweLijst = [...behouden, ...uitConcept].sort((a, b) => a.date.localeCompare(b.date));
+      await client.query(
+        `INSERT INTO settings (key, value, updated_at) VALUES ('conceptClosedDates', $1::jsonb, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = NOW()`,
+        [JSON.stringify(nieuweLijst)]
+      );
+      conceptClosedCount = uitConcept.length;
     }
 
     // 4. Mark draft as applied (including the date range that was applied)
@@ -3814,6 +4696,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       employeesApplied: appliedCount,
       shiftsCreated: totalCreated,
       shiftsDeleted: totalDeleted,
+      closedDaySkips,
       clearBlocks
     });
 
@@ -3821,11 +4704,21 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       applied: appliedCount,
       shifts: { created: totalCreated, deleted: totalDeleted },
       draftName: draft.name,
-      weekNumbers: appliedWeekNumbers
+      weekNumbers: appliedWeekNumbers,
+      manualShiftsPreserved: preservedManualCount,
+      // Aantal keer dat een gridcel niet is uitgevoerd omdat die dag in het
+      // concept gesloten staat. Zichtbaar maken, niet stil overslaan.
+      closedDaySkips,
+      conceptClosedCount,
+      // #211: het anker waarmee de diensten daadwerkelijk gegenereerd zijn.
+      // De frontend publiceert dit in schedule_pattern in plaats van er zelf
+      // een te berekenen, zodat rooster en weergave dezelfde fase aanhouden.
+      referenceDate,
+      cycleLength
     });
 
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('POST /schedule-drafts/:id/apply error:', err);
     res.status(500).json({ error: 'Server error bij concept toepassen', detail: err.message, code: err.code });
   } finally {
@@ -3888,126 +4781,741 @@ v1.get('/audit-log', requireAuth, requireRole('admin', 'roosterverantwoordelijke
 
 // ===== DATA IMPORT API =====
 
+// Backup terugzetten.
+//
+// Draait in één transactie, met een SAVEPOINT per item (#214). Zonder
+// transactie bleef bij een halverwege afgebroken import de helft staan.
+// De savepoints houden het bestaande gedrag intact: een rij die niet
+// deugt wordt overgeslagen en gemeld, de rest gaat gewoon door. Zonder
+// savepoint zou de eerste fout de hele transactie in aborted-toestand
+// zetten en zou alles erna alsnog falen.
 v1.post('/import', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { users, shifts, availability, settings } = req.body || {};
   const results = { imported: 0, skipped: 0, errors: [] };
+  const isAdmin = req.user.role === 'admin';
 
-  // Import users (with schedule data)
-  if (Array.isArray(users)) {
-    for (const user of users) {
-      try {
-        // Validate team exists if specified
-        let mainTeam = user.mainTeam || null;
-        if (mainTeam) {
-          const teamCheck = await pool.query('SELECT id FROM teams WHERE id = $1', [mainTeam]);
-          if (teamCheck.rows.length === 0) {
-            mainTeam = null;
+  const client = await pool.connect();
+  // Voert één item uit binnen een savepoint. Faalt het, dan rolt alleen dat
+  // item terug en blijft de transactie bruikbaar voor de volgende.
+  async function perItem(label, fn) {
+    await client.query('SAVEPOINT item');
+    try {
+      await fn();
+      await client.query('RELEASE SAVEPOINT item');
+      results.imported++;
+    } catch (err) {
+      await client.query('ROLLBACK TO SAVEPOINT item').catch(() => {});
+      results.errors.push({ ...label, error: err.message });
+      results.skipped++;
+    }
+  }
+
+  try {
+    await client.query('BEGIN');
+
+    // Import users (with schedule data)
+    if (Array.isArray(users)) {
+      // Eén keer hashen voor nieuwe users — voorkomt timeout bij bulk-import
+      // op beperkte CPU (bv. gratis Render plan). Bestaande users worden
+      // geüpdatet zonder nieuw wachtwoord; nieuwe krijgen dit hash (#staging).
+      const defaultPasswordHash = users.some(u => u.email) ? await bcrypt.hash(DEFAULT_RESET_PASSWORD, 12) : null;
+
+      for (const user of users) {
+        await perItem({ name: user.name }, async () => {
+          // Validate team exists if specified
+          let mainTeam = user.mainTeam || null;
+          if (mainTeam) {
+            const teamCheck = await client.query('SELECT id FROM teams WHERE id = $1', [mainTeam]);
+            if (teamCheck.rows.length === 0) mainTeam = null;
           }
-        }
 
-        // Check if user already exists (by email)
-        const existing = await pool.query('SELECT id FROM users WHERE email = $1', [user.email?.toLowerCase()]);
-        if (existing.rows.length > 0) {
-          // Update existing user's schedule data
           const week1Json = JSON.stringify(user.weekScheduleWeek1 || []);
           const week2Json = JSON.stringify(user.weekScheduleWeek2 || []);
           const wsJson = Array.isArray(user.weekSchedules) && user.weekSchedules.length > 0
             ? JSON.stringify(user.weekSchedules)
             : JSON.stringify([user.weekScheduleWeek1 || [], user.weekScheduleWeek2 || []]);
 
-          await pool.query(`
-            UPDATE users SET
-              name = $1,
-              main_team = $2,
-              contract_hours = $3,
-              active = $4,
-              week_schedule_week1 = $5::jsonb,
-              week_schedule_week2 = $6::jsonb,
-              week_schedules = $7::jsonb
-            WHERE email = $8
-          `, [
-            user.name,
-            mainTeam,
-            user.contractHours || 0,
-            user.active !== false,
-            week1Json,
-            week2Json,
-            wsJson,
-            user.email.toLowerCase()
-          ]);
-          results.imported++;
-        } else if (user.email) {
-          // Create new user with default password
-          const passwordHash = await bcrypt.hash(DEFAULT_RESET_PASSWORD, 12);
-          const week1Json = JSON.stringify(user.weekScheduleWeek1 || []);
-          const week2Json = JSON.stringify(user.weekScheduleWeek2 || []);
-          const wsJson = Array.isArray(user.weekSchedules) && user.weekSchedules.length > 0
-            ? JSON.stringify(user.weekSchedules)
-            : JSON.stringify([user.weekScheduleWeek1 || [], user.weekScheduleWeek2 || []]);
+          const existing = await client.query(
+            'SELECT id, role, active FROM users WHERE email = $1',
+            [user.email?.toLowerCase()]
+          );
 
-          await pool.query(`
-            INSERT INTO users (name, email, password_hash, role, team_id, main_team, contract_hours, active, week_schedule_week1, week_schedule_week2, week_schedules)
-            VALUES ($1, $2, $3, 'medewerker', $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)
-          `, [
-            user.name,
-            user.email.toLowerCase(),
-            passwordHash,
-            mainTeam,
-            mainTeam,
-            user.contractHours || 0,
-            user.active !== false,
-            week1Json,
-            week2Json,
-            wsJson
-          ]);
-          results.imported++;
-        } else {
-          results.skipped++;
-          results.errors.push({ name: user.name, error: 'Email is required' });
-        }
-      } catch (err) {
-        console.error(`Error importing ${user.name}:`, err.message);
-        results.errors.push({ name: user.name, error: err.message });
-        results.skipped++;
+          if (existing.rows.length > 0) {
+            const huidig = existing.rows[0];
+
+            // #200: de import werkte ook `active` bij, en stond open voor een
+            // roosterverantwoordelijke. Die kon daarmee het adminaccount
+            // deactiveren en zichzelf de hoogste autoriteit maken, terwijl de
+            // rollentabel zegt: geen accountbeheer. Alleen een admin mag de
+            // actief-vlag nog zetten; voor de rest blijft die ongemoeid.
+            const nieuwActief = isAdmin ? (user.active !== false) : huidig.active;
+
+            // Het laatste actieve adminaccount mag door niemand worden
+            // uitgeschakeld, ook niet door een andere admin. Anders sluit de
+            // organisatie zichzelf buiten en is er geen weg terug via de app.
+            if (huidig.role === 'admin' && huidig.active && nieuwActief === false) {
+              const anderen = await client.query(
+                `SELECT COUNT(*)::int AS n FROM users
+                 WHERE role = 'admin' AND active = true AND id != $1`,
+                [huidig.id]
+              );
+              if (anderen.rows[0].n === 0) {
+                throw new Error('Het laatste actieve beheerdersaccount kan niet gedeactiveerd worden');
+              }
+            }
+
+            // #214: team_id ontbrak hier, terwijl main_team wel werd
+            // bijgewerkt. Een backup die iemand van team verandert liet die
+            // twee scheef achter, en dan wijst de app hem in het ene team aan
+            // terwijl de autorisatie hem nog in het andere plaatst
+            // (CLAUDE.md regel 2). De import is juist het herstelpad, dus dat
+            // is de slechtst denkbare plek om rechten stuk te maken.
+            await client.query(`
+              UPDATE users SET
+                name = $1,
+                main_team = $2,
+                team_id = $2,
+                contract_hours = $3,
+                active = $4,
+                week_schedule_week1 = $5::jsonb,
+                week_schedule_week2 = $6::jsonb,
+                week_schedules = $7::jsonb
+              WHERE email = $8
+            `, [
+              user.name, mainTeam, user.contractHours || 0, nieuwActief,
+              week1Json, week2Json, wsJson, user.email.toLowerCase()
+            ]);
+          } else if (user.email) {
+            // Create new user with default password (hash berekend vóór de loop).
+            // De rol staat vast op 'medewerker': een import mag geen beheerders
+            // aanmaken, ook niet als het bestand dat beweert (#200).
+            await client.query(`
+              INSERT INTO users (name, email, password_hash, role, team_id, main_team, contract_hours, active, week_schedule_week1, week_schedule_week2, week_schedules)
+              VALUES ($1, $2, $3, 'medewerker', $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)
+            `, [
+              user.name, user.email.toLowerCase(), defaultPasswordHash,
+              mainTeam, mainTeam, user.contractHours || 0,
+              isAdmin ? (user.active !== false) : true,
+              week1Json, week2Json, wsJson
+            ]);
+          } else {
+            throw new Error('Email is required');
+          }
+        });
       }
     }
-  }
 
-  // Import shifts
-  if (Array.isArray(shifts)) {
-    for (const shift of shifts) {
-      try {
-        await pool.query(`
-          INSERT INTO shifts (user_id, team, date, start_time, end_time, notes)
-          VALUES ($1, $2, $3, $4, $5, $6)
-        `, [shift.userId, shift.team || null, shift.date, shift.startTime, shift.endTime, shift.notes || '']);
-        results.imported++;
-      } catch (err) {
-        results.errors.push({ shift: shift.date, error: err.message });
-        results.skipped++;
+    // Import shifts
+    if (Array.isArray(shifts)) {
+      for (const shift of shifts) {
+        await perItem({ shift: shift.date }, async () => {
+          await client.query(`
+            INSERT INTO shifts (user_id, team, date, start_time, end_time, notes)
+            VALUES ($1, $2, $3, $4, $5, $6)
+          `, [shift.userId, shift.team || null, shift.date, shift.startTime, shift.endTime, shift.notes || '']);
+        });
       }
     }
-  }
 
-  // Import availability
-  if (Array.isArray(availability)) {
-    for (const avail of availability) {
-      try {
-        await pool.query(`
-          INSERT INTO availability (user_id, date, type, reason, updated_at)
-          VALUES ($1, $2, $3, $4, NOW())
-          ON CONFLICT (user_id, date) DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
-        `, [avail.userId, avail.date, avail.type, avail.reason || '']);
-        results.imported++;
-      } catch (err) {
-        results.errors.push({ availability: avail.date, error: err.message });
-        results.skipped++;
+    // Import availability
+    if (Array.isArray(availability)) {
+      for (const avail of availability) {
+        await perItem({ availability: avail.date }, async () => {
+          await client.query(`
+            INSERT INTO availability (user_id, date, type, reason, updated_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (user_id, date) DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
+          `, [avail.userId, avail.date, avail.type, avail.reason || '']);
+        });
       }
     }
+
+    // #217: settings werden wel uitgelezen uit de body maar nergens gebruikt.
+    // Wie na een reset een backup terugzette, kreeg zijn vakantieperiodes,
+    // gesloten dagen, roosterregels en dienstsjablonen niet terug, terwijl de
+    // knop wel "backup" heet.
+    //
+    // Een object per sleutel, want zo staat het ook in de settings-tabel.
+    if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
+      for (const [key, value] of Object.entries(settings)) {
+        if (value === undefined) continue;
+        await perItem({ setting: key }, async () => {
+          await client.query(`
+            INSERT INTO settings (key, value, updated_at) VALUES ($1, $2::jsonb, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = $2::jsonb, updated_at = NOW()
+          `, [key, JSON.stringify(value)]);
+        });
+      }
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('POST /import error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 
   await logAudit(req, 'IMPORT', 'system', '', { imported: results.imported, skipped: results.skipped, errorCount: results.errors.length });
   res.json({ ok: true, results });
+});
+
+// ===== VERLOFPLANNING (verlofrondes) =====
+// Vervangt de gedeelde Excel. Twee modi:
+//   'binair'   → kleine vakanties: werken / verlof
+//   'voorkeur' → zomer: werken / liever_niet / zeker_niet
+// De matrix is voor iedereen zichtbaar (zoals de gedeelde Excel), maar
+// invullen mag je enkel voor jezelf — tenzij je de ronde beheert.
+
+const LEAVE_MANAGER_ROLES = ['admin', 'roosterverantwoordelijke'];
+
+// Gesloten dagen van een verlofblok. De frontend leidt ze af uit het
+// vakantieconcept en stuurt ze mee; hier controleren we enkel dat het
+// geldige datums binnen het blok zijn. `undefined`/`null` blijft "onbekend".
+function normalizeClosedDates(waarde, startDate, endDate, blokNaam) {
+  if (waarde === undefined || waarde === null) return { ok: true, value: null };
+  if (!Array.isArray(waarde)) {
+    return { ok: false, error: `Gesloten dagen bij "${blokNaam}" moeten een lijst zijn` };
+  }
+  const uniek = new Set();
+  for (const d of waarde) {
+    if (typeof d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      return { ok: false, error: `Ongeldige gesloten dag bij "${blokNaam}"` };
+    }
+    if (d < startDate || d > endDate) {
+      return { ok: false, error: `Gesloten dag ${d} valt buiten "${blokNaam}"` };
+    }
+    uniek.add(d);
+  }
+  return { ok: true, value: [...uniek].sort() };
+}
+const isLeaveManager = (user) => LEAVE_MANAGER_ROLES.includes(user?.role);
+
+// Kolommen van een ronde. De alias is nodig zodra er gejoind wordt: zowel
+// leave_rounds als leave_round_submissions hebben een kolom `id`.
+const roundSelect = (a = '') => {
+  const p = a ? `${a}.` : '';
+  return `
+  ${p}id, ${p}name, ${p}mode, ${p}start_date::text AS "startDate", ${p}end_date::text AS "endDate",
+  ${p}deadline::text AS deadline, ${p}status, ${p}holiday_period_id AS "holidayPeriodId",
+  ${p}rules, ${p}created_by AS "createdBy", ${p}created_at AS "createdAt", ${p}updated_at AS "updatedAt"`;
+};
+const ROUND_SELECT = roundSelect();
+
+// Alle rondes (iedereen mag ze zien; concepten enkel voor beheerders).
+// Bevat meteen wat de overzichtskaarten nodig hebben, zodat die niet elke
+// ronde apart hoeven op te halen.
+v1.get('/leave-rounds', requireAuth, async (req, res) => {
+  try {
+    const showConcepts = isLeaveManager(req.user);
+    const result = await pool.query(
+      `SELECT ${roundSelect('r')},
+              (SELECT COUNT(*) FROM leave_round_blocks b WHERE b.round_id = r.id)::int AS "blockCount",
+              (SELECT COUNT(*) FROM leave_round_submissions s
+                WHERE s.round_id = r.id AND s.submitted_at IS NOT NULL)::int AS "submittedCount",
+              ms.submitted_at AS "mySubmittedAt",
+              ms.approved     AS "myApproved"
+       FROM leave_rounds r
+       LEFT JOIN leave_round_submissions ms ON ms.round_id = r.id AND ms.user_id = $1
+       ${showConcepts ? '' : `WHERE r.status <> 'concept'`}
+       ORDER BY r.start_date DESC`,
+      [req.user.id]
+    );
+    res.json({ rounds: result.rows });
+  } catch (err) {
+    console.error('Error fetching leave rounds:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Eén ronde met de volledige matrix (alle medewerkers) + indienstatus
+v1.get('/leave-rounds/:id', requireAuth, async (req, res) => {
+  try {
+    const roundRes = await pool.query(`SELECT ${ROUND_SELECT} FROM leave_rounds WHERE id = $1`, [req.params.id]);
+    if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    const round = roundRes.rows[0];
+    if (round.status === 'concept' && !isLeaveManager(req.user)) {
+      return res.status(403).json({ error: 'Deze ronde is nog niet geopend' });
+    }
+
+    const [entries, subs, blocks] = await Promise.all([
+      pool.query(
+        `SELECT user_id AS "userId", date::text AS date, status, note
+         FROM leave_round_entries WHERE round_id = $1`, [req.params.id]),
+      pool.query(
+        `SELECT s.user_id AS "userId", s.submitted_at AS "submittedAt", s.approved,
+                s.approved_by AS "approvedBy", s.approved_at AS "approvedAt",
+                s.response_note AS "responseNote", u.name AS "userName"
+         FROM leave_round_submissions s JOIN users u ON u.id = s.user_id
+         WHERE s.round_id = $1`, [req.params.id]),
+      pool.query(
+        `SELECT id, name, mode, start_date::text AS "startDate", end_date::text AS "endDate",
+                holiday_period_id AS "holidayPeriodId", sort_order AS "sortOrder",
+                closed_dates AS "closedDates", closed_source AS "closedSource"
+         FROM leave_round_blocks WHERE round_id = $1 ORDER BY sort_order, start_date`, [req.params.id]),
+    ]);
+    res.json({ round, blocks: blocks.rows, entries: entries.rows, submissions: subs.rows });
+  } catch (err) {
+    console.error('Error fetching leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Een ronde wordt aangemaakt mét zijn blokken (de vakanties van het
+// schooljaar). De ronde-datums zijn de omhullende van die blokken.
+v1.post('/leave-rounds', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const { name, deadline, rules, status, blocks } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'Naam is verplicht' });
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    return res.status(400).json({ error: 'Kies minstens één vakantieperiode' });
+  }
+  for (const b of blocks) {
+    if (!b || !b.name || !b.startDate || !b.endDate) {
+      return res.status(400).json({ error: 'Elk blok heeft een naam, start- en einddatum nodig' });
+    }
+    if (b.mode && !['binair', 'voorkeur'].includes(b.mode)) {
+      return res.status(400).json({ error: 'Ongeldige modus' });
+    }
+    if (new Date(b.endDate) < new Date(b.startDate)) {
+      return res.status(400).json({ error: `Einddatum ligt voor de startdatum bij "${b.name}"` });
+    }
+    const cd = normalizeClosedDates(b.closedDates, b.startDate, b.endDate, b.name);
+    if (!cd.ok) return res.status(400).json({ error: cd.error });
+    b._closedDates = cd.value;
+  }
+
+  const startDate = blocks.reduce((m, b) => (b.startDate < m ? b.startDate : m), blocks[0].startDate);
+  const endDate   = blocks.reduce((m, b) => (b.endDate   > m ? b.endDate   : m), blocks[0].endDate);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `INSERT INTO leave_rounds (name, mode, start_date, end_date, deadline, status, rules, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+       RETURNING ${ROUND_SELECT}`,
+      [name, blocks[0].mode || 'binair', startDate, endDate, deadline || null,
+       status === 'concept' ? 'concept' : 'open', JSON.stringify(rules || {}), req.user.id]
+    );
+    const round = result.rows[0];
+    let i = 0;
+    for (const b of blocks) {
+      await client.query(
+        `INSERT INTO leave_round_blocks (round_id, name, mode, start_date, end_date, holiday_period_id, sort_order, closed_dates, closed_source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)`,
+        [round.id, b.name, b.mode || 'binair', b.startDate, b.endDate, b.holidayPeriodId || null, i++,
+         b._closedDates === null ? null : JSON.stringify(b._closedDates),
+         JSON.stringify(b._closedDates === null ? {} : (b.closedSource || {}))]
+      );
+    }
+    await client.query('COMMIT');
+    await logAudit(req, 'CREATE', 'settings', String(round.id), { type: 'leave_round', name, blocks: blocks.length });
+    res.json({ round });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error creating leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+v1.put('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const { name, mode, startDate, endDate, deadline, status, holidayPeriodId, rules } = req.body || {};
+  if (status && !['concept', 'open', 'gesloten', 'toegepast'].includes(status)) {
+    return res.status(400).json({ error: 'Ongeldige status' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE leave_rounds SET
+         name = COALESCE($2, name), mode = COALESCE($3, mode),
+         start_date = COALESCE($4, start_date), end_date = COALESCE($5, end_date),
+         deadline = $6, status = COALESCE($7, status),
+         holiday_period_id = COALESCE($8, holiday_period_id),
+         rules = COALESCE($9::jsonb, rules), updated_at = NOW()
+       WHERE id = $1 RETURNING ${ROUND_SELECT}`,
+      [req.params.id, name || null, mode || null, startDate || null, endDate || null,
+       deadline === undefined ? null : deadline, status || null, holidayPeriodId || null,
+       rules ? JSON.stringify(rules) : null]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    await logAudit(req, 'UPDATE', 'settings', req.params.id, { type: 'leave_round', status });
+    res.json({ round: result.rows[0] });
+  } catch (err) {
+    console.error('Error updating leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Weekends van één blok opnieuw overnemen uit het roosterconcept. Bewust een
+// aparte, expliciete actie: een concept dat na het openen van de ronde wijzigt
+// mag de grondslag waarop mensen invulden niet stilzwijgend verschuiven.
+v1.put('/leave-rounds/:id/blocks/:blockId', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const { closedDates, closedSource } = req.body || {};
+  const client = await pool.connect();
+  try {
+    const blokRes = await client.query(
+      `SELECT b.id, b.name, b.start_date::text AS "startDate", b.end_date::text AS "endDate",
+              b.closed_dates AS "closedDates", r.status
+       FROM leave_round_blocks b JOIN leave_rounds r ON r.id = b.round_id
+       WHERE b.id = $1 AND b.round_id = $2`,
+      [req.params.blockId, req.params.id]
+    );
+    if (blokRes.rows.length === 0) return res.status(404).json({ error: 'Blok niet gevonden in deze ronde' });
+    const blok = blokRes.rows[0];
+
+    // Een gesloten of toegepaste ronde herschrijven raakt afspraken die al
+    // goedgekeurd zijn — dat mag alleen bewust.
+    if (['gesloten', 'toegepast'].includes(blok.status) && req.query.force !== '1') {
+      return res.status(409).json({
+        error: 'Deze ronde is al gesloten. Bevestig dat je de weekendindeling toch wil aanpassen.',
+        status: blok.status
+      });
+    }
+
+    const cd = normalizeClosedDates(closedDates, blok.startDate, blok.endDate, blok.name);
+    if (!cd.ok) return res.status(400).json({ error: cd.error });
+
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE leave_round_blocks SET closed_dates = $1::jsonb, closed_source = $2::jsonb WHERE id = $3`,
+      [cd.value === null ? null : JSON.stringify(cd.value),
+       JSON.stringify(cd.value === null ? {} : (closedSource || {})), blok.id]
+    );
+
+    // Invulling op een dag die nu gesloten is moet weg: anders zet `apply`
+    // daar alsnog verlof op, en telt die dag mee in latere weekendtellingen.
+    let entriesRemoved = 0;
+    if (cd.value && cd.value.length > 0) {
+      const del = await client.query(
+        `DELETE FROM leave_round_entries WHERE round_id = $1 AND date = ANY($2::date[])`,
+        [req.params.id, cd.value]
+      );
+      entriesRemoved = del.rowCount || 0;
+    }
+    await client.query('COMMIT');
+
+    await logAudit(req, 'UPDATE', 'settings', String(req.params.id), {
+      type: 'leave_block_closed_dates', blockId: blok.id,
+      closed: cd.value ? cd.value.length : null, entriesRemoved
+    });
+    res.json({ block: { id: blok.id, closedDates: cd.value, closedSource: closedSource || {} }, entriesRemoved });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error updating leave block:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// De definitieve verdeling van een voorkeurblok (de zomer) vastleggen.
+//
+// Bewust NIET via PUT /leave-rounds/:id/entries: dat vervangt alle entries van
+// een gebruiker in de héle ronde, en een ronde beslaat het volledige schooljaar.
+// Dit endpoint blijft binnen één blok en raakt de kleine vakanties dus nooit.
+v1.put('/leave-rounds/:id/blocks/:blockId/entries', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const { entries } = req.body || {};
+  if (!Array.isArray(entries)) return res.status(400).json({ error: 'entries moet een array zijn' });
+
+  const client = await pool.connect();
+  try {
+    const blokRes = await client.query(
+      `SELECT b.id, b.name, b.start_date::text AS "startDate", b.end_date::text AS "endDate", r.status
+       FROM leave_round_blocks b JOIN leave_rounds r ON r.id = b.round_id
+       WHERE b.id = $1 AND b.round_id = $2`,
+      [req.params.blockId, req.params.id]
+    );
+    if (blokRes.rows.length === 0) return res.status(404).json({ error: 'Blok niet gevonden in deze ronde' });
+    const blok = blokRes.rows[0];
+
+    // Bij een open ronde kunnen medewerkers hun invulling nog wijzigen; een
+    // verdeling zou dan stil overschreven worden.
+    //
+    // #201: 'toegepast' hoort hier ook bij. Die reden geldt daar namelijk net
+    // zo min als bij 'gesloten', want de ronde staat voor medewerkers dicht.
+    // Wie per ongeluk toepaste vóór het verdelen, liep anders vast: de
+    // verdeling werd geweigerd met een 409 en er was geen weg vooruit. Nu kan
+    // hij alsnog verdelen en daarna opnieuw toepassen.
+    if (blok.status !== 'gesloten' && blok.status !== 'toegepast') {
+      return res.status(409).json({
+        error: 'De verdeling kan pas vastgelegd worden als de ronde gesloten is',
+        status: blok.status
+      });
+    }
+
+    const valid = ['werken', 'verlof', 'liever_niet', 'zeker_niet'];
+    const userIds = new Set();
+    for (const e of entries) {
+      if (!e || !Number.isInteger(Number(e.userId))) {
+        return res.status(400).json({ error: 'Elke regel heeft een geldige userId nodig' });
+      }
+      if (typeof e.date !== 'string' || e.date < blok.startDate || e.date > blok.endDate) {
+        return res.status(400).json({ error: `Datum ${e.date} valt buiten "${blok.name}"` });
+      }
+      if (!valid.includes(e.status)) {
+        return res.status(400).json({ error: `Ongeldige status ${e.status}` });
+      }
+      userIds.add(Number(e.userId));
+    }
+
+    await client.query('BEGIN');
+    if (userIds.size > 0) {
+      await client.query(
+        `DELETE FROM leave_round_entries
+         WHERE round_id = $1 AND user_id = ANY($2::int[]) AND date BETWEEN $3 AND $4`,
+        [req.params.id, [...userIds], blok.startDate, blok.endDate]
+      );
+      for (const e of entries) {
+        await client.query(
+          `INSERT INTO leave_round_entries (round_id, user_id, date, status)
+           VALUES ($1, $2, $3, $4)`,
+          [req.params.id, Number(e.userId), e.date, e.status]
+        );
+      }
+    }
+    await client.query('COMMIT');
+
+    await logAudit(req, 'UPDATE', 'settings', String(req.params.id), {
+      type: 'leave_block_verdeling', blockId: blok.id,
+      medewerkers: userIds.size, dagen: entries.length
+    });
+    res.json({ ok: true, saved: entries.length, medewerkers: userIds.size });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error saving leave distribution:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+v1.delete('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM leave_rounds WHERE id = $1 RETURNING name', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    await logAudit(req, 'DELETE', 'settings', req.params.id, { type: 'leave_round', name: result.rows[0].name });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error deleting leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Invulling opslaan. Medewerkers enkel voor zichzelf; beheerders ook voor
+// anderen (nodig om na een voorkeurronde de definitieve verdeling vast te leggen).
+v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
+  const { entries, userId } = req.body || {};
+  if (!Array.isArray(entries)) return res.status(400).json({ error: 'entries moet een array zijn' });
+
+  const targetUserId = userId && isLeaveManager(req.user) ? Number(userId) : req.user.id;
+  if (userId && Number(userId) !== req.user.id && !isLeaveManager(req.user)) {
+    return res.status(403).json({ error: 'Je kan enkel je eigen verlof invullen' });
+  }
+
+  const client = await pool.connect();
+  try {
+    const roundRes = await client.query('SELECT status, start_date, end_date FROM leave_rounds WHERE id = $1', [req.params.id]);
+    if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    const round = roundRes.rows[0];
+    // Een gesloten ronde is enkel nog door beheerders aan te passen
+    if (round.status !== 'open' && !isLeaveManager(req.user)) {
+      return res.status(403).json({ error: 'Deze ronde is gesloten' });
+    }
+
+    const valid = ['werken', 'verlof', 'liever_niet', 'zeker_niet'];
+    // Een ronde beslaat een heel schooljaar met gaten ertussen (schoolweken).
+    // Een dag moet dus binnen een van de vakantieblokken vallen, niet enkel
+    // tussen de omhullende rondedatums.
+    const blockRes = await client.query(
+      'SELECT start_date, end_date FROM leave_round_blocks WHERE round_id = $1', [req.params.id]);
+    const blokken = blockRes.rows.length
+      ? blockRes.rows.map(b => [new Date(b.start_date), new Date(b.end_date)])
+      : [[new Date(round.start_date), new Date(round.end_date)]];
+
+    for (const e of entries) {
+      if (!e || !e.date || !valid.includes(e.status)) {
+        return res.status(400).json({ error: `Ongeldige invulling voor ${e && e.date}` });
+      }
+      const d = new Date(e.date);
+      if (!blokken.some(([s, t]) => d >= s && d <= t)) {
+        return res.status(400).json({ error: `Datum ${e.date} valt buiten de ronde` });
+      }
+    }
+
+    await client.query('BEGIN');
+
+    // #194: dit verving ALLE invulling van deze medewerker in de hele ronde,
+    // ook die van vakanties waar de aanvraag niet over ging. De app stuurt
+    // altijd de volledige ronde mee, dus via de knoppen ging er niets verloren,
+    // maar elke andere aanroep kon iemands zomervoorkeuren wissen door één
+    // kerstweek op te slaan. Het blok-scoped endpoint begrenst wel al netjes.
+    //
+    // De vervanging blijft nu binnen het bereik dat in de aanvraag zit. Een
+    // lege lijst raakt dus niets aan, wat ook de eerdere fix bewaart dat leeg
+    // indienen de invulling niet mag wissen.
+    const datums = entries.map(e => e.date).sort();
+    if (datums.length > 0) {
+      await client.query(
+        `DELETE FROM leave_round_entries
+         WHERE round_id = $1 AND user_id = $2 AND date BETWEEN $3 AND $4`,
+        [req.params.id, targetUserId, datums[0], datums[datums.length - 1]]
+      );
+    }
+
+    for (const e of entries) {
+      await client.query(
+        `INSERT INTO leave_round_entries (round_id, user_id, date, status, note)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [req.params.id, targetUserId, e.date, e.status, e.note || '']
+      );
+    }
+
+    // #194: een wijziging ná de goedkeuring liet die goedkeuring gewoon staan,
+    // met de oorspronkelijke datum. De beheerder zag in het overzicht nog
+    // altijd "goedgekeurd" zonder enig signaal dat er daarna iets veranderd
+    // was, en apply nam over wat er op dat moment stond.
+    //
+    // Elke wijziging trekt de goedkeuring nu in, precies zoals submit dat al
+    // deed. De medewerker moet dus opnieuw indienen en de beheerder opnieuw
+    // beslissen. Een beheerder die voor iemand anders invult raakt zijn eigen
+    // goedkeuring niet kwijt, want targetUserId bepaalt wiens rij het is.
+    await client.query(
+      `INSERT INTO leave_round_submissions (round_id, user_id) VALUES ($1, $2)
+       ON CONFLICT (round_id, user_id)
+       DO UPDATE SET approved = NULL, approved_by = NULL, approved_at = NULL`,
+      [req.params.id, targetUserId]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, saved: entries.length });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error saving leave entries:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// Indienen (medewerker bevestigt zijn invulling)
+v1.post('/leave-rounds/:id/submit', requireAuth, async (req, res) => {
+  try {
+    const roundRes = await pool.query('SELECT status FROM leave_rounds WHERE id = $1', [req.params.id]);
+    if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    if (roundRes.rows[0].status !== 'open') return res.status(403).json({ error: 'Deze ronde is gesloten' });
+
+    await pool.query(
+      `INSERT INTO leave_round_submissions (round_id, user_id, submitted_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (round_id, user_id)
+       DO UPDATE SET submitted_at = NOW(), approved = NULL, approved_by = NULL, approved_at = NULL`,
+      [req.params.id, req.user.id]
+    );
+    await logAudit(req, 'UPDATE', 'settings', req.params.id, { type: 'leave_round_submit' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error submitting leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Goedkeuren of afwijzen van één medewerker binnen een ronde
+v1.put('/leave-rounds/:id/submissions/:userId', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const { approved, responseNote } = req.body || {};
+  if (typeof approved !== 'boolean') return res.status(400).json({ error: 'approved moet true of false zijn' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO leave_round_submissions (round_id, user_id, approved, approved_by, approved_at, response_note)
+       VALUES ($1, $2, $3, $4, NOW(), $5)
+       ON CONFLICT (round_id, user_id)
+       DO UPDATE SET approved = $3, approved_by = $4, approved_at = NOW(), response_note = $5
+       RETURNING user_id AS "userId", approved`,
+      [req.params.id, req.params.userId, approved, req.user.id, responseNote || '']
+    );
+    await logAudit(req, approved ? 'APPROVE' : 'REJECT', 'settings', req.params.id,
+      { type: 'leave_round', targetUser: req.params.userId });
+    res.json({ submission: result.rows[0] });
+  } catch (err) {
+    console.error('Error updating leave submission:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Toepassen: goedgekeurd verlof wordt echte afwezigheid, zodat het in de
+// planning en het afwezigheidsoverzicht verschijnt.
+v1.post('/leave-rounds/:id/apply', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const roundRes = await client.query('SELECT name FROM leave_rounds WHERE id = $1', [req.params.id]);
+    if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    const roundName = roundRes.rows[0].name;
+
+    // #201: apply neemt alleen dagen met status 'verlof' over, maar in een
+    // voorkeurblok staat op dat moment uitsluitend werken, liever_niet of
+    // zeker_niet. Wie op 'Verlof toepassen' drukte vóór 'Verlof verdelen',
+    // kreeg dus nul zomerdagen terwijl de melding als succes las, en beide
+    // knoppen verdwenen omdat die alleen bij status 'gesloten' verschijnen.
+    //
+    // We weigeren nu zolang een voorkeurblok nog niets op 'verlof' heeft
+    // staan. Een blok waarin niemand verlof kreeg is ononderscheidbaar van
+    // een onverdeeld blok, maar dat is een randgeval dat in de praktijk niet
+    // voorkomt: er wordt altijd iemand ingewilligd.
+    const onverdeeld = await client.query(
+      `SELECT b.id, b.name
+         FROM leave_round_blocks b
+        WHERE b.round_id = $1
+          AND b.mode = 'voorkeur'
+          AND NOT EXISTS (
+            SELECT 1 FROM leave_round_entries e
+             WHERE e.round_id = b.round_id
+               AND e.status = 'verlof'
+               AND e.date BETWEEN b.start_date AND b.end_date
+          )`,
+      [req.params.id]
+    );
+    if (onverdeeld.rows.length > 0) {
+      const namen = onverdeeld.rows.map(b => b.name).join(', ');
+      return res.status(409).json({
+        error: `Leg eerst de verdeling vast voor: ${namen}. Zonder verdeling levert het toepassen voor die vakantie geen enkele verlofdag op.`,
+        undistributedBlocks: onverdeeld.rows.map(b => ({ id: b.id, name: b.name }))
+      });
+    }
+
+    // Enkel dagen met status 'verlof' van goedgekeurde medewerkers
+    const rows = await client.query(
+      `SELECT e.user_id, e.date::text AS date
+       FROM leave_round_entries e
+       JOIN leave_round_submissions s
+         ON s.round_id = e.round_id AND s.user_id = e.user_id
+       WHERE e.round_id = $1 AND e.status = 'verlof' AND s.approved IS TRUE`,
+      [req.params.id]
+    );
+
+    await client.query('BEGIN');
+    let applied = 0;
+    for (const r of rows.rows) {
+      await client.query(
+        `INSERT INTO availability (user_id, date, type, reason, updated_at)
+         VALUES ($1, $2, 'verlof', $3, NOW())
+         ON CONFLICT (user_id, date)
+         DO UPDATE SET type = 'verlof', reason = $3, updated_at = NOW()`,
+        [r.user_id, r.date, `Verlofplanning: ${roundName}`]
+      );
+      applied++;
+    }
+    await client.query(`UPDATE leave_rounds SET status = 'toegepast', updated_at = NOW() WHERE id = $1`, [req.params.id]);
+    await client.query('COMMIT');
+
+    await logAudit(req, 'UPDATE', 'settings', req.params.id, { type: 'leave_round_apply', applied });
+    res.json({ ok: true, applied });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error applying leave round:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
 });
 
 // Reset all data (admin only)
@@ -4059,7 +5567,7 @@ v1.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
     };
     res.json({ ok: true, message: messages[scope] });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Server error' });
   } finally {
@@ -4242,7 +5750,7 @@ v1.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
 
     res.json({ ok: true, results });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Migration error:', err);
     res.status(500).json({ error: 'Migration failed' });
   } finally {
@@ -4253,11 +5761,11 @@ v1.post('/admin/migrate', requireAuth, requireAdmin, async (req, res) => {
 // Seed teams endpoint (admin only)
 v1.post('/admin/seed-teams', requireAuth, requireAdmin, async (req, res) => {
   const teams = [
-    { id: 'vlot1', name: 'Vlot 1 (Begeleiding)', color: '#3b82f6' },
-    { id: 'vlot2', name: 'Vlot 2 (Begeleiding)', color: '#8b5cf6' },
-    { id: 'cargo', name: 'Cargo (Dagbesteding)', color: '#10b981' },
-    { id: 'overkoepelend', name: 'Overkoepelend (Kantoor)', color: '#f59e0b' },
-    { id: 'jobstudent', name: 'Jobstudenten/Stagiairs', color: '#ec4899' }
+    { id: 'vlot1', name: 'Vlot 1 (Begeleiding)', color: '#4a7c6f' },
+    { id: 'vlot2', name: 'Vlot 2 (Begeleiding)', color: '#c08a4a' },
+    { id: 'cargo', name: 'Cargo (Dagbesteding)', color: '#5b7fa6' },
+    { id: 'overkoepelend', name: 'Overkoepelend (Kantoor)', color: '#9a6a9e' },
+    { id: 'jobstudent', name: 'Jobstudenten/Stagiairs', color: '#b9656a' }
   ];
 
   try {
@@ -4288,12 +5796,43 @@ app.use('/api/v1', v1);
 // Backward-compat: oude routes zonder prefix blijven werken — verwijderen na v1.3
 app.use('/', v1);
 
+// #215: laatste vangnet. Elke route zou zijn eigen fouten moeten afhandelen,
+// maar één vergeten plek mag niet de hele dienst kosten. Express 4 vangt een
+// afgewezen promise uit een async handler niet op, en zonder deze handler
+// beëindigt Node 22 het proces. Loggen en doordraaien is hier veiliger: een
+// enkel verzoek faalt dan, in plaats van iedereen tegelijk.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
+
+// Express-foutmiddleware. Moet ná alle routes staan en vier parameters hebben,
+// anders herkent Express hem niet als foutafhandelaar.
+app.use((err, req, res, _next) => {
+  console.error(`[express] ${req.method} ${req.originalUrl}:`, err && err.stack ? err.stack : err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Server error' });
+});
+
 if (process.env.NODE_ENV !== 'test') {
   runMigrations()
+    .then(() => ensureBootstrapData())
     .then(() => archiveOldShifts())
-    .catch(err => console.error('[startup] Fout:', err.message))
-    .finally(() => {
+    .then(() => {
       app.listen(PORT, () => console.log(`API running on :${PORT}`));
+    })
+    .catch(err => {
+      // #193: hier stond een .catch die alleen logde, gevolgd door een
+      // .finally die tóch ging luisteren. Een mislukte migratie leverde dus
+      // een API op die tegen een half gemigreerd schema draait, met als enig
+      // spoor een regel in het Render-log.
+      //
+      // Een server die niet opkomt is luidruchtig en veilig. Eentje die op een
+      // half schema draait is stil en gevaarlijk.
+      console.error('[startup] Opstarten afgebroken:', err && err.stack ? err.stack : err);
+      process.exit(1);
     });
 }
 

@@ -41,9 +41,11 @@ function renderEmployees() {
 
         const team = teams[teamKey];
         const teamName = escapeHtml(team.name);
+        const teamColor = team?.color || '#8d897c';
 
         html += `<div class="employees-team-section">
             <div class="employees-team-header team-${teamKey}">
+                <span class="team-header-dot" style="background:${teamColor}"></span>
                 <span class="team-header-name">${teamName}</span>
                 <span class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</span>
             </div>
@@ -106,6 +108,10 @@ function renderEmployees() {
 function renderProfile() {
     const user = AppState.currentUser;
     if (!user) return;
+
+    // Update eyebrow h2 with user name
+    const profileTitle = document.getElementById('profile-view-title');
+    if (profileTitle) profileTitle.textContent = user.name || 'Mijn profiel';
 
     const roleLabels = {
         admin: 'Admin',
@@ -504,7 +510,9 @@ function openProfileEditModal() {
     // Close handlers
     overlay.querySelector('.modal-close').addEventListener('click', closeModal);
     overlay.querySelector('.profile-edit-cancel').addEventListener('click', closeModal);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeModal(); });
     document.addEventListener('keydown', function escHandler(e) {
         if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', escHandler); }
     });
@@ -680,7 +688,7 @@ function renderEmployeeCard(emp) {
     const contractHours = emp.contractHours || 0;
     const teamName = (DataStore.settings.teams || {})[emp.mainTeam]?.name || emp.mainTeam || '';
     const teamColor = (DataStore.settings.teams || {})[emp.mainTeam]?.color || '#94a3b8';
-    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" title="Geen e-mail — voeg toe om welkomstmail te sturen">Geen email</span>` : '';
+    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" title="Geen e-mail, voeg er een toe om een welkomstmail te sturen">Geen email</span>` : '';
 
     // Hours for admin/planner view
     const weekStart = getEmployeeWeekStart(emp.id);
@@ -706,14 +714,20 @@ function renderEmployeeCard(emp) {
         hoursHtml = `<div class="emp-card-hours"><span>${hoursWeek.toFixed(1)}u deze week</span></div>`;
     }
 
+    const initials = escapeHtml(getInitials(emp.name || ''));
+    const subLine = contractHours > 0 ? `${contractHours}u/week` : 'Geen contracturen';
+
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
             <div class="employee-header">
-                <span class="team-color-dot" style="background: ${teamColor}" title="${escapeHtml(teamName)}"></span>
-                <div class="employee-name">${employeeName}</div>
-                ${noEmailBadge}
+                <span class="emp-avatar" style="background:${teamColor}" title="${escapeHtml(teamName)}">${initials}</span>
+                <div class="employee-card-info">
+                    <div class="employee-name">${employeeName}</div>
+                    <div class="employee-card-sub">${subLine}</div>
+                </div>
                 <span class="employee-status ${statusClass}">${statusText}</span>
             </div>
+            ${noEmailBadge ? `<div class="employee-card-badges">${noEmailBadge}</div>` : ''}
             ${hoursHtml}
         </div>
     `;

@@ -109,15 +109,19 @@ function renderHome() {
 
     const role = getEffectiveRole();
 
+    // Bereken alerts eerst (zet AppState._homeAlertCount voor de stat-kaarten)
+    const alertsHtml = renderHomeAlerts(role);
+
     let html = '';
     html += renderHomeWelcome(user, role);
     if (role === 'admin') html += renderHomeOnboarding();
-    html += renderHomeAlerts(role);
+    html += alertsHtml;
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
     html += renderHomeWeekendInfo();
-    html += renderHomeRequests(user, role);
+    html += renderHomeRequests(user);
     html += '</div>';
+    html += renderHomeNuAanHetWerk();
 
     container.innerHTML = html;
     IconHelper.init(container);
@@ -152,6 +156,11 @@ function renderHome() {
     container.querySelectorAll('.home-request-item[data-action="view-swaps"]').forEach(item => {
         item.style.cursor = 'pointer';
         item.addEventListener('click', () => switchView('swaps'));
+    });
+
+    container.querySelectorAll('.home-request-item[data-action="view-leave"]').forEach(item => {
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', () => switchView('leave'));
     });
 
     // Alert-item header: toggle expand/collapse
@@ -363,6 +372,7 @@ function renderHomeAlerts(role) {
         }
     }
 
+    AppState._homeAlertCount = warnings.length;
     if (warnings.length === 0) return '';
 
     const ALERT_COLLAPSE_AT = 5;
@@ -501,21 +511,58 @@ async function dismissOnboardingChecklist(btn) {
 }
 
 function renderHomeWelcome(user, role) {
-    const roleLabels = {
-        admin: 'Admin',
-        roosterverantwoordelijke: 'Roosterverantwoordelijke',
-        medewerker: 'Medewerker'
-    };
     const today = new Date();
-    const dateStr = today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const hour = today.getHours();
+    const greeting = hour < 12 ? 'Goeiemorgen' : hour < 18 ? 'Goeiemiddag' : 'Goeieavond';
+    const dateStr = today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' });
+    const firstName = (user.name || '').split(' ')[0] || user.name;
 
     return `
-        <div class="home-welcome">
-            <h2>Welkom, ${escapeHtml(user.name)}</h2>
-            <div class="home-welcome-sub">
-                <span>${dateStr}</span>
-                <span class="home-role-badge">${escapeHtml(roleLabels[role] || role)}</span>
+        <div class="home-hi">${greeting}, <em>${escapeHtml(firstName)}</em></div>
+        <div class="home-hi-sub">${dateStr}</div>
+    `;
+}
+
+function renderHomeStats(user, role) {
+    if (!['admin', 'roosterverantwoordelijke'].includes(role)) return '';
+
+    // Diensten deze week
+    const weekStart = getMonday(new Date());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const wkStartStr = formatDateYYYYMMDD(weekStart);
+    const wkEndStr = formatDateYYYYMMDD(weekEnd);
+    const shiftsThisWeek = (DataStore.shifts || []).filter(s => {
+        const d = (s.date || '').split('T')[0];
+        return d >= wkStartStr && d <= wkEndStr;
+    }).length;
+
+    // Actieve medewerkers
+    const activeEmployees = (DataStore.users || []).filter(u => u.active !== false && u.role === 'medewerker').length;
+
+    // Open ruilverzoeken
+    const openSwaps = (DataStore.swapRequests || []).filter(r =>
+        ['pending', 'pending_lead'].includes(r.status)
+    ).length;
+
+    // Aandachtspunten (zelfde telling als de alerts-balk, gezet door renderHomeAlerts)
+    const alertCount = AppState._homeAlertCount || 0;
+
+    const stat = (icon, bg, color, value, label) => `
+        <div class="stat-card">
+            <div class="stat-card-ic" style="background:${bg};color:${color}">${IconHelper.html(icon, 'md')}</div>
+            <div>
+                <div class="stat-card-v">${value}</div>
+                <div class="stat-card-k">${label}</div>
             </div>
+        </div>`;
+
+    return `
+        <div class="home-stats">
+            ${stat('calendar-days', 'var(--ok-bg)', 'var(--sage-700)', shiftsThisWeek, 'diensten deze week')}
+            ${stat('users', 'var(--info-bg)', 'var(--info)', activeEmployees, 'medewerkers actief')}
+            ${stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken')}
+            ${stat('alert-triangle', 'var(--danger-bg)', 'var(--danger-color)', alertCount, 'aandachtspunten')}
         </div>
     `;
 }
@@ -631,28 +678,62 @@ function renderHomeQuickActions(role) {
     `;
 }
 
-function renderHomeRequests(user, role) {
+// `role` is geen parameter meer: sinds #197 gelden voor iedereen dezelfde
+// filterregels op de startpagina.
+function renderHomeRequests(user) {
     const userId = Number(user.id || user.userId);
     const userTeam = user.team_id || user.mainTeam;
-    const isLeadOrAdmin = ['admin', 'roosterverantwoordelijke'].includes(role);
 
+    // #197: hier stond voor een lead `return r.status === 'pending_lead'`. Die
+    // status wordt door geen enkele regel backendcode ooit toegekend: de
+    // goedkeuringsstap door een lead is in #114 verwijderd en alleen de lege
+    // huls bleef staan. Een roosterverantwoordelijke zag dus altijd nul
+    // openstaande verzoeken, hoeveel er ook lagen.
+    //
+    // Een lead is voor ruilen gewoon een medewerker: hij ziet wat aan hem
+    // gericht is, plus de openstaande overnames van zijn team. Dat is dezelfde
+    // regel als hieronder, dus die geldt nu voor iedereen.
+    //
+    // De rest van de pending_lead-resten (de kolommen, de CHECK-constraint en
+    // de dode filters elders) staat in #315.
     let pendingRequests = (DataStore.swapRequests || []).filter(r => {
         if (r.status !== 'pending' && r.status !== 'pending_lead') return false;
-
-        if (isLeadOrAdmin) {
-            // Leads zien enkel verzoeken die hun goedkeuring vereisen (pending_lead)
-            return r.status === 'pending_lead';
-        }
-        // Medewerker: eigen requests + takeover requests van eigen team
         return r.requester_user_id === userId || r.target_user_id === userId ||
                (r.request_type === 'takeover' && r.requester_shift_team === userTeam);
     });
 
+    // Een lopende verlofronde die nog op jou wacht hoort hier ook thuis:
+    // anders zie je pas dat je iets moet invullen als je de verloftab opent.
+    // Geldt voor iedereen — ook een lead vult zijn eigen verlof in.
+    const verlofTaken = (AppState.leaveRounds || []).filter(r =>
+        r.status === 'open' && (!r.mySubmittedAt || r.myApproved === false)
+    );
+
+    const totaal = pendingRequests.length + verlofTaken.length;
+
     let requestsHtml = '';
-    if (pendingRequests.length === 0) {
-        requestsHtml = '<div class="home-card-empty"><i data-lucide="inbox" class="empty-state-icon"></i>Geen openstaande verzoeken</div>';
+    if (totaal === 0) {
+        requestsHtml = '<div class="home-card-empty"><i data-lucide="inbox" class="empty-state-icon"></i>Niets dat je aandacht vraagt</div>';
     } else {
         requestsHtml = '<div class="home-card-body">';
+
+        verlofTaken.forEach(r => {
+            const afgewezen = r.myApproved === false;
+            const label = afgewezen ? 'Opnieuw invullen' : 'Invullen';
+            const deadline = r.deadline
+                ? `vóór ${parseDateOnly(r.deadline).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })}`
+                : 'nog niet ingediend';
+            requestsHtml += `
+                <div class="home-request-item" data-action="view-leave">
+                    <div class="home-request-info">
+                        <div class="home-request-type">Verlof</div>
+                        <div class="home-request-detail">${escapeHtml(r.name)} · ${escapeHtml(deadline)}</div>
+                    </div>
+                    <span class="home-request-status needs-action">${label}</span>
+                </div>
+            `;
+        });
+
         pendingRequests.slice(0, 5).forEach(req => {
             const isSwap = req.request_type === 'swap';
             const typeLabel = isSwap ? 'Ruil' : 'Overname';
@@ -680,11 +761,12 @@ function renderHomeRequests(user, role) {
         requestsHtml += '</div>';
     }
 
+    // Niet langer alleen ruilverzoeken, dus ook niet langer "verzoeken"
     return `
         <div class="home-card">
             <div class="home-card-header">
-                Openstaande verzoeken
-                ${pendingRequests.length > 0 ? `<span class="card-count">${pendingRequests.length}</span>` : ''}
+                Vraagt je aandacht
+                ${totaal > 0 ? `<span class="card-count">${totaal}</span>` : ''}
             </div>
             ${requestsHtml}
         </div>
@@ -838,6 +920,65 @@ function renderHomeWeekendInfo() {
     `;
 }
 
+function renderHomeNuAanHetWerk() {
+    const now = new Date();
+    const todayStr = formatDateYYYYMMDD(now);
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const activeShifts = (DataStore.shifts || []).filter(s => {
+        const date = (s.date || '').split('T')[0];
+        if (date !== todayStr) return false;
+        const start = (s.startTime || s.start_time || '').substring(0, 5);
+        const end = (s.endTime || s.end_time || '').substring(0, 5);
+        return start && end && currentTime >= start && currentTime < end;
+    });
+
+    if (activeShifts.length === 0) {
+        return `
+            <div class="home-card home-card-on-duty mt-lg">
+                <div class="home-card-header">Nu aan het werk</div>
+                <div class="home-card-empty">
+                    <i data-lucide="moon" class="empty-state-icon"></i>
+                    Niemand is op dit moment aan het werk
+                </div>
+            </div>
+        `;
+    }
+
+    const chips = activeShifts.map(shift => {
+        const userId = shift.userId || shift.employeeId || shift.user_id;
+        const emp = (DataStore.users || []).find(u => String(u.id) === String(userId));
+        const name = emp?.name || shift.employeeName || 'Onbekend';
+        const teamId = shift.team;
+        const teamColor = DataStore.settings?.teams?.[teamId]?.color || '#64748b';
+        const initials = getInitials(name);
+        const startTime = (shift.startTime || shift.start_time || '').substring(0, 5);
+        const endTime = (shift.endTime || shift.end_time || '').substring(0, 5);
+
+        return `
+            <div class="on-duty-chip">
+                <div class="on-duty-avatar" style="background:${escapeHtml(teamColor)}">${escapeHtml(initials)}</div>
+                <div class="on-duty-info">
+                    <span class="on-duty-name">${escapeHtml(name)}</span>
+                    <span class="on-duty-time">${escapeHtml(startTime)} – ${escapeHtml(endTime)}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="home-card home-card-on-duty mt-lg">
+            <div class="home-card-header">
+                Nu aan het werk
+                <span class="card-count">${activeShifts.length}</span>
+            </div>
+            <div class="on-duty-list">
+                ${chips}
+            </div>
+        </div>
+    `;
+}
+
 async function switchView(viewName) {
     // Prevent medewerker from accessing settings
     if (viewName === 'settings' && getEffectiveRole() === 'medewerker') {
@@ -950,6 +1091,10 @@ async function switchView(viewName) {
         case 'swaps':
             DOM.swapsView.classList.add('active');
             renderSwaps();
+            break;
+        case 'leave':
+            DOM.leaveView.classList.add('active');
+            renderLeave();
             break;
         case 'builder':
             DOM.builderView.classList.add('active');
@@ -1122,11 +1267,13 @@ function changeAvailabilityMobileDay(direction) {
         const prev = new Date(AppState.currentWeekStart);
         prev.setDate(prev.getDate() - 7);
         AppState.currentWeekStart = prev;
+        updateShiftRefreshRange();
     } else if (AppState.availabilityMobileDayIndex > 6) {
         AppState.availabilityMobileDayIndex = 0;
         const next = new Date(AppState.currentWeekStart);
         next.setDate(next.getDate() + 7);
         AppState.currentWeekStart = next;
+        updateShiftRefreshRange();
     }
 
     renderAvailability();
@@ -1190,7 +1337,7 @@ function updatePeriodDisplay() {
         }
         DOM.currentPeriod.textContent = formatMonthDisplay(AppState.currentMonthStart);
     } else if (AppState.viewMode === 'day') {
-        // Day view: show "Maandag, 3 maart 2026"
+        // Day view: show "Week 6 · Maandag, 3 maart 2026"
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
             return;
@@ -1198,20 +1345,30 @@ function updatePeriodDisplay() {
         const dayNames = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
         const currentDate = new Date(AppState.currentWeekStart);
         currentDate.setDate(currentDate.getDate() + AppState.mobileDayIndex);
+        const weekNr = getISOWeekNumber(formatDateYYYYMMDD(currentDate));
         const dateStr = currentDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
-        DOM.currentPeriod.textContent = `${dayNames[AppState.mobileDayIndex]}, ${dateStr}`;
+        DOM.currentPeriod.textContent = `Week ${weekNr} · ${dayNames[AppState.mobileDayIndex]}, ${dateStr}`;
     } else {
-        // Week view: show "Week 6 | 3 februari 2026 - 9 februari 2026"
+        // Week view: "Week 24 · 8 - 14 juni 2026"
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
             return;
         }
         const weekEnd = new Date(AppState.currentWeekStart);
         weekEnd.setDate(weekEnd.getDate() + 6);
-        const options = { day: 'numeric', month: 'long', year: 'numeric' };
-        const startStr = AppState.currentWeekStart.toLocaleDateString('nl-BE', options);
-        const endStr = weekEnd.toLocaleDateString('nl-BE', options);
-        DOM.currentPeriod.textContent = `${startStr} - ${endStr}`;
+        const weekNr = getISOWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart));
+        DOM.currentPeriod.textContent = `Week ${weekNr} · ${formatWeekRange(AppState.currentWeekStart, weekEnd)}`;
     }
+}
+
+// Compact datumbereik: "8 - 14 juni 2026" (zelfde maand) of "28 juni - 4 juli 2026"
+function formatWeekRange(start, end) {
+    const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+    const endStr = end.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+    if (sameMonth) {
+        return `${start.getDate()} - ${endStr}`;
+    }
+    const startStr = start.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' });
+    return `${startStr} - ${endStr}`;
 }
 

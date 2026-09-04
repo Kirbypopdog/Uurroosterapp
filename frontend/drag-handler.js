@@ -138,7 +138,7 @@ const DragHandler = {
 
             // Prevent default to avoid text selection
             e.preventDefault();
-        } else if (emptyCell && !emptyCell.classList.contains('closed')) {
+        } else if (emptyCell && !emptyCell.classList.contains('closed') && !e.target.closest('.shift-block-indicator')) {
             // Clicked on empty cell - record for potential shift creation
             this.state.startX = e.clientX;
             this.state.startY = e.clientY;
@@ -172,7 +172,16 @@ const DragHandler = {
                 if (shift && !canUserTransferShift(shift)) {
                     console.log('[DragHandler] User cannot transfer shifts - cancelling drag');
                     showToast('Je kunt alleen je eigen shift tijden aanpassen, niet naar anderen verplaatsen. Gebruik "Shift afstaan" om je shift over te dragen.', 'warning');
-                    this.cleanup();
+                    // #212: hier stond cleanup(), en die verwijdert ALLE
+                    // listeners, ook die voor gewone klikken. De tijdlijn
+                    // reageerde daarna nergens meer op: een dienst openen loopt
+                    // via handleMouseUp, en die listener was weg. De gebruiker
+                    // klikte tevergeefs verder tot een hertekening alles
+                    // toevallig herstelde.
+                    //
+                    // reset() wist alleen de sleepstatus en laat de listeners
+                    // staan. Dat is wat je wil bij het afbreken van één poging.
+                    this.reset();
                     return;
                 }
             }
@@ -250,7 +259,8 @@ const DragHandler = {
     hasPendingSwapRequest(shiftId) {
         const swapRequests = DataStore.swapRequests || [];
         return swapRequests.some(
-            req => req.shift_id === shiftId && req.status === 'pending'
+            req => (req.requester_shift_id === shiftId || req.target_shift_id === shiftId) &&
+                   ['pending', 'pending_lead'].includes(req.status)
         );
     },
 
@@ -399,6 +409,19 @@ const DragHandler = {
                 source: 'manual' // Mark as manual so it persists
             });
 
+            // Als de shift van dag of medewerker is veranderd, bescherm de originele
+            // cel met een shift_block zodat het concept haar niet opnieuw vult (#146).
+            const cellChanged = originalData.employeeId !== targetEmployee.id || originalData.date !== targetDate;
+            if (cellChanged) {
+                try {
+                    await dataApiFetch(`/shift-blocks`, {
+                        method: 'POST',
+                        body: JSON.stringify({ user_id: originalData.employeeId, date: originalData.date, reason: 'drag_move' })
+                    });
+                    await fetchShiftBlocks();
+                } catch (_) { /* block aanmaken is best-effort */ }
+            }
+
             // Record undo action for drag transfer (using captured shiftId)
             if (typeof UndoManager !== 'undefined') {
                 UndoManager.push({
@@ -536,6 +559,28 @@ const DragHandler = {
             newEndTime = newTime;
         }
 
+        // #216: het handvat mag niet voorbij het andere schieten.
+        //
+        // calculateDuration telt er 24 uur bij op zodra de eindtijd vóór de
+        // starttijd ligt, want dat is hoe een echte nachtdienst eruitziet.
+        // Sleepte je het beginhandvat voorbij de eindtijd, dan sprong de duur
+        // dus van nul naar ongeveer 23 uur en greep de controle hieronder nooit
+        // in. Bij een blok van één uur gebeurt dat snel, want dat is ongeveer
+        // even breed als de handvatzone zelf.
+        //
+        // "eindtijd vóór starttijd" afwijzen kan niet: een nachtdienst is dat
+        // ook. Wat wel klopt: binnen de tijdlijn, die van 07:00 tot 24:00 loopt,
+        // kan een gewone dienst nooit legitiem een nachtdienst worden of
+        // omgekeerd. Verandert de aard van de dienst, dan is het handvat
+        // doorgeschoten.
+        const naarMinuten = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+        const wasNacht = naarMinuten(originalData.endTime) <= naarMinuten(originalData.startTime);
+        const wordtNacht = naarMinuten(newEndTime) <= naarMinuten(newStartTime);
+        if (wasNacht !== wordtNacht) {
+            showToast('Het begin van een dienst kan niet voorbij het einde liggen', 'warning');
+            return;
+        }
+
         // Validate duration (minimum 1 hour)
         const duration = this.calculateDuration(newStartTime, newEndTime);
         if (duration < 1) {
@@ -601,7 +646,7 @@ const DragHandler = {
             const shiftId = parseInt(shiftBlock.dataset.shiftId, 10);
             const shift = shiftId ? getShift(shiftId) : null;
             if (shift && canUserEditShift(shift)) openEditShiftModal(shiftId);
-        } else if (dayCell && !dayCell.classList.contains('closed')) {
+        } else if (dayCell && !dayCell.classList.contains('closed') && !e.target.closest('.shift-block-indicator')) {
             this.handleCellClick(dayCell);
         }
     },
@@ -653,12 +698,15 @@ const DragHandler = {
         } else {
             // Fallback: open normal modal and manually fill
             openAddShiftModal();
-            // TODO: Pre-fill form fields
             document.getElementById('shift-employee').value = employee.id;
             document.getElementById('shift-date').value = date;
             document.getElementById('shift-team').value = employee.mainTeam;
             document.getElementById('shift-start').value = defaultStartTime;
             document.getElementById('shift-end').value = defaultEndTime;
+            // Velden worden hier met .value gezet, wat géén change-event vuurt.
+            // De melding "dag handmatig leeggemaakt" moet dus expliciet opnieuw
+            // bepaald worden nu medewerker én datum bekend zijn.
+            if (typeof updateShiftBlockNotice === 'function') updateShiftBlockNotice();
         }
     },
 
@@ -1085,7 +1133,11 @@ const BuilderDragHandler = {
         if (!AppState.builderGrid[targetEmpId]) AppState.builderGrid[targetEmpId] = {};
         AppState.builderGrid[targetEmpId][targetDay] = assignment;
 
-        AppState.builderIsDirty = true;
+        // #210: hier stond `AppState.builderIsDirty = true`. Dat zet wel de
+        // vlag maar plant geen automatische opslag in en werkt de statusregel
+        // niet bij, terwijl slepen juist de voornaamste manier van werken in de
+        // bouwer is. Je sleepte een uur lang en las ondertussen "bewaard".
+        setBuilderDirty();
         renderBuilder();
         if (validation.level !== 'ok') showToast(validation.message, 'warning');
         else showToast('Dienst verplaatst', 'success');
@@ -1109,14 +1161,14 @@ const BuilderDragHandler = {
         const prev = grid[targetDay - 1];
         if (prev?.endTime) {
             const gap = gapHours(toMin(prev.endTime), startMin);
-            if (gap < 11) return { level: 'error', message: `Onvoldoende rust — ${gap.toFixed(1)}u na vorige dienst (min. 11u)` };
+            if (gap < 11) return { level: 'error', message: `Onvoldoende rust: ${gap.toFixed(1)}u na vorige dienst (min. 11u)` };
         }
 
         // Check rest gap with next day's assignment
         const next = grid[targetDay + 1];
         if (next?.startTime) {
             const gap = gapHours(endMin, toMin(next.startTime));
-            if (gap < 11) return { level: 'error', message: `Onvoldoende rust — ${gap.toFixed(1)}u voor volgende dienst (min. 11u)` };
+            if (gap < 11) return { level: 'error', message: `Onvoldoende rust: ${gap.toFixed(1)}u voor volgende dienst (min. 11u)` };
         }
 
         return { level: 'ok', message: '' };
@@ -1194,7 +1246,8 @@ const BuilderDragHandler = {
             endTime: newEnd
         };
 
-        AppState.builderIsDirty = true;
+        // #210: zie het verplaatsen hierboven, zelfde reden.
+        setBuilderDirty();
         renderBuilder();
         showToast(`Dienst aangepast: ${newStart}-${newEnd}`, 'success');
     },

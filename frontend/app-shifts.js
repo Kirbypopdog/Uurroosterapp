@@ -70,6 +70,38 @@ function populateShiftTemplateDropdown() {
     });
 }
 
+// Een handmatig leeggemaakte dag is "beschermd": het concept vult hem niet
+// opnieuw. Dat was alleen af te leiden uit een klein icoontje met tooltip —
+// op een telefoon dus onzichtbaar. Bij het toevoegen van een dienst zeggen
+// we het daarom expliciet, net zoals een handmatig aangepaste dienst dat doet.
+function updateShiftBlockNotice() {
+    if (!DOM.shiftValidationErrors) return;
+    const bestaand = DOM.shiftValidationErrors.querySelector('.shift-block-notice');
+    if (bestaand) bestaand.remove();
+
+    if (AppState.editingShiftId) return; // enkel bij toevoegen
+    const empId = DOM.shiftEmployee?.value;
+    const datum = DOM.shiftDate?.value;
+    if (!empId || !datum) return;
+
+    const block = (DataStore.shiftBlocks || []).find(
+        b => String(b.user_id) === String(empId) && b.date === datum
+    );
+    if (!block) return;
+
+    const wie = getEmployee(Number(empId))?.name || 'deze medewerker';
+    const melding = document.createElement('div');
+    melding.className = 'shift-source-info shift-block-notice';
+    melding.innerHTML = `
+        <span class="source-icon">${IconHelper.html('circle-slash', 'sm')}</span>
+        <span class="source-text">
+            ${escapeHtml(blockReasonLabel(block.reason))} voor ${escapeHtml(wie)}.
+            Het basisrooster vult deze dag daarom niet meer automatisch in.
+        </span>`;
+    DOM.shiftValidationErrors.prepend(melding);
+    IconHelper.init(melding);
+}
+
 function openAddShiftModal() {
     AppState.editingShiftId = null;
     DOM.shiftModalTitle.textContent = 'Dienst toevoegen';
@@ -98,6 +130,7 @@ function openAddShiftModal() {
     resetShiftSubmitBtn();
 
     DOM.shiftModal.classList.remove('hidden');
+    updateShiftBlockNotice();
 }
 
 function openAddShiftForEmployee(employeeId, date) {
@@ -110,6 +143,7 @@ function openAddShiftForEmployee(employeeId, date) {
     populateEmployeeDropdown();
     DOM.shiftEmployee.value = employeeId;
     DOM.shiftModal.classList.remove('hidden');
+    updateShiftBlockNotice();
 }
 
 function canUserEditShift(shift) {
@@ -194,6 +228,22 @@ function openShiftModal(shift, canEdit) {
             field.classList.add('readonly');
         }
     });
+
+    // #262: het teamveld bleef bewerkbaar voor de eigenaar van de dienst,
+    // waardoor een medewerker zichzelf in een ander team kon schrijven. Wie
+    // geen diensten mag beheren, mag ook het team niet wijzigen. De backend
+    // weigert die wissel nu ook, dus dit is de zichtbare helft van dezelfde
+    // grens.
+    if (!hasPermission('MANAGE_SHIFTS')) {
+        DOM.shiftTeam.disabled = true;
+        DOM.shiftTeam.classList.add('readonly');
+        // Om dezelfde reden mag de dienst niet aan een collega worden
+        // toegewezen. De toevoegmodal doet dit al; het bewerkpad deed het niet,
+        // terwijl de backend die wissel nu wel weigert. Wie zijn dienst kwijt
+        // wil gebruikt 'Dienst afstaan'.
+        DOM.shiftEmployee.disabled = true;
+        DOM.shiftEmployee.classList.add('readonly');
+    }
 
     // Show/hide action buttons
     DOM.shiftSubmitBtn.classList.toggle('hidden', !canEdit);
@@ -507,7 +557,7 @@ function runSwapValidation() {
                 <strong>${IconHelper.html(ICONS.warning, 'sm')} Waarschuwingen:</strong>
                 <ul>${validation.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
             </div>
-            <p class="validation-hint text-warning">Je kunt dit verzoek indienen, maar een verantwoordelijke moet het goedkeuren.</p>
+            <p class="validation-hint text-warning">Je kunt dit verzoek indienen. Je collega moet het nog accepteren.</p>
         `;
     } else {
         validationDisplay.classList.add('is-valid');

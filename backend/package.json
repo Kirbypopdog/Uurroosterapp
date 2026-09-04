@@ -7,6 +7,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node scripts/seed.js",
+    "seed:demo": "node scripts/seed-demo.js",
     "db:setup": "node scripts/setup-db.js && npm run seed",
     "test": "NODE_ENV=test jest --runInBand"
   },

@@ -22,6 +22,11 @@ function renderSettings() {
         tab.onclick = () => switchSettingsTab(tab.dataset.settingsTab);
     });
 
+    // Update view title
+    const activeTabConfig = allowedTabs.find(t => t.id === AppState.activeSettingsTab);
+    const titleEl = document.getElementById('settings-view-title');
+    if (titleEl && activeTabConfig) titleEl.textContent = activeTabConfig.label;
+
     // Scroll active tab into view
     const activeTab = document.querySelector('.settings-tab.active');
     if (activeTab) {
@@ -59,11 +64,16 @@ async function switchSettingsTab(tabName) {
     document.querySelectorAll('.settings-tab').forEach(tab => {
         const isActive = tab.dataset.settingsTab === tabName;
         tab.classList.toggle('active', isActive);
-        // Scroll active tab into view on mobile
         if (isActive) {
             tab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
         }
     });
+
+    // Update view title
+    const activeTabConfig = SETTINGS_TAB_CONFIG.find(t => t.id === tabName);
+    const titleEl = document.getElementById('settings-view-title');
+    if (titleEl && activeTabConfig) titleEl.textContent = activeTabConfig.label;
+
     renderSettingsTabContent(tabName);
 }
 
@@ -283,7 +293,9 @@ function showAddUserModal(teams) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'add-user-modal';
-    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    modal.onmousedown = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
@@ -298,7 +310,7 @@ function showAddUserModal(teams) {
                     </div>
                     <div class="form-group">
                         <label for="new-user-email">Email</label>
-                        <input type="email" id="new-user-email" class="form-input" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen" />
+                        <input type="email" id="new-user-email" class="form-input" placeholder="Optioneel, welkomstmail wordt gestuurd bij invullen" />
                     </div>
                     <div class="form-group">
                         <label for="new-user-password">Wachtwoord</label>
@@ -394,7 +406,9 @@ function showEditAccountModal(user, teams, onSave) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'edit-account-modal';
-    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    modal.onmousedown = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
         <div class="modal-content modal-content--md">
             <div class="modal-header">
@@ -410,7 +424,7 @@ function showEditAccountModal(user, teams, onSave) {
                         </div>
                         <div class="form-group flex-1">
                             <label for="edit-user-email">Email</label>
-                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email || '')}" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen" />
+                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email || '')}" placeholder="Optioneel, welkomstmail wordt gestuurd bij invullen" />
                         </div>
                     </div>
                     <div class="form-row d-flex gap-10">
@@ -517,8 +531,17 @@ function showEditAccountModal(user, teams, onSave) {
             const result = await dataApiFetch(`/admin/users/${user.id}/reset-password`, {
                 method: 'POST'
             });
-            const newPw = result.newPassword || '(standaard)';
-            showToast(`Wachtwoord gereset naar: ${newPw}`, 'success', 8000);
+            if (result.newPassword) {
+                // No email on file — admin must hand over the password manually.
+                // Show once in a modal (never logged to console).
+                await showConfirm(
+                    `Wachtwoord gereset.\n\nDe medewerker heeft geen e-mailadres, dus het nieuwe wachtwoord wordt hier eenmalig getoond:\n\n${result.newPassword}\n\nDeel dit persoonlijk mee aan de medewerker.`,
+                    'Wachtwoord gereset',
+                    { confirmText: 'Begrepen', hideCancel: true }
+                );
+            } else {
+                showToast('Wachtwoord gereset. Medewerker ontvangt een e-mail.', 'success');
+            }
         } catch (error) {
             showToast(`Reset mislukt: ${error.message}`, 'error');
         }
@@ -572,7 +595,9 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'replace-employee-modal';
-    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    modal.onmousedown = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
         <div class="modal-content modal-content--md">
             <div class="modal-header">
@@ -647,9 +672,9 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 String(s.employeeId) === String(departingUser.id) && s.date >= fromDate
             );
             summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${fromDate})`;
-            summaryHtml += `<br><small class="text-muted">Telling op basis van geladen planning — werkelijk aantal kan hoger zijn</small></li>`;
+            summaryHtml += `<br><small class="text-muted">Telling op basis van de geladen planning, het werkelijke aantal kan hoger zijn</small></li>`;
         } else {
-            summaryHtml += `<li>Geen diensten overgedragen — pas het actief concept opnieuw toe via Rooster Bouwen</li>`;
+            summaryHtml += `<li>Geen diensten overgedragen. Pas het actieve concept opnieuw toe via Rooster Bouwen</li>`;
         }
 
         summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
@@ -738,7 +763,7 @@ function renderClosedDatesList() {
     const items = closedDates.map(cd => {
         const d = parseDateOnly(cd.date);
         const label = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const reasonHtml = cd.reason ? ' — ' + escapeHtml(cd.reason) : '';
+        const reasonHtml = cd.reason ? ' · ' + escapeHtml(cd.reason) : '';
         return `<li class="closed-date-item">
             <span>${IconHelper.html(ICONS.lock,'xs')} <strong>${escapeHtml(label)}</strong>${reasonHtml}</span>
             <button class="btn btn-sm btn-danger" onclick="handleRemoveClosedDate('${cd.date}')" title="Verwijder">
@@ -782,19 +807,27 @@ async function openAddClosedDateDialog() {
         if (shiftsOnDate.length > 0) {
             const dateLabel = new Date(date + 'T12:00:00').toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' });
             const ok = await showConfirm(
-                `Er staan ${shiftsOnDate.length} shift(s) ingepland op ${dateLabel}. Deze worden verwijderd bij het sluiten.`,
+                `Er staan ${shiftsOnDate.length} dienst(en) ingepland op ${dateLabel}. Deze worden verwijderd bij het sluiten.`,
                 'Dag sluiten'
             );
             if (!ok) return;
-            for (const shift of shiftsOnDate) {
-                await deleteShift(shift.id);
-            }
         }
 
-        await addClosedDate(date, reason);
-        renderPlanning();
-        const listEl = document.getElementById('closed-dates-list');
-        if (listEl) { listEl.innerHTML = renderClosedDatesList(); IconHelper.init(listEl); }
+        // #189: zonder foutafhandeling waren de diensten weg terwijl de dag
+        // niet gesloten raakte, en zag de gebruiker daar niets van.
+        try {
+            for (const shift of shiftsOnDate) {
+                await deleteShift(shift.id, true);
+            }
+            await addClosedDate(date, reason);
+            showToast('Dag gesloten', 'success');
+        } catch (error) {
+            showToast('Dag sluiten mislukt: ' + getUserFriendlyError(error), 'error');
+        } finally {
+            renderPlanning();
+            const listEl = document.getElementById('closed-dates-list');
+            if (listEl) { listEl.innerHTML = renderClosedDatesList(); IconHelper.init(listEl); }
+        }
     });
 }
 
@@ -1373,6 +1406,7 @@ function renderSettingsSystem(container) {
                 <div class="info-box neutral">
                     <p>Alle data wordt opgeslagen in de PostgreSQL database.</p>
                     <p>Exporteer regelmatig een backup om dataverlies te voorkomen.</p>
+                    <p class="text-muted">De backup bevat medewerkers, diensten, afwezigheden en instellingen. Roosterconcepten, verlofrondes en ruilverzoeken zitten er niet in.</p>
                 </div>
                 <div class="data-stats">
                     <div class="stat-item">
@@ -1457,6 +1491,7 @@ function renderSettingsBeheer(container) {
                 <div class="info-box neutral">
                     <p>Alle data wordt opgeslagen in de PostgreSQL database.</p>
                     <p>Exporteer regelmatig een backup om dataverlies te voorkomen.</p>
+                    <p class="text-muted">De backup bevat medewerkers, diensten, afwezigheden en instellingen. Roosterconcepten, verlofrondes en ruilverzoeken zitten er niet in.</p>
                 </div>
                 <div class="data-stats">
                     <div class="stat-item">
@@ -2649,7 +2684,9 @@ function showWeekendResponsiblePicker(mondayKey) {
 
     overlay.querySelector('#weekend-picker-close').addEventListener('click', () => overlay.remove());
     overlay.querySelector('#weekend-picker-cancel').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
 
     overlay.querySelector('#weekend-picker-save').addEventListener('click', async () => {
         const selected = overlay.querySelector('input[name="weekend-responsible"]:checked')?.value;
@@ -2732,20 +2769,41 @@ function setupSettingsCollapsibles(scope = document) {
             closeBtn.addEventListener('click', async () => {
                 closeDayContextMenu();
                 const shiftsOnDate = DataStore.shifts.filter(s => s.date === dateStr);
+
+                // #189: hier werd eerst verwijderd en pas daarna om een reden
+                // gevraagd. Wie op Annuleer klikte, was zijn diensten kwijt
+                // terwijl de dag niet gesloten werd, zonder enige melding en
+                // zonder dat het scherm werd bijgewerkt.
+                //
+                // Alle vragen komen nu vóór de eerste wijziging, zodat afbreken
+                // op elk moment betekent dat er niets gebeurd is.
+                const reason = await promptReason('Reden (optioneel):');
+                if (reason === null) return;
+
                 if (shiftsOnDate.length > 0) {
                     const ok = await showConfirm(
-                        `Er staan ${shiftsOnDate.length} shift(s) ingepland op ${label}. Deze worden verwijderd bij het sluiten.`,
+                        `Er staan ${shiftsOnDate.length} dienst(en) ingepland op ${label}. Deze worden verwijderd bij het sluiten.`,
                         'Dag sluiten'
                     );
                     if (!ok) return;
+                }
+
+                try {
                     for (const shift of shiftsOnDate) {
+                        // skipBlock: het sluiten van de dag houdt hem al leeg,
+                        // een blokkade per medewerker is overbodig en blijft
+                        // achter als de dag later heropend wordt.
                         await deleteShift(shift.id, true);
                     }
+                    await addClosedDate(dateStr, reason);
+                    showToast(`Dag gesloten: ${label}`, 'success');
+                } catch (error) {
+                    showToast('Dag sluiten mislukt: ' + getUserFriendlyError(error), 'error');
+                } finally {
+                    // Ook in het foutpad, anders toont het scherm diensten die
+                    // er niet meer zijn.
+                    renderPlanning();
                 }
-                const reason = await promptReason('Reden (optioneel):');
-                if (reason === null) return;
-                await addClosedDate(dateStr, reason);
-                renderPlanning();
             });
             menu.appendChild(closeBtn);
         } else {
@@ -2798,25 +2856,10 @@ function setupSettingsCollapsibles(scope = document) {
         });
     }
 
-    function showConfirmDialog(message, confirmLabel, altLabel) {
-        return new Promise(resolve => {
-            const overlay = document.createElement('div');
-            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
-            overlay.innerHTML = `
-                <div class="quick-dialog quick-dialog-confirm">
-                    <div class="mb-md">${escapeHtml(message)}</div>
-                    <div class="quick-dialog-actions flex-wrap">
-                        <button id="_conf-cancel" class="btn btn-secondary">Annuleer</button>
-                        <button id="_conf-alt" class="btn btn-secondary">${escapeHtml(altLabel)}</button>
-                        <button id="_conf-ok" class="btn btn-danger">${escapeHtml(confirmLabel)}</button>
-                    </div>
-                </div>`;
-            document.body.appendChild(overlay);
-            overlay.querySelector('#_conf-ok').addEventListener('click', () => { overlay.remove(); resolve(true); });
-            overlay.querySelector('#_conf-alt').addEventListener('click', () => { overlay.remove(); resolve(false); });
-            overlay.querySelector('#_conf-cancel').addEventListener('click', () => { overlay.remove(); resolve(null); });
-        });
-    }
+    // showConfirmDialog stond hier: een driewegdialoog die nergens werd
+    // aangeroepen, zonder Escape en zonder klik-buiten. Verwijderd als dode
+    // code. Wie ooit een echte driewegvraag nodig heeft, bouwt hem beter in
+    // app-ui.js naast showConfirm, zodat er één plek is voor dialogen.
 
     document.addEventListener('contextmenu', (e) => {
         const header = e.target.closest('.timeline-day-header, .month-day-header');

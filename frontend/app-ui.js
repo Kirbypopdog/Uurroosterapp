@@ -12,6 +12,30 @@ const FocusTrap = {
         this._previousFocus = document.activeElement;
 
         this._handler = (e) => {
+            // #191: de FocusTrap ving alleen Tab af. Escape deed nergens iets,
+            // en omdat de sluitknop van sommige vensters een span is en dus
+            // geen tabstop, kon je met het toetsenbord niet meer uit een
+            // geopend venster komen. Dat gold voor elk venster in de app: de
+            // meldingenmodal, de dienstmodal, het medewerkersvenster, het
+            // accountvenster en het afwezigheidsvenster.
+            //
+            // We klikken de eigen sluitknop van het venster aan in plaats van
+            // het gewoon te verbergen, zodat de opruimlogica van dat venster
+            // draait (formulier leegmaken, state terugzetten).
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                const closer = modal.querySelector('.modal-close')
+                    || [...modal.querySelectorAll('button')]
+                        .find(b => /annul/i.test(b.textContent || ''));
+                if (closer) {
+                    closer.click();
+                } else {
+                    modal.classList.add('hidden');
+                    this.deactivate();
+                }
+                return;
+            }
+
             if (e.key === 'Tab') {
                 const focusable = modal.querySelectorAll(
                     'button:not([disabled]):not(.hidden), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
@@ -169,11 +193,11 @@ function showToast(message, type = 'info', duration = null) {
 function getUserFriendlyError(err) {
     if (!err) return 'Er is een onbekende fout opgetreden.';
     const msg = err.message || err.error || String(err);
-    if (msg.includes('constraint')) return 'Dit kan niet worden opgeslagen — controleer de gegevens.';
+    if (msg.includes('constraint')) return 'Dit kan niet worden opgeslagen. Controleer de gegevens.';
     if (msg.includes('duplicate')) return 'Deze waarde bestaat al.';
     if (msg.includes('not found') || msg.includes('404')) return 'Dit item werd niet gevonden.';
     if (msg.includes('unauthorized') || msg.includes('401')) return 'Je bent niet gemachtigd voor deze actie.';
-    if (msg.includes('network') || msg.includes('fetch') || msg.includes('Failed to fetch')) return 'Verbindingsfout — controleer je internetverbinding.';
+    if (msg.includes('network') || msg.includes('fetch') || msg.includes('Failed to fetch')) return 'Verbindingsfout. Controleer je internetverbinding.';
     if (msg.includes('Te veel verzoeken')) return msg;
     return msg;
 }
@@ -232,6 +256,7 @@ function showConfirm(message, title = 'Bevestig actie', options = {}) {
         // Custom button text
         okBtn.textContent = options.confirmText || 'OK';
         cancelBtn.textContent = options.cancelText || 'Annuleren';
+        cancelBtn.style.display = options.hideCancel ? 'none' : '';
 
         // Show modal
         modal.classList.remove('hidden');
@@ -251,13 +276,15 @@ function showConfirm(message, title = 'Bevestig actie', options = {}) {
         // Cleanup function
         const cleanup = () => {
             modal.classList.add('hidden');
+            cancelBtn.style.display = '';
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);
-            modal.removeEventListener('click', handleBackdropClick);
+            modal.removeEventListener('mousedown', handleBackdropClick);
             document.removeEventListener('keydown', handleEscape);
         };
 
-        // Handle backdrop click
+        // Handle backdrop click — mousedown i.p.v. click: anders sluit de modal
+        // als je tekst selecteert en de muis buiten het kader loslaat.
         const handleBackdropClick = (e) => {
             if (e.target === modal) {
                 handleCancel();
@@ -274,7 +301,7 @@ function showConfirm(message, title = 'Bevestig actie', options = {}) {
         // Add event listeners
         okBtn.addEventListener('click', handleOk);
         cancelBtn.addEventListener('click', handleCancel);
-        modal.addEventListener('click', handleBackdropClick);
+        modal.addEventListener('mousedown', handleBackdropClick);
         document.addEventListener('keydown', handleEscape);
     });
 }
@@ -298,9 +325,11 @@ function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
             modal.classList.add('hidden');
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);
-            modal.removeEventListener('click', handleBackdropClick);
+            modal.removeEventListener('mousedown', handleBackdropClick);
             document.removeEventListener('keydown', handleKeys);
         };
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
         const handleBackdropClick = (e) => { if (e.target === modal) handleCancel(); };
         const handleKeys = (e) => {
             if (e.key === 'Escape') handleCancel();
@@ -308,7 +337,7 @@ function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
         };
         okBtn.addEventListener('click', handleOk);
         cancelBtn.addEventListener('click', handleCancel);
-        modal.addEventListener('click', handleBackdropClick);
+        modal.addEventListener('mousedown', handleBackdropClick);
         document.addEventListener('keydown', handleKeys);
     });
 }
@@ -344,9 +373,11 @@ function showSelectPrompt(message, title, options) {
             selectEl.replaceWith(inputEl);
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);
-            modal.removeEventListener('click', handleBackdropClick);
+            modal.removeEventListener('mousedown', handleBackdropClick);
             document.removeEventListener('keydown', handleKeys);
         };
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
         const handleBackdropClick = (e) => { if (e.target === modal) handleCancel(); };
         const handleKeys = (e) => {
             if (e.key === 'Escape') handleCancel();
@@ -354,7 +385,7 @@ function showSelectPrompt(message, title, options) {
         };
         okBtn.addEventListener('click', handleOk);
         cancelBtn.addEventListener('click', handleCancel);
-        modal.addEventListener('click', handleBackdropClick);
+        modal.addEventListener('mousedown', handleBackdropClick);
         document.addEventListener('keydown', handleKeys);
     });
 }
@@ -393,10 +424,10 @@ function applyTeamColors() {
 .team-badge.${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .team-badge-mini.${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
-.timeline-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.timeline-block.team-${teamId} { background: linear-gradient(135deg, color-mix(in srgb, ${color} 78%, white) 0%, ${color} 100%) !important; color: ${textColor} !important; }
 .shift-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-team-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
-.timeline-team-header.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
+.timeline-team-header.team-${teamId} { --team-dot-color: ${color}; }
 .team-tab.active.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 `;
     });

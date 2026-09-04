@@ -138,7 +138,7 @@ open frontend/index.html
 │   ├── src/db.js               # PostgreSQL connection pool
 │   ├── src/email.js            # Resend email service (9 notificatie types)
 │   ├── src/utils.js            # Pure datumhulpfuncties
-│   ├── tests/                  # Jest test suite (194 tests)
+│   ├── tests/                  # Jest test suite (188 tests)
 │   ├── sql/schema.sql          # Database schema (bron van waarheid)
 │   ├── scripts/                # Setup & seed scripts
 │   └── import-backup.js        # CLI backup import tool
@@ -155,7 +155,7 @@ open frontend/index.html
 
 **10 tabellen**: `teams`, `users`, `shifts`, `availability`, `settings`, `shift_blocks`, `shift_swap_requests`, `audit_log`, `schedule_drafts`, `shift_activities`
 
-Auto-migratie bij elke server startup via `ensureSchema()` — geen handmatige migraties nodig.
+Geversioneerd migratiesysteem via `runMigrations()` bij elke server startup — geen handmatige migraties nodig. Een verse database initialiseert zichzelf (basistabellen + standaardteams + admin-account), dus een nieuwe omgeving werkt na de eerste deploy zonder extra stappen.
 
 ---
 
@@ -211,6 +211,17 @@ Zie [DEPLOY.md](DEPLOY.md) voor volledige instructies. Korte samenvatting:
 3. **Frontend**: Static Site vanuit `frontend/` folder
 4. Auto-deploy bij elke push naar `main`
 
+### Twee omgevingen
+
+| Branch | Omgeving | Doel |
+|--------|----------|------|
+| `main` | **Productie** — wat het team gebruikt | live data |
+| `staging` | **Testomgeving** — eigen database | veilig testen vóór het live gaat |
+
+Workflow: ontwikkel → `push origin staging` (test) → merge naar `main` (live).
+Zie [STAGING.md](STAGING.md) voor de eenmalige setup. Een verse omgeving
+initialiseert zichzelf bij de eerste deploy (basistabellen + admin-account).
+
 ---
 
 ## Ontwikkeling
@@ -220,7 +231,7 @@ Dit project is volledig ontwikkeld met AI-assistentie via [Claude Code](https://
 ### Tests
 
 ```bash
-cd backend && npm test   # 117 tests, geen DB vereist
+cd backend && npm test   # 188 tests, geen DB vereist
 ```
 
 | Testbestand | Beschrijving |
@@ -234,7 +245,7 @@ cd backend && npm test   # 117 tests, geen DB vereist
 - **Geen frameworks** — vanilla JS, geen React/Vue/build tools
 - **`team_id` = `main_team`** — altijd syncen bij user updates
 - **Parameterized queries** — nooit string concatenation in SQL
-- **Auto-migratie** — schema changes via `ensureSchema()` in server.js
+- **Migraties** — schema changes als nieuwe entry in de `MIGRATIONS`-array (`runMigrations()` in server.js)
 
 ---
 

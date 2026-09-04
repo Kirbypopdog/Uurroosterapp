@@ -314,3 +314,195 @@ describe('getShiftEndDateTime — extra grensgevallen', () => {
     expect(end.getDate()).toBe(1);
   });
 });
+
+// ===== VERLOFPLANNING: gesloten dagen uit het roosterconcept =====
+//
+// app-leave.js is browsercode, maar de weekindeling en de afleiding van
+// gesloten dagen zijn pure functies. Ze leunen op drie datumhelpers uit
+// data.js; die zetten we hier als globals klaar, net zoals hierboven met
+// DataStore gebeurt.
+global.parseDateOnly = (value) => {
+  const [y, m, d] = String(value).split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+global.getMondayOfWeek = (date) => {
+  const x = new Date(date);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  x.setHours(0, 0, 0, 0);
+  return x;
+};
+global.formatDateYYYYMMDD = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const {
+  closedDatesFromPattern,
+  leaveWeeksOfBlock,
+  leaveClosedInfo,
+  leaveOpenDaysOfBlock,
+  leaveBlockProgress,
+  leaveVerdeelVoorstel,
+  leaveWeekWens
+} = require('../../frontend/app-leave.js');
+
+// Kerstvakantie 21 dec 2026 t/m 3 jan 2027 = twee volle maandagweken.
+const KERST = { startDate: '2026-12-21', endDate: '2027-01-03' };
+const PATROON = { cycleLength: 2, weeks: { '1': { closedDays: [6, 0] }, '2': { closedDays: [] } } };
+
+describe('closedDatesFromPattern', () => {
+  test('sluit het weekend van week 1 en laat week 2 open', () => {
+    const dicht = closedDatesFromPattern(KERST.startDate, KERST.startDate, KERST.endDate, PATROON);
+    expect(dicht).toEqual(['2026-12-26', '2026-12-27']);
+  });
+
+  test('geeft niets terug zonder patroon', () => {
+    expect(closedDatesFromPattern(KERST.startDate, KERST.startDate, KERST.endDate, null)).toEqual([]);
+  });
+
+  // Weken voorbij de cyclus hebben geen entry: dan claimen we niets, in
+  // plaats van het patroon te laten herhalen.
+  test('claimt niets voor weken voorbij de cyclus', () => {
+    const kort = { cycleLength: 1, weeks: { '1': { closedDays: [6, 0] } } };
+    const dicht = closedDatesFromPattern(KERST.startDate, KERST.startDate, KERST.endDate, kort);
+    expect(dicht).toEqual(['2026-12-26', '2026-12-27']);
+  });
+
+  test('neemt alleen dagen binnen het blok mee als het blok midden in een week start', () => {
+    // Blok start op woensdag 23 dec; de zaterdag erna valt nog in week 1.
+    const dicht = closedDatesFromPattern('2026-12-21', '2026-12-23', '2027-01-03', PATROON);
+    expect(dicht).toEqual(['2026-12-26', '2026-12-27']);
+  });
+});
+
+describe('leaveWeeksOfBlock met gesloten dagen', () => {
+  const blok = { ...KERST, closedDates: ['2026-12-26', '2026-12-27'] };
+
+  test('splitst open en gesloten dagen per week', () => {
+    const weken = leaveWeeksOfBlock(blok);
+    expect(weken).toHaveLength(2);
+    expect(weken[0].openDays).toHaveLength(5);
+    expect(weken[0].closedDays).toEqual(['2026-12-26', '2026-12-27']);
+    expect(weken[1].openDays).toHaveLength(7);
+  });
+
+  test('benoemt het weekend per week', () => {
+    const weken = leaveWeeksOfBlock(blok);
+    expect(leaveClosedInfo(weken[0])).toMatchObject({ open: false, label: 'weekend gesloten' });
+    expect(leaveClosedInfo(weken[1])).toMatchObject({ open: true, label: 'weekend open' });
+  });
+
+  // Een concept kan ook een doordeweekse dag sluiten — 25 december, 11 juli.
+  // Dan moet de rij die dag benoemen in plaats van "weekend open".
+  test('benoemt een gesloten doordeweekse dag', () => {
+    const kerstdag = { ...KERST, closedDates: ['2026-12-25'] };
+    const weken = leaveWeeksOfBlock(kerstdag);
+    expect(weken[0].openDays).toHaveLength(6);
+    expect(leaveClosedInfo(weken[0])).toMatchObject({ open: true, label: 'vr gesloten' });
+  });
+
+  test('somt weekdag en weekend samen op', () => {
+    const nieuwjaar = { ...KERST, closedDates: ['2027-01-01', '2027-01-02', '2027-01-03'] };
+    const weken = leaveWeeksOfBlock(nieuwjaar);
+    expect(leaveClosedInfo(weken[1])).toMatchObject({ open: false, label: 'vr, za, zo gesloten' });
+  });
+
+  // Zonder gekoppeld concept weten we niets: dan tonen we ook niets.
+  test('zegt niets over het weekend zonder closedDates', () => {
+    const weken = leaveWeeksOfBlock(KERST);
+    expect(weken[0].openDays).toHaveLength(7);
+    expect(leaveClosedInfo(weken[0])).toBeNull();
+  });
+});
+
+describe('leaveBlockProgress', () => {
+  const blok = { ...KERST, closedDates: ['2026-12-26', '2026-12-27'] };
+
+  // Zonder deze regel blijft de indienknop permanent uitgeschakeld zodra
+  // er ergens een weekend dicht staat.
+  test('is klaar wanneer enkel de open dagen ingevuld zijn', () => {
+    const map = {};
+    leaveOpenDaysOfBlock(blok).forEach(d => { map[d] = 'werken'; });
+    expect(leaveBlockProgress(blok, map)).toEqual({ totaal: 12, ingevuld: 12, klaar: true });
+  });
+
+  test('telt gesloten dagen niet mee als ontbrekend', () => {
+    expect(leaveBlockProgress(blok, {}).totaal).toBe(12);
+  });
+
+  test('een volledig gesloten blok is meteen klaar', () => {
+    const dicht = { startDate: '2026-12-26', endDate: '2026-12-27', closedDates: ['2026-12-26', '2026-12-27'] };
+    expect(leaveBlockProgress(dicht, {}).klaar).toBe(true);
+  });
+});
+
+// ===== VERDELING VAN EEN ZOMERBLOK =====
+//
+// In een voorkeurblok kiezen mensen werken/liever niet/zeker niet, maar `apply`
+// neemt alleen 'verlof' over. De beheerder legt daarom de definitieve verdeling
+// vast; deze functie zet het voorstel klaar.
+describe('leaveVerdeelVoorstel', () => {
+  // 5 juli t/m 18 juli 2027 = twee volle weken; het eerste weekend is dicht.
+  const ZOMER = { startDate: '2027-07-05', endDate: '2027-07-18', closedDates: ['2027-07-10', '2027-07-11'] };
+  const MENSEN = [{ id: 2 }, { id: 3 }, { id: 4 }];
+
+  test('zeker niet en liever niet worden allebei verlof', () => {
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, {
+      2: { '2027-07-05': 'zeker_niet' },
+      3: { '2027-07-12': 'liever_niet' },
+      4: {}
+    });
+    expect(v[2]['2027-07-05']).toBe('verlof');
+    expect(v[3]['2027-07-12']).toBe('verlof');
+  });
+
+  test('alleen werken blijft werken', () => {
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, { 2: { '2027-07-05': 'werken', '2027-07-06': 'werken' } });
+    expect(v[2]['2027-07-05']).toBe('werken');
+  });
+
+  // Nooit ongevraagd verlof toekennen aan wie niets indiende.
+  test('wie niets invulde krijgt werken', () => {
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, {});
+    expect(v[4]['2027-07-05']).toBe('werken');
+    expect(v[4]['2027-07-12']).toBe('werken');
+  });
+
+  // Na het vastleggen staan er verlof/werken in plaats van voorkeuren. Zonder
+  // deze regel zou heropenen de verdeling terugzetten naar 'iedereen werkt'.
+  test('een al vastgelegde verdeling blijft staan', () => {
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, {
+      2: { '2027-07-05': 'verlof', '2027-07-06': 'verlof', '2027-07-12': 'werken' }
+    });
+    expect(v[2]['2027-07-05']).toBe('verlof');
+    expect(v[2]['2027-07-12']).toBe('werken');
+  });
+
+  test('een volledig gesloten week komt niet in het voorstel', () => {
+    const dicht = {
+      startDate: '2027-07-05', endDate: '2027-07-18',
+      closedDates: ['2027-07-05','2027-07-06','2027-07-07','2027-07-08','2027-07-09','2027-07-10','2027-07-11']
+    };
+    const v = leaveVerdeelVoorstel(dicht, MENSEN, {});
+    expect(Object.keys(v[2])).toEqual(['2027-07-12']);
+  });
+
+  // Het voorstel corrigeert niets: als iedereen weg wil, toont het scherm dat
+  // en beslist de mens. Zo blijft het voorspelbaar.
+  test('als iedereen vrij wil, werkt niemand in het voorstel', () => {
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, {
+      2: { '2027-07-05': 'zeker_niet' }, 3: { '2027-07-05': 'zeker_niet' }, 4: { '2027-07-05': 'liever_niet' }
+    });
+    expect(MENSEN.every(m => v[m.id]['2027-07-05'] === 'verlof')).toBe(true);
+  });
+});
+
+describe('leaveWeekWens', () => {
+  const week = { days: ['2027-07-05','2027-07-06'], openDays: ['2027-07-05','2027-07-06'], closedDays: [], closedBekend: true };
+
+  test('de zwaarste wens weegt door', () => {
+    expect(leaveWeekWens(week, { '2027-07-05': 'werken', '2027-07-06': 'zeker_niet' })).toBe('zeker_niet');
+  });
+
+  test('geeft niets terug als er niets ingevuld is', () => {
+    expect(leaveWeekWens(week, {})).toBeNull();
+  });
+});

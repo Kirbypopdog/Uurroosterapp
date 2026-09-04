@@ -14,6 +14,13 @@ const AppState = {
     authToken: null,
     isAuthenticating: false, // Prevent concurrent authentication attempts
     currentView: 'home',
+    // Verlofplanning
+    leaveRounds: [],          // lijst van rondes
+    leaveRound: null,         // geladen detail (ronde + entries + submissions)
+    leaveRoundId: null,       // welke ronde staat open in de view
+    leaveScreen: 'landing',   // 'landing' | 'blok' | 'overzicht'
+    leaveBlockId: null,       // welke vakantie staat open
+    leaveDraft: {},           // { 'YYYY-MM-DD': status } vóór opslaan
     schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
     currentMonthStart: null, // First day of month for month view
@@ -54,7 +61,8 @@ const AppState = {
     filterOnlyWithShifts: false,
     planningControlsCollapsed: true,
     settingsDirty: false,
-    swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
+    swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
+    collapsedTeams: new Set()
 };
 
 // ===== TEAM HELPERS =====
@@ -148,7 +156,16 @@ const UndoManager = {
     async _executeReverse(action) {
         switch (action.type) {
             case 'create':
-                await deleteShift(action.resultId);
+                // #302: ongedaan maken hoort de vorige toestand te herstellen,
+                // niet iets nieuws achter te laten. Zonder skipBlock bleef er
+                // een shift_block staan op een cel die er vóór de aanmaak geen
+                // had, waardoor het concept die medewerkerdag bij een volgende
+                // toepassing niet meer vulde.
+                //
+                // Bij het opnieuw uitvoeren van een verwijdering hieronder is
+                // die blokkade juist wél gewenst: daar is het leegmaken een
+                // bewuste keuze die het concept moet respecteren.
+                await deleteShift(action.resultId, true);
                 break;
             case 'update':
                 await updateShift(action.shiftId, action.previousData);

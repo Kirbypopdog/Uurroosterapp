@@ -1,5 +1,31 @@
 // ===== ROOSTERBOUWER: CONCEPTEN (opslaan, laden, toepassen, vergelijken) =====
 
+// Een concept is meer dan zijn diensten: gesloten dagen, bezettingsregels en
+// vergaderingen tellen evengoed. Deze ene bron bepaalt zowel of de
+// opslaanknoppen aan staan als of opslaan zin heeft — anders raken die twee
+// uit elkaar, zoals eerder gebeurde: een concept met enkel gesloten dagen kon
+// je niet opslaan én de knop stond grijs.
+function builderHeeftIets() {
+    const vulling = g => g && Object.keys(g).length > 0
+        && Object.values(g).some(d => d && Object.keys(d).length > 0);
+
+    if (vulling(AppState.builderGrid)) return true;
+    if (Object.values(AppState.builderGridByWeek || {}).some(vulling)) return true;
+    if (Object.values(AppState.builderPattern?.weeks || {})
+        .some(w => Array.isArray(w?.closedDays) && w.closedDays.length > 0)) return true;
+    if (Object.keys(AppState.builderStaffingRulesByWeek || {}).length > 0
+        || Object.keys(AppState.builderStaffingRules || {}).length > 0) return true;
+    if (Object.values(AppState.builderMeetings || {})
+        .some(v => Array.isArray(v) && v.length > 0)) return true;
+    return false;
+}
+
+function builderHeeftInhoud() {
+    if (builderHeeftIets()) return true;
+    showToast('Er valt nog niets op te slaan.\nVul een dienst in, sluit een dag of stel bezetting in.', 'warning');
+    return false;
+}
+
 async function saveBuilderDraft() {
     // Sync current week to cache before saving
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
@@ -13,7 +39,8 @@ async function saveBuilderDraft() {
             hasAnyData = true;
         }
     }
-    if (!hasAnyData) return;
+
+    if (!builderHeeftInhoud()) return;
 
     // If a draft is loaded, UPDATE it directly (no modal needed)
     if (AppState.builderLoadedDraftId) {
@@ -138,7 +165,7 @@ async function saveBuilderDraftAs() {
             hasAnyData = true;
         }
     }
-    if (!hasAnyData) return;
+    if (!builderHeeftInhoud()) return;
 
     const result = await showDraftSaveModal();
     if (!result) return;
@@ -275,7 +302,9 @@ function showNewConceptTypeModal() {
 
     overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
     overlay.querySelector('#concept-type-cancel').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
 
     overlay.querySelector('#concept-type-confirm').addEventListener('click', async () => {
         const type = overlay.querySelector('input[name="concept-type"]:checked')?.value || 'basis';
@@ -432,7 +461,9 @@ function showDraftSaveModal() {
             if (e.key === 'Enter') overlay.querySelector('#draft-save-confirm').click();
             if (e.key === 'Escape') cleanup(null);
         });
-        overlay.addEventListener('click', (e) => {
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => {
             if (e.target === overlay) cleanup(null);
         });
     });
@@ -663,7 +694,9 @@ async function deactivateBuilderDraft(draftId) {
         });
         overlay.querySelector('#deactivate-cancel').addEventListener('click', () => { cleanup(); resolve(null); });
         overlay.querySelector('#deactivate-close').addEventListener('click', () => { cleanup(); resolve(null); });
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
     });
 
     if (!result) return;
@@ -730,20 +763,14 @@ async function applyBuilderDraft(draftId) {
 
         showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
         try {
-            let result = await applyScheduleDraft(draftId, { clearBlocks: true });
-
-            // Handmatige wijzigingen detectie
-            if (result.needsManualConfirmation) {
-                hideSectionLoading('planning-view');
-                const overwrite = await showConfirm(
-                    `Er zijn ${result.manualShiftCount} handmatige diensten in de vakantieperiode.\n\nOK — Alles verwijderen (handmatige aanpassingen gaan verloren)\nAnnuleren — Alleen automatische diensten verwijderen`,
-                    'Handmatige diensten gevonden'
-                );
-                showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
-                result = await applyScheduleDraft(draftId, { clearBlocks: true, confirmOverwrite: overwrite });
-            }
-
-            showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt)`, 'success');
+            const result = await applyScheduleDraft(draftId, { clearBlocks: true });
+            // Overgeslagen dagen expliciet melden: die komen uit gridcellen die
+            // je in de bouwer niet meer ziet omdat de dag intussen gesloten is.
+            const gesloten = result.closedDaySkips
+                ? `, ${result.closedDaySkips} overgeslagen op gesloten dagen` : '';
+            const dicht = result.conceptClosedCount
+                ? `, ${result.conceptClosedCount} dagen gesloten in de planning` : '';
+            showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt${gesloten}${dicht})`, 'success');
 
             const draftToMark = drafts.find(d => d.id === draftId);
             if (draftToMark) {
@@ -753,7 +780,8 @@ async function applyBuilderDraft(draftId) {
                 draftToMark.lastAppliedUntil = hp.endDate;
             }
 
-            await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshActivities()]);
+            // settings mee: de gesloten dagen van dit concept komen daarvandaan
+            await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshActivities(), refreshSettings()]);
             renderBuilder();
         } catch (error) {
             console.error('Error applying vakantie draft:', error);
@@ -841,7 +869,8 @@ async function applyBuilderDraft(draftId) {
         let result = await applyScheduleDraft(draftId, {
             clearBlocks: true,
             applyStartDate: applyResult.startDate,
-            applyEndDate: applyResult.endDate
+            applyEndDate: applyResult.endDate,
+            confirmOverwrite: applyResult.confirmOverwrite ? true : null
         });
 
         // Overlap detectie — ander actief concept overlapt
@@ -859,24 +888,8 @@ async function applyBuilderDraft(draftId) {
                 clearBlocks: true,
                 applyStartDate: applyResult.startDate,
                 applyEndDate: applyResult.endDate,
-                confirmOverlap: true
-            });
-        }
-
-        // Handmatige wijzigingen detectie
-        if (result.needsManualConfirmation) {
-            hideSectionLoading('planning-view');
-            const overwrite = await showConfirm(
-                `Er zijn ${result.manualShiftCount} diensten die handmatig zijn aangepast (bijv. geruild, tijden gewijzigd of handmatig toegevoegd).\n\nWat wil je doen?\n\n• OK — Alles overschrijven met het concept (handmatige aanpassingen gaan verloren)\n• Annuleren — Alleen automatische diensten vervangen, handmatige aanpassingen behouden`,
-                'Handmatige diensten gevonden'
-            );
-            showSectionLoading('planning-view', 'Concept toepassen...');
-            result = await applyScheduleDraft(draftId, {
-                clearBlocks: true,
-                applyStartDate: applyResult.startDate,
-                applyEndDate: applyResult.endDate,
                 confirmOverlap: true,
-                confirmOverwrite: overwrite
+                confirmOverwrite: applyResult.confirmOverwrite ? true : null
             });
         }
 
@@ -888,7 +901,12 @@ async function applyBuilderDraft(draftId) {
             return;
         }
 
-        showToast(`Basisrooster ${weekLabel} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt)`, 'success');
+        const preservedNote = result.manualShiftsPreserved > 0
+            ? ` · ${result.manualShiftsPreserved} manuele diensten behouden`
+            : '';
+        const geslotenNote = result.closedDaySkips
+            ? `, ${result.closedDaySkips} overgeslagen op gesloten dagen` : '';
+        showToast(`Basisrooster ${weekLabel} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt${preservedNote}${geslotenNote})`, 'success');
 
         // Update local draft cache with applied dates
         const draftToMark = (DataStore.settings.schedule_drafts || []).find(d => d.id === draftId);
@@ -899,8 +917,19 @@ async function applyBuilderDraft(draftId) {
             draftToMark.lastAppliedUntil = applyResult.endDate;
         }
 
-        // Auto-update school year start for week numbering
-        await saveSchoolYearStart(applyResult.startDate);
+        // #207: hier stond `await saveSchoolYearStart(applyResult.startDate)`,
+        // onvoorwaardelijk, dus ook voor een vakantieconcept en ook voor een
+        // toepassing midden in het jaar.
+        //
+        // De schooljaarstart is niet zomaar een etiket: getFourWeekPeriodDates
+        // verankert er de vaste vierwekenperiodes aan, en die bepalen het getal
+        // "X/152u" dat in de planning onder elke naam staat. Een concept
+        // toepassen op 17 november verschoof de periodegrenzen een week en
+        // veranderde ieders periodetotaal, zonder dat er één dienst was
+        // bijgekomen of verdwenen. De knop "Vanaf nu" maakte dat één klik weg.
+        //
+        // De schooljaarstart wordt voortaan alleen nog handmatig gezet, in
+        // Instellingen, waar hij toch al te zetten is.
 
         // Apply pattern + rotation from draft globally (date-aware)
         {
@@ -911,9 +940,17 @@ async function applyBuilderDraft(draftId) {
 
             if (applyGrid._pattern) {
                 const currentPattern = getSchedulePattern();
-                // Auto-set referentiedatum op maandag van apply-from datum
-                const applyMonday = getMonday(applyFromDate);
-                const autoRefDate = formatDateYYYYMMDD(applyMonday);
+                // #211: hier werd zelf een anker berekend, de maandag van de
+                // startdatum, terwijl de backend met het anker uit het concept
+                // genereerde. Die twee liepen uiteen en dan stond het rooster
+                // een cycluspositie verschoven ten opzichte van wat je zag.
+                //
+                // De backend geeft nu terug welk anker hij écht gebruikt heeft.
+                // Dat publiceren we, zodat er maar één waarheid is. De oude
+                // berekening blijft als terugval voor een backend die het veld
+                // nog niet meestuurt.
+                const autoRefDate = result.referenceDate
+                    || formatDateYYYYMMDD(getMonday(applyFromDate));
 
                 let newPatternSetting;
 
@@ -990,13 +1027,13 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                     <span class="modal-close" id="draft-apply-close"><i data-lucide="x"></i></span>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-sm"><strong>${escapeHtml(draft.name)}</strong> toepassen als basisrooster ${weekLabel}?</p>
+                    <p class="mb-sm text-secondary">Periode kiezen voor <strong>${escapeHtml(draft.name)}</strong>:</p>
                     <div class="apply-presets">
-                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetSchoolStart}" data-end="${presetSchoolEnd}">Dit schooljaar (sep – aug)</button>
-                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetTodayStr}" data-end="${presetSchoolEnd}">Vanaf nu tot aug</button>
-                        <button class="btn btn-secondary btn-sm apply-preset" data-start="" data-end="">Aangepaste periode</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetSchoolStart}" data-end="${presetSchoolEnd}">Dit schooljaar</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetTodayStr}" data-end="${presetSchoolEnd}">Vanaf nu</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="" data-end="">Aangepast</button>
                     </div>
-                    <div class="form-row form-row-gap">
+                    <div class="form-row form-row-gap mt-sm">
                         <div class="form-group flex-1">
                             <label>Van</label>
                             <input type="date" id="draft-apply-start-date" class="form-input" value="${defaultStart}" required>
@@ -1006,10 +1043,13 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                             <input type="date" id="draft-apply-end-date" class="form-input" value="${defaultEnd}" required>
                         </div>
                     </div>
-                    <span class="form-hint form-hint-block mt-xs">Shifts worden alleen gegenereerd binnen deze periode. Bestaande shifts buiten deze periode blijven ongewijzigd.</span>
-                    <div class="code-block">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
+                    <p class="form-hint mt-xs">Manuele aanpassingen worden bewaard. Shifts buiten deze periode blijven ongewijzigd.</p>
+                    <div class="apply-changes-summary mt-sm">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
                 </div>
                 <div class="modal-footer">
+                    <span class="modal-footer-left">
+                        <button class="btn btn-ghost btn-sm" id="draft-apply-reset" data-tooltip="Verwijdert ook manuele aanpassingen en zet alles terug naar het concept" data-tooltip-pos="top" style="color:var(--color-danger,#dc2626)">Reset alles</button>
+                    </span>
                     <button class="btn btn-secondary btn-sm" id="draft-apply-cancel">Annuleren</button>
                     <button class="btn btn-primary btn-sm" id="draft-apply-confirm">Toepassen</button>
                 </div>
@@ -1039,24 +1079,38 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
             });
         });
 
-        overlay.querySelector('#draft-apply-confirm').addEventListener('click', () => {
+        function validateDates() {
             const startDate = overlay.querySelector('#draft-apply-start-date').value;
             const endDate = overlay.querySelector('#draft-apply-end-date').value;
-            if (!startDate || !endDate) {
-                showToast('Vul beide datums in', 'warning');
-                return;
-            }
-            if (startDate >= endDate) {
-                showToast('Startdatum moet voor einddatum liggen', 'warning');
-                return;
-            }
+            if (!startDate || !endDate) { showToast('Vul beide datums in', 'warning'); return null; }
+            if (startDate >= endDate) { showToast('Startdatum moet voor einddatum liggen', 'warning'); return null; }
+            return { startDate, endDate };
+        }
+
+        overlay.querySelector('#draft-apply-confirm').addEventListener('click', () => {
+            const dates = validateDates();
+            if (!dates) return;
             cleanup();
-            resolve({ startDate, endDate });
+            resolve({ ...dates, confirmOverwrite: false });
+        });
+
+        overlay.querySelector('#draft-apply-reset').addEventListener('click', async () => {
+            const dates = validateDates();
+            if (!dates) return;
+            const confirmed = await showConfirm(
+                `Dit verwijdert ALLE diensten in de periode ${dates.startDate} – ${dates.endDate} en zet alles terug naar het concept "${escapeHtml(draftName)}", inclusief manuele aanpassingen en leeggemaakte dagen.\n\nDoorgaan?`,
+                'Reset alles naar concept'
+            );
+            if (!confirmed) return;
+            cleanup();
+            resolve({ ...dates, confirmOverwrite: true });
         });
 
         overlay.querySelector('#draft-apply-cancel').addEventListener('click', () => { cleanup(); resolve(null); });
         overlay.querySelector('#draft-apply-close').addEventListener('click', () => { cleanup(); resolve(null); });
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
     });
 }
 
@@ -1087,7 +1141,9 @@ function showReapplyAfterEditModal(draftName) {
         overlay.querySelector('#reapply-yes').addEventListener('click', () => { cleanup(); resolve(true); });
         overlay.querySelector('#reapply-no').addEventListener('click', () => { cleanup(); resolve(false); });
         overlay.querySelector('#reapply-close').addEventListener('click', () => { cleanup(); resolve(false); });
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(false); } });
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) { cleanup(); resolve(false); } });
     });
 }
 
@@ -1282,7 +1338,9 @@ function executeCopyWeek() {
     AppState.builderGridByWeek[targetWeek] = newTargetGrid;
     AppState.builderWeekNumber = targetWeek;
     AppState.builderGrid = JSON.parse(JSON.stringify(newTargetGrid));
-    AppState.builderIsDirty = true;
+    // #210: via setBuilderDirty, anders wordt er geen automatische opslag
+    // ingepland en blijft de statusregel "bewaard" tonen.
+    setBuilderDirty();
 
     document.getElementById('copy-week-modal').classList.add('hidden');
     renderBuilder();
