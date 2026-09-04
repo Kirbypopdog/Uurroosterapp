@@ -84,11 +84,33 @@ function calcPlanningHourlyHeadcount(date, hour) {
     prev.setDate(prev.getDate() - 1);
     const prevDate = formatDateYYYYMMDD(prev);
 
+    // #204: wie afwezig is telde gewoon mee. Een ziekmelding laat de dienst
+    // namelijk staan: sick-with-takeover maakt afwezigheidsrijen en
+    // overnameverzoeken aan, maar raakt de diensten niet. De grafiek meldde
+    // daardoor drie mensen aan het werk terwijl het er twee waren, precies op
+    // het moment dat het ertoe doet.
+    //
+    // 'vrij' telt hier ook als afwezig: dat is een vaste vrije dag, dus die
+    // persoon staat niet op de vloer. Een dienst op zo'n dag is een
+    // tegenstrijdigheid die de validatie elders meldt, niet iets om hier als
+    // bezetting mee te tellen.
+    // De afwezigheid hoort bij de dag waarop de dienst BEGINT, niet bij het uur
+    // dat we tellen. Anders zou een nachtdienst van gisteravond wegvallen omdat
+    // iemand zich vanochtend ziek meldde, of net blijven staan terwijl hij
+    // gisteren al ziek was. Vandaar de sleutel op medewerker plus datum.
+    const AFWEZIG = ['ziek', 'verlof', 'vrij'];
+    const afwezig = new Set(
+        (DataStore.availability || [])
+            .filter(a => (a.date === date || a.date === prevDate) && AFWEZIG.includes(a.type))
+            .map(a => `${a.employeeId || a.userId}_${a.date}`)
+    );
+
     let bruto = 0;
     const workingEmployees = new Set(); // track who is working at this hour
 
     for (const s of DataStore.shifts) {
         if (!coverageTeams.includes(s.team)) continue;
+        if (afwezig.has(`${s.employeeId || s.userId || s.user_id}_${s.date}`)) continue;
         const [sh, sm] = s.startTime.split(':').map(Number);
         const [eh, em] = s.endTime.split(':').map(Number);
         const startDec = sh + sm / 60;
@@ -782,6 +804,13 @@ function renderTimelineView() {
                             const leftPercent = Math.max(0, ((startFrac - START_HOUR) / TOTAL_HOURS) * 100);
 
                             let widthPercent;
+                            // #208: hoeveel uren van de tijdlijn het blok ECHT
+                            // beslaat. Dat is iets anders dan de duur van de
+                            // dienst: de tijdlijn loopt van 07:00 tot 24:00, dus
+                            // een nachtdienst van 22:00 tot 07:00 duurt negen uur
+                            // maar krijgt op een geknipte cel maar twee uren
+                            // breedte. Het tijdlabel moet hierop afgaan.
+                            let breedteUren;
                             if (isOvernight) {
                                 // Nachtdienst: bereken totale breedte over beide dagen
                                 // Van starttijd tot middernacht (24:00) op dag 1
@@ -793,6 +822,7 @@ function renderTimelineView() {
                                 if (dayOfWeek === 0 || isDayView) {
                                     const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
                                     widthPercent = `${widthDay1Percent}%`;
+                                    breedteUren = hoursDay1;
                                 } else {
                                     // Other days: show full overnight shift spanning two day cells
                                     // We moeten de width berekenen als: dag1 deel + kleine gap + dag2 deel
@@ -803,11 +833,13 @@ function renderTimelineView() {
 
                                     // Totaal: dag1 + gap (4px) + dag2
                                     widthPercent = `calc(${widthDay1Percent}% + 4px + ${widthDay2Percent}%)`;
+                                    breedteUren = hoursDay1 + hoursDay2;
                                 }
                             } else {
                                 const endFrac = endHour + endMin / 60;
                                 const rightEnd = Math.min(END_HOUR, endFrac);
                                 widthPercent = ((rightEnd - Math.max(startFrac, START_HOUR)) / TOTAL_HOURS) * 100;
+                                breedteUren = rightEnd - Math.max(startFrac, START_HOUR);
                             }
 
                             let blockClass = `timeline-block team-${shift.team}`;
@@ -857,11 +889,20 @@ function renderTimelineView() {
                             const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
                             // Determine display density based on duration (#147)
-                            const durationH = isOvernight
-                                ? (24 - startFrac) + Math.max(0, (endHour + endMin / 60))
-                                : Math.max(0, (endHour + endMin / 60) - startFrac);
-                            if (durationH < 1)   blockClass += ' timeline-block--xs';
-                            else if (durationH < 2) blockClass += ' timeline-block--sm';
+                            // #208: dit ging op de DUUR van de dienst, niet op de
+                            // breedte die het blok krijgt. Een nachtdienst van
+                            // 22:00 tot 07:00 duurt negen uur, dus de smalle
+                            // klasse en het korte label bleven uit, terwijl het
+                            // blok op een geknipte cel maar 21 pixels breed werd.
+                            // Het label werd dan gecentreerd afgeknipt en je las
+                            // het MIDDEN van de tekst, zoiets als "0-07", wat op
+                            // een geldige tijd lijkt en het niet is.
+                            // Drempels gemeten op een dagcel van ongeveer 170px: één uur
+                            // is dan een kleine 10px. "22:00" heeft 31px nodig en
+                            // "22:00-07:00" 57px, dus ruwweg 2,5 en 6 uur breedte.
+                            const zichtbaarUren = Math.max(0, breedteUren || 0);
+                            if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
+                            else if (zichtbaarUren < 6) blockClass += ' timeline-block--sm';
 
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
@@ -873,7 +914,10 @@ function renderTimelineView() {
                             });
 
                             // Show only start time when block is too narrow for full range (#147)
-                            const timeLabel = durationH < 2
+                            // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
+                            // niet, dus dan alleen de starttijd. Die is
+                            // ondubbelzinnig, een afgeknipte reeks niet.
+                            const timeLabel = zichtbaarUren < 6
                                 ? shift.startTime
                                 : `${shift.startTime}-${shift.endTime}`;
 
@@ -994,6 +1038,13 @@ function renderTimelineView() {
                             const leftPercent = Math.max(0, ((startFrac - START_HOUR) / TOTAL_HOURS) * 100);
 
                             let widthPercent;
+                            // #208: hoeveel uren van de tijdlijn het blok ECHT
+                            // beslaat. Dat is iets anders dan de duur van de
+                            // dienst: de tijdlijn loopt van 07:00 tot 24:00, dus
+                            // een nachtdienst van 22:00 tot 07:00 duurt negen uur
+                            // maar krijgt op een geknipte cel maar twee uren
+                            // breedte. Het tijdlabel moet hierop afgaan.
+                            let breedteUren;
                             if (isOvernight) {
                                 // Nachtdienst: bereken totale breedte over beide dagen
                                 const hoursDay1 = END_HOUR - startFrac; // van start tot 24:00
@@ -1003,16 +1054,19 @@ function renderTimelineView() {
                                 if (dayOfWeek === 0 || isDayView) {
                                     const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
                                     widthPercent = `${widthDay1Percent}%`;
+                                    breedteUren = hoursDay1;
                                 } else {
                                     // Other days: show full overnight shift spanning two day cells
                                     const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
                                     const widthDay2Percent = (hoursDay2 / TOTAL_HOURS) * 100;
                                     widthPercent = `calc(${widthDay1Percent}% + 4px + ${widthDay2Percent}%)`;
+                                    breedteUren = hoursDay1 + hoursDay2;
                                 }
                             } else {
                                 const endFrac = endHour + endMin / 60;
                                 const rightEnd = Math.min(END_HOUR, endFrac);
                                 widthPercent = ((rightEnd - Math.max(startFrac, START_HOUR)) / TOTAL_HOURS) * 100;
+                                breedteUren = rightEnd - Math.max(startFrac, START_HOUR);
                             }
 
                             let blockClass = `timeline-block team-${shift.team}`;
@@ -1061,11 +1115,20 @@ function renderTimelineView() {
                             const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
                             // Determine display density based on duration (#147)
-                            const durationH = isOvernight
-                                ? (24 - startFrac) + Math.max(0, (endHour + endMin / 60))
-                                : Math.max(0, (endHour + endMin / 60) - startFrac);
-                            if (durationH < 1)   blockClass += ' timeline-block--xs';
-                            else if (durationH < 2) blockClass += ' timeline-block--sm';
+                            // #208: dit ging op de DUUR van de dienst, niet op de
+                            // breedte die het blok krijgt. Een nachtdienst van
+                            // 22:00 tot 07:00 duurt negen uur, dus de smalle
+                            // klasse en het korte label bleven uit, terwijl het
+                            // blok op een geknipte cel maar 21 pixels breed werd.
+                            // Het label werd dan gecentreerd afgeknipt en je las
+                            // het MIDDEN van de tekst, zoiets als "0-07", wat op
+                            // een geldige tijd lijkt en het niet is.
+                            // Drempels gemeten op een dagcel van ongeveer 170px: één uur
+                            // is dan een kleine 10px. "22:00" heeft 31px nodig en
+                            // "22:00-07:00" 57px, dus ruwweg 2,5 en 6 uur breedte.
+                            const zichtbaarUren = Math.max(0, breedteUren || 0);
+                            if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
+                            else if (zichtbaarUren < 6) blockClass += ' timeline-block--sm';
 
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
@@ -1077,7 +1140,10 @@ function renderTimelineView() {
                             });
 
                             // Show only start time when block is too narrow for full range (#147)
-                            const timeLabel = durationH < 2
+                            // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
+                            // niet, dus dan alleen de starttijd. Die is
+                            // ondubbelzinnig, een afgeknipte reeks niet.
+                            const timeLabel = zichtbaarUren < 6
                                 ? shift.startTime
                                 : `${shift.startTime}-${shift.endTime}`;
 

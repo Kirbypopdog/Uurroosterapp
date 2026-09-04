@@ -215,7 +215,7 @@ async function loadDataFromAPI() {
         const echteRol = AppState.currentUser?.role;
         const magConcepten = ['admin', 'roosterverantwoordelijke',
             'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(echteRol);
-        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData, leaveRoundsData] = await Promise.all([
+        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData, leaveRoundsData, swapRequestsData] = await Promise.all([
             dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
             dataApiFetch(`/shifts?startDate=${_getInitialWindowStart()}&endDate=${_getInitialWindowEnd()}`).catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
             dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
@@ -227,7 +227,13 @@ async function loadDataFromAPI() {
             dataApiFetch('/shift-activities').catch(err => { console.log('[LoadData] Activities not available'); return { activities: [] }; }),
             // Nodig op de startpagina: daar herinneren we mensen eraan dat een
             // verlofronde nog op hen wacht, zonder dat ze de verloftab openen.
-            dataApiFetch('/leave-rounds').catch(err => { console.log('[LoadData] Verlofrondes niet beschikbaar'); return { rounds: [] }; })
+            dataApiFetch('/leave-rounds').catch(err => { console.log('[LoadData] Verlofrondes niet beschikbaar'); return { rounds: [] }; }),
+            // #198: ruilverzoeken werden pas geladen bij het openen van de
+            // ruiltab. Daardoor zweeg de kaart "Vraagt je aandacht" op de
+            // startpagina precies bij het inloggen, en las de sleepbescherming
+            // uit #175 een lege lijst. Wie inlogde, home bekeek en weer wegging
+            // miste elke ruil- of overnamevraag.
+            dataApiFetch('/swap-requests').catch(err => { loadErrors.push('ruilverzoeken'); console.error('[LoadData] Failed to load swap-requests:', err); return { swapRequests: [] }; })
         ]);
 
         if (loadErrors.length > 0) {
@@ -244,6 +250,7 @@ async function loadDataFromAPI() {
         DataStore.availability = (availabilityData.availability || []).map(normalizeAvailability);
         DataStore.shiftBlocks = (Array.isArray(shiftBlocksData) ? shiftBlocksData : []).map(normalizeShiftBlock);
         AppState.leaveRounds = leaveRoundsData.rounds || [];
+        DataStore.swapRequests = swapRequestsData.swapRequests || [];
 
         // Merge API settings with defaults
         const apiSettings = settingsData.settings || {};

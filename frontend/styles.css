@@ -5012,6 +5012,19 @@ body[data-view-mode="day"] .timeline-day-cell {
     padding: 0 4px;
     white-space: nowrap;
     text-shadow: 0 1px 1px rgba(0,0,0,0.2);
+    /* #208: het blok centreert zijn inhoud en knipt af met overflow:hidden.
+       Zonder deze drie regels werd een te lang label aan BEIDE kanten
+       afgesneden en las je het midden van de tekst, zoiets als "0-07". Dat
+       ziet eruit als een geldige tijd terwijl het er geen is.
+       Links uitlijnen met een beletselteken maakt het afkappen eerlijk: je
+       leest het begin en ziet dat er meer staat. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.timeline-block--sm .block-time,
+.timeline-block--xs .block-time {
+    text-align: left;
 }
 
 /* Short shift blocks — hide chips at <1u, hide time text at <45min (#147) */

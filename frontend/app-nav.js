@@ -119,7 +119,7 @@ function renderHome() {
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
     html += renderHomeWeekendInfo();
-    html += renderHomeRequests(user, role);
+    html += renderHomeRequests(user);
     html += '</div>';
     html += renderHomeNuAanHetWerk();
 
@@ -678,19 +678,26 @@ function renderHomeQuickActions(role) {
     `;
 }
 
-function renderHomeRequests(user, role) {
+// `role` is geen parameter meer: sinds #197 gelden voor iedereen dezelfde
+// filterregels op de startpagina.
+function renderHomeRequests(user) {
     const userId = Number(user.id || user.userId);
     const userTeam = user.team_id || user.mainTeam;
-    const isLeadOrAdmin = ['admin', 'roosterverantwoordelijke'].includes(role);
 
+    // #197: hier stond voor een lead `return r.status === 'pending_lead'`. Die
+    // status wordt door geen enkele regel backendcode ooit toegekend: de
+    // goedkeuringsstap door een lead is in #114 verwijderd en alleen de lege
+    // huls bleef staan. Een roosterverantwoordelijke zag dus altijd nul
+    // openstaande verzoeken, hoeveel er ook lagen.
+    //
+    // Een lead is voor ruilen gewoon een medewerker: hij ziet wat aan hem
+    // gericht is, plus de openstaande overnames van zijn team. Dat is dezelfde
+    // regel als hieronder, dus die geldt nu voor iedereen.
+    //
+    // De rest van de pending_lead-resten (de kolommen, de CHECK-constraint en
+    // de dode filters elders) staat in #315.
     let pendingRequests = (DataStore.swapRequests || []).filter(r => {
         if (r.status !== 'pending' && r.status !== 'pending_lead') return false;
-
-        if (isLeadOrAdmin) {
-            // Leads zien enkel verzoeken die hun goedkeuring vereisen (pending_lead)
-            return r.status === 'pending_lead';
-        }
-        // Medewerker: eigen requests + takeover requests van eigen team
         return r.requester_user_id === userId || r.target_user_id === userId ||
                (r.request_type === 'takeover' && r.requester_shift_team === userTeam);
     });

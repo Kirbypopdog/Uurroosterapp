@@ -468,7 +468,16 @@ function openAvailabilityModal(employeeId = null, date = null) {
     } else {
         // Opening fresh (e.g., from button)
         modalTitle.textContent = 'Afwezigheid registreren';
-        employeeSelect.value = '';
+        // #205: hier stond onvoorwaardelijk `employeeSelect.value = ''`, wat de
+        // voorselectie wiste die populateAbsenceEmployeeDropdown net had gezet.
+        // Voor een medewerker bleef het veld op disabled staan zonder waarde,
+        // dus opslaan gaf "Selecteer een medewerker" en er was geen weg uit het
+        // venster. De knop "+ Afwezigheid" werkte daarmee niet voor de grootste
+        // gebruikersgroep.
+        //
+        // Wie maar één persoon mag kiezen houdt zijn voorselectie. Wie er
+        // meerdere mag kiezen begint met een leeg veld, zoals voorheen.
+        if (!employeeSelect.disabled) employeeSelect.value = '';
         startDateInput.value = '';
         endDateInput.value = '';
         absenceTypeSelect.value = '';

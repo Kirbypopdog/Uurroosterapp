@@ -172,7 +172,16 @@ const DragHandler = {
                 if (shift && !canUserTransferShift(shift)) {
                     console.log('[DragHandler] User cannot transfer shifts - cancelling drag');
                     showToast('Je kunt alleen je eigen shift tijden aanpassen, niet naar anderen verplaatsen. Gebruik "Shift afstaan" om je shift over te dragen.', 'warning');
-                    this.cleanup();
+                    // #212: hier stond cleanup(), en die verwijdert ALLE
+                    // listeners, ook die voor gewone klikken. De tijdlijn
+                    // reageerde daarna nergens meer op: een dienst openen loopt
+                    // via handleMouseUp, en die listener was weg. De gebruiker
+                    // klikte tevergeefs verder tot een hertekening alles
+                    // toevallig herstelde.
+                    //
+                    // reset() wist alleen de sleepstatus en laat de listeners
+                    // staan. Dat is wat je wil bij het afbreken van één poging.
+                    this.reset();
                     return;
                 }
             }
@@ -548,6 +557,28 @@ const DragHandler = {
             newStartTime = newTime;
         } else {
             newEndTime = newTime;
+        }
+
+        // #216: het handvat mag niet voorbij het andere schieten.
+        //
+        // calculateDuration telt er 24 uur bij op zodra de eindtijd vóór de
+        // starttijd ligt, want dat is hoe een echte nachtdienst eruitziet.
+        // Sleepte je het beginhandvat voorbij de eindtijd, dan sprong de duur
+        // dus van nul naar ongeveer 23 uur en greep de controle hieronder nooit
+        // in. Bij een blok van één uur gebeurt dat snel, want dat is ongeveer
+        // even breed als de handvatzone zelf.
+        //
+        // "eindtijd vóór starttijd" afwijzen kan niet: een nachtdienst is dat
+        // ook. Wat wel klopt: binnen de tijdlijn, die van 07:00 tot 24:00 loopt,
+        // kan een gewone dienst nooit legitiem een nachtdienst worden of
+        // omgekeerd. Verandert de aard van de dienst, dan is het handvat
+        // doorgeschoten.
+        const naarMinuten = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+        const wasNacht = naarMinuten(originalData.endTime) <= naarMinuten(originalData.startTime);
+        const wordtNacht = naarMinuten(newEndTime) <= naarMinuten(newStartTime);
+        if (wasNacht !== wordtNacht) {
+            showToast('Het begin van een dienst kan niet voorbij het einde liggen', 'warning');
+            return;
         }
 
         // Validate duration (minimum 1 hour)
@@ -1102,7 +1133,11 @@ const BuilderDragHandler = {
         if (!AppState.builderGrid[targetEmpId]) AppState.builderGrid[targetEmpId] = {};
         AppState.builderGrid[targetEmpId][targetDay] = assignment;
 
-        AppState.builderIsDirty = true;
+        // #210: hier stond `AppState.builderIsDirty = true`. Dat zet wel de
+        // vlag maar plant geen automatische opslag in en werkt de statusregel
+        // niet bij, terwijl slepen juist de voornaamste manier van werken in de
+        // bouwer is. Je sleepte een uur lang en las ondertussen "bewaard".
+        setBuilderDirty();
         renderBuilder();
         if (validation.level !== 'ok') showToast(validation.message, 'warning');
         else showToast('Dienst verplaatst', 'success');
@@ -1211,7 +1246,8 @@ const BuilderDragHandler = {
             endTime: newEnd
         };
 
-        AppState.builderIsDirty = true;
+        // #210: zie het verplaatsen hierboven, zelfde reden.
+        setBuilderDirty();
         renderBuilder();
         showToast(`Dienst aangepast: ${newStart}-${newEnd}`, 'success');
     },

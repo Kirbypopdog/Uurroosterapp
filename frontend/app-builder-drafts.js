@@ -1338,7 +1338,9 @@ function executeCopyWeek() {
     AppState.builderGridByWeek[targetWeek] = newTargetGrid;
     AppState.builderWeekNumber = targetWeek;
     AppState.builderGrid = JSON.parse(JSON.stringify(newTargetGrid));
-    AppState.builderIsDirty = true;
+    // #210: via setBuilderDirty, anders wordt er geen automatische opslag
+    // ingepland en blijft de statusregel "bewaard" tonen.
+    setBuilderDirty();
 
     document.getElementById('copy-week-modal').classList.add('hidden');
     renderBuilder();
