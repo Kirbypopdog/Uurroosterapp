@@ -1406,6 +1406,7 @@ function renderSettingsSystem(container) {
                 <div class="info-box neutral">
                     <p>Alle data wordt opgeslagen in de PostgreSQL database.</p>
                     <p>Exporteer regelmatig een backup om dataverlies te voorkomen.</p>
+                    <p class="text-muted">De backup bevat medewerkers, diensten, afwezigheden en instellingen. Roosterconcepten, verlofrondes en ruilverzoeken zitten er niet in.</p>
                 </div>
                 <div class="data-stats">
                     <div class="stat-item">
@@ -1490,6 +1491,7 @@ function renderSettingsBeheer(container) {
                 <div class="info-box neutral">
                     <p>Alle data wordt opgeslagen in de PostgreSQL database.</p>
                     <p>Exporteer regelmatig een backup om dataverlies te voorkomen.</p>
+                    <p class="text-muted">De backup bevat medewerkers, diensten, afwezigheden en instellingen. Roosterconcepten, verlofrondes en ruilverzoeken zitten er niet in.</p>
                 </div>
                 <div class="data-stats">
                     <div class="stat-item">

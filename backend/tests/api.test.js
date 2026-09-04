@@ -1786,6 +1786,113 @@ describe('POST /api/v1/schedule-drafts/:id/apply', () => {
   });
 });
 
+// ===== POST /import =====
+
+describe('POST /import', () => {
+  function arrange(bestaandeGebruiker = null, adminTellingBuitenZichzelf = 1) {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [] });                     // logAudit
+
+    mockClient.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.startsWith('SELECT id FROM teams')) return Promise.resolve({ rows: [{ id: 'cargo' }] });
+      if (sql.includes('FROM users WHERE email')) {
+        return Promise.resolve({ rows: bestaandeGebruiker ? [bestaandeGebruiker] : [] });
+      }
+      if (sql.includes("role = 'admin' AND active = true")) {
+        return Promise.resolve({ rows: [{ n: adminTellingBuitenZichzelf }] });
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 });
+    });
+    return mockClient;
+  }
+
+  // Regressie #214: team_id ontbrak in de UPDATE, waardoor een backup die
+  // iemand van team verandert de rechten scheef achterliet.
+  test('keeps team_id in sync with main_team when updating a user (#214)', async () => {
+    const mockClient = arrange({ id: 7, role: 'medewerker', active: true });
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/api/v1/import')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ users: [{ name: 'Carla', email: 'carla@test.be', mainTeam: 'cargo' }] });
+    expect(res.status).toBe(200);
+
+    const upd = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE users SET')
+    );
+    expect(upd).toBeTruthy();
+    expect(upd[0]).toContain('team_id = $2');
+    expect(upd[1][1]).toBe('cargo'); // dezelfde parameter voedt main_team en team_id
+  });
+
+  // Regressie #200: een roosterverantwoordelijke kon via de import het
+  // adminaccount deactiveren en zo de enige rol boven zich uitschakelen.
+  test('roosterverantwoordelijke cannot change the active flag (#200)', async () => {
+    const mockClient = arrange({ id: 1, role: 'admin', active: true });
+    const token = makeToken({ id: 5, role: 'roosterverantwoordelijke', name: 'Anna', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/api/v1/import')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ users: [{ name: 'Admin', email: 'admin@hetvlot.be', active: false }] });
+    expect(res.status).toBe(200);
+
+    const upd = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE users SET')
+    );
+    expect(upd[1][3]).toBe(true); // active blijft op de huidige waarde staan
+  });
+
+  // Ook een admin mag het laatste actieve beheerdersaccount niet uitzetten.
+  test('refuses to deactivate the last active admin (#200)', async () => {
+    arrange({ id: 1, role: 'admin', active: true }, 0); // geen andere actieve admin
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/api/v1/import')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ users: [{ name: 'Admin', email: 'admin@hetvlot.be', active: false }] });
+    expect(res.status).toBe(200);
+    expect(res.body.results.skipped).toBe(1);
+    expect(res.body.results.errors[0].error).toMatch(/laatste actieve beheerdersaccount/i);
+  });
+
+  // Regressie #217: settings werden uitgelezen maar nergens verwerkt.
+  test('writes settings from the backup (#217)', async () => {
+    const mockClient = arrange();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/api/v1/import')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ settings: { holidayPeriods: [{ id: 'z27' }], closedDates: [] } });
+    expect(res.status).toBe(200);
+
+    const ins = mockClient.query.mock.calls.filter(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO settings')
+    );
+    expect(ins).toHaveLength(2);
+    expect(ins.map(c => c[1][0]).sort()).toEqual(['closedDates', 'holidayPeriods']);
+  });
+
+  // De import draait in één transactie met een savepoint per item, zodat een
+  // afgebroken import geen half werk achterlaat (#214).
+  test('runs inside a transaction with a savepoint per item (#214)', async () => {
+    const mockClient = arrange();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    await request(app)
+      .post('/api/v1/import')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ availability: [{ userId: 6, date: '2027-05-11', type: 'vrij' }] });
+
+    const sqls = mockClient.query.mock.calls.map(c => c[0]).filter(s => typeof s === 'string');
+    expect(sqls).toContain('BEGIN');
+    expect(sqls).toContain('COMMIT');
+    expect(sqls).toContain('SAVEPOINT item');
+    expect(sqls).toContain('RELEASE SAVEPOINT item');
+  });
+});
+
 // ===== POST /admin/users/:id/replace =====
 
 describe('POST /admin/users/:id/replace', () => {
