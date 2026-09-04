@@ -2856,25 +2856,10 @@ function setupSettingsCollapsibles(scope = document) {
         });
     }
 
-    function showConfirmDialog(message, confirmLabel, altLabel) {
-        return new Promise(resolve => {
-            const overlay = document.createElement('div');
-            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
-            overlay.innerHTML = `
-                <div class="quick-dialog quick-dialog-confirm">
-                    <div class="mb-md">${escapeHtml(message)}</div>
-                    <div class="quick-dialog-actions flex-wrap">
-                        <button id="_conf-cancel" class="btn btn-secondary">Annuleer</button>
-                        <button id="_conf-alt" class="btn btn-secondary">${escapeHtml(altLabel)}</button>
-                        <button id="_conf-ok" class="btn btn-danger">${escapeHtml(confirmLabel)}</button>
-                    </div>
-                </div>`;
-            document.body.appendChild(overlay);
-            overlay.querySelector('#_conf-ok').addEventListener('click', () => { overlay.remove(); resolve(true); });
-            overlay.querySelector('#_conf-alt').addEventListener('click', () => { overlay.remove(); resolve(false); });
-            overlay.querySelector('#_conf-cancel').addEventListener('click', () => { overlay.remove(); resolve(null); });
-        });
-    }
+    // showConfirmDialog stond hier: een driewegdialoog die nergens werd
+    // aangeroepen, zonder Escape en zonder klik-buiten. Verwijderd als dode
+    // code. Wie ooit een echte driewegvraag nodig heeft, bouwt hem beter in
+    // app-ui.js naast showConfirm, zodat er één plek is voor dialogen.
 
     document.addEventListener('contextmenu', (e) => {
         const header = e.target.closest('.timeline-day-header, .month-day-header');
