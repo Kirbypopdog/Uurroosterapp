@@ -1467,10 +1467,14 @@ describe('POST /api/v1/schedule-drafts/:id/apply', () => {
       c => typeof c[0] === 'string' && c[0].includes('INSERT INTO shifts')
     );
     expect(insertCall).toBeTruthy();
-    // 6 shifts × 6 params = 36 (de geblokkeerde dag is overgeslagen)
-    expect(insertCall[1]).toHaveLength(36);
+    // 6 shifts × 7 params = 42 (de geblokkeerde dag is overgeslagen).
+    // Sinds #185 draagt elke rij ook draft_id, vandaar 7 in plaats van 6.
+    expect(insertCall[1]).toHaveLength(42);
     // De geblokkeerde datum mag niet in de insert-params voorkomen
     expect(insertCall[1]).not.toContain('2026-05-06');
+    // Elke rij krijgt het id van het toegepaste concept mee
+    expect(insertCall[0]).toContain('draft_id');
+    expect(insertCall[1].filter(p => p === '1')).toHaveLength(6);
   });
 });
 

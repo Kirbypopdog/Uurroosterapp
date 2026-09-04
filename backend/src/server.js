@@ -643,6 +643,33 @@ const MIGRATIONS = [
       await client.query(`ALTER TABLE leave_round_blocks ADD COLUMN IF NOT EXISTS closed_dates JSONB`);
       await client.query(`ALTER TABLE leave_round_blocks ADD COLUMN IF NOT EXISTS closed_source JSONB NOT NULL DEFAULT '{}'::jsonb`);
     }
+  },
+  {
+    // #185 / #187: shifts legden nergens vast uit welk concept ze kwamen.
+    // Daardoor konden 'uitplannen' en 'overlap bevestigen' alleen op datum en
+    // medewerker begrenzen, en werd stelselmatig te veel gewist.
+    // ON DELETE SET NULL: een verwijderd concept mag nooit diensten meeslepen.
+    // Bestaande diensten houden NULL — die vallen terug op de oude, maar nu wel
+    // begrensde, verwijderlogica.
+    name: '037_shifts_draft_id',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS draft_id TEXT`);
+      const fk = await client.query(`
+        SELECT 1 FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_name = 'shifts' AND kcu.column_name = 'draft_id'
+      `);
+      if (fk.rows.length === 0) {
+        await client.query(
+          `ALTER TABLE shifts ADD FOREIGN KEY (draft_id) REFERENCES schedule_drafts(id) ON DELETE SET NULL`
+        );
+      }
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_shifts_draft_id ON shifts(draft_id) WHERE draft_id IS NOT NULL`
+      );
+    }
   }
 ];
 
@@ -3568,8 +3595,14 @@ v1.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'ro
     await client.query('BEGIN');
 
     // 1. Load draft
+    // last_applied_until wordt hieronder overschreven met endDate, dus we lezen
+    // de oorspronkelijke waarde hier uit: die is de bovengrens voor diensten
+    // van vóór migratie 037, die nog geen draft_id dragen.
     const draftResult = await client.query(
-      'SELECT id, name, grid, team_filter FROM schedule_drafts WHERE id = $1 FOR UPDATE',
+      `SELECT id, name, grid, team_filter,
+              last_applied_from::text  as "lastAppliedFrom",
+              last_applied_until::text as "lastAppliedUntil"
+       FROM schedule_drafts WHERE id = $1 FOR UPDATE`,
       [req.params.id]
     );
     if (draftResult.rows.length === 0) {
@@ -3595,24 +3628,55 @@ v1.post('/schedule-drafts/:id/deactivate', requireAuth, requireRole('admin', 'ro
       }
     }
 
+    // 4. Verwijder de diensten van DIT concept na endDate.
+    //
+    // #185: hier stond `user_id = ANY($1) AND date > $2`, zonder bovengrens en
+    // zonder koppeling met het concept. Het uitplannen van een paasconcept van
+    // twee weken wiste daardoor het volledige toekomstige rooster van iedereen
+    // die erin stond, inclusief diensten die een heel ander concept had gemaakt.
+    // Sinds migratie 037 draagt elke gegenereerde dienst een draft_id, dus we
+    // kunnen precies zijn.
     let shiftsDeleted = 0;
-    if (userIds.size > 0) {
-      const userIdArray = Array.from(userIds);
-      // Delete auto-generated shifts after endDate for these users
-      // source='auto' marks auto-generated shifts
-      let deleteQuery;
-      if (deleteManual) {
-        deleteQuery = 'DELETE FROM shifts WHERE user_id = ANY($1) AND date > $2';
-      } else {
-        deleteQuery = "DELETE FROM shifts WHERE user_id = ANY($1) AND date > $2 AND source = 'auto'";
+    const byDraft = await client.query(
+      `DELETE FROM shifts WHERE draft_id = $1 AND date > $2::date`,
+      [req.params.id, endDate]
+    );
+    shiftsDeleted += byDraft.rowCount;
+
+    // Diensten van vóór migratie 037 hebben geen draft_id. Die kunnen we niet
+    // exact toewijzen, dus blijven we binnen wat dit concept aantoonbaar
+    // besloeg: zijn eigen toepassingsbereik, zijn eigen medewerkers en zijn
+    // eigen teamfilter. Nooit verder.
+    //
+    // Beide grenzen zijn nodig. Alleen bovenaan begrenzen is niet genoeg: een
+    // paasconcept dat enkel 5 t/m 18 april 2027 besloeg wiste bij een endDate
+    // van 31 augustus 2026 anders alsnog alle diensten uit september 2026, die
+    // onmogelijk van dat concept konden komen.
+    //
+    // Is het concept nog nooit toegepast, dan heeft het ook niets gegenereerd
+    // en gebeurt hier niets.
+    const legacyFrom = draft.lastAppliedFrom;
+    const legacyUntil = draft.lastAppliedUntil;
+    if (userIds.size > 0 && legacyFrom && legacyUntil && legacyUntil > endDate) {
+      const params = [Array.from(userIds), endDate, legacyFrom, legacyUntil];
+      let legacyQuery = `DELETE FROM shifts
+        WHERE draft_id IS NULL
+          AND user_id = ANY($1::int[])
+          AND date > $2::date
+          AND date >= $3::date AND date <= $4::date`;
+      if (!deleteManual) legacyQuery += ` AND source = 'auto'`;
+      if (draft.team_filter) {
+        params.push(draft.team_filter);
+        legacyQuery += ` AND team = $${params.length}`;
       }
-      const result = await client.query(deleteQuery, [userIdArray, endDate]);
-      shiftsDeleted = result.rowCount;
+      const legacy = await client.query(legacyQuery, params);
+      shiftsDeleted += legacy.rowCount;
     }
 
     await client.query('COMMIT');
     await logAudit(req, 'UPDATE', 'settings', req.params.id, {
-      action: 'deactivate', endDate, shiftsDeleted, draftName: draft.name
+      action: 'deactivate', endDate, shiftsDeleted, draftName: draft.name,
+      scopedFrom: legacyFrom || null, scopedUntil: legacyUntil || null
     });
     res.json({ ok: true, shiftsDeleted });
   } catch (err) {
@@ -3799,11 +3863,26 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           );
         }
 
-        // Verwijder shifts van het oude concept in de overlappende periode
+        // Verwijder de diensten van het oude concept in de overlappende periode.
+        //
+        // #187: deze DELETE liep van de startdatum van het NIEUWE concept tot de
+        // einddatum van het OUDE, zonder filter op concept of team. Alles voorbij
+        // het bereik van het nieuwe concept werd dus gewist en nooit opnieuw
+        // gevuld, en teams waar het nieuwe concept niets mee te maken heeft
+        // gingen mee. De gebruiker bevestigde het inkorten van een concept, niet
+        // het leegmaken van maanden rooster voor de hele organisatie.
+        //
+        // Nu: alleen de diensten van dít oude concept, en alleen binnen het
+        // bereik dat het nieuwe concept daadwerkelijk gaat vullen. Wat daarbuiten
+        // valt blijft staan en blijft via draft_id beheerbaar met 'uitplannen'.
+        // Oude diensten zonder draft_id raken we hier bewust niet aan: de gewone
+        // bulk-delete verderop dekt het bereik van het nieuwe concept al af, voor
+        // precies de medewerkers en teams die het betreft.
         await client.query(
-          `DELETE FROM shifts WHERE source = 'auto'
-           AND date >= $1::date AND date <= $2::date`,
-          [effectiveStartDate, overlap.last_applied_until]
+          `DELETE FROM shifts
+           WHERE draft_id = $1
+             AND date >= $2::date AND date <= $3::date`,
+          [overlap.id, effectiveStartDate, effectiveEndDate]
         );
       }
     }
@@ -3853,6 +3932,10 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
     for (const { weekNumber, grid } of weeksToApply) {
       gridByWeek[weekNumber] = grid;
     }
+
+    // Wie er echt in het conceptraster staat. Wordt in het blok hieronder gevuld
+    // en daarna hergebruikt door de week_schedules-sync (#186).
+    let empsInDraftForSync = [];
 
     // ===== GENERATE SHIFTS FROM DRAFT GRID =====
     {
@@ -3912,6 +3995,7 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
           weekGrid && (weekGrid[String(emp.id)] || weekGrid[emp.id])
         )
       );
+      empsInDraftForSync = empsInDraft;
 
       // ===== BULK DELETE: employees IN draft =====
       if (empsInDraft.length > 0) {
@@ -4054,16 +4138,27 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
         }
       }
 
-      // ===== BULK INSERT: alle shifts in één query =====
+      // ===== BULK INSERT =====
+      // draft_id legt vast uit welk concept elke dienst komt, zodat uitplannen
+      // en overlap-inkorting precies weten wat ze mogen verwijderen (#185, #187).
+      // Postgres bindt maximaal 65.535 parameters per query, dus in blokken:
+      // een volledig schooljaar met veertig medewerkers zit daar dicht tegenaan.
       if (insertRows.length > 0) {
-        const values = insertRows.map((_, i) =>
-          `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, 'auto', $${i * 6 + 6})`
-        ).join(', ');
-        const params = insertRows.flatMap(r => [r.userId, r.date, r.startTime, r.endTime, r.team, r.isReserve]);
-        await client.query(
-          `INSERT INTO shifts (user_id, date, start_time, end_time, team, source, is_reserve) VALUES ${values}`,
-          params
-        );
+        const COLS = 7;
+        const CHUNK = Math.floor(60000 / COLS);
+        for (let offset = 0; offset < insertRows.length; offset += CHUNK) {
+          const chunk = insertRows.slice(offset, offset + CHUNK);
+          const values = chunk.map((_, i) =>
+            `($${i * COLS + 1}, $${i * COLS + 2}, $${i * COLS + 3}, $${i * COLS + 4}, $${i * COLS + 5}, 'auto', $${i * COLS + 6}, $${i * COLS + 7})`
+          ).join(', ');
+          const params = chunk.flatMap(r => [
+            r.userId, r.date, r.startTime, r.endTime, r.team, r.isReserve, draftId
+          ]);
+          await client.query(
+            `INSERT INTO shifts (user_id, date, start_time, end_time, team, source, is_reserve, draft_id) VALUES ${values}`,
+            params
+          );
+        }
       }
 
       // ===== BULK DELETE: employees NOT in draft (auto-shifts only) =====
@@ -4086,7 +4181,19 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
     }
 
     // 3. Sync week_schedules op users vanuit het concept grid (read-only weergave voor medewerkers)
-    for (const emp of allEmployeesResult.rows) {
+    //
+    // #186: dit liep over ALLE actieve medewerkers en keek niet naar het soort
+    // concept. Een vakantieconcept toepassen verving daardoor het vaste
+    // jaarpatroon van iedereen door het vakantiepatroon, en wie niet in dat
+    // vakantieraster stond raakte zijn basisrooster helemaal kwijt. De oude
+    // waarde stond daarna nergens meer.
+    //
+    // Een vakantieconcept beschrijft een uitzondering van enkele weken, geen
+    // weekpatroon, dus het hoort het basisrooster niet aan te raken. En ook een
+    // basisconcept raakt alleen nog de medewerkers die er echt in staan: wie er
+    // niet in voorkomt houdt wat hij had.
+    const employeesToSync = isVakantie ? [] : empsInDraftForSync;
+    for (const emp of employeesToSync) {
       const allWeeks = [];
       for (let weekNumber = 1; weekNumber <= cycleLength; weekNumber++) {
         const weekGrid = gridByWeek[weekNumber];

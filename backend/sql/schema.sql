@@ -41,6 +41,13 @@ CREATE TABLE IF NOT EXISTS shifts (
   notes TEXT DEFAULT '',
   source TEXT DEFAULT 'manual' CHECK (source IN ('auto', 'manual')),
   archived BOOLEAN NOT NULL DEFAULT false,
+  is_reserve BOOLEAN NOT NULL DEFAULT false,
+  -- Uit welk roosterconcept deze dienst komt. NULL voor manuele diensten en
+  -- voor auto-diensten van vóór migratie 037. Zonder deze kolom kan uitplannen
+  -- niet weten welke diensten het mag verwijderen (#185, #187).
+  -- De verwijzing naar schedule_drafts staat onderaan dit bestand, want die
+  -- tabel wordt pas verderop aangemaakt.
+  draft_id TEXT,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -238,6 +245,26 @@ CREATE INDEX IF NOT EXISTS idx_leave_entries_round ON leave_round_entries(round_
 CREATE INDEX IF NOT EXISTS idx_leave_entries_user  ON leave_round_entries(user_id);
 CREATE INDEX IF NOT EXISTS idx_leave_subs_round    ON leave_round_submissions(round_id);
 CREATE INDEX IF NOT EXISTS idx_leave_rounds_status ON leave_rounds(status);
+
+-- Kolommen en indexen die eerder alleen via migraties bestonden (#329).
+CREATE INDEX IF NOT EXISTS idx_shifts_draft_id ON shifts(draft_id) WHERE draft_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false;
+CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id);
+
+-- shifts.draft_id verwijst naar schedule_drafts, dat verderop in dit bestand
+-- wordt aangemaakt. Daarom staat de verwijzing hier en niet in de tabel zelf.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
+    WHERE tc.constraint_type = 'FOREIGN KEY'
+      AND tc.table_name = 'shifts' AND kcu.column_name = 'draft_id'
+  ) THEN
+    ALTER TABLE shifts ADD FOREIGN KEY (draft_id) REFERENCES schedule_drafts(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- Migration tracking table (used by runMigrations() in server.js)
 CREATE TABLE IF NOT EXISTS migrations (
