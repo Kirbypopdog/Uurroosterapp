@@ -12,6 +12,30 @@ const FocusTrap = {
         this._previousFocus = document.activeElement;
 
         this._handler = (e) => {
+            // #191: de FocusTrap ving alleen Tab af. Escape deed nergens iets,
+            // en omdat de sluitknop van sommige vensters een span is en dus
+            // geen tabstop, kon je met het toetsenbord niet meer uit een
+            // geopend venster komen. Dat gold voor elk venster in de app: de
+            // meldingenmodal, de dienstmodal, het medewerkersvenster, het
+            // accountvenster en het afwezigheidsvenster.
+            //
+            // We klikken de eigen sluitknop van het venster aan in plaats van
+            // het gewoon te verbergen, zodat de opruimlogica van dat venster
+            // draait (formulier leegmaken, state terugzetten).
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                const closer = modal.querySelector('.modal-close')
+                    || [...modal.querySelectorAll('button')]
+                        .find(b => /annul/i.test(b.textContent || ''));
+                if (closer) {
+                    closer.click();
+                } else {
+                    modal.classList.add('hidden');
+                    this.deactivate();
+                }
+                return;
+            }
+
             if (e.key === 'Tab') {
                 const focusable = modal.querySelectorAll(
                     'button:not([disabled]):not(.hidden), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'

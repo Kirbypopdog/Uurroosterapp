@@ -2052,6 +2052,21 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
     );
     const oldShift = oldResult.rows[0] || null;
 
+    // #262: een medewerker mag zijn eigen dienst bewerken, maar hem niet naar
+    // een ander team of naar een andere collega verplaatsen. Het teamveld bleef
+    // in de modal bewerkbaar en de UPDATE hieronder liet zowel team als user_id
+    // ongecontroleerd door, dus iemand kon zichzelf in een ander team schrijven
+    // of zijn dienst aan een collega toewijzen. Daar bestaat 'Dienst afstaan'
+    // voor, met een verzoek dat de ander kan aanvaarden.
+    if (role === 'medewerker' && oldShift) {
+      if (team !== undefined && team !== null && team !== oldShift.team) {
+        return res.status(403).json({ error: 'Je kunt het team van een dienst niet wijzigen' });
+      }
+      if (userId !== undefined && userId !== null && Number(userId) !== Number(oldShift.userId)) {
+        return res.status(403).json({ error: 'Je kunt een dienst niet aan iemand anders toewijzen. Gebruik daarvoor Dienst afstaan.' });
+      }
+    }
+
     // Blokeer verplaatsing naar manueel gesloten datum
     const effectiveDate = date || oldShift?.date;
     if (date && date !== oldShift?.date) {

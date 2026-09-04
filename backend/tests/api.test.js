@@ -619,6 +619,62 @@ describe('PUT /shifts/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body.shift).toBeTruthy();
   });
+
+  // Regressie #262: het teamveld bleef bewerkbaar voor de eigenaar van de
+  // dienst en de UPDATE liet team en user_id ongecontroleerd door. Een
+  // medewerker kon zich zo in een ander team schrijven of zijn dienst aan
+  // een collega toewijzen.
+  const eigenDienst = {
+    id: 20, userId: 6, employeeId: 6, team: 'vlot1', date: '2026-12-09',
+    startTime: '14:00', endTime: '22:00', notes: '', source: 'manual', isReserve: false
+  };
+
+  test('medewerker cannot change the team of their own shift (#262)', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ user_id: 6 }] })   // eigenaarscontrole
+      .mockResolvedValueOnce({ rows: [eigenDienst] });     // oude dienst ophalen
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/shifts/20')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ team: 'cargo' });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/team van een dienst niet wijzigen/i);
+  });
+
+  test('medewerker cannot reassign their own shift to a colleague (#262)', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ user_id: 6 }] })
+      .mockResolvedValueOnce({ rows: [eigenDienst] });
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/shifts/20')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 8 });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Dienst afstaan/i);
+  });
+
+  // Keerzijde: de eigen tijden aanpassen blijft toegestaan. Dat is een
+  // bewuste keuze en staat zo in de rollentabel.
+  test('medewerker can still edit the times of their own shift (#262)', async () => {
+    mockActiveUser();
+    const bijgewerkt = { ...eigenDienst, startTime: '15:00', endTime: '23:00' };
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ user_id: 6 }] })   // eigenaarscontrole
+      .mockResolvedValueOnce({ rows: [eigenDienst] })      // oude dienst ophalen
+      .mockResolvedValueOnce({ rows: [] })                 // validateShiftRules: buurdiensten
+      .mockResolvedValueOnce({ rows: [bijgewerkt] })       // UPDATE RETURNING
+      .mockResolvedValue({ rows: [] });                    // logAudit
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/shifts/20')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ startTime: '15:00', endTime: '23:00' });
+    expect(res.status).toBe(200);
+  });
 });
 
 // ===== DELETE /shifts/:id =====

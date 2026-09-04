@@ -229,6 +229,22 @@ function openShiftModal(shift, canEdit) {
         }
     });
 
+    // #262: het teamveld bleef bewerkbaar voor de eigenaar van de dienst,
+    // waardoor een medewerker zichzelf in een ander team kon schrijven. Wie
+    // geen diensten mag beheren, mag ook het team niet wijzigen. De backend
+    // weigert die wissel nu ook, dus dit is de zichtbare helft van dezelfde
+    // grens.
+    if (!hasPermission('MANAGE_SHIFTS')) {
+        DOM.shiftTeam.disabled = true;
+        DOM.shiftTeam.classList.add('readonly');
+        // Om dezelfde reden mag de dienst niet aan een collega worden
+        // toegewezen. De toevoegmodal doet dit al; het bewerkpad deed het niet,
+        // terwijl de backend die wissel nu wel weigert. Wie zijn dienst kwijt
+        // wil gebruikt 'Dienst afstaan'.
+        DOM.shiftEmployee.disabled = true;
+        DOM.shiftEmployee.classList.add('readonly');
+    }
+
     // Show/hide action buttons
     DOM.shiftSubmitBtn.classList.toggle('hidden', !canEdit);
     DOM.shiftDeleteBtn.classList.toggle('hidden', !canEdit);
