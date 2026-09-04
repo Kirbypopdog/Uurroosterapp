@@ -1798,6 +1798,16 @@ describe('POST /api/v1/schedule-drafts/:id/apply', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.draftName).toBe('Testconcept');
+
+    // Regressie #376: het opruimen van vergaderingen liep over ALLE
+    // activiteiten van dat type in het bereik, dus ook over handmatig
+    // ingevoerde en die van andere teams. Nu alleen die van dit concept.
+    const meetingCleanup = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes("type = 'vergadering'") && c[0].includes('DELETE')
+    );
+    expect(meetingCleanup).toBeTruthy();
+    expect(meetingCleanup[0]).toContain('draft_id = $3');
+    expect(meetingCleanup[1][2]).toBe('1'); // het id van dit concept
     expect(typeof res.body.applied).toBe('number');
     expect(typeof res.body.shifts).toBe('object');
 

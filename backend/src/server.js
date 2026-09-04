@@ -670,6 +670,32 @@ const MIGRATIONS = [
         `CREATE INDEX IF NOT EXISTS idx_shifts_draft_id ON shifts(draft_id) WHERE draft_id IS NOT NULL`
       );
     }
+  },
+  {
+    // #376: hetzelfde probleem als bij shifts, nu voor teamvergaderingen. Het
+    // toepassen van een concept wiste ALLE activiteiten van het type
+    // 'vergadering' in het bereik, ongeacht team en ongeacht of iemand ze met
+    // de hand had ingevoerd. Zonder herkomst kan de opruiming dat onderscheid
+    // niet maken.
+    name: '038_shift_activities_draft_id',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS draft_id TEXT`);
+      const fk = await client.query(`
+        SELECT 1 FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_name = 'shift_activities' AND kcu.column_name = 'draft_id'
+      `);
+      if (fk.rows.length === 0) {
+        await client.query(
+          `ALTER TABLE shift_activities ADD FOREIGN KEY (draft_id) REFERENCES schedule_drafts(id) ON DELETE SET NULL`
+        );
+      }
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_shift_activities_draft_id ON shift_activities(draft_id) WHERE draft_id IS NOT NULL`
+      );
+    }
   }
 ];
 
@@ -4394,11 +4420,36 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
 
     // 4. Auto-create vergadering activities from _teamMeetings
     const teamMeetings = rawGrid._teamMeetings || {};
-    // Altijd bestaande auto-vergaderingen verwijderen in dit bereik,
-    // ook als het nieuwe concept geen vergaderingen heeft (zomerconcept)
+
+    // Altijd de eigen vergaderingen van dit concept opruimen in dit bereik, ook
+    // als het nieuwe concept er geen meer heeft (zomerconcept).
+    //
+    // #376: hier stond `DELETE ... WHERE type = 'vergadering' AND date BETWEEN`,
+    // zonder filter op concept, team of medewerker. Dat wiste ook vergaderingen
+    // die iemand met de hand had ingevoerd (dat type staat gewoon in de
+    // keuzelijst van de activiteitenmodal) en die van teams waar het concept
+    // niets mee te maken heeft. Vaak kwam er niets voor terug, want de
+    // regeneratie draait alleen als het concept _teamMeetings heeft.
+    //
+    // Sinds migratie 038 draagt elke gegenereerde vergadering een draft_id, en
+    // daar begrenzen we op. Niets anders wordt aangeraakt.
+    //
+    // Vergaderingen van vóór die migratie hebben geen draft_id, en er is geen
+    // betrouwbare manier om te zien of zo'n rij door een concept is gemaakt of
+    // door iemand met de hand: beide krijgen een shift_id en een vrije
+    // omschrijving. Gokken op de omschrijving zou handmatig werk kunnen wissen,
+    // en dat is precies het probleem dat hier wordt opgelost.
+    //
+    // Gevolg: vergaderingen die vóór deze migratie door een concept zijn
+    // aangemaakt blijven staan, en bij een concept met teamvergaderingen kan er
+    // daardoor één keer een dubbele verschijnen. Die is zichtbaar en met de
+    // hand te verwijderen. Vanaf de eerstvolgende toepassing klopt het vanzelf.
     await client.query(
-      `DELETE FROM shift_activities WHERE type = 'vergadering' AND date >= $1::date AND date <= $2::date`,
-      [effectiveStartDate, effectiveEndDate]
+      `DELETE FROM shift_activities
+        WHERE type = 'vergadering'
+          AND draft_id = $3
+          AND date >= $1::date AND date <= $2::date`,
+      [effectiveStartDate, effectiveEndDate, draftId]
     );
 
     if (Object.keys(teamMeetings).length > 0) {
@@ -4454,17 +4505,20 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
             const fromTime = `${String(fromH).padStart(2, '0')}:${String(fromM).padStart(2, '0')}`;
             const toTime = `${String(toH).padStart(2, '0')}:${String(toM).padStart(2, '0')}`;
 
+            // draft_id legt vast dat deze vergadering uit dit concept komt,
+            // zodat de opruiming hierboven hem later kan onderscheiden van een
+            // handmatig ingevoerde (#376).
             if (shiftIdExists) {
               await client.query(
-                `INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description)
-                 VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering')`,
-                [shift.user_id, shift.id, shift.date, fromTime, toTime]
+                `INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description, draft_id)
+                 VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering', $6)`,
+                [shift.user_id, shift.id, shift.date, fromTime, toTime, draftId]
               );
             } else {
               await client.query(
-                `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description)
-                 VALUES ($1, $2, $3, $4, 'vergadering', 'Teamvergadering')`,
-                [shift.user_id, shift.date, fromTime, toTime]
+                `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description, draft_id)
+                 VALUES ($1, $2, $3, $4, 'vergadering', 'Teamvergadering', $5)`,
+                [shift.user_id, shift.date, fromTime, toTime, draftId]
               );
             }
           }

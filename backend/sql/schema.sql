@@ -142,6 +142,11 @@ CREATE TABLE IF NOT EXISTS shift_activities (
   end_time TIME NOT NULL,
   type TEXT NOT NULL,
   description TEXT DEFAULT '',
+  -- Uit welk roosterconcept deze activiteit komt. NULL voor handmatig
+  -- ingevoerde en voor activiteiten van vóór migratie 038. Zonder deze kolom
+  -- kan de opruiming bij het toepassen niet zien welke vergaderingen ze mag
+  -- weghalen (#376). De verwijzing staat onderaan dit bestand.
+  draft_id TEXT,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -250,20 +255,26 @@ CREATE INDEX IF NOT EXISTS idx_leave_rounds_status ON leave_rounds(status);
 CREATE INDEX IF NOT EXISTS idx_shifts_draft_id ON shifts(draft_id) WHERE draft_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false;
 CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id);
+CREATE INDEX IF NOT EXISTS idx_shift_activities_draft_id ON shift_activities(draft_id) WHERE draft_id IS NOT NULL;
 
--- shifts.draft_id verwijst naar schedule_drafts, dat verderop in dit bestand
--- wordt aangemaakt. Daarom staat de verwijzing hier en niet in de tabel zelf.
+-- draft_id verwijst naar schedule_drafts, dat verderop in dit bestand wordt
+-- aangemaakt. Daarom staan deze verwijzingen hier en niet in de tabellen zelf.
 DO $$
+DECLARE
+  t TEXT;
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.table_constraints tc
-    JOIN information_schema.key_column_usage kcu
-      ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
-    WHERE tc.constraint_type = 'FOREIGN KEY'
-      AND tc.table_name = 'shifts' AND kcu.column_name = 'draft_id'
-  ) THEN
-    ALTER TABLE shifts ADD FOREIGN KEY (draft_id) REFERENCES schedule_drafts(id) ON DELETE SET NULL;
-  END IF;
+  FOREACH t IN ARRAY ARRAY['shifts', 'shift_activities'] LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
+      WHERE tc.constraint_type = 'FOREIGN KEY'
+        AND tc.table_name = t AND kcu.column_name = 'draft_id'
+    ) THEN
+      EXECUTE format(
+        'ALTER TABLE %I ADD FOREIGN KEY (draft_id) REFERENCES schedule_drafts(id) ON DELETE SET NULL', t);
+    END IF;
+  END LOOP;
 END $$;
 
 -- Migration tracking table (used by runMigrations() in server.js)
