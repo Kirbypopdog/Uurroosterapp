@@ -429,6 +429,37 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
     `;
 }
 
+/**
+ * Zegt of de backend deze weigering laat doordrukken.
+ *
+ * #202: ruilen en overnemen sloegen de roosterregels volledig over. Nu weigert
+ * de backend, maar een weigering zonder uitweg is even onbruikbaar als geen
+ * controle. De app kent dat patroon al bij een dienst opslaan ("Toch opslaan"),
+ * en de backend volgt dezelfde afspraak: force slaat enkel de 11-uur rust over,
+ * nooit een overlap. Bij een overlap staat er canOverride: false en tonen we
+ * dus geen uitweg, want op twee plekken tegelijk staan kan niet.
+ */
+function magRusttijdOverrulen(error) {
+    return !!(error && error.data && error.data.canOverride);
+}
+
+/**
+ * Toont de bevestiging waarmee een te korte rusttijd doorgedrukt mag worden.
+ * @returns {Promise<boolean>} true als de gebruiker wil doordrukken
+ */
+function bevestigRusttijdOverride(error, bevestigTekst) {
+    const data = error.data;
+    const uitleg = data.wie === 'aanvrager'
+        ? 'De aanvrager houdt hierdoor te weinig rust tussen twee diensten.'
+        : 'Je houdt hierdoor te weinig rust tussen twee diensten.';
+
+    return showConfirm(
+        `${data.error}\n\n${uitleg}\n\nDe 11-uur rust is een wettelijke norm. Doordrukken kan, en wordt bijgehouden in de audit log.`,
+        'Te weinig rust',
+        { confirmText: bevestigTekst, cancelText: 'Annuleren', danger: true }
+    );
+}
+
 function attachSwapActionListeners() {
     // Target approve buttons
     document.querySelectorAll('.btn-target-approve-swap').forEach(btn => {
@@ -441,6 +472,27 @@ function attachSwapActionListeners() {
                     showToast('Ruil geaccepteerd! De shifts zijn omgewisseld.', 'success');
                     switchView('planning'); // Go to planning to see the result
                 } catch (error) {
+                    // #202: de backend controleert nu overlap en rusttijd. Een te
+                    // korte rust mag doorgedrukt worden na bevestiging, zoals bij
+                    // een dienst opslaan; een overlap nooit, want dan sta je op
+                    // twee plekken tegelijk.
+                    if (magRusttijdOverrulen(error)) {
+                        if (!await bevestigRusttijdOverride(error, 'Ruil toch accepteren')) {
+                            // Bewust afgezien: dat is geen fout, dus ook geen foutmelding.
+                            showToast('Ruil niet geaccepteerd.', 'info');
+                            return;
+                        }
+                        try {
+                            await targetApproveSwapRequest(swapId, notes, true);
+                            showToast('Ruil geaccepteerd, met minder dan 11 uur rust.', 'warning');
+                            switchView('planning');
+                            return;
+                        } catch (tweede) {
+                            console.error('Error approving swap (force):', tweede);
+                            showToast('Fout bij accepteren: ' + getUserFriendlyError(tweede), 'error');
+                            return;
+                        }
+                    }
                     console.error('Error approving swap:', error);
                     showToast('Fout bij accepteren: ' + getUserFriendlyError(error), 'error');
                 }
@@ -500,6 +552,25 @@ function attachSwapActionListeners() {
                         showToast('Shift overgenomen! Je kunt hem nu zien in je planning.', 'success');
                         switchView('planning'); // Go to planning to see the new shift
                     } catch (error) {
+                        // #202: zie de toelichting bij de ruilknop hierboven.
+                        if (magRusttijdOverrulen(error)) {
+                            if (!await bevestigRusttijdOverride(error, 'Toch overnemen')) {
+                                // Bewust afgezien: dat is geen fout, dus ook geen foutmelding.
+                                showToast('Shift niet overgenomen.', 'info');
+                                return;
+                            }
+                            try {
+                                await acceptTakeoverRequest(requestId, notes, true);
+                                await Promise.all([refreshShifts(), getSwapRequests()]);
+                                showToast('Shift overgenomen, met minder dan 11 uur rust.', 'warning');
+                                switchView('planning');
+                                return;
+                            } catch (tweede) {
+                                console.error('Error accepting takeover (force):', tweede);
+                                showToast('Fout bij overnemen: ' + getUserFriendlyError(tweede), 'error');
+                                return;
+                            }
+                        }
                         console.error('Error accepting takeover:', error);
                         showToast('Fout bij overnemen: ' + getUserFriendlyError(error), 'error');
                     }

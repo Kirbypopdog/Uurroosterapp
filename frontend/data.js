@@ -187,7 +187,14 @@ async function dataApiFetch(path, options = {}) {
         const data = await response.json().catch(() => ({}));
         const msg = data.error || `HTTP ${response.status}`;
         const detail = data.detail ? ` (${data.detail})` : '';
-        throw new Error(msg + detail);
+        const fout = new Error(msg + detail);
+        // De statuscode en het volledige antwoord meegeven, zodat een aanroeper
+        // kan reageren op wat de backend zegt in plaats van op de tekst te
+        // moeten matchen. Gebruikt door de ruil- en overnameknoppen, die bij
+        // canOverride een bevestiging tonen en het opnieuw proberen met force.
+        fout.status = response.status;
+        fout.data = data;
+        throw fout;
     }
 
     return response.json();
@@ -947,11 +954,11 @@ async function cancelSwapRequest(id) {
     }
 }
 
-async function targetApproveSwapRequest(id, responseNotes) {
+async function targetApproveSwapRequest(id, responseNotes, force = false) {
     try {
         await dataApiFetch(`/swap-requests/${id}/target-approve`, {
             method: 'PUT',
-            body: JSON.stringify({ responseNotes })
+            body: JSON.stringify({ responseNotes, ...(force ? { force: true } : {}) })
         });
 
         // Refresh swap requests + shifts (target approval executes the swap)
@@ -1005,11 +1012,11 @@ async function createTakeoverRequest(shiftId, message) {
     }
 }
 
-async function acceptTakeoverRequest(id, responseNotes) {
+async function acceptTakeoverRequest(id, responseNotes, force = false) {
     try {
         await dataApiFetch(`/shift-requests/${id}/takeover-accept`, {
             method: 'PUT',
-            body: JSON.stringify({ responseNotes })
+            body: JSON.stringify({ responseNotes, ...(force ? { force: true } : {}) })
         });
         await getSwapRequests();
         return true;

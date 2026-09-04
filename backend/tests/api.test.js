@@ -1406,6 +1406,51 @@ describe('PUT /shift-requests/:id/takeover-accept', () => {
 
     expect(res.status).toBe(422);
     expect(res.body.error).toMatch(/11-uur/i);
+    // De melding moet zeggen dat doordrukken kan, anders is de weigering een
+    // doodlopende weg en staat de medewerker met een dienst die niemand doet.
+    expect(res.body.rule).toBe('rest');
+    expect(res.body.canOverride).toBe(true);
+    const assign = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assign).toBeUndefined();
+  });
+
+  // force=true slaat, net als bij POST /shifts, ALLEEN de rusttijd over.
+  test('accepts a takeover with too little rest when force is set (#202)', async () => {
+    const mockClient = arrangeMetEigenDienst({ ...baseRequest }, [
+      { id: 901, date: '2099-01-14', start_time: '15:00', end_time: '23:00' }
+    ]);
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/shift-requests/7/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ force: true });
+
+    expect(res.status).toBe(200);
+    const assign = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assign).toBeTruthy();
+  });
+
+  // Overlap blijft ook met force geweigerd: op twee plekken tegelijk staan kan
+  // niet, dus dat is geen beleidskeuze om te overrulen.
+  test('still refuses an overlapping takeover when force is set (#202)', async () => {
+    const mockClient = arrangeMetEigenDienst({ ...baseRequest }, [
+      { id: 900, date: '2099-01-15', start_time: '07:00', end_time: '15:00' }
+    ]);
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/shift-requests/7/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ force: true });
+
+    expect(res.status).toBe(422);
+    expect(res.body.rule).toBe('overlap');
+    expect(res.body.canOverride).toBe(false);
     const assign = mockClient.query.mock.calls.find(
       c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
     );
@@ -1487,6 +1532,46 @@ describe('PUT /swap-requests/:id/target-approve', () => {
     expect(res.status).toBe(422);
     expect(res.body.error).toMatch(/aanvrager/i);
     expect(res.body.error).toMatch(/11-uur/i);
+    expect(res.body.canOverride).toBe(true);
+    expect(res.body.wie).toBe('aanvrager');
+  });
+
+  test('executes the swap with too little rest when force is set (#202)', async () => {
+    const mockClient = arrangeSwap({ ...baseSwap }, [], [
+      { id: 911, date: '2099-01-15', start_time: '15:00', end_time: '23:00' }
+    ]);
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/swap-requests/11/target-approve')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ force: true });
+
+    expect(res.status).toBe(200);
+    const assigns = mockClient.query.mock.calls.filter(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assigns).toHaveLength(2);
+  });
+
+  test('still refuses an overlapping swap when force is set (#202)', async () => {
+    const mockClient = arrangeSwap({ ...baseSwap }, [
+      { id: 910, date: '2099-01-15', start_time: '12:00', end_time: '20:00' }
+    ]);
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/swap-requests/11/target-approve')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ force: true });
+
+    expect(res.status).toBe(422);
+    expect(res.body.rule).toBe('overlap');
+    expect(res.body.canOverride).toBe(false);
+    const assign = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assign).toBeUndefined();
   });
 
   // Een ruil die wél kan, moet gewoon blijven werken.

@@ -941,13 +941,18 @@ async function validateShiftRules(db, userId, newShift, excludeId = null, skipRe
 
   for (const existing of rows) {
     if (shiftsOverlapCheck(existing, newShift)) {
-      return { valid: false, message: 'Overlap: medewerker heeft al een shift op dit tijdstip.' };
+      // rule: 'overlap' is nooit te overrulen. Iemand kan niet op twee plekken
+      // tegelijk staan, dus dat is geen beleidskeuze maar een feit. force=true
+      // slaat alleen de rusttijd over, hier en bij POST/PUT /shifts.
+      return { valid: false, rule: 'overlap', message: 'Overlap: medewerker heeft al een shift op dit tijdstip.' };
     }
     if (!skipRestCheck) {
       const hours = hoursBetweenShifts(existing, newShift);
       if (hours >= 0 && hours < MIN_REST) {
         return {
           valid: false,
+          rule: 'rest',
+          hours: Number(hours.toFixed(1)),
           message: `11-uur regel: slechts ${hours.toFixed(1)}u rust tussen shifts (minimum ${MIN_REST}u).`
         };
       }
@@ -3039,7 +3044,7 @@ v1.post('/swap-requests', requireAuth, async (req, res) => {
 // Target approval endpoints
 v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
   const swapId = req.params.id;
-  const { responseNotes } = req.body;
+  const { responseNotes, force } = req.body;
   const { id: currentUserId } = req.user;
 
   const client = await pool.connect();
@@ -3106,19 +3111,33 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     //
     // Elke medewerker staat zijn eigen dienst af, dus die telt niet mee als
     // conflict: hij wordt uitgesloten via excludeId.
+    //
+    // force=true slaat, net als bij POST /shifts en PUT /shifts/:id, ALLEEN de
+    // 11-uur rust over en nooit de overlap. De frontend zet die vlag pas nadat
+    // de gebruiker de melding heeft gezien en bevestigd heeft.
     const requesterShift = { date: swap.requester_date, start_time: swap.requester_start, end_time: swap.requester_end };
     const targetShift = { date: swap.target_date, start_time: swap.target_start, end_time: swap.target_end };
 
-    const targetCheck = await validateShiftRules(client, swap.target_user_id, requesterShift, swap.target_shift_id);
+    const targetCheck = await validateShiftRules(client, swap.target_user_id, requesterShift, swap.target_shift_id, !!force);
     if (!targetCheck.valid) {
       await client.query('ROLLBACK').catch(() => {});
-      return res.status(422).json({ error: `Deze ruil kan niet doorgaan. ${targetCheck.message}` });
+      return res.status(422).json({
+        error: `Deze ruil kan niet doorgaan. ${targetCheck.message}`,
+        rule: targetCheck.rule,
+        wie: 'jij',
+        canOverride: targetCheck.rule === 'rest'
+      });
     }
 
-    const requesterCheck = await validateShiftRules(client, swap.requester_user_id, targetShift, swap.requester_shift_id);
+    const requesterCheck = await validateShiftRules(client, swap.requester_user_id, targetShift, swap.requester_shift_id, !!force);
     if (!requesterCheck.valid) {
       await client.query('ROLLBACK').catch(() => {});
-      return res.status(422).json({ error: `Deze ruil kan niet doorgaan voor de aanvrager. ${requesterCheck.message}` });
+      return res.status(422).json({
+        error: `Deze ruil kan niet doorgaan voor de aanvrager. ${requesterCheck.message}`,
+        rule: requesterCheck.rule,
+        wie: 'aanvrager',
+        canOverride: requesterCheck.rule === 'rest'
+      });
     }
 
     // Execute swap: swap user_ids atomically
@@ -3154,7 +3173,10 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     );
 
     await client.query('COMMIT');
-    await logAudit(req, 'APPROVE', 'swap_request', swapId, { swap: { requester: swap.requester_user_id, target: swap.target_user_id, type: 'swap' } });
+    await logAudit(req, 'APPROVE', 'swap_request', swapId, {
+      swap: { requester: swap.requester_user_id, target: swap.target_user_id, type: 'swap' },
+      ...(force ? { rusttijdOverruled: true } : {})
+    });
 
     // Email notification (fire-and-forget)
     (async () => {
@@ -3355,7 +3377,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
 
 v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
   const requestId = req.params.id;
-  const { responseNotes } = req.body;
+  const { responseNotes, force } = req.body;
   const { id: currentUserId, team_id: acceptorTeam } = req.user;
 
   const client = await pool.connect();
@@ -3438,11 +3460,19 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
     // huisregel maar arbeidswetgeving, en dit is juist het scenario waar de
     // planner het minst naar kijkt: een overname voelt als iets dat de
     // collega's onderling geregeld hebben.
+    //
+    // force=true slaat, net als bij POST /shifts en PUT /shifts/:id, ALLEEN de
+    // 11-uur rust over en nooit de overlap. De frontend zet die vlag pas nadat
+    // de gebruiker de melding heeft gezien en bevestigd heeft.
     const takeoverShift = { date: request.date, start_time: request.start_time, end_time: request.end_time };
-    const acceptorCheck = await validateShiftRules(client, currentUserId, takeoverShift);
+    const acceptorCheck = await validateShiftRules(client, currentUserId, takeoverShift, null, !!force);
     if (!acceptorCheck.valid) {
       await client.query('ROLLBACK').catch(() => {});
-      return res.status(422).json({ error: `Je kunt deze dienst niet overnemen. ${acceptorCheck.message}` });
+      return res.status(422).json({
+        error: `Je kunt deze dienst niet overnemen. ${acceptorCheck.message}`,
+        rule: acceptorCheck.rule,
+        canOverride: acceptorCheck.rule === 'rest'
+      });
     }
 
     // Assign shift to acceptor, keep original team (don't change team on takeover)
@@ -3471,7 +3501,10 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
     );
 
     await client.query('COMMIT');
-    await logAudit(req, 'APPROVE', 'swap_request', requestId, { type: 'takeover', requester: request.requester_user_id, acceptedBy: currentUserId });
+    await logAudit(req, 'APPROVE', 'swap_request', requestId, {
+      type: 'takeover', requester: request.requester_user_id, acceptedBy: currentUserId,
+      ...(force ? { rusttijdOverruled: true } : {})
+    });
 
     // Email notification to original owner (fire-and-forget)
     (async () => {
