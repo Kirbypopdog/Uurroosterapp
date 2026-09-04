@@ -1990,8 +1990,16 @@ v1.post('/admin/test-email', requireAuth, requireRole('admin', 'roosterverantwoo
     if (!process.env.RESEND_API_KEY) {
       return res.status(503).json({ error: 'RESEND_API_KEY is niet geconfigureerd op de server.' });
     }
-    await emailService.notifyTestEmail(user);
-    res.json({ success: true, sentTo: user.email });
+    // #209: hiervoor stond hier alleen `await notifyTestEmail(user)` gevolgd door
+    // een vast success-antwoord. Deze knop is het enige instrument om te
+    // controleren of e-mail werkt, en hij zei altijd ja, ook wanneer Resend de
+    // mail weigerde. Nu antwoorden we op wat er echt gebeurd is.
+    const result = await emailService.notifyTestEmail(user);
+    if (!result || !result.ok) {
+      const reden = (result && result.error) || 'Onbekende fout bij de mailprovider.';
+      return res.status(502).json({ error: 'Testmail versturen mislukt: ' + reden });
+    }
+    res.json({ success: true, sentTo: user.email, messageId: result.id || null });
   } catch (err) {
     res.status(500).json({ error: 'Testmail versturen mislukt: ' + (err.message || 'Onbekende fout') });
   }
@@ -2546,16 +2554,42 @@ v1.post('/availability', requireAuth, async (req, res) => {
 
 
   try {
+    // #203: dit is een upsert op (gebruiker, datum), dus een bestaande
+    // registratie werd stilzwijgend vervangen. Wie ergens 'vrij' stond met
+    // reden 'Vaste vrije dag' werd zonder melding 'ziek', het antwoord was
+    // 201 Created voor wat in feite een overschrijving was, en de audit log
+    // hield alleen de nieuwe waarde bij. Achteraf was dus niet meer na te gaan
+    // wat er stond. Eén afwezigheid per persoon per dag blijft de regel, maar
+    // de vervanging moet zichtbaar zijn en een spoor nalaten.
+    //
+    // De CTE leest de oude rij op de snapshot van vóór de insert, dus dit
+    // blijft één atomaire opdracht.
     const result = await pool.query(`
+      WITH vorige AS (
+        SELECT type, reason FROM availability WHERE user_id = $1 AND date = $2::date
+      )
       INSERT INTO availability (user_id, date, type, reason, updated_at)
       VALUES ($1, $2, $3, $4, NOW())
       ON CONFLICT (user_id, date)
       DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
-      RETURNING id, user_id as "userId", date::text as date, type, reason, updated_at as "updatedAt"
+      RETURNING id, user_id as "userId", date::text as date, type, reason, updated_at as "updatedAt",
+                (SELECT type FROM vorige) as "previousType",
+                (SELECT reason FROM vorige) as "previousReason"
     `, [userId, date, type, reason || '']);
 
-    await logAudit(req, 'CREATE', 'availability', result.rows[0].id, { availability: result.rows[0] });
-    res.status(201).json({ availability: result.rows[0] });
+    const row = result.rows[0];
+    const previousType = row.previousType;
+    const wasOverwrite = previousType !== null && previousType !== undefined;
+    const previous = wasOverwrite ? { type: previousType, reason: row.previousReason || '' } : null;
+
+    const availability = {
+      id: row.id, userId: row.userId, date: row.date,
+      type: row.type, reason: row.reason, updatedAt: row.updatedAt
+    };
+
+    await logAudit(req, wasOverwrite ? 'UPDATE' : 'CREATE', 'availability', availability.id,
+      wasOverwrite ? { availability, previous } : { availability });
+    res.status(wasOverwrite ? 200 : 201).json({ availability, previous });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -2626,6 +2660,19 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Geen geldige datums in bereik' });
     }
 
+    // #203: lees eerst wat er al staat, zodat een overschrijving niet
+    // spoorloos is. Zie de toelichting bij POST /availability. Dit gebeurt in
+    // dezelfde transactie, dus de waarden kloppen met wat er zo meteen
+    // vervangen wordt.
+    const vorigeResult = await client.query(
+      `SELECT date::text as date, type, reason FROM availability
+       WHERE user_id = $1 AND date = ANY($2::date[])`,
+      [userId, dates]
+    );
+    const overwritten = vorigeResult.rows.filter(
+      r => r.type !== type || (r.reason || '') !== (reason || '')
+    );
+
     // 2. Upsert availability for each date
     const availability = [];
     for (const dateStr of dates) {
@@ -2687,12 +2734,13 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
     await client.query('COMMIT');
 
     // Audit log (outside transaction)
-    await logAudit(req, 'CREATE', 'availability', '', {
+    await logAudit(req, overwritten.length > 0 ? 'UPDATE' : 'CREATE', 'availability', '', {
       type: 'bulk_sick_with_takeover',
       userId, startDate, endDate, absenceType: type,
       daysCreated: dates.length,
       takeoverRequestsCreated: takeoverCount,
-      conflictingShifts: conflictingShiftCount
+      conflictingShifts: conflictingShiftCount,
+      overwritten
     });
 
     // Email notification to managers (fire-and-forget)
@@ -2716,7 +2764,8 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
     res.status(201).json({
       availability,
       takeoverRequests: takeoverCount,
-      conflictingShifts: conflictingShiftCount
+      conflictingShifts: conflictingShiftCount,
+      overwritten
     });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -3001,9 +3050,9 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     // Fetch swap request met shifts info (FOR UPDATE locks rows to prevent concurrent modification)
     const swapResult = await client.query(
       `SELECT sr.*,
-              s1.user_id as requester_current_user, s1.team as requester_team, s1.date as requester_date,
+              s1.user_id as requester_current_user, s1.team as requester_team, s1.date::text as requester_date,
               s1.start_time as requester_start, s1.end_time as requester_end,
-              s2.user_id as target_current_user, s2.team as target_team, s2.date as target_date,
+              s2.user_id as target_current_user, s2.team as target_team, s2.date::text as target_date,
               s2.start_time as target_start, s2.end_time as target_end
        FROM shift_swap_requests sr
        JOIN shifts s1 ON sr.requester_shift_id = s1.id
@@ -3041,12 +3090,35 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     // Verify shifts not in past
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    const requesterDate = new Date(swap.requester_date);
-    const targetDate = new Date(swap.target_date);
+    const requesterDate = parseLocalDate(swap.requester_date);
+    const targetDate = parseLocalDate(swap.target_date);
 
     if (requesterDate < now || targetDate < now) {
       await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Shifts zijn al voorbij' });
+    }
+
+    // #202: een ruil ging tot nu toe volledig langs de roosterregels heen. De
+    // shifts wisselden van eigenaar zonder te controleren of de nieuwe eigenaar
+    // die dag al werkt of te weinig rust overhoudt. Dezelfde dienst via
+    // POST /shifts aanmaken wordt wel geweigerd, dus de ruil was een sluipweg
+    // om de overlapcontrole en de 11-uur regel te omzeilen.
+    //
+    // Elke medewerker staat zijn eigen dienst af, dus die telt niet mee als
+    // conflict: hij wordt uitgesloten via excludeId.
+    const requesterShift = { date: swap.requester_date, start_time: swap.requester_start, end_time: swap.requester_end };
+    const targetShift = { date: swap.target_date, start_time: swap.target_start, end_time: swap.target_end };
+
+    const targetCheck = await validateShiftRules(client, swap.target_user_id, requesterShift, swap.target_shift_id);
+    if (!targetCheck.valid) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(422).json({ error: `Deze ruil kan niet doorgaan. ${targetCheck.message}` });
+    }
+
+    const requesterCheck = await validateShiftRules(client, swap.requester_user_id, targetShift, swap.requester_shift_id);
+    if (!requesterCheck.valid) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(422).json({ error: `Deze ruil kan niet doorgaan voor de aanvrager. ${requesterCheck.message}` });
     }
 
     // Execute swap: swap user_ids atomically
@@ -3293,7 +3365,7 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
 
     // Fetch takeover request with shift info (FOR UPDATE locks rows to prevent concurrent modification)
     const requestResult = await client.query(
-      `SELECT sr.*, s.user_id as current_shift_owner, s.date, s.start_time, s.end_time, s.team
+      `SELECT sr.*, s.user_id as current_shift_owner, s.date::text as date, s.start_time, s.end_time, s.team
        FROM shift_swap_requests sr
        JOIN shifts s ON sr.requester_shift_id = s.id
        WHERE sr.id = $1
@@ -3353,11 +3425,24 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
     // Verify shift is not in the past
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    const shiftDate = new Date(request.date);
+    const shiftDate = parseLocalDate(request.date);
 
     if (shiftDate < now) {
       await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Shift ligt in het verleden' });
+    }
+
+    // #202: ook een overname sloeg de roosterregels over. Wie de dienst
+    // overneemt kon er een krijgen die overlapt met zijn eigen dienst, of die
+    // te kort op zijn vorige of volgende dienst volgt. De 11-uur rust is geen
+    // huisregel maar arbeidswetgeving, en dit is juist het scenario waar de
+    // planner het minst naar kijkt: een overname voelt als iets dat de
+    // collega's onderling geregeld hebben.
+    const takeoverShift = { date: request.date, start_time: request.start_time, end_time: request.end_time };
+    const acceptorCheck = await validateShiftRules(client, currentUserId, takeoverShift);
+    if (!acceptorCheck.valid) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(422).json({ error: `Je kunt deze dienst niet overnemen. ${acceptorCheck.message}` });
     }
 
     // Assign shift to acceptor, keep original team (don't change team on takeover)

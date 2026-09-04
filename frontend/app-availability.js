@@ -1,20 +1,20 @@
 // HET VLOT ROOSTERPLANNING - AFWEZIGHEID TAB EN MODAL
 
+const ABSENCE_LABELS = {
+    'verlof': 'Verlof',
+    'ziek': 'Ziekte',
+    'overuren': 'Overuren',
+    'vorming': 'Vorming',
+    'andere': 'Andere',
+    'vrij': 'Vrij'
+};
+
 function renderAvailability() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
     const role = getEffectiveRole();
     let employees = getAllEmployees(true);
     const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
-
-    const absenceLabels = {
-        'verlof': 'Verlof',
-        'ziek': 'Ziekte',
-        'overuren': 'Overuren',
-        'vorming': 'Vorming',
-        'andere': 'Andere',
-        'vrij': 'Vrij'
-    };
 
     // Group employees by team (same order as Timeline)
     let teamOrder = getTeamOrder();
@@ -148,7 +148,7 @@ function renderAvailability() {
                     // Afwezigheid heeft prioriteit
                     if (absence && absence.type) {
                         statusClass = 'absent';
-                        statusText = absenceLabels[absence.type] || 'Afwezig';
+                        statusText = ABSENCE_LABELS[absence.type] || 'Afwezig';
                         tooltipText = absence.reason ? `${statusText}: ${absence.reason}` : statusText;
 
                         // Check voor conflict met dienst
@@ -528,6 +528,7 @@ async function handleAvailabilitySave() {
     try {
         // Check for conflicts first
         let conflictDates = [];
+        const alleDatums = [];
         // Use string dates to avoid timezone conversion issues
         const startParts = startDate.split('-').map(Number);
         const endParts = endDate.split('-').map(Number);
@@ -541,11 +542,40 @@ async function handleAvailabilitySave() {
             const day = String(checkDate.getDate()).padStart(2, '0');
             const dateStr = `${year}-${month}-${day}`;
 
+            alleDatums.push(dateStr);
+
             const shifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
             if (shifts.length > 0) {
                 conflictDates.push(dateStr);
             }
             checkDate.setDate(checkDate.getDate() + 1);
+        }
+
+        // #203: een bestaande afwezigheid werd stil overschreven. Wie op een dag
+        // 'vrij' stond met reden 'Vaste vrije dag' werd zonder enige melding
+        // 'ziek', en de oude waarde was daarna nergens meer terug te vinden.
+        // Eén registratie per persoon per dag blijft de regel, maar je hoort te
+        // weten dat je iets vervangt. De backend houdt het nu ook bij in de
+        // audit log.
+        const teVervangen = alleDatums
+            .map(dateStr => ({ dateStr, bestaand: getAvailability(employeeId, dateStr) }))
+            .filter(({ bestaand }) => bestaand && bestaand.type && bestaand.type !== absenceType);
+
+        if (teVervangen.length > 0) {
+            const naam = getEmployee(employeeId)?.name || 'Deze medewerker';
+            const nieuwLabel = ABSENCE_LABELS[absenceType] || 'afwezigheid';
+            const regels = teVervangen.slice(0, 5).map(({ dateStr, bestaand }) => {
+                const label = ABSENCE_LABELS[bestaand.type] || bestaand.type;
+                return `${formatDateShort(parseDateOnly(dateStr))}: ${label}${bestaand.reason ? ` (${bestaand.reason})` : ''}`;
+            });
+            if (teVervangen.length > 5) regels.push(`en nog ${teVervangen.length - 5} dag(en)`);
+
+            const bevestigd = await showConfirm(
+                `${naam} staat al genoteerd op ${teVervangen.length} dag${teVervangen.length !== 1 ? 'en' : ''}:\n\n` +
+                regels.join('\n') +
+                `\n\nVervangen door ${nieuwLabel}? De oude registratie gaat verloren.`
+            );
+            if (!bevestigd) return;
         }
 
         // Read takeover preference from inline checkbox (no confirm dialogs needed)

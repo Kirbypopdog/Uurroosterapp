@@ -1131,6 +1131,41 @@ describe('POST /availability', () => {
       .send({ userId: 5, date: '2026-05-01', type: 'beschikbaar' });
     expect(res.status).toBe(201);
     expect(res.body.availability.type).toBe('beschikbaar');
+    // #203: niets overschreven, dus geen vorige registratie
+    expect(res.body.previous).toBeNull();
+  });
+
+  // Regressie #203: een bestaande afwezigheid werd stilzwijgend vervangen. Het
+  // antwoord was 201 Created voor wat in feite een overschrijving was, en de
+  // audit log hield alleen de nieuwe waarde bij.
+  test('answers 200 and reports the previous registration on an overwrite (#203)', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{
+        id: 1, userId: 5, date: '2026-05-01', type: 'ziek', reason: '',
+        updatedAt: '2026-04-30T10:00:00.000Z',
+        previousType: 'vrij', previousReason: 'Vaste vrije dag'
+      }] })
+      .mockResolvedValueOnce({ rows: [] }); // logAudit
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/availability')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, date: '2026-05-01', type: 'ziek' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.previous).toEqual({ type: 'vrij', reason: 'Vaste vrije dag' });
+    // De interne kolommen van de CTE horen niet in het antwoord thuis
+    expect(res.body.availability.previousType).toBeUndefined();
+
+    // De audit log moet de vervanging kunnen aantonen: actie UPDATE, met de
+    // oude waarde erbij. Anders is achteraf niet meer na te gaan wat er stond.
+    const audit = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO audit_log')
+    );
+    expect(audit).toBeTruthy();
+    expect(audit[1][2]).toBe('UPDATE');
+    expect(JSON.parse(audit[1][5]).previous).toEqual({ type: 'vrij', reason: 'Vaste vrije dag' });
   });
 });
 
@@ -1315,6 +1350,162 @@ describe('PUT /shift-requests/:id/takeover-accept', () => {
     );
     expect(assign).toBeTruthy();
     expect(assign[1]).toEqual([6, 135]); // dienst 135 gaat naar gebruiker 6
+  });
+
+  // Variant van arrange() waarbij de roostercontrole een bestaande dienst van
+  // de overnemer terugvindt. De volgorde van queries in de handler is:
+  // BEGIN, SELECT verzoek, SELECT eigen diensten (validateShiftRules), rest.
+  function arrangeMetEigenDienst(requestRow, eigenDiensten) {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [] });                     // logAudit, mail
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })              // BEGIN
+      .mockResolvedValueOnce({ rows: [requestRow] })    // SELECT verzoek + dienst
+      .mockResolvedValueOnce({ rows: eigenDiensten })   // validateShiftRules
+      .mockResolvedValue({ rows: [] });                 // al de rest
+    return mockClient;
+  }
+
+  // Regressie #202: een overname wisselde de eigenaar zonder validateShiftRules
+  // aan te roepen. Dezelfde dienst via POST /shifts aanmaken werd wél geweigerd,
+  // dus de overname was een sluipweg langs de overlapcontrole.
+  test('refuses a takeover that overlaps the acceptor\'s own shift (#202)', async () => {
+    const mockClient = arrangeMetEigenDienst({ ...baseRequest }, [
+      { id: 900, date: '2099-01-15', start_time: '07:00', end_time: '15:00' }
+    ]);
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/shift-requests/7/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/overlap/i);
+    const assign = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assign).toBeUndefined();
+  });
+
+  // De 11-uur rust is geen huisregel maar arbeidswetgeving, en ook die viel weg.
+  test('refuses a takeover that breaks the 11-hour rest rule (#202)', async () => {
+    // De overnemer werkte de dag ervoor tot 23:00, de over te nemen dienst
+    // begint om 07:00. Dat is 8 uur rust.
+    const mockClient = arrangeMetEigenDienst({ ...baseRequest }, [
+      { id: 901, date: '2099-01-14', start_time: '15:00', end_time: '23:00' }
+    ]);
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/shift-requests/7/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/11-uur/i);
+    const assign = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assign).toBeUndefined();
+  });
+});
+
+// ===== PUT /swap-requests/:id/target-approve =====
+
+describe('PUT /swap-requests/:id/target-approve', () => {
+  // Aanvrager 4 ruilt dienst 135 (15 jan, 07:00-15:00) tegen dienst 200 van
+  // doelpersoon 6 (16 jan, 07:00-15:00).
+  const baseSwap = {
+    id: 11,
+    status: 'pending',
+    requester_user_id: 4,
+    target_user_id: 6,
+    requester_shift_id: 135,
+    target_shift_id: 200,
+    requester_current_user: 4,
+    target_current_user: 6,
+    requester_team: 'vlot1', requester_date: '2099-01-15',
+    requester_start: '07:00', requester_end: '15:00',
+    target_team: 'vlot1', target_date: '2099-01-16',
+    target_start: '07:00', target_end: '15:00'
+  };
+
+  // Queryvolgorde: BEGIN, SELECT ruilverzoek, validateShiftRules voor de
+  // doelpersoon, validateShiftRules voor de aanvrager, rest.
+  function arrangeSwap(swapRow, dienstenDoel = [], dienstenAanvrager = []) {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [] });                     // logAudit, mail
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                  // BEGIN
+      .mockResolvedValueOnce({ rows: [swapRow] })           // SELECT ruilverzoek
+      .mockResolvedValueOnce({ rows: dienstenDoel })        // validateShiftRules doelpersoon
+      .mockResolvedValueOnce({ rows: dienstenAanvrager })   // validateShiftRules aanvrager
+      .mockResolvedValue({ rows: [] });                     // al de rest
+    return mockClient;
+  }
+
+  // Regressie #202: een ruil wisselde de eigenaars zonder enige roostercontrole.
+  test('refuses a swap that overlaps a shift of the approving user (#202)', async () => {
+    // De doelpersoon krijgt de dienst van 15 jan, maar werkt die dag al.
+    const mockClient = arrangeSwap({ ...baseSwap }, [
+      { id: 910, date: '2099-01-15', start_time: '12:00', end_time: '20:00' }
+    ]);
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/swap-requests/11/target-approve')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/overlap/i);
+    const assign = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assign).toBeUndefined();
+  });
+
+  // Ook de andere kant van de ruil moet gecontroleerd worden, anders krijgt de
+  // aanvrager een dienst die niet kan terwijl hij zelf niets meer te zeggen heeft.
+  test('refuses a swap that breaks the 11-hour rest rule for the requester (#202)', async () => {
+    // De aanvrager krijgt de dienst van 16 jan 07:00 en werkt op 15 jan tot 23:00.
+    const mockClient = arrangeSwap({ ...baseSwap }, [], [
+      { id: 911, date: '2099-01-15', start_time: '15:00', end_time: '23:00' }
+    ]);
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/swap-requests/11/target-approve')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/aanvrager/i);
+    expect(res.body.error).toMatch(/11-uur/i);
+  });
+
+  // Een ruil die wél kan, moet gewoon blijven werken.
+  test('executes a swap that breaks no rules (#202)', async () => {
+    const mockClient = arrangeSwap({ ...baseSwap });
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/swap-requests/11/target-approve')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(200);
+    const assigns = mockClient.query.mock.calls.filter(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assigns).toHaveLength(2);
+    expect(assigns[0][1]).toEqual([6, 135]); // dienst van de aanvrager naar 6
+    expect(assigns[1][1]).toEqual([4, 200]); // dienst van de doelpersoon naar 4
   });
 });
 
@@ -2555,5 +2746,72 @@ describe('Verlofrondes', () => {
       .send({ entries: [{ userId: 2, date: '2027-07-05', status: 'verlof' }] });
 
     expect(res.status).toBe(200);
+  });
+});
+
+
+// ===== POST /admin/test-email =====
+
+// Regressie #209: dit endpoint antwoordde altijd { success: true }. De enige
+// knop waarmee je kunt controleren of e-mail werkt, zei dus ook ja wanneer
+// Resend de mail weigerde. Oorzaak is #195: sendEmail gaf niets terug, want de
+// Resend-bibliotheek gooit geen fout maar levert { data, error }.
+describe('POST /admin/test-email', () => {
+  const beheerder = { id: 1, role: 'admin', name: 'Admin', team_id: 'vlot1' };
+  let emailService;
+  let spy;
+
+  // Pas ophalen nadat de globale beforeAll de server (en dus email.js) geladen
+  // heeft, anders logt email.js zijn waarschuwing buiten de onderdrukking om.
+  beforeAll(() => { emailService = require('../src/email'); });
+
+  afterEach(() => {
+    if (spy) spy.mockRestore();
+    spy = null;
+    delete process.env.RESEND_API_KEY;
+  });
+
+  test('returns 503 when the mail provider is not configured', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ email: 'admin@hetvlot.be', name: 'Admin' }] });
+    const res = await request(app)
+      .post('/api/v1/admin/test-email')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+    expect(res.status).toBe(503);
+  });
+
+  test('returns 502 when the mail provider refuses the message (#209)', async () => {
+    process.env.RESEND_API_KEY = 'test-key';
+    spy = jest.spyOn(emailService, 'notifyTestEmail')
+      .mockResolvedValue({ ok: false, error: 'The hetvlot.be domain is not verified.' });
+
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ email: 'admin@hetvlot.be', name: 'Admin' }] });
+    const res = await request(app)
+      .post('/api/v1/admin/test-email')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(502);
+    // De echte reden van de provider moet in de melding staan, anders sta je
+    // met een mislukking waar je niets mee kunt.
+    expect(res.body.error).toMatch(/domain is not verified/i);
+    expect(res.body.success).toBeUndefined();
+  });
+
+  test('returns 200 only when the message was actually accepted (#209)', async () => {
+    process.env.RESEND_API_KEY = 'test-key';
+    spy = jest.spyOn(emailService, 'notifyTestEmail')
+      .mockResolvedValue({ ok: true, id: 'msg_123' });
+
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ email: 'admin@hetvlot.be', name: 'Admin' }] });
+    const res = await request(app)
+      .post('/api/v1/admin/test-email')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.sentTo).toBe('admin@hetvlot.be');
+    expect(res.body.messageId).toBe('msg_123');
   });
 });
