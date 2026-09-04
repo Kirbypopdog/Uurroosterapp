@@ -156,7 +156,16 @@ const UndoManager = {
     async _executeReverse(action) {
         switch (action.type) {
             case 'create':
-                await deleteShift(action.resultId);
+                // #302: ongedaan maken hoort de vorige toestand te herstellen,
+                // niet iets nieuws achter te laten. Zonder skipBlock bleef er
+                // een shift_block staan op een cel die er vóór de aanmaak geen
+                // had, waardoor het concept die medewerkerdag bij een volgende
+                // toepassing niet meer vulde.
+                //
+                // Bij het opnieuw uitvoeren van een verwijdering hieronder is
+                // die blokkade juist wél gewenst: daar is het leegmaken een
+                // bewuste keuze die het concept moet respecteren.
+                await deleteShift(action.resultId, true);
                 break;
             case 'update':
                 await updateShift(action.shiftId, action.previousData);
