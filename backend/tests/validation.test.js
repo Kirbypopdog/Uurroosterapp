@@ -344,7 +344,8 @@ const {
   leaveWeekWens,
   leaveBlockDates,
   leaveBlockGewijzigd,
-  leaveBlockHerstel
+  leaveBlockHerstel,
+  leaveConceptVoorBlok
 } = require('../../frontend/app-leave.js');
 
 // Kerstvakantie 21 dec 2026 t/m 3 jan 2027 = twee volle maandagweken.
@@ -658,5 +659,65 @@ describe('belgischeSchoolvakanties', () => {
 
   test('geeft vijf periodes terug', () => {
     expect(SJ2025).toHaveLength(5);
+  });
+});
+
+
+// ===== VERLOFPLANNING: welk concept levert de gesloten dagen (#308) =====
+//
+// De resync nam het concept dat het recentst was toegepast of bijgewerkt. Bij
+// het openen van de ronde koos de beheerder echter expliciet welk concept de
+// gesloten dagen levert, en die keuze staat in closed_source.draftId. Dat veld
+// werd niet gelezen, dus invulling van medewerkers kon verdwijnen op basis van
+// een concept dat niet aan deze ronde hangt.
+describe('leaveConceptVoorBlok', () => {
+  // leaveDraftsForPeriod sorteert op lastAppliedAt, dan updatedAt, nieuwste
+  // eerst. "Nieuw" staat dus vooraan, ook al hangt de ronde aan "Oud".
+  const OUD    = { id: 11, type: 'vakantie', holidayPeriodId: 'kerst', name: 'Oud',   updatedAt: '2026-01-01T00:00:00Z' };
+  const NIEUW  = { id: 22, type: 'vakantie', holidayPeriodId: 'kerst', name: 'Nieuw', updatedAt: '2026-06-01T00:00:00Z' };
+
+  const zetConcepten = (lijst) => {
+    global.DataStore = { shifts: [], users: [], settings: { rules: {}, schedule_drafts: lijst } };
+  };
+
+  afterEach(() => {
+    global.DataStore = { shifts: [], users: [], settings: { rules: {} } };
+  });
+
+  test('neemt het concept dat aan de ronde hangt, niet het nieuwste', () => {
+    zetConcepten([OUD, NIEUW]);
+    const blok = { holidayPeriodId: 'kerst', closedSource: { draftId: '11' } };
+    expect(leaveConceptVoorBlok(blok)).toMatchObject({ herkomst: 'ronde' });
+    expect(leaveConceptVoorBlok(blok).concept.name).toBe('Oud');
+  });
+
+  test('valt terug op het nieuwste als het concept van de ronde weg is', () => {
+    zetConcepten([NIEUW]);
+    const blok = { holidayPeriodId: 'kerst', closedSource: { draftId: '11' } };
+    const uit = leaveConceptVoorBlok(blok);
+    expect(uit.herkomst).toBe('vervangen');
+    expect(uit.concept.name).toBe('Nieuw');
+  });
+
+  test('neemt het nieuwste als er nooit een keuze bewaard is', () => {
+    zetConcepten([OUD, NIEUW]);
+    const blok = { holidayPeriodId: 'kerst', closedSource: {} };
+    const uit = leaveConceptVoorBlok(blok);
+    expect(uit.herkomst).toBe('nieuwste');
+    expect(uit.concept.name).toBe('Nieuw');
+  });
+
+  test('meldt geen concept wanneer er niets aan de periode hangt', () => {
+    zetConcepten([]);
+    const blok = { holidayPeriodId: 'zomer', closedSource: { draftId: '11' } };
+    expect(leaveConceptVoorBlok(blok)).toEqual({ concept: null, herkomst: 'geen' });
+  });
+
+  test('vergelijkt het id als tekst, niet als getal', () => {
+    // De backend geeft draftId als string terug, de concepten hebben een getal
+    zetConcepten([OUD, NIEUW]);
+    const blok = { holidayPeriodId: 'kerst', closedSource: { draftId: 22 } };
+    expect(leaveConceptVoorBlok(blok).concept.name).toBe('Nieuw');
+    expect(leaveConceptVoorBlok(blok).herkomst).toBe('ronde');
   });
 });

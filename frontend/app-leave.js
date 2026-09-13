@@ -1145,19 +1145,33 @@ async function applyLeaveRound(round) {
 // invulden niet stilzwijgend verschuiven.
 async function resyncLeaveClosedDays(data) {
     const { round, blocks = [] } = data;
-    const teDoen = blocks
-        .map(b => ({ blok: b, concept: leaveDraftsForPeriod(b.holidayPeriodId)[0] }))
-        .filter(x => x.concept);
+    // #308: per blok het concept van déze ronde, niet het nieuwste dat toevallig
+    // aan dezelfde vakantieperiode hangt.
+    const perBlok = blocks.map(b => ({ blok: b, ...leaveConceptVoorBlok(b) }));
+    const teDoen = perBlok.filter(x => x.concept);
+    const zonder = perBlok.filter(x => !x.concept);
 
     if (!teDoen.length) {
         showToast('Geen vakantieconcept gevonden voor de blokken van deze ronde', 'warning');
         return;
     }
 
-    const namen = teDoen.map(x => `${x.blok.name} ← "${x.concept.name}"`).join('\n');
+    // Benoem waar elk concept vandaan komt. Anders ziet de beheerder niet dat
+    // er voor een blok is teruggevallen op een ander concept dan het zijne.
+    const toelichting = {
+        vervangen: ' (het concept van deze ronde bestaat niet meer)',
+        nieuwste: ' (nieuwste concept; deze ronde had er geen vastgelegd)',
+    };
+    const namen = teDoen
+        .map(x => `${x.blok.name} ← "${x.concept.name}"${toelichting[x.herkomst] || ''}`)
+        .join('\n');
+    const overgeslagen = zonder.length
+        ? `\n\nZonder concept, dus ongewijzigd: ${zonder.map(x => x.blok.name).join(', ')}.`
+        : '';
+
     const gesloten = ['gesloten', 'toegepast'].includes(round.status);
     const bevestigd = await showConfirm(
-        `${namen}\n\nInvulling op dagen die daardoor gesloten raken wordt verwijderd; wie al indiende moet die weken opnieuw invullen.${
+        `${namen}${overgeslagen}\n\nInvulling op dagen die daardoor gesloten raken wordt verwijderd; wie al indiende moet die weken opnieuw invullen.${
             gesloten ? '\n\nLet op: deze ronde is al gesloten.' : ''}\n\nDoorgaan?`,
         'Gesloten dagen bijwerken uit concept'
     );
@@ -1244,6 +1258,37 @@ function leaveDraftsForPeriod(periodId) {
         .filter(d => d.type === 'vakantie' && String(d.holidayPeriodId) === String(periodId))
         .sort((a, b) => (b.lastAppliedAt || '').localeCompare(a.lastAppliedAt || '')
                      || (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+}
+
+/**
+ * Welk vakantieconcept levert de gesloten dagen voor dit blok.
+ *
+ * #308: de resync nam `leaveDraftsForPeriod(...)[0]`, dus het concept dat het
+ * recentst is toegepast of bijgewerkt. Bij het openen van de ronde koos de
+ * beheerder echter expliciet welk concept de gesloten dagen levert, en die
+ * keuze staat bewaard in closed_source.draftId. Dat veld werd niet gelezen en
+ * gewoon overschreven. Invulling van medewerkers verdween daardoor op basis van
+ * een roosterconcept dat helemaal niet aan deze ronde hangt.
+ *
+ * @returns {{concept: object|null, herkomst: 'ronde'|'vervangen'|'nieuwste'|'geen'}}
+ *   ronde     = het concept dat aan deze ronde gekoppeld is
+ *   vervangen = dat concept bestaat niet meer, dus het nieuwste springt in
+ *   nieuwste  = er was nooit een keuze bewaard (ronde van vóór dit veld)
+ *   geen      = er is helemaal geen concept voor deze vakantieperiode
+ */
+function leaveConceptVoorBlok(blok) {
+    const kandidaten = leaveDraftsForPeriod(blok.holidayPeriodId);
+    const bewaardId = blok.closedSource && blok.closedSource.draftId;
+
+    if (bewaardId) {
+        const eigen = kandidaten.find(d => String(d.id) === String(bewaardId));
+        if (eigen) return { concept: eigen, herkomst: 'ronde' };
+        if (kandidaten[0]) return { concept: kandidaten[0], herkomst: 'vervangen' };
+        return { concept: null, herkomst: 'geen' };
+    }
+
+    if (kandidaten[0]) return { concept: kandidaten[0], herkomst: 'nieuwste' };
+    return { concept: null, herkomst: 'geen' };
 }
 
 // Welke dagen dit concept sluit. Bewust het aantal DAGEN en niet het aantal
@@ -1418,5 +1463,6 @@ if (typeof module !== 'undefined' && module.exports) {
         leaveBlockDates,
         leaveBlockGewijzigd,
         leaveBlockHerstel,
+        leaveConceptVoorBlok,
     };
 }
