@@ -341,7 +341,10 @@ const {
   leaveOpenDaysOfBlock,
   leaveBlockProgress,
   leaveVerdeelVoorstel,
-  leaveWeekWens
+  leaveWeekWens,
+  leaveBlockDates,
+  leaveBlockGewijzigd,
+  leaveBlockHerstel
 } = require('../../frontend/app-leave.js');
 
 // Kerstvakantie 21 dec 2026 t/m 3 jan 2027 = twee volle maandagweken.
@@ -504,5 +507,82 @@ describe('leaveWeekWens', () => {
 
   test('geeft niets terug als er niets ingevuld is', () => {
     expect(leaveWeekWens(week, {})).toBeNull();
+  });
+});
+
+
+// ===== VERLOFPLANNING: de draft per blok (#252) =====
+//
+// De draft wordt over alle vakantieblokken heen opgebouwd en in één keer
+// verstuurd. Wie een blok invulde en terugklikte zonder te bewaren, liet zijn
+// keuzes gewoon in de draft staan. De kaart toonde daarna "nog niet ingevuld",
+// dus het leek vervallen, maar bij het bewaren van een ándere vakantie gingen
+// ze alsnog mee naar de server en werden ze echt verlof in de planning.
+describe('leaveBlockDates', () => {
+  const KROKUS = { startDate: '2027-02-22', endDate: '2027-02-28' };
+
+  test('geeft elke dag van het blok, ook de gesloten', () => {
+    const dagen = leaveBlockDates(KROKUS);
+    expect(dagen).toHaveLength(7);
+    expect(dagen[0]).toBe('2027-02-22');
+    expect(dagen[6]).toBe('2027-02-28');
+  });
+
+  test('blijft binnen het blok, ook als het middenin een week start', () => {
+    // Woensdag tot en met vrijdag: de weekindeling begint op maandag, maar
+    // dagen buiten het blok horen er niet bij.
+    const dagen = leaveBlockDates({ startDate: '2027-02-24', endDate: '2027-02-26' });
+    expect(dagen).toEqual(['2027-02-24', '2027-02-25', '2027-02-26']);
+  });
+});
+
+describe('leaveBlockGewijzigd', () => {
+  const BLOK = { startDate: '2027-02-22', endDate: '2027-02-28' };
+
+  afterEach(() => { global.AppState = undefined; });
+
+  test('ziet een nieuwe keuze die nog niet op de server staat', () => {
+    global.AppState = { leaveDraft: { '2027-02-22': 'verlof' } };
+    expect(leaveBlockGewijzigd(BLOK, {})).toBe(true);
+  });
+
+  test('ziet een gewijzigde keuze', () => {
+    global.AppState = { leaveDraft: { '2027-02-22': 'verlof' } };
+    expect(leaveBlockGewijzigd(BLOK, { '2027-02-22': 'werken' })).toBe(true);
+  });
+
+  test('meldt niets wanneer draft en server gelijk zijn', () => {
+    global.AppState = { leaveDraft: { '2027-02-22': 'verlof' } };
+    expect(leaveBlockGewijzigd(BLOK, { '2027-02-22': 'verlof' })).toBe(false);
+  });
+
+  test('kijkt alleen naar dit blok, niet naar een andere vakantie', () => {
+    // De kerstkeuze zit in dezelfde draft maar hoort bij een ander blok
+    global.AppState = { leaveDraft: { '2026-12-24': 'verlof' } };
+    expect(leaveBlockGewijzigd(BLOK, {})).toBe(false);
+  });
+});
+
+describe('leaveBlockHerstel', () => {
+  const BLOK = { startDate: '2027-02-22', endDate: '2027-02-28' };
+
+  afterEach(() => { global.AppState = undefined; });
+
+  test('wist een keuze die nergens op de server staat', () => {
+    global.AppState = { leaveDraft: { '2027-02-22': 'verlof', '2027-02-23': 'verlof' } };
+    leaveBlockHerstel(BLOK, {});
+    expect(global.AppState.leaveDraft).toEqual({});
+  });
+
+  test('zet een gewijzigde dag terug op de serverwaarde', () => {
+    global.AppState = { leaveDraft: { '2027-02-22': 'verlof' } };
+    leaveBlockHerstel(BLOK, { '2027-02-22': 'werken' });
+    expect(global.AppState.leaveDraft).toEqual({ '2027-02-22': 'werken' });
+  });
+
+  test('laat de andere vakanties in de draft ongemoeid', () => {
+    global.AppState = { leaveDraft: { '2026-12-24': 'verlof', '2027-02-22': 'verlof' } };
+    leaveBlockHerstel(BLOK, {});
+    expect(global.AppState.leaveDraft).toEqual({ '2026-12-24': 'verlof' });
   });
 });

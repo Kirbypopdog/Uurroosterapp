@@ -429,6 +429,40 @@ function renderLeaveBlockCard(block, entryMap) {
         </button>`;
 }
 
+/**
+ * Alle datums die bij één vakantieblok horen, open en gesloten.
+ *
+ * #252: de draft wordt over alle blokken heen opgebouwd en in één keer
+ * verstuurd. Om de wijzigingen van één blok te kunnen laten vallen moeten we
+ * weten welke dagen bij dat blok horen.
+ */
+function leaveBlockDates(block) {
+    return leaveWeeksOfBlock(block).flatMap(w => w.days);
+}
+
+/** De invulling zoals ze op de server staat, voor de ingelogde gebruiker. */
+function leaveServerMap(entries) {
+    const me = Number(AppState.currentUser?.id);
+    const map = {};
+    (entries || []).filter(e => Number(e.userId) === me).forEach(e => { map[e.date] = e.status; });
+    return map;
+}
+
+/** Zijn er in dit blok wijzigingen die nog niet bewaard zijn? */
+function leaveBlockGewijzigd(block, serverMap) {
+    const draft = AppState.leaveDraft || {};
+    return leaveBlockDates(block).some(d => (draft[d] || '') !== (serverMap[d] || ''));
+}
+
+/** Zet de dagen van dit blok terug op wat er op de server staat. */
+function leaveBlockHerstel(block, serverMap) {
+    if (!AppState.leaveDraft) return;
+    leaveBlockDates(block).forEach(d => {
+        if (serverMap[d]) AppState.leaveDraft[d] = serverMap[d];
+        else delete AppState.leaveDraft[d];
+    });
+}
+
 function leaveDatumKort(iso) {
     return parseDateOnly(iso).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
 }
@@ -849,7 +883,31 @@ function bindLeaveEvents(container, data) {
             AppState.leaveScreen = 'blok';
             renderLeave();
         }));
-    container.querySelector('#leave-back')?.addEventListener('click', () => {
+    container.querySelector('#leave-back')?.addEventListener('click', async () => {
+        // #252: de draft wordt over alle blokken heen opgebouwd en in één keer
+        // verstuurd. Wie hier terugklikte zonder te bewaren, liet zijn keuzes
+        // gewoon in de draft staan. De kaart toonde daarna "nog niet ingevuld",
+        // dus het leek vervallen, maar bij het bewaren van een ándere vakantie
+        // gingen ze alsnog mee naar de server. Zo legt iemand verlof vast dat
+        // hij bewust had laten vallen, en bij een goedgekeurde ronde belandt
+        // dat in de planning.
+        //
+        // Het gedrag was bovendien niet consistent: bij het hertekenen wint de
+        // serverwaarde in de merge, dus een gewijzigde dag werd wél
+        // teruggedraaid en een gloednieuwe dag bleef hangen.
+        const blok = blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
+        if (blok) {
+            const serverMap = leaveServerMap(data.entries);
+            if (leaveBlockGewijzigd(blok, serverMap)) {
+                const doorgaan = await showConfirm(
+                    `Je wijzigingen in ${blok.name} zijn nog niet bewaard.\n\nGa je terug, dan vervallen ze.`,
+                    'Niet bewaard',
+                    { confirmText: 'Wijzigingen weggooien', cancelText: 'Terug naar invullen', danger: true }
+                );
+                if (!doorgaan) return;
+            }
+            leaveBlockHerstel(blok, serverMap);
+        }
         AppState.leaveScreen = 'landing';
         AppState.leaveVerdeling = null;
         renderLeave();
@@ -901,7 +959,12 @@ function bindLeaveEvents(container, data) {
 
     // Bewaren in het detailscherm keert terug naar het overzicht
     container.querySelector('#leave-save-block')?.addEventListener('click', async () => {
-        await saveLeaveDraft(round, false, { terug: true });
+        // #252: stuur alleen de dagen van dit blok mee. De server vervangt het
+        // bereik tussen de eerste en de laatste datum uit de aanvraag, dus een
+        // draft die over meerdere vakanties loopt maakt dat bereik onnodig
+        // breed. Zo blijft het opslaan beperkt tot wat je hier bewerkt hebt.
+        const blok = blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
+        await saveLeaveDraft(round, false, { terug: true, alleenDagen: blok ? leaveBlockDates(blok) : null });
     });
     container.querySelector('#leave-submit')?.addEventListener('click', () => saveLeaveDraft(round, true));
     container.querySelector('#leave-close')?.addEventListener('click', e => closeLeaveRound(round, Number(e.currentTarget.dataset.open || 0)));
@@ -981,8 +1044,12 @@ async function saveLeaveVerdeling(data, blockId) {
 }
 
 async function saveLeaveDraft(round, ookIndienen, opties = {}) {
+    // opties.alleenDagen beperkt de opslag tot één vakantieblok (#252). Zonder
+    // die optie gaat de volledige draft mee, wat nodig is voor de knop
+    // Indienen op de landingspagina.
+    const filter = opties.alleenDagen ? new Set(opties.alleenDagen) : null;
     const entries = Object.entries(AppState.leaveDraft || {})
-        .filter(([, status]) => status)
+        .filter(([date, status]) => status && (!filter || filter.has(date)))
         .map(([date, status]) => ({ date, status }));
 
     // De server vervangt de volledige invulling. Leeg opslaan terwijl er op de
@@ -1348,5 +1415,8 @@ if (typeof module !== 'undefined' && module.exports) {
         weekStatus,
         leaveVerdeelVoorstel,
         leaveWeekWens,
+        leaveBlockDates,
+        leaveBlockGewijzigd,
+        leaveBlockHerstel,
     };
 }
