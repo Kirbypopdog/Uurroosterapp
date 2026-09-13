@@ -680,8 +680,20 @@ body.dark-mode .team-config-item.team-drag-over {
 /* --- Globaal zichtbaar: toasts, dialogen, contextmenu --- */
 body.dark-mode .toast {
     background: var(--surface-2);
-    border-color: var(--line);
+    /* #338: hier stond border-color: var(--line). .toast heeft alleen een
+       linkerrand, bedoeld als gekleurd accent per soort melding, en deze regel
+       wint op specificiteit van .toast-error en de rest. Alle vier de soorten
+       kregen daardoor dezelfde grijsbruine rand en waren in donkere modus niet
+       meer uit elkaar te houden. De rand hoort hier dus helemaal niet gezet te
+       worden. */
 }
+
+/* De accentkleuren zelf via de statustokens, zodat ze in donkere modus
+   oplichten in plaats van weg te zakken. */
+body.dark-mode .toast-success { color: var(--ok-text);     border-left-color: var(--ok-text); }
+body.dark-mode .toast-error   { color: var(--danger-text); border-left-color: var(--danger-text); }
+body.dark-mode .toast-warning { color: var(--warn-text);   border-left-color: var(--warn-text); }
+body.dark-mode .toast-info    { color: var(--info-text);   border-left-color: var(--info-text); }
 body.dark-mode .toast-message { color: var(--ink); }
 body.dark-mode .toast-close   { color: var(--ink-2); }
 body.dark-mode .quick-dialog {
@@ -3313,7 +3325,7 @@ body[data-view-mode="day"] .timeline-header {
 
 .issue-details-example {
     font-size: 13px;
-    color: #78350f;
+    color: var(--warn-text);
     margin-bottom: 8px;
 }
 
@@ -3335,7 +3347,7 @@ body[data-view-mode="day"] .timeline-header {
     font-size: 12px;
     font-weight: 600;
     margin-bottom: 4px;
-    color: #92400e;
+    color: var(--warn-text);
 }
 .issue-details-more { margin-top: 2px; }
 .issue-details-more-toggle {
@@ -3357,8 +3369,8 @@ body[data-view-mode="day"] .timeline-header {
 .issue-details-more--open .issue-details-more-list { display: block; }
 
 .issue-details-level-error .issue-details-rule { color: #991b1b; }
-.issue-details-level-warning .issue-details-rule { color: #92400e; }
-.issue-details-level-error svg { color: #dc2626; }
+.issue-details-level-warning .issue-details-rule { color: var(--warn-text); }
+.issue-details-level-error svg { color: var(--danger-text); }
 .issue-details-level-warning svg { color: #d97706; }
 
 .issue-entry-list { list-style: none; margin: 0 0 6px; padding: 0; }
@@ -3512,7 +3524,7 @@ body[data-view-mode="day"] .timeline-header {
 .staffing-warning-item {
     background: var(--color-warning-light);
     border: 1px solid #fbbf24;
-    color: #92400e;
+    color: var(--warn-text);
     padding: 6px 8px;
     border-radius: 4px;
     font-size: 11px;
@@ -3743,7 +3755,7 @@ body[data-view-mode="day"] .timeline-header {
 
 .shift-block.shift-absent-conflict .shift-employee-name,
 .shift-block.shift-absent-conflict .shift-time {
-    color: #7f1d1d !important;
+    color: var(--danger-text) !important;
     text-shadow: 0 0 1px white;
 }
 
@@ -3962,12 +3974,12 @@ body[data-view-mode="day"] .timeline-header {
 
 .team-badge-mini.cargo {
     background: var(--color-success-bg);
-    color: #065f46;
+    color: var(--ok-text);
 }
 
 .team-badge-mini.overkoepelend {
     background: var(--color-warning-light);
-    color: #92400e;
+    color: var(--warn-text);
 }
 
 .team-badge-mini.jobstudent {
@@ -4525,7 +4537,7 @@ body[data-view-mode="day"] .timeline-header {
 }
 .timeline-day-header.manually-closed .day-name,
 .timeline-day-header.manually-closed .day-num {
-    color: #991b1b;
+    color: var(--danger-text);
 }
 
 .timeline-day-header.holiday {
@@ -4613,7 +4625,7 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .day-context-menu button.danger {
-    color: #dc2626;
+    color: var(--danger-text);
 }
 
 .timeline-scale-row {
@@ -4901,12 +4913,12 @@ body[data-view-mode="day"] .timeline-header {
 
 .timeline-employee-cell .emp-team.team-cargo {
     background: var(--color-success-bg);
-    color: #065f46;
+    color: var(--ok-text);
 }
 
 .timeline-employee-cell .emp-team.team-overkoepelend {
     background: var(--color-warning-light);
-    color: #92400e;
+    color: var(--warn-text);
 }
 
 .timeline-employee-cell .emp-team.team-jobstudent {
@@ -5874,7 +5886,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .employee-status.active {
     background: var(--color-success-bg);
-    color: #065f46;
+    color: var(--ok-text);
 }
 
 .employee-status.active::before {
@@ -6022,12 +6034,12 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .team-badge.cargo {
     background: var(--color-success-bg);
-    color: #065f46;
+    color: var(--ok-text);
 }
 
 .team-badge.overkoepelend {
     background: var(--color-warning-light);
-    color: #92400e;
+    color: var(--warn-text);
 }
 
 .team-badge.jobstudent {
@@ -6562,7 +6574,7 @@ body[data-view-mode="day"] .timeline-day-cell {
     padding: 2px 8px;
     border-radius: 999px;
     background: var(--color-danger-border);
-    color: #991b1b;
+    color: var(--danger-text);
     font-size: 10px;
     font-weight: 600;
     z-index: 1;
@@ -7102,7 +7114,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 .danger-zone p {
     margin: 0 0 12px 0;
     font-size: 13px;
-    color: #7f1d1d;
+    color: var(--danger-text);
 }
 
 /* Teams list */
@@ -7431,7 +7443,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 .holiday-status-banner.active {
     background: var(--color-success-light);
     border-color: var(--primary-color);
-    color: #065f46;
+    color: var(--ok-text);
 }
 .holiday-status-banner.upcoming {
     background: #fffbeb;
@@ -8589,7 +8601,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .responsible-label {
     font-weight: 600;
-    color: #92400e;
+    color: var(--warn-text);
     font-size: 14px;
 }
 
@@ -8601,7 +8613,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .responsible-warning {
-    color: #b45309;
+    color: var(--warn-text);
     font-weight: 500;
     font-style: italic;
     font-size: 14px;
@@ -10100,7 +10112,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .shift-source-info .btn-link:hover {
-    color: #33594f;
+    color: var(--ok-text);
 }
 
 /* ===== SWAP REQUEST MODALS ===== */
@@ -10145,7 +10157,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .swap-arrow {
     font-size: 2rem;
-    color: #4a7c6f;
+    color: var(--ok-text);
     font-weight: bold;
     flex-shrink: 0;
 }
@@ -10242,7 +10254,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .swap-status-badge.status-available {
     background: var(--color-success-bg);
-    color: #065f46;
+    color: var(--ok-text);
 }
 
 .swap-request-body {
@@ -10418,7 +10430,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 .swap-section h3 {
     margin: 0 0 1rem 0;
     font-size: 1.25rem;
-    color: #2b2a26;
+    color: var(--text-primary);
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -10472,7 +10484,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .takeover-shift-info strong {
     display: block;
-    color: #2b2a26;
+    color: var(--text-primary);
     margin-bottom: 0.25rem;
 }
 
@@ -10685,7 +10697,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .toast-close:hover {
-    color: #1f2937;
+    color: var(--text-primary);
 }
 
 /* Mobile Responsive */
@@ -12273,11 +12285,11 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .draft-badge-applied {
     background: var(--color-success-bg);
-    color: #065f46;
+    color: var(--ok-text);
 }
 .draft-badge-scheduled {
     background: var(--color-warning-light);
-    color: #92400e;
+    color: var(--warn-text);
 }
 .draft-badge-expired {
     background: #f3f4f6;
@@ -12878,7 +12890,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .conflict-error {
     font-weight: 500;
-    color: #991b1b;
+    color: var(--danger-text);
     margin-bottom: 8px;
     font-size: 13px;
     line-height: 1.4;
