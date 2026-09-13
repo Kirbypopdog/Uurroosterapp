@@ -1078,9 +1078,10 @@ async function saveLeaveVerdeling(data, blockId) {
     if (!bevestigd) return;
 
     try {
-        await dataApiFetch(`/leave-rounds/${round.id}/blocks/${block.id}/entries`, {
-            method: 'PUT', body: JSON.stringify({ entries })
-        });
+        await metLeaveVoortgang('leave-verdeel-save', 'Verdeling vastleggen…', () =>
+            dataApiFetch(`/leave-rounds/${round.id}/blocks/${block.id}/entries`, {
+                method: 'PUT', body: JSON.stringify({ entries })
+            }));
         showToast('Verdeling vastgelegd.\nJe kan het verlof nu toepassen.', 'success');
         AppState.leaveVerdeling = null;
         AppState.leaveScreen = 'overzicht';
@@ -1173,14 +1174,45 @@ async function deleteLeaveRound(round) {
     }
 }
 
+/**
+ * Voert een langlopende beheeractie uit met zichtbare terugkoppeling.
+ *
+ * #358: applyLeaveRound vuurde zijn POST meteen af zonder overlay, zonder
+ * spinner en zonder de knop uit te schakelen. Zolang het verzoek liep gebeurde
+ * er zichtbaar niets, en een tweede klik stuurde een tweede verzoek. Dat was
+ * hier onschadelijk, want de backend doet een upsert op (user_id, date) en zet
+ * de ronde gewoon opnieuw op 'toegepast', maar je wist niet of het gelukt was.
+ * "Verdeling vastleggen" en "Gesloten dagen bijwerken" hadden hetzelfde gat.
+ *
+ * @param {string|null} knopId  de knop die zolang op slot gaat
+ * @param {string} tekst        wat er in de overlay staat
+ * @param {Function} actie      de eigenlijke aanroep
+ */
+async function metLeaveVoortgang(knopId, tekst, actie) {
+    const knop = knopId ? document.getElementById(knopId) : null;
+    if (knop) knop.disabled = true;
+    showSectionLoading('leave-view', tekst);
+    try {
+        return await actie();
+    } finally {
+        hideSectionLoading('leave-view');
+        // Na een geslaagde actie tekent renderLeave het scherm opnieuw en is
+        // deze knop weg. Alleen een knop die nog in de pagina staat hoeft van
+        // het slot af.
+        if (knop && knop.isConnected) knop.disabled = false;
+    }
+}
+
 async function applyLeaveRound(round) {
     if (!await showConfirm(
         'Goedgekeurd verlof wordt omgezet naar afwezigheden in de planning. Doorgaan?',
         'Verlof toepassen')) return;
     try {
-        const res = await dataApiFetch(`/leave-rounds/${round.id}/apply`, { method: 'POST' });
-        showToast(`${res.applied} verlofdagen toegepast`, 'success');
-        if (typeof refreshAvailability === 'function') await refreshAvailability();
+        await metLeaveVoortgang('leave-apply', 'Verlof toepassen…', async () => {
+            const res = await dataApiFetch(`/leave-rounds/${round.id}/apply`, { method: 'POST' });
+            showToast(`${res.applied} verlofdagen toegepast`, 'success');
+            if (typeof refreshAvailability === 'function') await refreshAvailability();
+        });
         renderLeave();
     } catch (err) {
         showToast('Toepassen mislukt: ' + getUserFriendlyError(err), 'error');
@@ -1227,23 +1259,25 @@ async function resyncLeaveClosedDays(data) {
 
     let gewist = 0;
     try {
-        for (const { blok, concept } of teDoen) {
-            const res = await dataApiFetch(
-                `/leave-rounds/${round.id}/blocks/${blok.id}${gesloten ? '?force=1' : ''}`, {
-                method: 'PUT',
-                body: JSON.stringify({
-                    closedDates: closedDatesFromPattern(blok.startDate, blok.startDate, blok.endDate, concept.grid?._pattern),
-                    closedSource: {
-                        draftId: String(concept.id), draftName: concept.name,
-                        holidayPeriodId: String(blok.holidayPeriodId || ''),
-                        syncedAt: new Date().toISOString(),
-                        syncedBy: AppState.currentUser?.id ?? null,
-                        syncedByName: AppState.currentUser?.name || ''
-                    }
-                })
-            });
-            gewist += res.entriesRemoved || 0;
-        }
+        await metLeaveVoortgang('leave-resync', 'Gesloten dagen bijwerken…', async () => {
+            for (const { blok, concept } of teDoen) {
+                const res = await dataApiFetch(
+                    `/leave-rounds/${round.id}/blocks/${blok.id}${gesloten ? '?force=1' : ''}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        closedDates: closedDatesFromPattern(blok.startDate, blok.startDate, blok.endDate, concept.grid?._pattern),
+                        closedSource: {
+                            draftId: String(concept.id), draftName: concept.name,
+                            holidayPeriodId: String(blok.holidayPeriodId || ''),
+                            syncedAt: new Date().toISOString(),
+                            syncedBy: AppState.currentUser?.id ?? null,
+                            syncedByName: AppState.currentUser?.name || ''
+                        }
+                    })
+                });
+                gewist += res.entriesRemoved || 0;
+            }
+        });
         showToast(gewist ? `Gesloten dagen bijgewerkt.\n${gewist} ingevulde dagen vervallen.` : 'Gesloten dagen bijgewerkt', 'success');
         renderLeave();
     } catch (err) {
