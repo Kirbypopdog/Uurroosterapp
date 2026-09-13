@@ -150,6 +150,21 @@
     --danger-warm: #c0524a; --danger-warm-bg: #fbe9e7; --danger-bg: #fbe9e7;
     --info: #5b7fa6; --info-bg: #eaf0f6;
     --ok: #4a7c6f; --ok-bg: #e9f1ed;
+
+    /* Tekstkleuren voor status, los van de vlakken waar ze op staan.
+       De statuschips door de hele app zetten hun ACHTERGROND via een token dat
+       per thema omslaat, maar hun TEKST via een kleur uit het lichte palet
+       (--ok, --color-danger, --color-warning, --accent-blue). In donkere modus
+       gaf dat donkergroen op donkergroen; in lichte modus haalden dezelfde
+       combinaties net de eis van 4,5 niet, met waarden van 3,4 tot 4,4.
+
+       Bewust aparte tokens en niet --color-danger en --color-success zelf
+       aangepast: die worden ook als ACHTERGROND van knoppen en stippen
+       gebruikt, met witte tekst erop. Daar helpt lichter maken niet. */
+    --ok-text:     #3d6a5e;
+    --danger-text: #a8433c;
+    --warn-text:   #8f5620;
+    --info-text:   #48658a;
 }
 
 /* ===== DARK MODE ===== */
@@ -188,12 +203,36 @@ body.dark-mode {
     --danger-bg:            #2a0d0a; --danger-warm-bg: #2a0d0a;
     --info-bg:              #0a1520;
     --ok-bg:                #0d1f18;
+    --ok-text:              #6fae9d;
+    --danger-text:          #e8706a;
+    --warn-text:            #e8a83a;
+    --info-text:            #7aa5c5;
     --color-danger-bg:      #2a0d0a; --color-danger-border: #5a1f1a;
     --color-success-bg:     #0d1f18; --color-success-light:  #0d1f18;
     --color-warning-light:  #2a1a08;
     /* Ontbrak: 6 usages (afwezigheidscellen, danger-zone, conflict-items,
        form-message.error) bleven daardoor lichtroze in dark mode. */
     --color-danger-light:   #2a0d0a;
+
+    /* #229: de oude aliassen hieronder staan op :root als var(--iets-anders).
+       Een aangepaste eigenschap wordt op zijn eigen element berekend en daarna
+       als vaste waarde overgeerfd. --text-color kreeg dus op :root al de
+       lichte --text-primary te pakken, en bleef die houden ook al zet
+       body.dark-mode --text-primary op een andere kleur. Gemeten leverde dat
+       rgb(43,42,38) op rgb(30,27,20) op, een verhouding van 1,20: de nog
+       openstaande stappen in de installatiechecklist waren onzichtbaar.
+       Ze hier opnieuw declareren laat ze op body.dark-mode herberekenen met de
+       donkere waarden. Dit raakt alles wat de aliassen gebruikt, onder meer
+       .staffing-min-input en .meeting-input. */
+    --bg-primary:    var(--surface-color);
+    --bg-secondary:  var(--surface-2);
+    --bg-card:       var(--surface-color);
+    --bg-hover:      var(--raise);
+    --hover-bg:      var(--raise);
+    --primary-light: var(--alert-info-bg);
+    --text-tertiary: var(--ink-3);
+    --text-muted:    var(--text-secondary);
+    --text-color:    var(--text-primary);
 }
 
 /* ===== DARK MODE OVERRIDES (hardcoded-color fixes) ===== */
@@ -2620,13 +2659,13 @@ textarea:focus-visible {
 
 .home-request-status.pending {
     background: rgba(245, 158, 11, 0.15);
-    color: #b45309;
+    color: var(--warn-text);
     border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
 .home-request-status.needs-action {
     background: rgba(239, 68, 68, 0.15);
-    color: var(--color-danger);
+    color: var(--danger-text);
     border: 1px solid rgba(239, 68, 68, 0.3);
     animation: pulse-attention 2s ease-in-out infinite;
 }
@@ -3359,13 +3398,13 @@ body[data-view-mode="day"] .timeline-header {
 
 .alert-warning {
     background: var(--color-warning-light);
-    color: #92400e;
+    color: var(--warn-text);
     border-left: 4px solid var(--warning-color);
 }
 
 .alert-danger {
     background: var(--color-danger-bg);
-    color: #991b1b;
+    color: var(--danger-text);
     border-left: 4px solid var(--danger-color);
 }
 
@@ -5035,12 +5074,16 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .timeline-block .block-time {
-    color: white;
+    /* Dit stond op wit. Sinds applyTeamColors() de tekstkleur per teamkleur
+       kiest (wit of bijna zwart, wat het meeste contrast geeft) moet de tijd
+       die keuze volgen, anders staat er lichte tijd naast donkere naam in
+       hetzelfde blok. Gemeten op een blauw team: de naam kwam op 5,12 uit en
+       de tijd bleef op 3,68 hangen. */
+    color: inherit;
     font-size: 9px;
     font-weight: 600;
     padding: 0 4px;
     white-space: nowrap;
-    text-shadow: 0 1px 1px rgba(0,0,0,0.2);
     /* #208: het blok centreert zijn inhoud en knipt af met overflow:hidden.
        Zonder deze drie regels werd een te lang label aan BEIDE kanten
        afgesneden en las je het midden van de tekst, zoiets als "0-07". Dat
@@ -6154,7 +6197,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .validation-errors ul {
     margin-left: 20px;
-    color: #991b1b;
+    color: var(--danger-text);
     font-size: 14px;
 }
 
@@ -6864,7 +6907,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 .info-box.info {
     background: #eff6ff;
     border: 1px solid #bfdbfe;
-    color: var(--accent-blue);
+    color: var(--info-text);
 }
 
 .info-box.neutral {
@@ -7873,12 +7916,12 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .legend-chip.available {
     background: var(--color-success-light);
-    color: var(--color-success-hover);
+    color: var(--ok-text);
 }
 
 .legend-chip.absent {
     background: var(--color-danger-bg);
-    color: var(--color-danger);
+    color: var(--danger-text);
 }
 
 .legend-chip.has-shift {
@@ -8274,7 +8317,9 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 /* Add absence button */
 .btn-add-absence {
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    /* Wit op #10b981 haalde 2,54. Deze twee stops brengen dat op 5,36 en 6,72,
+       met hetzelfde groen als basis. */
+    background: linear-gradient(135deg, #077a53 0%, #05593e 100%);
     color: white;
     border: none;
     padding: 10px 20px;
@@ -10488,15 +10533,15 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .validation-errors {
-    color: #991b1b;
+    color: var(--danger-text);
 }
 
 .validation-warnings {
-    color: #92400e;
+    color: var(--warn-text);
 }
 
 .validation-success {
-    color: #065f46;
+    color: var(--ok-text);
 }
 
 /* ===== DRAG & DROP STYLES ===== */
@@ -12463,7 +12508,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .badge-vakantie {
     background: color-mix(in srgb, var(--team-vlot2) 20%, white);
-    color: var(--team-vlot2-darker);
+    /* --team-vlot2-darker gaf 4,12 op deze lichte menging, net onder de eis. */
+    color: color-mix(in srgb, var(--team-vlot2-darker) 82%, black);
 }
 .concept-card-meta {
     display: flex;
@@ -12921,7 +12967,7 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-size: 11px; font-weight: 600; text-transform: uppercase;
 }
 .audit-create { background: #d1fae5; color: #065f46; }
-.audit-update { background: #dbeafe; color: var(--accent-blue); }
+.audit-update { background: #dbeafe; color: var(--info-text); }
 .audit-delete { background: #fee2e2; color: #991b1b; }
 .audit-approve { background: #d1fae5; color: #065f46; }
 .audit-reject { background: #fee2e2; color: #991b1b; }
@@ -13287,11 +13333,11 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .email-status-badge.configured {
     background: var(--color-success-bg, #dcfce7);
-    color: var(--color-success, #16a34a);
+    color: var(--ok-text);
 }
 .email-status-badge.not-configured {
     background: var(--color-danger-bg, #fee2e2);
-    color: var(--color-danger, #dc2626);
+    color: var(--danger-text);
 }
 
 /* ===== Issue #39: inline style migraties fase 3 ===== */
@@ -13832,7 +13878,7 @@ body.dark-mode {
     font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
     padding: 3px 9px; border-radius: 20px; white-space: nowrap; flex: none;
 }
-.leave-rs-open      { background: var(--ok-bg);            color: var(--ok); }
+.leave-rs-open      { background: var(--ok-bg);            color: var(--ok-text); }
 .leave-rs-concept   { background: var(--surface-2);        color: var(--ink-3); }
 .leave-rs-gesloten  { background: var(--alert-info-bg);    color: var(--alert-info-text); }
 .leave-rs-toegepast { background: var(--alert-info-bg);    color: var(--alert-info-text); }
@@ -13877,3 +13923,93 @@ body.dark-mode .shift-block-notice {
     background: var(--surface-2);
     color: var(--ink-2);
 }
+
+
+/* ===== DONKERE MODUS: statuskleuren die niet meeflipten (#179, #259, #287, #335, #336, #338, #339) =====
+
+   Patroon achter deze hele groep: de ACHTERGROND van een status- of teamchip
+   loopt via een token dat in donkere modus wel omslaat, terwijl de TEKST een
+   kleur uit het lichte palet vasthoudt (--sage-700, --color-success-hover,
+   --color-danger, een team-darker). Het resultaat is donkergroen op
+   donkergroen. Gemeten liep dat van 2,07 tot 3,94, tegen een eis van 4,5.
+
+   Bewust niet opgelost door --color-danger en --color-success zelf om te
+   zetten: die worden op vijf plekken als ACHTERGROND van een knop of stip
+   gebruikt, met witte tekst erop. Lichter maken lost het ene op en breekt het
+   andere. */
+
+/* De actieve knop in de zijbalk, en de naam in de begroeting op het startscherm */
+body.dark-mode .app-sidebar .nav-btn.active { color: var(--ok-text); }
+body.dark-mode .home-hi em { color: var(--ok-text); }
+
+/* Statuschips met een groene of rode achtergrond */
+body.dark-mode .employee-status.active { color: var(--ok-text); }
+
+/* Rolbadge in de profielkop */
+body.dark-mode .profile-hero-role { color: var(--ok-text); }
+
+/* #339: conceptbadges. .badge-draft en .badge-expired lopen via --surface-2 en
+   --ink-3 en slaan dus netjes om; deze drie mengen hun achtergrond met wit en
+   bleven daardoor lichte chips op een donkere kaart. Ze mengen nu met het
+   donkere oppervlak, en de tekst met wit in plaats van andersom. */
+body.dark-mode .badge-active {
+    background: color-mix(in srgb, var(--sage) 22%, var(--surface-color));
+    color: color-mix(in srgb, var(--sage) 55%, white);
+}
+body.dark-mode .badge-scheduled {
+    background: color-mix(in srgb, var(--team-cargo) 22%, var(--surface-color));
+    color: color-mix(in srgb, var(--team-cargo) 55%, white);
+}
+body.dark-mode .badge-vakantie {
+    background: color-mix(in srgb, var(--team-vlot2) 22%, var(--surface-color));
+    color: color-mix(in srgb, var(--team-vlot2) 55%, white);
+}
+body.dark-mode .legend-chip.has-shift {
+    background: color-mix(in srgb, var(--team-cargo) 22%, var(--surface-color));
+    color: color-mix(in srgb, var(--team-cargo) 55%, white);
+}
+
+/* Badges in de audit log stonden op vaste lichte achtergronden */
+body.dark-mode .audit-create,
+body.dark-mode .audit-approve { background: var(--ok-bg);            color: var(--ok-text); }
+body.dark-mode .audit-update  { background: var(--alert-info-bg); }
+body.dark-mode .audit-delete,
+body.dark-mode .audit-reject  { background: var(--alert-error-bg);   color: var(--alert-error-text); }
+body.dark-mode .audit-cancel  { background: var(--alert-warning-bg); color: var(--alert-warning-text); }
+body.dark-mode .audit-login   { background: var(--surface-2);        color: var(--ink-2); }
+
+/* De validatiemeldingen in de dienstmodal staan op een vaste donkerrode tekst.
+   In donkere modus gaf dat 1,93 tegen de achtergrond. Het blok Activiteiten
+   (#261) wordt in dezelfde container gerenderd en erfde die rode kleur mee,
+   dus daar stond "Activiteiten" en de knop "+ Toevoegen" ook in donkerrood. */
+
+/* Het blok Activiteiten hoort de gewone tekstkleur van het venster te volgen
+   en niet de kleur van de foutmeldingen waar het toevallig in staat. */
+.shift-activities-section { color: var(--text-primary); }
+
+/* #179: alleen de variant .auto had een donkere override. De manuele variant
+   hield zijn lichtgroene verloop met donkergroene tekst, gemeten 2,24. */
+body.dark-mode .shift-source-info.shift-source-manual,
+body.dark-mode .shift-source-info.manual {
+    background: linear-gradient(135deg, #0d1f18 0%, #0a1712 100%);
+    border-color: var(--ok-text);
+    color: var(--ok-text);
+}
+
+/* De slogan op het inlogscherm en de naam in de begroeting gebruiken allebei
+   --sage-700, dat voor een lichte achtergrond gemaakt is (#287). */
+body.dark-mode .login-bigline em { color: var(--ok-text); }
+
+/* Rolpillen in het profiel: lichte mix met wit plus donkere tekst (#336). */
+body.dark-mode .profile-hero-role.role-admin,
+body.dark-mode .profile-meta-value.role-admin {
+    background: var(--alert-error-bg);
+    color: var(--alert-error-text);
+}
+
+/* De rest van de losse #991b1b en #92400e op vlakken die wel omslaan */
+body.dark-mode .alert-info { background: var(--alert-info-bg); color: var(--alert-info-text); }
+body.dark-mode .heatmap-red { background: var(--alert-error-bg); color: var(--alert-error-text); }
+body.dark-mode .diff-removed,
+body.dark-mode .diff-badge.diff-removed { background: var(--alert-error-bg); color: var(--alert-error-text); }
+body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--alert-error-text); }

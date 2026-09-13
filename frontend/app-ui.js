@@ -491,18 +491,57 @@ function showSelectPrompt(message, title, options) {
 }
 
 // ===== KLEUR HELPERS =====
-function getContrastColor(hexColor) {
-    if (typeof hexColor !== 'string') return '#ffffff';
+
+// Donkere tekstkleur op een gekleurd vlak. Bewust bijna zwart en niet
+// --text-primary: dit staat op een teamkleur, niet op de paginaachtergrond, en
+// moet in beide thema's hetzelfde blijven.
+const TEKST_OP_LICHT = '#14110c';
+
+function _hexNaarRgb(hexColor) {
+    if (typeof hexColor !== 'string') return null;
     const hex = hexColor.replace('#', '');
-    const normalized = hex.length === 3
+    const genormaliseerd = hex.length === 3
         ? hex.split('').map(ch => ch + ch).join('')
         : hex;
-    if (normalized.length !== 6) return '#ffffff';
-    const r = parseInt(normalized.slice(0, 2), 16) / 255;
-    const g = parseInt(normalized.slice(2, 4), 16) / 255;
-    const b = parseInt(normalized.slice(4, 6), 16) / 255;
-    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    return luminance > 0.6 ? '#1f2933' : '#ffffff';
+    if (!/^[0-9a-fA-F]{6}$/.test(genormaliseerd)) return null;
+    return [0, 2, 4].map(i => parseInt(genormaliseerd.slice(i, i + 2), 16));
+}
+
+// Relatieve helderheid volgens WCAG. De vorige versie nam de kanalen recht uit
+// de hex zonder gammacorrectie, waardoor de uitkomst niets met het werkelijke
+// contrast te maken had.
+function _relatieveHelderheid(rgb) {
+    const c = rgb.map(v => v / 255).map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+
+function _contrast(rgbA, rgbB) {
+    const a = _relatieveHelderheid(rgbA), b = _relatieveHelderheid(rgbB);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+// Meng een kleur met wit, zoals color-mix(in srgb, kleur X%, white) in de CSS.
+function mengMetWit(hexColor, percentageKleur) {
+    const rgb = _hexNaarRgb(hexColor);
+    if (!rgb) return '#ffffff';
+    const f = Math.max(0, Math.min(100, percentageKleur)) / 100;
+    return '#' + rgb.map(v => Math.round(v * f + 255 * (1 - f)).toString(16).padStart(2, '0')).join('');
+}
+
+// Kies wit of bijna zwart, afhankelijk van welke van de twee het meeste
+// contrast geeft op deze achtergrond.
+//
+// Dit stond er al, maar werd nergens gebruikt: applyTeamColors() zette overal
+// hardcoded wit. Bij de standaard teamkleuren haalde wit op zes van de tien
+// kleuren de eis van 4,5 niet. Op #f59e0b (oranje) kwam het zelfs op 2,15 uit.
+// Omdat de teamkleuren door de beheerder zelf worden gekozen, is meten de enige
+// manier die blijft kloppen.
+function getContrastColor(hexColor) {
+    const rgb = _hexNaarRgb(hexColor);
+    if (!rgb) return '#ffffff';
+    const opWit = _contrast(rgb, [255, 255, 255]);
+    const opDonker = _contrast(rgb, _hexNaarRgb(TEKST_OP_LICHT));
+    return opDonker > opWit ? TEKST_OP_LICHT : '#ffffff';
 }
 
 function applyTeamColors() {
@@ -518,13 +557,17 @@ function applyTeamColors() {
     let css = '';
     Object.entries(teams).forEach(([teamId, team]) => {
         const color = team.color || '#64748b';
-        const textColor = '#ffffff';
+        const textColor = getContrastColor(color);
+        // Het tijdlijnblok is een verloop dat links op 78 procent kleur met wit
+        // staat. Die lichtere helft bepaalt of de tekst leesbaar is, dus daar
+        // wordt de tekstkleur op gekozen.
+        const textColorVerloop = getContrastColor(mengMetWit(color, 78));
         css += `
 .team-toggle.active[data-team="${teamId}"] { background: ${color} !important; color: ${textColor} !important; border-color: transparent !important; }
 .team-badge.${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .team-badge-mini.${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
-.timeline-block.team-${teamId} { background: linear-gradient(135deg, color-mix(in srgb, ${color} 78%, white) 0%, ${color} 100%) !important; color: ${textColor} !important; }
+.timeline-block.team-${teamId} { background: linear-gradient(135deg, color-mix(in srgb, ${color} 78%, white) 0%, ${color} 100%) !important; color: ${textColorVerloop} !important; }
 .shift-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-team-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .timeline-team-header.team-${teamId} { --team-dot-color: ${color}; }

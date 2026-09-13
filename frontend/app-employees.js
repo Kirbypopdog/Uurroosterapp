@@ -729,7 +729,7 @@ function renderEmployeeCard(emp) {
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
             <div class="employee-header">
-                <span class="emp-avatar" style="background:${teamColor}" title="${escapeHtml(teamName)}">${initials}</span>
+                <span class="emp-avatar" style="background:${teamColor};color:${getContrastColor(teamColor)}" title="${escapeHtml(teamName)}">${initials}</span>
                 <div class="employee-card-info">
                     <div class="employee-name">${employeeName}</div>
                     <div class="employee-card-sub">${subLine}</div>
