@@ -4871,13 +4871,13 @@ body[data-view-mode="day"] .timeline-header {
 
 .timeline-employee-cell .emp-hours.over-hours,
 .timeline-employee-cell .emp-hours-sub.over-hours {
-    color: var(--color-danger, #ef4444);
+    color: var(--danger-text);
     font-weight: 700;
 }
 
 .timeline-employee-cell .emp-hours.under-hours,
 .timeline-employee-cell .emp-hours-sub.under-hours {
-    color: #d98a1f;
+    color: var(--warn-text);
     font-weight: 700;
 }
 
@@ -5393,12 +5393,12 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .month-employee-cell .emp-hours.over-hours {
-    color: var(--color-danger, #ef4444);
+    color: var(--danger-text);
     font-weight: 600;
 }
 
 .month-employee-cell .emp-hours.under-hours {
-    color: #f59e0b;
+    color: var(--warn-text);
     font-weight: 600;
 }
 
