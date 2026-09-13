@@ -539,20 +539,76 @@ describe('POST /shifts', () => {
     expect(res.body.error).toContain('Overlap');
   });
 
-  test('returns 422 when 11-hour rest rule is violated', async () => {
+  // Shift eindigde om 22:00 de dag ervoor → slechts 9u rust voor de 07:00 shift.
+  // De queryvolgorde is: closedDates, de eigen diensten, en pas daarna de
+  // rustnorm uit de instellingen (die wordt enkel gelezen als de rustcontrole
+  // echt draait).
+  const vorigeDienst = { id: 2, date: '2026-04-14', start_time: '14:00', end_time: '22:00' };
+
+  test('returns 422 when the rest rule is violated', async () => {
     mockActiveUser();
-    // Shift eindigde om 22:00 de dag ervoor → slechts 9u rust voor 07:00 shift
-    const prevShift = { id: 2, date: '2026-04-14', start_time: '14:00', end_time: '22:00' };
     pool.query
       .mockResolvedValueOnce({ rows: [] })              // closedDates check
-      .mockResolvedValueOnce({ rows: [prevShift] });    // validateShiftRules: te weinig rust
+      .mockResolvedValueOnce({ rows: [vorigeDienst] })  // validateShiftRules: te weinig rust
+      .mockResolvedValueOnce({ rows: [] });             // settings.rules ontbreekt → standaard 11u
     const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'team1' });
     const res = await request(app)
       .post('/shifts')
       .set('Authorization', `Bearer ${token}`)
       .send({ userId: 5, date: '2026-04-15', startTime: '07:00', endTime: '15:00' });
     expect(res.status).toBe(422);
-    expect(res.body.error).toContain('11-uur');
+    expect(res.body.error).toContain('Rustregel');
+    expect(res.body.error).toContain('minimum 11u');
+  });
+
+  // De rustnorm staat in Instellingen > Planning regels. De backend hardcodeerde
+  // 11, waardoor een aangepaste norm alleen in de frontendwaarschuwingen
+  // doorwerkte en niet in de controle die echt weigert.
+  test('honours a lower rest norm from settings', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [] })              // closedDates check
+      .mockResolvedValueOnce({ rows: [vorigeDienst] })  // 9u rust
+      .mockResolvedValueOnce({ rows: [{ value: { minHoursBetweenShifts: 8 } }] })
+      .mockResolvedValueOnce({ rows: [{ id: 99 }] })    // INSERT
+      .mockResolvedValue({ rows: [] });                 // blokkade opruimen, logAudit
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'team1' });
+    const res = await request(app)
+      .post('/shifts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, date: '2026-04-15', startTime: '07:00', endTime: '15:00' });
+    // 9u rust haalt de ingestelde norm van 8u, dus dit mag door
+    expect(res.status).not.toBe(422);
+  });
+
+  test('honours a higher rest norm from settings', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [] })              // closedDates check
+      .mockResolvedValueOnce({ rows: [vorigeDienst] })  // 9u rust
+      .mockResolvedValueOnce({ rows: [{ value: { minHoursBetweenShifts: 14 } }] });
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'team1' });
+    const res = await request(app)
+      .post('/shifts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, date: '2026-04-15', startTime: '07:00', endTime: '15:00' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toContain('minimum 14u');
+  });
+
+  test('falls back to 11 hours when the setting is nonsense', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [vorigeDienst] })
+      .mockResolvedValueOnce({ rows: [{ value: { minHoursBetweenShifts: 'veel' } }] });
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'team1' });
+    const res = await request(app)
+      .post('/shifts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, date: '2026-04-15', startTime: '07:00', endTime: '15:00' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toContain('minimum 11u');
   });
 
   test('returns 400 when startTime has invalid format', async () => {
@@ -1294,15 +1350,21 @@ describe('PUT /shift-requests/:id/takeover-accept', () => {
     team: 'vlot1'
   };
 
-  function arrange(requestRow) {
+  // De mocks reageren op de SQL, niet op de volgorde. Een positionele keten
+  // brak zodra validateShiftRules er een query bij kreeg (de rustnorm uit de
+  // instellingen), en dan schoof alles stil een plaats op.
+  function arrange(requestRow, eigenDiensten = [], regels = null) {
     const mockClient = { query: jest.fn(), release: jest.fn() };
     pool.connect.mockResolvedValueOnce(mockClient);
     pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
     pool.query.mockResolvedValue({ rows: [] });                     // logAudit, mail
-    mockClient.query
-      .mockResolvedValueOnce({ rows: [] })              // BEGIN
-      .mockResolvedValueOnce({ rows: [requestRow] })    // SELECT verzoek + dienst
-      .mockResolvedValue({ rows: [] });                 // al de rest
+    mockClient.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [], rowCount: 1 });
+      if (sql.includes('FROM shift_swap_requests sr')) return Promise.resolve({ rows: [requestRow] });
+      if (sql.includes("key = 'rules'")) return Promise.resolve({ rows: regels ? [{ value: regels }] : [] });
+      if (sql.includes('FROM shifts') && sql.includes('date BETWEEN')) return Promise.resolve({ rows: eigenDiensten });
+      return Promise.resolve({ rows: [], rowCount: 1 });
+    });
     return mockClient;
   }
 
@@ -1352,21 +1414,7 @@ describe('PUT /shift-requests/:id/takeover-accept', () => {
     expect(assign[1]).toEqual([6, 135]); // dienst 135 gaat naar gebruiker 6
   });
 
-  // Variant van arrange() waarbij de roostercontrole een bestaande dienst van
-  // de overnemer terugvindt. De volgorde van queries in de handler is:
-  // BEGIN, SELECT verzoek, SELECT eigen diensten (validateShiftRules), rest.
-  function arrangeMetEigenDienst(requestRow, eigenDiensten) {
-    const mockClient = { query: jest.fn(), release: jest.fn() };
-    pool.connect.mockResolvedValueOnce(mockClient);
-    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
-    pool.query.mockResolvedValue({ rows: [] });                     // logAudit, mail
-    mockClient.query
-      .mockResolvedValueOnce({ rows: [] })              // BEGIN
-      .mockResolvedValueOnce({ rows: [requestRow] })    // SELECT verzoek + dienst
-      .mockResolvedValueOnce({ rows: eigenDiensten })   // validateShiftRules
-      .mockResolvedValue({ rows: [] });                 // al de rest
-    return mockClient;
-  }
+  const arrangeMetEigenDienst = arrange;
 
   // Regressie #202: een overname wisselde de eigenaar zonder validateShiftRules
   // aan te roepen. Dezelfde dienst via POST /shifts aanmaken werd wél geweigerd,
@@ -1405,7 +1453,7 @@ describe('PUT /shift-requests/:id/takeover-accept', () => {
       .send({});
 
     expect(res.status).toBe(422);
-    expect(res.body.error).toMatch(/11-uur/i);
+    expect(res.body.error).toMatch(/rustregel/i);
     // De melding moet zeggen dat doordrukken kan, anders is de weigering een
     // doodlopende weg en staat de medewerker met een dienst die niemand doet.
     expect(res.body.rule).toBe('rest');
@@ -1433,6 +1481,47 @@ describe('PUT /shift-requests/:id/takeover-accept', () => {
       c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
     );
     expect(assign).toBeTruthy();
+  });
+
+  // De norm uit Instellingen geldt ook hier, niet alleen bij POST /shifts.
+  test('honours the rest norm from settings on a takeover (#202)', async () => {
+    // 8 uur rust. Met de standaard van 11u wordt dat geweigerd (zie de test
+    // hierboven); met een ingestelde norm van 8u mag het door.
+    const mockClient = arrange(
+      { ...baseRequest },
+      [{ id: 901, date: '2099-01-14', start_time: '15:00', end_time: '23:00' }],
+      { minHoursBetweenShifts: 8 }
+    );
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/shift-requests/7/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(200);
+    const assign = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE shifts SET user_id')
+    );
+    expect(assign).toBeTruthy();
+  });
+
+  test('reports the configured norm in the refusal (#202)', async () => {
+    arrange(
+      { ...baseRequest },
+      [{ id: 901, date: '2099-01-14', start_time: '15:00', end_time: '23:00' }],
+      { minHoursBetweenShifts: 14 }
+    );
+
+    const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/api/v1/shift-requests/7/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(422);
+    expect(res.body.minRest).toBe(14);
+    expect(res.body.error).toContain('minimum 14u');
   });
 
   // Overlap blijft ook met force geweigerd: op twee plekken tegelijk staan kan
@@ -1478,19 +1567,24 @@ describe('PUT /swap-requests/:id/target-approve', () => {
     target_start: '07:00', target_end: '15:00'
   };
 
-  // Queryvolgorde: BEGIN, SELECT ruilverzoek, validateShiftRules voor de
-  // doelpersoon, validateShiftRules voor de aanvrager, rest.
-  function arrangeSwap(swapRow, dienstenDoel = [], dienstenAanvrager = []) {
+  // Reageert op de SQL en op de gebruiker in $1, zodat de twee roostercontroles
+  // (één per kant van de ruil) elk hun eigen diensten terugkrijgen, ongeacht in
+  // welke volgorde de handler ze uitvoert.
+  function arrangeSwap(swapRow, dienstenDoel = [], dienstenAanvrager = [], regels = null) {
     const mockClient = { query: jest.fn(), release: jest.fn() };
     pool.connect.mockResolvedValueOnce(mockClient);
     pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
     pool.query.mockResolvedValue({ rows: [] });                     // logAudit, mail
-    mockClient.query
-      .mockResolvedValueOnce({ rows: [] })                  // BEGIN
-      .mockResolvedValueOnce({ rows: [swapRow] })           // SELECT ruilverzoek
-      .mockResolvedValueOnce({ rows: dienstenDoel })        // validateShiftRules doelpersoon
-      .mockResolvedValueOnce({ rows: dienstenAanvrager })   // validateShiftRules aanvrager
-      .mockResolvedValue({ rows: [] });                     // al de rest
+    mockClient.query.mockImplementation((sql, params) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [], rowCount: 1 });
+      if (sql.includes('FROM shift_swap_requests sr')) return Promise.resolve({ rows: [swapRow] });
+      if (sql.includes("key = 'rules'")) return Promise.resolve({ rows: regels ? [{ value: regels }] : [] });
+      if (sql.includes('FROM shifts') && sql.includes('date BETWEEN')) {
+        const wie = params && params[0];
+        return Promise.resolve({ rows: wie === swapRow.target_user_id ? dienstenDoel : dienstenAanvrager });
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 });
+    });
     return mockClient;
   }
 
@@ -1531,7 +1625,7 @@ describe('PUT /swap-requests/:id/target-approve', () => {
 
     expect(res.status).toBe(422);
     expect(res.body.error).toMatch(/aanvrager/i);
-    expect(res.body.error).toMatch(/11-uur/i);
+    expect(res.body.error).toMatch(/rustregel/i);
     expect(res.body.canOverride).toBe(true);
     expect(res.body.wie).toBe('aanvrager');
   });

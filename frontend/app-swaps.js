@@ -453,8 +453,21 @@ function bevestigRusttijdOverride(error, bevestigTekst) {
         ? 'De aanvrager houdt hierdoor te weinig rust tussen twee diensten.'
         : 'Je houdt hierdoor te weinig rust tussen twee diensten.';
 
+    // De norm komt uit Instellingen > Planning regels, dus noem de waarde die
+    // daar staat in plaats van een vast getal.
+    const norm = data.minRest ?? DataStore.settings?.rules?.minHoursBetweenShifts ?? 11;
+    let normUitleg;
+    if (norm === 11) {
+        normUitleg = 'De rust van 11 uur is een wettelijke norm.';
+    } else if (norm > 11) {
+        normUitleg = `De ingestelde rust is ${norm} uur, strenger dan het wettelijke minimum van 11 uur.`;
+    } else {
+        normUitleg = `De ingestelde rust is ${norm} uur, onder het wettelijke minimum van 11 uur.`;
+    }
+    const slot = `${normUitleg} Doordrukken kan, en wordt bijgehouden in de audit log.`;
+
     return showConfirm(
-        `${data.error}\n\n${uitleg}\n\nDe 11-uur rust is een wettelijke norm. Doordrukken kan, en wordt bijgehouden in de audit log.`,
+        `${data.error}\n\n${uitleg}\n\n${slot}`,
         'Te weinig rust',
         { confirmText: bevestigTekst, cancelText: 'Annuleren', danger: true }
     );

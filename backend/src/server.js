@@ -922,8 +922,40 @@ async function blockDayIfEmpty(db, userId, date, createdBy, reason) {
   return true;
 }
 
-async function validateShiftRules(db, userId, newShift, excludeId = null, skipRestCheck = false) {
-  const MIN_REST = 11;
+// De rustnorm staat in Instellingen > Planning regels en wordt bewaard onder
+// settings.rules.minHoursBetweenShifts. De frontend leest hem al op zeven
+// plekken; de backend hardcodeerde 11, waardoor een aangepaste norm alleen in
+// de waarschuwingen doorwerkte en niet in de controle die echt weigert.
+const STANDAARD_MIN_RUST = 11;
+
+/**
+ * Leest de rustnorm uit de instellingen.
+ *
+ * Bewust geen cache. Die zou moduletoestand zijn die op Render met meerdere
+ * instanties een aangepaste norm nog even laat gelden, en die tussen tests
+ * blijft hangen. De query is een enkele rij uit een kleine tabel; waar hij in
+ * een lus zou belanden geven we de waarde expliciet mee via minRest.
+ */
+async function getMinRustUren(db) {
+  try {
+    const { rows } = await db.query(`SELECT value FROM settings WHERE key = 'rules'`);
+    const uit = rows[0] && rows[0].value ? Number(rows[0].value.minHoursBetweenShifts) : NaN;
+    if (Number.isFinite(uit) && uit >= 0 && uit <= 24) return uit;
+  } catch (err) {
+    // Instellingen onleesbaar: terugvallen op het wettelijk minimum is veiliger
+    // dan de controle stil overslaan.
+    console.error('Kon de rustnorm niet lezen, val terug op 11 uur:', err.message);
+  }
+  return STANDAARD_MIN_RUST;
+}
+
+/**
+ * @param {number|null} minRest - de rustnorm, als de aanroeper hem al kent.
+ *   Laat null om hem hier te laten lezen. Alleen de bulkpaden geven hem mee,
+ *   omdat die validateShiftRules per dienst aanroepen.
+ */
+async function validateShiftRules(db, userId, newShift, excludeId = null, skipRestCheck = false, minRest = null) {
+  let MIN_REST = minRest;
   const rangeStart = new Date(newShift.date);
   rangeStart.setDate(rangeStart.getDate() - 2);
   const rangeEnd = new Date(newShift.date);
@@ -947,13 +979,17 @@ async function validateShiftRules(db, userId, newShift, excludeId = null, skipRe
       return { valid: false, rule: 'overlap', message: 'Overlap: medewerker heeft al een shift op dit tijdstip.' };
     }
     if (!skipRestCheck) {
+      // Pas hier lezen: op de force-paden is de norm niet nodig en scheelt dat
+      // een query.
+      if (MIN_REST === null) MIN_REST = await getMinRustUren(db);
       const hours = hoursBetweenShifts(existing, newShift);
       if (hours >= 0 && hours < MIN_REST) {
         return {
           valid: false,
           rule: 'rest',
           hours: Number(hours.toFixed(1)),
-          message: `11-uur regel: slechts ${hours.toFixed(1)}u rust tussen shifts (minimum ${MIN_REST}u).`
+          minRest: MIN_REST,
+          message: `Rustregel: slechts ${hours.toFixed(1)}u rust tussen shifts (minimum ${MIN_REST}u).`
         };
       }
     }
@@ -2324,6 +2360,10 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
     const cdResult = await client.query("SELECT value FROM settings WHERE key = 'closedDates'");
     const closedDates = new Set((cdResult.rows[0]?.value || []).map(d => d.date));
 
+    // Idem voor de rustnorm: validateShiftRules zou hem anders per dienst
+    // opnieuw ophalen, en deze lus loopt over honderden diensten.
+    const minRustUren = await getMinRustUren(client);
+
     const createdShifts = [];
     const skipped = [];
 
@@ -2345,10 +2385,10 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
         continue;
       }
 
-      // Validate 11-hour rule and overlap
+      // Validate rusttijd en overlap
       const validation = await validateShiftRules(client, shift.userId, {
         date: shift.date, start_time: shift.startTime, end_time: shift.endTime
-      });
+      }, null, false, minRustUren);
       if (!validation.valid) {
         skipped.push({ date: shift.date, userId: shift.userId, reason: validation.message });
         continue;
@@ -3124,6 +3164,7 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
       return res.status(422).json({
         error: `Deze ruil kan niet doorgaan. ${targetCheck.message}`,
         rule: targetCheck.rule,
+        minRest: targetCheck.minRest,
         wie: 'jij',
         canOverride: targetCheck.rule === 'rest'
       });
@@ -3135,6 +3176,7 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
       return res.status(422).json({
         error: `Deze ruil kan niet doorgaan voor de aanvrager. ${requesterCheck.message}`,
         rule: requesterCheck.rule,
+        minRest: requesterCheck.minRest,
         wie: 'aanvrager',
         canOverride: requesterCheck.rule === 'rest'
       });
@@ -3471,6 +3513,7 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
       return res.status(422).json({
         error: `Je kunt deze dienst niet overnemen. ${acceptorCheck.message}`,
         rule: acceptorCheck.rule,
+        minRest: acceptorCheck.minRest,
         canOverride: acceptorCheck.rule === 'rest'
       });
     }
