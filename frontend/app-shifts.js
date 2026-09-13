@@ -305,7 +305,7 @@ function openShiftModal(shift, canEdit) {
             activitiesListHtml += '<div class="shift-activities-list">';
             shiftActivities.forEach(act => {
                 const label = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
-                const desc = act.description ? ` - ${escapeHtml(act.description)}` : '';
+                const desc = act.description ? ` · ${escapeHtml(act.description)}` : '';
                 activitiesListHtml += `<div class="shift-activity-item activity-badge activity-badge--list" data-activity-id="${act.id}">
                     <span class="activity-type-${escapeHtml(act.type)} activity-type-bar"></span>
                     <span><strong>${escapeHtml(label)}</strong> ${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}${desc}</span>
@@ -886,7 +886,7 @@ function applySuggestion(btn) {
 
     DOM.shiftValidationErrors.innerHTML = '';
     resetShiftSubmitBtn();
-    showToast('Suggestie toegepast - controleer en klik Opslaan', 'info');
+    showToast('Suggestie toegepast. Controleer en klik Opslaan', 'info');
 }
 
 // ===== ACTIVITY MODAL =====

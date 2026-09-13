@@ -184,7 +184,7 @@ function renderAvailability() {
                     } else {
                         statusClass = 'available';
                         statusText = '';
-                        tooltipText = canManageAvailability(emp.id) ? 'Beschikbaar - klik om afwezigheid te registreren' : '';
+                        tooltipText = canManageAvailability(emp.id) ? 'Beschikbaar, klik om afwezigheid te registreren' : '';
                     }
                 }
 

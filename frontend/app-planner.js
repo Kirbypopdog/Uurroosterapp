@@ -249,7 +249,7 @@ function showHeatmapDetail(teamId, date) {
     const teamsToShow = teamId ? [teamId] : coverageTeams;
     const shifts = DataStore.shifts.filter(s => teamsToShow.includes(s.team) && s.date === date);
 
-    let msg = `Bezetting - ${formatDate(date)}\n`;
+    let msg = `Bezetting · ${formatDate(date)}\n`;
     if (shifts.length === 0) {
         msg += 'Geen diensten ingepland.';
     } else {

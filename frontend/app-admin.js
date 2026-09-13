@@ -42,7 +42,7 @@ async function runMigration() {
         }
 
         if (result.results.migrations.length === 0 && result.results.fixes.length === 0) {
-            message += 'Geen wijzigingen nodig - database is up-to-date.';
+            message += 'Geen wijzigingen nodig, de database is bijgewerkt.';
         }
 
         showToast(message.substring(0, 200), 'success');
