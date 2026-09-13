@@ -372,15 +372,26 @@ async function handleShiftDelete(shiftId = null) {
         : 'deze dienst';
 
     if (await showConfirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?`, 'Dienst verwijderen', { danger: true, confirmText: 'Verwijderen' })) {
-        // Wait for deletion to complete before re-rendering
-        await deleteShift(idToDelete);
+        // #270: zonder try/catch verdween een mislukte verwijdering spoorloos.
+        // De modal bleef openstaan zoals hij was, er kwam geen toast, geen
+        // rode regel, geen spinner. De beheerder dacht dat zijn klik niet was
+        // aangekomen en klikte opnieuw, of sloot de modal in de overtuiging
+        // dat de dienst weg was terwijl hij nog gewoon in de planning stond.
+        try {
+            // Wait for deletion to complete before re-rendering
+            await deleteShift(idToDelete);
 
-        // Close modal only if deleting from modal (when shiftId is event or null)
-        if (isEvent || !shiftId) {
-            closeShiftModal();
+            // Close modal only if deleting from modal (when shiftId is event or null)
+            if (isEvent || !shiftId) {
+                closeShiftModal();
+            }
+
+            renderPlanning();
+        } catch (error) {
+            console.error('Fout bij verwijderen dienst:', error);
+            showToast('Verwijderen mislukt: ' + getUserFriendlyError(error), 'error');
+            // Modal blijft open zodat de gebruiker het opnieuw kan proberen
         }
-
-        renderPlanning();
     }
 }
 
