@@ -2288,7 +2288,117 @@ async function setHolidayWeekResponsible(periodId, weekNum, employeeId) {
     showToast(`Verantwoordelijke week ${weekNum} ingesteld`, 'success');
 }
 
-function openAddHolidayModal() {
+/**
+ * De vijf Belgische schoolvakanties van één schooljaar, afgeleid uit het
+ * startjaar en de paasdatum.
+ *
+ * #352: deze vijf stonden hard in de code met vaste datums. Herfst en Kerst
+ * waren bijgewerkt naar 2026-2027, Krokus, Pasen en Zomer niet, en de kop
+ * beloofde "schooljaar 2025-2026". Klikken op Zomer gaf 1 juli tot 31 augustus
+ * 2026, dus het verleden. De vakantieperiodes zijn de basis van elke
+ * verlofronde, en deze lijst verouderde elk jaar opnieuw.
+ *
+ * De regels volgen de Vlaamse vakantieregeling:
+ *  - herfst: de maandag van de week waarin 1 november valt, één week. Valt
+ *    1 november op een zaterdag of zondag, dan de maandag erna
+ *  - kerst: idem rond 25 december, twee weken
+ *  - krokus: de zevende week vóór Pasen, één week
+ *  - pasen: twee weken vanaf de maandag na Paaszondag
+ *  - zomer: 1 juli tot en met 31 augustus
+ *
+ * Nagerekend tegen de datums die hier eerder hard stonden en die klopten:
+ * krokus 2026 (16 t/m 22 feb), pasen 2026 (6 t/m 19 apr), herfst 2026
+ * (2 t/m 8 nov, want 1 november viel op een zondag) en kerst 2026
+ * (21 dec t/m 3 jan). Alle vier komen ze hieruit.
+ *
+ * Bij een uitzonderlijk late Pasen kent de regeling een uitzondering die hier
+ * niet in zit. De datums blijven zichtbaar en bewerkbaar vóór het opslaan, dus
+ * dit is een voorzet en geen laatste woord.
+ *
+ * @param {number} startJaar   het jaar waarin het schooljaar begint
+ * @param {string} paaszondag  'YYYY-MM-DD' van Pasen in startJaar + 1
+ */
+function belgischeSchoolvakanties(startJaar, paaszondag) {
+    const eindJaar = startJaar + 1;
+    const plus = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+    const maandagVanWeek = (d) => plus(d, -((d.getDay() + 6) % 7));
+    const maandagNa = (d) => { const r = plus(d, 1); return plus(r, (8 - r.getDay()) % 7); };
+    const inWeekend = (d) => d.getDay() === 0 || d.getDay() === 6;
+    // Een vakantie die "rond" een vaste dag ligt, begint op de maandag van die
+    // week. Valt de ankerdag zelf in het weekend, dan schuift ze een week op.
+    const startRond = (anker) => inWeekend(anker) ? maandagNa(anker) : maandagVanWeek(anker);
+
+    // `kort` is het opschrift van de knop, `naam` wat er in het naamveld komt.
+    const periode = (kort, naam, start, dagen) => ({
+        kort,
+        naam: `${naam} ${start.getFullYear()}`,
+        start: formatDateYYYYMMDD(start),
+        eind: formatDateYYYYMMDD(plus(start, dagen - 1)),
+    });
+
+    const paasmaandag = plus(parseDateOnly(paaszondag), 1);
+    const zomerStart = new Date(eindJaar, 6, 1);
+
+    return [
+        periode('Herfst', 'Herfstvakantie', startRond(new Date(startJaar, 10, 1)), 7),
+        periode('Kerst',  'Kerstvakantie',  startRond(new Date(startJaar, 11, 25)), 14),
+        periode('Krokus', 'Krokusvakantie', plus(paasmaandag, -49), 7),
+        periode('Pasen',  'Paasvakantie',   paasmaandag, 14),
+        periode('Zomer',  'Zomervakantie',  zomerStart, 62),
+    ];
+}
+
+/**
+ * Haalt Paaszondag op voor een jaar. De backend rekent Pasen al uit voor de
+ * feestdagenlijst, dus we leiden het daaruit af in plaats van de berekening
+ * een tweede keer te schrijven.
+ */
+async function paaszondagVan(jaar) {
+    const feestdagen = await fetchPublicHolidays(jaar);
+    const paasmaandag = (feestdagen || []).find(h => h.name === 'Paasmaandag');
+    if (!paasmaandag) return null;
+    const d = parseDateOnly(paasmaandag.date);
+    d.setDate(d.getDate() - 1);
+    return formatDateYYYYMMDD(d);
+}
+
+async function openAddHolidayModal() {
+    // #352: het schooljaar komt uit de instellingen in plaats van uit de code.
+    // Loopt die instelling achter, dan nemen we het schooljaar waarin vandaag
+    // valt, anders zijn alle vijf de knoppen verleden tijd. Staat de instelling
+    // juist vooruit, dan volgen we die: de beheerder is dan al met volgend jaar
+    // bezig.
+    const nu = new Date();
+    const schooljaarVanVandaag = nu.getMonth() >= 8 ? nu.getFullYear() : nu.getFullYear() - 1;
+    const startJaar = Math.max(
+        parseDateOnly(getSchoolYearStart()).getFullYear(),
+        schooljaarVanVandaag
+    );
+
+    let vakanties = [];
+    try {
+        const paas = await paaszondagVan(startJaar + 1);
+        if (paas) vakanties = belgischeSchoolvakanties(startJaar, paas);
+    } catch (err) {
+        // Zonder feestdagen geen krokus en pasen. Liever geen knoppen dan
+        // knoppen met verkeerde datums.
+        console.error('Schoolvakanties berekenen mislukt:', err);
+    }
+
+    const vandaag = formatDateYYYYMMDD(new Date());
+    const snelleSelectie = vakanties.length === 0 ? '' : `
+                <div class="quick-select-section">
+                    <h4>Snelle selectie (schooljaar ${startJaar}-${startJaar + 1})</h4>
+                    <div class="quick-select-buttons">
+                        ${vakanties.map(v => `
+                            <button type="button" class="btn btn-sm btn-outline"
+                                title="${escapeHtml(v.start)} tot en met ${escapeHtml(v.eind)}"
+                                onclick="prefillHoliday('${escapeHtml(v.naam)}', '${v.start}', '${v.eind}')">
+                                ${escapeHtml(v.kort)}${v.eind < vandaag ? ' (voorbij)' : ''}
+                            </button>`).join('')}
+                    </div>
+                </div>`;
+
     const modalHtml = `
     <div class="modal" id="holiday-modal" onclick="closeHolidayModal()">
         <div class="modal-content modal-content--sm" onclick="event.stopPropagation()">
@@ -2313,17 +2423,8 @@ function openAddHolidayModal() {
                 </div>
                 <div id="holiday-date-info" class="date-range-info"></div>
 
-                <!-- Snelle selectie voor Belgische schoolvakanties -->
-                <div class="quick-select-section">
-                    <h4>Snelle selectie (schooljaar 2025-2026)</h4>
-                    <div class="quick-select-buttons">
-                        <button type="button" class="btn btn-sm btn-outline" onclick="prefillHoliday('Krokusvakantie', '2026-02-16', '2026-02-22')">Krokus</button>
-                        <button type="button" class="btn btn-sm btn-outline" onclick="prefillHoliday('Paasvakantie', '2026-04-06', '2026-04-19')">Pasen</button>
-                        <button type="button" class="btn btn-sm btn-outline" onclick="prefillHoliday('Zomervakantie', '2026-07-01', '2026-08-31')">Zomer</button>
-                        <button type="button" class="btn btn-sm btn-outline" onclick="prefillHoliday('Herfstvakantie', '2026-11-02', '2026-11-08')">Herfst</button>
-                        <button type="button" class="btn btn-sm btn-outline" onclick="prefillHoliday('Kerstvakantie', '2026-12-21', '2027-01-03')">Kerst</button>
-                    </div>
-                </div>
+                <!-- Snelle selectie voor Belgische schoolvakanties (#352) -->
+                ${snelleSelectie}
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeHolidayModal()">Annuleren</button>
@@ -2880,3 +2981,9 @@ function setupSettingsCollapsibles(scope = document) {
     });
 })();
 
+// De berekening van de schoolvakanties heeft geen DOM nodig en wordt in Node
+// getest (#352). In de browser bestaat `module` niet, dus deze guard verandert
+// daar niets.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { belgischeSchoolvakanties };
+}

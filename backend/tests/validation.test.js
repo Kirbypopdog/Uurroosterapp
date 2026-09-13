@@ -586,3 +586,77 @@ describe('leaveBlockHerstel', () => {
     expect(global.AppState.leaveDraft).toEqual({ '2026-12-24': 'verlof' });
   });
 });
+
+// ===== SCHOOLVAKANTIES: snelle selectie (#352) =====
+//
+// De vijf knoppen in "Vakantieperiode toevoegen" stonden hard in de code met
+// vaste datums. Herfst en Kerst waren bijgewerkt naar 2026-2027, Krokus, Pasen
+// en Zomer niet, en de kop beloofde "schooljaar 2025-2026". Zomer gaf 1 juli
+// tot 31 augustus 2026, dus het verleden, terwijl de vakantieperiodes de basis
+// zijn van elke verlofronde.
+//
+// app-settings.js is browsercode met een IIFE onderaan die aan document hangt.
+// Drie stubs volstaan om het in Node te laden; de berekening zelf is puur.
+global.document = {
+  addEventListener() {},
+  getElementById() { return null; },
+  querySelector() { return null; },
+  querySelectorAll() { return []; },
+  body: { insertAdjacentHTML() {} },
+};
+global.window = { addEventListener() {} };
+
+const { belgischeSchoolvakanties } = require('../../frontend/app-settings.js');
+
+describe('belgischeSchoolvakanties', () => {
+  // Pasen 2026 viel op 5 april. Dit schooljaar loopt van september 2025 tot
+  // augustus 2026, en de datums hieronder zijn precies die welke eerder hard
+  // in de code stonden en klopten.
+  const SJ2025 = belgischeSchoolvakanties(2025, '2026-04-05');
+  const vind = (lijst, deel) => lijst.find(v => v.naam.startsWith(deel));
+
+  test('krokus valt zeven weken vóór Pasen', () => {
+    expect(vind(SJ2025, 'Krokus')).toMatchObject({ start: '2026-02-16', eind: '2026-02-22' });
+  });
+
+  test('pasen loopt twee weken vanaf de maandag na Paaszondag', () => {
+    expect(vind(SJ2025, 'Paas')).toMatchObject({ start: '2026-04-06', eind: '2026-04-19' });
+  });
+
+  test('zomer loopt van 1 juli tot en met 31 augustus van het eindjaar', () => {
+    expect(vind(SJ2025, 'Zomer')).toMatchObject({ start: '2026-07-01', eind: '2026-08-31' });
+  });
+
+  // Pasen 2027 viel op 28 maart. Dit schooljaar levert de herfst- en
+  // kerstdatums die eerder hard in de code stonden.
+  const SJ2026 = belgischeSchoolvakanties(2026, '2027-03-28');
+
+  test('herfst schuift een week op als 1 november in het weekend valt', () => {
+    // 1 november 2026 was een zondag, dus de vakantie begint op 2 november
+    expect(vind(SJ2026, 'Herfst')).toMatchObject({ start: '2026-11-02', eind: '2026-11-08' });
+  });
+
+  test('kerst begint op de maandag van de week met Kerstmis en duurt twee weken', () => {
+    // 25 december 2026 was een vrijdag, dus de maandag ervoor
+    expect(vind(SJ2026, 'Kerst')).toMatchObject({ start: '2026-12-21', eind: '2027-01-03' });
+  });
+
+  test('elke vakantie begint op een maandag', () => {
+    for (const v of [...SJ2025, ...SJ2026]) {
+      if (v.naam.startsWith('Zomer')) continue;   // zomer is datumgebonden
+      const dag = new Date(...v.start.split('-').map((n, i) => i === 1 ? Number(n) - 1 : Number(n))).getDay();
+      expect(dag).toBe(1);
+    }
+  });
+
+  test('de naam draagt het jaar van de startdatum', () => {
+    expect(vind(SJ2026, 'Herfst').naam).toBe('Herfstvakantie 2026');
+    expect(vind(SJ2026, 'Kerst').naam).toBe('Kerstvakantie 2026');
+    expect(vind(SJ2026, 'Krokus').naam).toBe('Krokusvakantie 2027');
+    expect(vind(SJ2026, 'Zomer').naam).toBe('Zomervakantie 2027');
+  });
+
+  test('geeft vijf periodes terug', () => {
+    expect(SJ2025).toHaveLength(5);
+  });
+});
