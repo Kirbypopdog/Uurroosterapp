@@ -5621,6 +5621,27 @@ v1.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
     deletedTables.push('availability');
     await client.query('DELETE FROM shifts');
     deletedTables.push('shifts');
+
+    // #292: de vier verloftabellen stonden niet in deze lijst. Bij scope 'data'
+    // bleven de rondes dus staan mét de ingevulde voorkeuren en de
+    // goedkeuringen, terwijl `settings` (en daarmee holidayPeriods, waar de
+    // blokken naar verwijzen) net wél gewist werd. De melding beloofde
+    // "Planning data gewist" en dat klopte niet, en voor persoonsgegevens is
+    // het een restje dat blijft hangen terwijl de beheerder denkt dat alles
+    // weg is.
+    //
+    // De FK's cascaden vanaf leave_rounds, maar we wissen expliciet in
+    // afhankelijkheidsvolgorde: dat leest duidelijker en het blijft kloppen op
+    // een database waar die cascade ooit ontbrak.
+    await client.query('DELETE FROM leave_round_entries');
+    deletedTables.push('leave_round_entries');
+    await client.query('DELETE FROM leave_round_submissions');
+    deletedTables.push('leave_round_submissions');
+    await client.query('DELETE FROM leave_round_blocks');
+    deletedTables.push('leave_round_blocks');
+    await client.query('DELETE FROM leave_rounds');
+    deletedTables.push('leave_rounds');
+
     await client.query('DELETE FROM settings');
     deletedTables.push('settings');
     await client.query('DELETE FROM schedule_drafts');
@@ -5645,7 +5666,9 @@ v1.delete('/reset-data', requireAuth, requireAdmin, async (req, res) => {
       data_users: 'Planning data en medewerker-accounts gewist',
       all: 'Alle data en accounts gewist (behalve eigen account)'
     };
-    res.json({ ok: true, message: messages[scope] });
+    // deletedTables ging alleen naar de audit log. Wie wist wat er gebeurd is,
+    // hoort dat ook te kunnen zien in het antwoord.
+    res.json({ ok: true, message: messages[scope], deletedTables });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error(err);

@@ -3078,3 +3078,79 @@ describe('POST /admin/test-email', () => {
     expect(res.body.messageId).toBe('msg_123');
   });
 });
+
+// ===== DELETE /reset-data =====
+
+// Regressie #292: de vier verloftabellen stonden niet in de lijst. Bij scope
+// 'data' bleven de rondes staan mét de ingevulde voorkeuren en de
+// goedkeuringen, terwijl settings (en dus holidayPeriods, waar de blokken naar
+// verwijzen) net wél gewist werd. De melding beloofde "Planning data gewist".
+describe('DELETE /reset-data', () => {
+  const beheerder = { id: 1, role: 'admin', name: 'Admin', team_id: null };
+
+  function arrangeReset() {
+    const mockClient = { query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [] });                     // logAudit
+    return mockClient;
+  }
+
+  const gewisteTabellen = (mockClient) => mockClient.query.mock.calls
+    .map(c => typeof c[0] === 'string' && c[0].match(/^DELETE FROM (\w+)/))
+    .filter(Boolean)
+    .map(m => m[1]);
+
+  test('wist ook de verlofrondes en alles eronder (#292)', async () => {
+    const mockClient = arrangeReset();
+    const res = await request(app)
+      .delete('/api/v1/reset-data?scope=data')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(200);
+    const tabellen = gewisteTabellen(mockClient);
+    for (const t of ['leave_round_entries', 'leave_round_submissions', 'leave_round_blocks', 'leave_rounds']) {
+      expect(tabellen).toContain(t);
+    }
+  });
+
+  test('wist de verloftabellen in afhankelijkheidsvolgorde (#292)', async () => {
+    const mockClient = arrangeReset();
+    await request(app)
+      .delete('/api/v1/reset-data?scope=data')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    const tabellen = gewisteTabellen(mockClient);
+    // De kinderen vóór de ouder, anders faalt het op een database zonder cascade
+    expect(tabellen.indexOf('leave_round_entries')).toBeLessThan(tabellen.indexOf('leave_rounds'));
+    expect(tabellen.indexOf('leave_round_submissions')).toBeLessThan(tabellen.indexOf('leave_rounds'));
+    expect(tabellen.indexOf('leave_round_blocks')).toBeLessThan(tabellen.indexOf('leave_rounds'));
+  });
+
+  test('het antwoord vertelt wat er echt gewist is (#292)', async () => {
+    arrangeReset();
+    const res = await request(app)
+      .delete('/api/v1/reset-data?scope=data')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.body.deletedTables).toEqual(expect.arrayContaining(['leave_rounds', 'shifts', 'settings']));
+    // Gebruikers blijven bij scope 'data'
+    expect(res.body.deletedTables.some(t => t.startsWith('users'))).toBe(false);
+  });
+
+  test('weigert een onbekende scope', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .delete('/api/v1/reset-data?scope=alles')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+    expect(res.status).toBe(400);
+  });
+
+  test('weigert een medewerker', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .delete('/api/v1/reset-data?scope=data')
+      .set('Authorization', `Bearer ${makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' })}`);
+    expect(res.status).toBe(403);
+  });
+});

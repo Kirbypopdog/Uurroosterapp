@@ -1861,7 +1861,9 @@ async function resetData() {
         'Wat wil je verwijderen? Dit kan niet ongedaan worden gemaakt!',
         'Data wissen',
         [
-            { value: 'data', label: 'Alleen planning data (diensten, afwezigheden, instellingen)' },
+            // #292: de verlofrondes werden niet gewist én niet genoemd. Nu
+            // worden ze wel gewist, dus hoort de keuze dat ook te zeggen.
+            { value: 'data', label: 'Alleen planning data (diensten, afwezigheden, verlofrondes, concepten, instellingen)' },
             { value: 'data_users', label: 'Planning data + medewerker-accounts' },
             { value: 'all', label: 'Alles behalve mijn account' }
         ]
