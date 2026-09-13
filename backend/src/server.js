@@ -2558,6 +2558,22 @@ v1.delete('/shift-activities/:id', requireAuth, async (req, res) => {
 v1.get('/availability', requireAuth, async (req, res) => {
   const { startDate, endDate, userId } = req.query;
   try {
+    // #219: dit endpoint gaf het vrije redenveld mee aan iedereen met een
+    // login, over teamgrenzen heen en zonder datumgrens. Met het token van een
+    // gewone medewerker leverde dat 77 rijen op waarvan nul van hemzelf,
+    // inclusief de reden bij ziekmeldingen van andere teams.
+    //
+    // Dat iedereen ALLE teams ziet is een bewuste keuze (zie
+    // getVisibleTeamsForRole: "Iedereen met een login kan alle teams zien in de
+    // planner"), dus per team filteren zou de planning breken. Wat niet nodig
+    // is, is de reden. Wie "operatie knie" of "burn-out" invult deelt dat
+    // anders breder dan hij denkt, en ziektegegevens zijn bijzondere categorie
+    // onder artikel 9 AVG.
+    //
+    // De reden blijft dus alleen zichtbaar voor de betrokkene zelf en voor wie
+    // de planning beheert. De app toont bij een afwezigheid zonder reden gewoon
+    // het type, dus er breekt niets.
+    const magRedenenZien = ['admin', 'roosterverantwoordelijke'].includes(req.user.role);
     let query = `
       SELECT id, user_id as "userId", date::text as date, type, reason, updated_at as "updatedAt"
       FROM availability
@@ -2578,7 +2594,12 @@ v1.get('/availability', requireAuth, async (req, res) => {
     query += ' ORDER BY date';
 
     const result = await pool.query(query, params);
-    res.json({ availability: result.rows });
+    const rijen = magRedenenZien
+      ? result.rows
+      : result.rows.map(r => (
+          Number(r.userId) === Number(req.user.id) ? r : { ...r, reason: '' }
+        ));
+    res.json({ availability: rijen });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });

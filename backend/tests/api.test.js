@@ -3154,3 +3154,69 @@ describe('DELETE /reset-data', () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ===== GET /availability: het redenveld =====
+
+// Regressie #219: dit endpoint gaf `reason` mee aan iedereen met een login,
+// over teamgrenzen heen en zonder datumgrens. Wie bij een ziekmelding
+// "operatie knie" invulde, deelde dat met de hele organisatie. Ziektegegevens
+// zijn bijzondere categorie onder artikel 9 AVG.
+//
+// Per team filteren kan niet: dat iedereen alle teams ziet is een bewuste
+// keuze waar de planning op steunt. Alleen de reden gaat dicht.
+describe('GET /availability en het redenveld (#219)', () => {
+  const rijen = [
+    { id: 1, userId: 5, date: '2026-05-01', type: 'ziek',   reason: 'operatie knie',  updatedAt: null },
+    { id: 2, userId: 9, date: '2026-05-02', type: 'ziek',   reason: 'burn-out',       updatedAt: null },
+    { id: 3, userId: 9, date: '2026-05-03', type: 'vrij',   reason: 'Vaste vrije dag', updatedAt: null },
+  ];
+
+  function arrange() {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: rijen });
+  }
+
+  test('een medewerker ziet alleen zijn eigen reden', async () => {
+    arrange();
+    const res = await request(app)
+      .get('/api/v1/availability')
+      .set('Authorization', `Bearer ${makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' })}`);
+
+    expect(res.status).toBe(200);
+    const perId = Object.fromEntries(res.body.availability.map(r => [r.id, r.reason]));
+    expect(perId[1]).toBe('operatie knie');   // van hemzelf
+    expect(perId[2]).toBe('');                // van een ander
+    expect(perId[3]).toBe('');                // ook een vrije dag van een ander
+  });
+
+  test('de rijen zelf blijven zichtbaar, alleen de reden gaat dicht', async () => {
+    arrange();
+    const res = await request(app)
+      .get('/api/v1/availability')
+      .set('Authorization', `Bearer ${makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' })}`);
+
+    // De planning steunt erop dat je ziet DAT iemand afwezig is, ook in een
+    // ander team. Alleen de vrije tekst verdwijnt.
+    expect(res.body.availability).toHaveLength(3);
+    expect(res.body.availability.map(r => r.type)).toEqual(['ziek', 'ziek', 'vrij']);
+    expect(res.body.availability.map(r => r.userId)).toEqual([5, 9, 9]);
+  });
+
+  test('een roosterverantwoordelijke ziet alle redenen', async () => {
+    arrange();
+    const res = await request(app)
+      .get('/api/v1/availability')
+      .set('Authorization', `Bearer ${makeToken({ id: 7, role: 'roosterverantwoordelijke', name: 'Lead', team_id: 'vlot1' })}`);
+
+    expect(res.body.availability.map(r => r.reason)).toEqual(['operatie knie', 'burn-out', 'Vaste vrije dag']);
+  });
+
+  test('een admin ziet alle redenen', async () => {
+    arrange();
+    const res = await request(app)
+      .get('/api/v1/availability')
+      .set('Authorization', `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`);
+
+    expect(res.body.availability.map(r => r.reason)).toEqual(['operatie knie', 'burn-out', 'Vaste vrije dag']);
+  });
+});
