@@ -60,9 +60,15 @@ function mockActiveUser() {
 
 // Helper: PUT /leave-rounds/:id/entries gebruikt pool.connect() i.p.v. pool.query,
 // dus de ronde-lookup moet op de CLIENT gemockt worden.
-function mockLeaveRoundClient(round) {
+function mockLeaveRoundClient(round, doelRol = 'medewerker') {
   const client = {
     query: jest.fn().mockImplementation((sql) => {
+      // #309: PUT /leave-rounds/:id/entries kijkt eerst welke rol de
+      // doelgebruiker heeft, want een beheeraccount draait niet mee in het
+      // rooster en mag geen verlof invullen.
+      if (/SELECT role FROM users/i.test(sql)) {
+        return Promise.resolve({ rows: doelRol ? [{ role: doelRol }] : [] });
+      }
       if (/FROM leave_rounds/i.test(sql)) return Promise.resolve({ rows: round ? [round] : [] });
       return Promise.resolve({ rows: [], rowCount: 0 });
     }),
@@ -2799,13 +2805,17 @@ describe('Verlofrondes', () => {
 
   // ===== #194: entries opslaan =====
 
-  function arrangeEntries() {
+  function arrangeEntries(doelRol = 'medewerker') {
     const mockClient = { query: jest.fn(), release: jest.fn() };
     pool.connect.mockResolvedValueOnce(mockClient);
     pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
     pool.query.mockResolvedValue({ rows: [] });
     mockClient.query.mockImplementation((sql) => {
       if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      // #309: de handler kijkt eerst welke rol de doelgebruiker heeft
+      if (sql.includes('SELECT role FROM users')) {
+        return Promise.resolve({ rows: doelRol ? [{ role: doelRol }] : [] });
+      }
       if (sql.includes('FROM leave_rounds WHERE id')) {
         return Promise.resolve({ rows: [{ status: 'open', start_date: '2026-09-01', end_date: '2027-08-31' }] });
       }
@@ -2855,6 +2865,80 @@ describe('Verlofrondes', () => {
     );
     expect(sub).toBeTruthy();
     expect(sub[0]).toContain('approved = NULL');
+  });
+
+  // #309: een adminaccount draait in deze app niet mee in het rooster. Het komt
+  // niet voor in de matrix, de goedkeurlijst of het verdeelscherm, maar kon wel
+  // invullen en indienen. Die invulling kwam nergens terecht en apply sloeg ze
+  // over, dus het account bleef eindeloos "Je hebt al ingediend" zien.
+  test('PUT entries weigert invulling voor een beheeraccount (#309)', async () => {
+    const mockClient = arrangeEntries('admin');
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/6/entries')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ entries: [{ date: '2026-12-21', status: 'verlof' }] });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/beheeraccount/i);
+    // Er mag niets geschreven zijn
+    const schrijf = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && /DELETE FROM leave_round_entries|INSERT INTO leave_round_entries/.test(c[0])
+    );
+    expect(schrijf).toBeUndefined();
+  });
+
+  // Ook wanneer een beheerder het voor iemand anders doet: de doelgebruiker kan
+  // zelf een admin zijn, en dan leidt het net zo goed nergens toe.
+  test('PUT entries weigert ook wanneer een beheerder voor een admin invult (#309)', async () => {
+    arrangeEntries('admin');
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/6/entries')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ userId: 1, entries: [{ date: '2026-12-21', status: 'verlof' }] });
+
+    expect(res.status).toBe(403);
+  });
+
+  // Voor een gewone medewerker blijft invullen door de beheerder werken; dat is
+  // nodig om na een voorkeurronde de verdeling vast te leggen.
+  test('PUT entries blijft werken voor een gewone medewerker (#309)', async () => {
+    arrangeEntries('medewerker');
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/6/entries')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ userId: 3, entries: [{ date: '2026-12-21', status: 'verlof' }] });
+
+    expect(res.status).toBe(200);
+  });
+
+  test('POST submit weigert een beheeraccount (#309)', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValue({ rows: [] });
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/submit')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({});
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/beheeraccount/i);
+    // De weigering komt vóór elke databaseschrijving
+    const schrijf = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO leave_round_submissions')
+    );
+    expect(schrijf).toBeUndefined();
+  });
+
+  test('POST submit blijft werken voor een medewerker (#309)', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ status: 'open' }] })
+      .mockResolvedValue({ rows: [] });
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/submit')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({});
+
+    expect(res.status).toBe(200);
   });
 
   // Een lege lijst mag niets wissen. Dat was een eerdere fix en moet zo blijven.

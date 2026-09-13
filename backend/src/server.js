@@ -5035,6 +5035,22 @@ function normalizeClosedDates(waarde, startDate, endDate, blokNaam) {
 }
 const isLeaveManager = (user) => LEAVE_MANAGER_ROLES.includes(user?.role);
 
+/**
+ * Zegt of dit account verlof mag invullen en indienen voor zichzelf.
+ *
+ * #309: het adminaccount is in deze app geen roostermedewerker. De matrix, de
+ * goedkeurlijst en het verdeelscherm bouwen hun lijst met getAllEmployees(true)
+ * en die filtert admins weg. Een admin kon toch invullen en indienen, maar zijn
+ * indiening kwam nooit in de lijst 'te beoordelen', kon dus niet goedgekeurd
+ * worden, en apply sloeg hem over omdat `approved IS TRUE` nooit waar werd.
+ * Wat overbleef was een account dat eindeloos 'Je hebt al ingediend' te zien
+ * kreeg zonder dat er ooit iets gebeurde.
+ *
+ * Een beheerder die wél meedraait in het rooster heeft de rol
+ * roosterverantwoordelijke; voor die rol werkt de hele keten correct.
+ */
+const isRoosterMedewerker = (rol) => rol !== 'admin';
+
 // Kolommen van een ronde. De alias is nodig zodra er gejoind wordt: zowel
 // leave_rounds als leave_round_submissions hebben een kolom `id`.
 const roundSelect = (a = '') => {
@@ -5359,6 +5375,19 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
 
   const client = await pool.connect();
   try {
+    // #309: een adminaccount draait niet mee in het rooster, dus invulling voor
+    // dat account leidt nergens toe. Dit geldt ook wanneer een beheerder het
+    // voor iemand anders doet, want de doelgebruiker kan zelf een admin zijn.
+    const doelRes = await client.query('SELECT role FROM users WHERE id = $1', [targetUserId]);
+    if (doelRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Medewerker niet gevonden' });
+    }
+    if (!isRoosterMedewerker(doelRes.rows[0].role)) {
+      return res.status(403).json({
+        error: 'Een beheeraccount draait niet mee in het rooster en kan geen verlof invullen.'
+      });
+    }
+
     const roundRes = await client.query('SELECT status, start_date, end_date FROM leave_rounds WHERE id = $1', [req.params.id]);
     if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
     const round = roundRes.rows[0];
@@ -5444,6 +5473,14 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
 // Indienen (medewerker bevestigt zijn invulling)
 v1.post('/leave-rounds/:id/submit', requireAuth, async (req, res) => {
   try {
+    // #309: zie de toelichting bij isRoosterMedewerker. Indienen met een
+    // adminaccount leverde een indiening op die nergens terechtkwam.
+    if (!isRoosterMedewerker(req.user.role)) {
+      return res.status(403).json({
+        error: 'Een beheeraccount draait niet mee in het rooster en kan geen verlof indienen.'
+      });
+    }
+
     const roundRes = await pool.query('SELECT status FROM leave_rounds WHERE id = $1', [req.params.id]);
     if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
     if (roundRes.rows[0].status !== 'open') return res.status(403).json({ error: 'Deze ronde is gesloten' });

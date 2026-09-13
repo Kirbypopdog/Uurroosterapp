@@ -186,6 +186,17 @@ function leaveBlockProgress(block, entryMap) {
 async function renderLeave() {
     const container = document.getElementById('leave-content');
     if (!container) return;
+
+    // #309: de vaste ondertitel "Duid je verlof aan" is een opdracht aan de
+    // gebruiker, en een beheeraccount draait niet mee in het rooster. Voor die
+    // rol beschrijft hij wat het scherm er wél doet.
+    const beschrijving = document.getElementById('leave-view-description');
+    if (beschrijving) {
+        beschrijving.textContent = AppState.currentUser?.role === 'admin'
+            ? 'Volg de verlofrondes op, keur in en verwerk ze in de planning'
+            : 'Duid je verlof aan voor de vakantieperiodes';
+    }
+
     container.innerHTML = '<p class="no-items-text">Laden…</p>';
 
     try {
@@ -257,11 +268,17 @@ function renderLeaveRoundCard(r) {
     const st = LEAVE_ROUND_STATUS[r.status] || LEAVE_ROUND_STATUS.concept;
     const beheer = canManageLeave();
 
-    // Wat de gebruiker zelf nog moet doen weegt zwaarder dan de rondestatus
-    const eigen = r.myApproved === true  ? '<span class="leave-card-status leave-card-klaar">goedgekeurd</span>'
-               : r.myApproved === false  ? '<span class="leave-card-status leave-card-afgewezen">afgewezen</span>'
-               : r.mySubmittedAt         ? '<span class="leave-card-status leave-card-bezig">ingediend</span>'
-               : r.status === 'open'     ? '<span class="leave-card-status leave-card-open">nog in te vullen</span>'
+    // Wat de gebruiker zelf nog moet doen weegt zwaarder dan de rondestatus.
+    //
+    // #309: voor een beheeraccount is er niets zelf te doen, want het draait
+    // niet mee in het rooster. "nog in te vullen" was daar een opdracht die
+    // nergens toe leidde.
+    const beheeraccount = AppState.currentUser?.role === 'admin';
+    const eigen = beheeraccount        ? ''
+               : r.myApproved === true  ? '<span class="leave-card-status leave-card-klaar">goedgekeurd</span>'
+               : r.myApproved === false ? '<span class="leave-card-status leave-card-afgewezen">afgewezen</span>'
+               : r.mySubmittedAt        ? '<span class="leave-card-status leave-card-bezig">ingediend</span>'
+               : r.status === 'open'    ? '<span class="leave-card-status leave-card-open">nog in te vullen</span>'
                : '';
 
     return `
@@ -304,7 +321,13 @@ function renderLeaveRoundHtml(rounds, data) {
         AppState.leaveScreen = 'landing';
     }
     if (scherm === 'blok') {
-        const block = blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
+        // #309: het invulscherm is er voor je eigen verlof, en een beheeraccount
+        // draait niet mee in het rooster. De kaarten die erheen leiden zijn voor
+        // die rol al weg; deze regel vangt een blijven hangen leaveScreen op,
+        // want die overleeft een hertekening.
+        const block = AppState.currentUser?.role === 'admin'
+            ? null
+            : blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
         if (block) return renderLeaveBlokScherm(round, block, entries, submissions);
         AppState.leaveScreen = 'landing';
     }
@@ -325,7 +348,21 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
     const klein = blocks.filter(b => b.mode === 'binair');
     const zomer = blocks.filter(b => b.mode === 'voorkeur');
     const alleKlaar = blocks.length > 0 && blocks.every(b => leaveBlockProgress(b, entryMap).klaar);
-    const bewerkbaar = round.status === 'open';
+
+    // #309: het adminaccount draait in deze app niet mee in het rooster. Het
+    // komt niet voor in de matrix, de goedkeurlijst of het verdeelscherm, want
+    // die bouwen hun lijst met getAllEmployees(true) en dat filtert admins weg.
+    // Toch kreeg een admin hier invulkaarten en een indienknop. Die indiening
+    // kwam nergens terecht, kon niet goedgekeurd worden en werd bij het
+    // toepassen overgeslagen. Wat overbleef was de banner "Je hebt al
+    // ingediend", eindeloos.
+    //
+    // We kijken naar de rol van het account zelf en niet naar
+    // getEffectiveRole(): een admin die een rol simuleert heeft nog steeds een
+    // adminaccount, dus indienen zou nog steeds tot niets leiden. De backend
+    // weigert het nu ook.
+    const beheeraccount = AppState.currentUser?.role === 'admin';
+    const bewerkbaar = round.status === 'open' && !beheeraccount;
 
     const groep = (titel, lijst) => !lijst.length ? '' : `
         <div class="leave-group">
@@ -348,10 +385,16 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
             </div>
         </div>
 
-        ${renderLeaveStatusBanner(round, mySub, alleKlaar)}
+        ${beheeraccount ? `
+            <div class="leave-banner leave-banner-info">
+                Dit beheeraccount draait niet mee in het rooster, dus er valt voor jou geen verlof in te vullen.
+                Volg de ronde op via <strong>Overzicht iedereen</strong>.
+            </div>` : `
+            ${renderLeaveStatusBanner(round, mySub, alleKlaar)}
 
-        ${groep('Kleine vakanties', klein)}
-        ${groep('Zomer', zomer)}
+            ${groep('Kleine vakanties', klein)}
+            ${groep('Zomer', zomer)}
+        `}
 
         <div class="leave-landing-actions">
             ${bewerkbaar ? `<button class="btn btn-primary" id="leave-submit" ${alleKlaar ? '' : 'disabled'}>
