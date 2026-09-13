@@ -71,9 +71,33 @@ const FocusTrap = {
             document.removeEventListener('keydown', this._handler);
             this._handler = null;
         }
-        if (this._previousFocus && this._previousFocus.focus) {
-            try { this._previousFocus.focus(); } catch (e) { /* element may be gone */ }
-        }
+        // #362: het venster wordt vaak geopend door op een div te klikken die
+        // zelf geen focus kan krijgen, dus _previousFocus was document.body en
+        // de tabvolgorde begon daarna weer helemaal vooraan. Sinds die kaarten
+        // en cellen focusbaar zijn (#274, #275, #277, #190) klopt dit meestal
+        // vanzelf; blijft er toch niets bruikbaars over, dan zetten we de focus
+        // op het eerste element van de zichtbare view in plaats van op body.
+        //
+        // activate() roept deactivate() eerst aan om een eventuele vorige val
+        // op te ruimen. Stond er op dat moment geen val open, dan mag hier
+        // niets met de focus gebeuren. Anders verspringt de focus bij het
+        // openen van elk venster naar het eerste element van de view, en wordt
+        // dat meteen het punt waar we na het sluiten naartoe terugkeren.
+        const hadVal = !!this._activeModal;
+        const terug = this._previousFocus;
+        if (!hadVal) { this._previousFocus = null; return; }
+        const bruikbaar = terug && terug.focus && terug !== document.body && terug.isConnected;
+        try {
+            if (bruikbaar) {
+                terug.focus();
+            } else {
+                const view = document.querySelector('.view.active');
+                const eerste = view?.querySelector(
+                    'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                );
+                if (eerste) eerste.focus();
+            }
+        } catch (e) { /* element may be gone */ }
         this._activeModal = null;
         this._previousFocus = null;
     }
@@ -83,6 +107,32 @@ const FocusTrap = {
 function initModalFocusTrap() {
     const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
+            // #239: een venster dat later door JavaScript wordt ingevoegd is
+            // meteen zichtbaar; er komt geen class-wijziging meer achteraan.
+            // Zonder deze tak bleven de ongeveer twaalf JS-vensters (verlof,
+            // instellingen, concepten, medewerkers) volledig onbewaakt en liep
+            // de focus er bij het tabben achterlangs de pagina in.
+            if (mutation.type === 'childList') {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType !== 1) return;
+                    const modals = node.classList?.contains('modal')
+                        ? [node]
+                        : [...(node.querySelectorAll?.('.modal') || [])];
+                    modals.forEach(modal => {
+                        observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
+                        if (!modal.classList.contains('hidden')) FocusTrap.activate(modal);
+                    });
+                });
+                mutation.removedNodes.forEach(node => {
+                    if (node.nodeType !== 1) return;
+                    if (FocusTrap._activeModal &&
+                        (node === FocusTrap._activeModal || node.contains?.(FocusTrap._activeModal))) {
+                        FocusTrap.deactivate();
+                    }
+                });
+                continue;
+            }
+
             if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
                 const el = mutation.target;
                 if (!el.classList.contains('modal')) continue;
@@ -98,7 +148,33 @@ function initModalFocusTrap() {
     document.querySelectorAll('.modal').forEach(modal => {
         observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
     });
+
+    // #239: en de body in de gaten houden voor vensters die er later bij komen.
+    observer.observe(document.body, { childList: true, subtree: true });
 }
+
+// ===== KLIKBARE DIVS TOETSENBORDBEDIENBAAR =====
+//
+// Grote delen van de app renderen klikbare elementen als div met een
+// click-listener: dienstblokken en lege dagcellen in de planning, cellen in
+// het afwezigheidsraster, medewerkerskaarten, verlofrondekaarten en de
+// uitklapkoppen in Ruilen. Een div staat niet in de tabvolgorde en reageert
+// niet op Enter of spatie, dus met het toetsenbord was daar niet bij te komen
+// (#190, #274, #275, #277, #367).
+//
+// Die render-plekken geven nu `role="button"` en `tabindex="0"` mee. Deze ene
+// gedelegeerde handler maakt Enter en spatie daar gelijk aan een klik, voor
+// alle huidige én toekomstige plekken tegelijk. Echte buttons en links doen
+// dit zelf al, die slaan we over.
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    const el = e.target.closest?.('[role="button"]');
+    if (!el) return;
+    if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.tagName === 'INPUT') return;
+    // Spatie scrollt de pagina; Enter kan een formulier indienen.
+    e.preventDefault();
+    el.click();
+});
 
 // ===== TOAST NOTIFICATION SYSTEM =====
 const ToastManager = {

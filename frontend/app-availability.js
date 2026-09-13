@@ -190,8 +190,22 @@ function renderAvailability() {
 
                 const conflictIcon = hasConflict ? `<span class="conflict-icon">${IconHelper.html(ICONS.warning, 'xs')}</span>` : '';
                 const canEdit = canManageAvailability(emp.id);
+                // #277: de cel is een div en stond dus niet in de tabvolgorde.
+                // Registreren en wijzigen kon nog via "+ Afwezigheid", maar een
+                // bestaande afwezigheid VERWIJDEREN kan alleen via deze cel,
+                // want de knop Verwijderen verschijnt enkel als de modal vanuit
+                // een cel geopend wordt. Dat was met het toetsenbord dus
+                // onbereikbaar.
+                //
+                // Alleen bewerkbare cellen worden focusbaar: een readonly-cel
+                // doet niets en zou de tabvolgorde alleen maar verlengen.
+                const celLabel = escapeHtml(
+                    `${emp.name}, ${date}${statusText ? `, ${statusText}` : ', beschikbaar'}`);
+                const celToets = canEdit
+                    ? ` role="button" tabindex="0" aria-label="${celLabel}"`
+                    : '';
                 const cellContent = !isClosed ? `
-                    <div class="availability-cell-content ${statusClass}${canEdit ? '' : ' readonly-cell'}"
+                    <div class="availability-cell-content ${statusClass}${canEdit ? '' : ' readonly-cell'}"${celToets}
                          data-employee-id="${emp.id}"
                          data-date="${date}"
                          title="${escapeHtml(tooltipText)}">

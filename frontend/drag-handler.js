@@ -635,9 +635,20 @@ const DragHandler = {
         }
     },
 
-    // Handle tap/click on mobile (mousedown is disabled on ≤767px)
+    // Handle tap/click on mobile (mousedown is disabled on ≤767px), en
+    // toetsenbordactivering op elk formaat.
+    //
+    // #274: dienstblokken en lege dagcellen zijn divs. Op desktop opent een
+    // dienst via mousedown/mouseup in deze handler, dus een synthetische klik
+    // (zoals Enter of spatie er een stuurt) deed daar helemaal niets. De
+    // gedeelde toetsenbordhandler in app-ui.js roept el.click() aan, en die
+    // klik herkennen we hier aan detail === 0: echte muis- en tikklikken
+    // hebben detail >= 1. Zo werkt het toetsenbord op elk schermformaat
+    // zonder dat een muisklik op desktop twee keer wordt afgehandeld.
     handleMobileClick(e) {
-        if (!window.matchMedia('(max-width: 767px)').matches) return;
+        const vanToetsenbord = e.detail === 0;
+        const opMobiel = window.matchMedia('(max-width: 767px)').matches;
+        if (!vanToetsenbord && !opMobiel) return;
 
         const shiftBlock = e.target.closest('.timeline-block');
         const dayCell = e.target.closest('.timeline-day-cell');

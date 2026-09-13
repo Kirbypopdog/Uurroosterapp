@@ -70,6 +70,15 @@ function renderEmployees() {
         const employee = employees.find(e => e.id === employeeId);
         if (employee && canManageEmployee(employee)) {
             card.style.cursor = 'pointer';
+            // #275: de kaart is een div en stond dus niet in de tabvolgorde;
+            // het basisrooster van een medewerker was zonder muis niet te
+            // bereiken. Hier gezet en niet in de template, zodat de
+            // rechtencheck hierboven blijft gelden: een kaart die je niet mag
+            // openen wordt ook geen tabstop. Enter en spatie lopen via de
+            // gedeelde handler in app-ui.js.
+            card.setAttribute('role', 'button');
+            card.setAttribute('tabindex', '0');
+            card.setAttribute('aria-label', `${employee.name} bewerken`);
             card.addEventListener('click', () => {
                 openEditEmployeeModal(employeeId);
             });

@@ -281,8 +281,14 @@ function renderLeaveRoundCard(r) {
                : r.status === 'open'    ? '<span class="leave-card-status leave-card-open">nog in te vullen</span>'
                : '';
 
+    // #190: de kaart is een div met een click-listener, zonder tabindex en
+    // zonder role. Voor een medewerker was dit het ENIGE element op het
+    // verlofscherm, dus die kon met het toetsenbord zijn verlof niet invullen
+    // en niet bekijken. Er was geen tweede weg naartoe.
     return `
-        <div class="leave-round-card" data-open-round="${r.id}">
+        <div class="leave-round-card" data-open-round="${r.id}"
+             role="button" tabindex="0"
+             aria-label="${escapeHtml(`Verlofronde ${r.name} openen`)}">
             <div class="leave-round-card-head">
                 <strong>${escapeHtml(r.name)}</strong>
                 <span class="leave-round-badge ${st.klasse}">${st.label}</span>

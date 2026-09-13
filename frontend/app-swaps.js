@@ -91,7 +91,9 @@ async function renderSwaps() {
         // === Section: Ruilverzoeken (swap type) ===
         const ruilCollapsed = AppState.swapCollapseState.ruil;
         html += `<div class="swap-group ${ruilCollapsed ? 'collapsed' : ''}" data-group="ruil">
-            <div class="swap-group-header" data-toggle-group="ruil">
+            <div class="swap-group-header" data-toggle-group="ruil"
+                 role="button" tabindex="0" aria-expanded="${!ruilCollapsed}"
+                 aria-label="Ruilverzoeken in- of uitklappen">
                 <h3>
                     ${IconHelper.html('arrow-left-right', 'sm')}
                     Ruilverzoeken
@@ -116,7 +118,9 @@ async function renderSwaps() {
         // === Section: Overnames / Afstaan (takeover type) ===
         const overnameCollapsed = AppState.swapCollapseState.overname;
         html += `<div class="swap-group ${overnameCollapsed ? 'collapsed' : ''}" data-group="overname">
-            <div class="swap-group-header" data-toggle-group="overname">
+            <div class="swap-group-header" data-toggle-group="overname"
+                 role="button" tabindex="0" aria-expanded="${!overnameCollapsed}"
+                 aria-label="Overnames en afstaan in- of uitklappen">
                 <h3>
                     ${IconHelper.html('hand', 'sm')}
                     Overnames / Afstaan
@@ -143,7 +147,9 @@ async function renderSwaps() {
         if (expiredRequests.length > 0) {
             const verlopenCollapsed = AppState.swapCollapseState.verlopen;
             html += `<div class="swap-group swap-group-expired ${verlopenCollapsed ? 'collapsed' : ''}" data-group="verlopen">
-                <div class="swap-group-header" data-toggle-group="verlopen">
+                <div class="swap-group-header" data-toggle-group="verlopen"
+                     role="button" tabindex="0" aria-expanded="${!verlopenCollapsed}"
+                     aria-label="Verlopen verzoeken in- of uitklappen">
                     <h3>
                         ${IconHelper.html('clock', 'sm')}
                         Verlopen
@@ -188,7 +194,11 @@ async function renderSwaps() {
                 const group = header.dataset.toggleGroup;
                 const section = header.closest('.swap-group');
                 section.classList.toggle('collapsed');
-                AppState.swapCollapseState[group] = section.classList.contains('collapsed');
+                const ingeklapt = section.classList.contains('collapsed');
+                // De kop meldt zijn toestand ook aan een schermlezer, anders
+                // blijft aria-expanded op de waarde van de laatste render staan.
+                header.setAttribute('aria-expanded', String(!ingeklapt));
+                AppState.swapCollapseState[group] = ingeklapt;
                 try { localStorage.setItem('swapCollapseState', JSON.stringify(AppState.swapCollapseState)); } catch {}
                 IconHelper.init(section);
             });

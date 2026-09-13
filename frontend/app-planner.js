@@ -921,7 +921,19 @@ function renderTimelineView() {
                                 ? shift.startTime
                                 : `${shift.startTime}-${shift.endTime}`;
 
-                            html += `<div class="${blockClass}"
+                            // #274: een dienstblok is een div en stond dus niet
+                            // in de tabvolgorde; met het toetsenbord was er geen
+                            // enkele dienst te openen. Alleen blokken die je mag
+                            // bewerken worden focusbaar, want een tabstop die
+                            // niets doet is alleen maar in de weg. De gedeelde
+                            // handler in app-ui.js maakt Enter en spatie gelijk
+                            // aan een klik.
+                            const blokNaam = getEmployee(shift.employeeId)?.name || 'Medewerker';
+                            const toetsAttrs = canEdit
+                                ? ` role="button" tabindex="0" aria-label="${escapeHtml(`Dienst ${blokNaam}, ${shift.date}, ${shift.startTime} tot ${shift.endTime}`)}"`
+                                : '';
+
+                            html += `<div class="${blockClass}"${toetsAttrs}
                                          data-shift-id="${shift.id}"
                                          data-employee-id="${shift.employeeId}"
                                          data-date="${shift.date}"
@@ -1147,7 +1159,19 @@ function renderTimelineView() {
                                 ? shift.startTime
                                 : `${shift.startTime}-${shift.endTime}`;
 
-                            html += `<div class="${blockClass}"
+                            // #274: een dienstblok is een div en stond dus niet
+                            // in de tabvolgorde; met het toetsenbord was er geen
+                            // enkele dienst te openen. Alleen blokken die je mag
+                            // bewerken worden focusbaar, want een tabstop die
+                            // niets doet is alleen maar in de weg. De gedeelde
+                            // handler in app-ui.js maakt Enter en spatie gelijk
+                            // aan een klik.
+                            const blokNaam = getEmployee(shift.employeeId)?.name || 'Medewerker';
+                            const toetsAttrs = canEdit
+                                ? ` role="button" tabindex="0" aria-label="${escapeHtml(`Dienst ${blokNaam}, ${shift.date}, ${shift.startTime} tot ${shift.endTime}`)}"`
+                                : '';
+
+                            html += `<div class="${blockClass}"${toetsAttrs}
                                          data-shift-id="${shift.id}"
                                          data-employee-id="${shift.employeeId}"
                                          data-date="${shift.date}"
