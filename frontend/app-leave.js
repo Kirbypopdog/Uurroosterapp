@@ -590,6 +590,28 @@ function leaveVerdeelVoorstel(block, medewerkers, entriesPerUser) {
     return voorstel;
 }
 
+/**
+ * Is de verdeling van dit voorkeurblok al vastgelegd?
+ *
+ * #307: saveLeaveVerdeling vervangt elke entry in het blok door verlof of
+ * werken, dus het onderscheid tussen liever_niet en zeker_niet is daarna weg.
+ * Het scherm bleef ondertussen beweren dat de letter in een cel toont wat die
+ * persoon vroeg, terwijl het voortaan de eigen beslissing van de beheerder
+ * toont. Wie wil bijsturen mist dan precies de informatie waarop hij moet
+ * beslissen, en het scherm doet alsof ze er nog staat.
+ *
+ * Het invulscherm van een voorkeurblok biedt alleen werken, liever niet en
+ * zeker niet aan (leaveOptionsFor). Een entry met status 'verlof' kan er dus
+ * alleen staan doordat de beheerder de verdeling heeft vastgelegd. Dat is een
+ * betrouwbaar kenmerk zonder extra kolom in de database.
+ */
+function leaveBlokIsVerdeeld(block, entriesPerUser) {
+    if (block.mode !== 'voorkeur') return false;
+    const dagen = new Set(leaveBlockDates(block));
+    return Object.values(entriesPerUser || {}).some(map =>
+        Object.entries(map).some(([datum, status]) => status === 'verlof' && dagen.has(datum)));
+}
+
 // De sterkste wens die iemand die week uitsprak — de reden waarop de beheerder
 // beslist, dus die hoort in beeld te staan.
 function leaveWeekWens(week, entryMap) {
@@ -618,6 +640,18 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
     }
     const verdeling = AppState.leaveVerdeling;
 
+    // #307: na het vastleggen zijn de oorspronkelijke voorkeuren vervangen. De
+    // letters tonen dan de beslissing van de beheerder, niet meer de wens, en
+    // het scherm moet dat zeggen in plaats van het tegendeel te blijven
+    // beweren.
+    const verdeeld = leaveBlokIsVerdeeld(block, perUser);
+    const letterUitleg = verdeeld ? 'letter = de vastgelegde verdeling' : 'letter = wat die persoon vroeg';
+    // Is het blok verdeeld, dan is de letter dezelfde beslissing als de kleur.
+    // "verlof, vastgelegd als verlof" erbij zetten is dan alleen ruis.
+    const wensTekst = (wens) => verdeeld
+        ? ''
+        : (wens ? ', vroeg ' + LEAVE_STATUS[wens].label.toLowerCase() : ', niets ingevuld');
+
     const aanHetWerk = weken.map(w =>
         medewerkers.filter(m => verdeling[Number(m.id)]?.[w.maandag] !== 'verlof').length);
 
@@ -630,10 +664,17 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
         <div class="leave-detail-head">
             <h3>Verlof verdelen voor ${escapeHtml(block.name)}</h3>
             <p class="text-muted text-sm">
-                Het voorstel geeft iedereen wat hij vroeg. Klik een vakje om het om te zetten;
-                onderaan zie je hoeveel mensen die week nog werken.
+                ${verdeeld
+                    ? 'Deze verdeling is al vastgelegd. Klik een vakje om het om te zetten; onderaan zie je hoeveel mensen die week nog werken.'
+                    : 'Het voorstel geeft iedereen wat hij vroeg. Klik een vakje om het om te zetten; onderaan zie je hoeveel mensen die week nog werken.'}
             </p>
         </div>
+        ${verdeeld ? `
+            <div class="leave-banner leave-banner-warn">
+                Het vastleggen heeft de oorspronkelijke voorkeuren vervangen, dus "liever niet" en
+                "zeker niet" zijn niet meer te zien. Wil je die bij een volgende ronde bewaren,
+                exporteer dan de CSV vóór je vastlegt.
+            </div>` : ''}
         ${nietGoedgekeurd.length ? `
             <div class="leave-banner leave-banner-warn">
                 Nog niet goedgekeurd (${nietGoedgekeurd.length}): ${nietGoedgekeurd.map(m => escapeHtml(m.name)).join(', ')}.
@@ -642,7 +683,7 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
         <div class="leave-legend">
             <span class="leave-legend-item"><span class="leave-legend-swatch leave-verlof"></span>verlof</span>
             <span class="leave-legend-item"><span class="leave-legend-swatch leave-werken"></span>werken</span>
-            <span class="leave-legend-title">letter = wat die persoon vroeg</span>
+            <span class="leave-legend-title">${letterUitleg}</span>
         </div>
         <div class="leave-matrix-scroll">
             <table class="leave-matrix leave-verdeel">
@@ -664,8 +705,8 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
                                 return `<td class="leave-cell leave-verdeel-cel ${keuze === 'verlof' ? 'leave-verlof' : 'leave-werken'}"
                                     data-verdeel-user="${m.id}" data-verdeel-week="${w.maandag}"
                                     data-naam="${escapeHtml(m.name)}" data-weeklabel="${leaveWeekLabel(w)}"
-                                    data-wens="${wens ? ', vroeg ' + LEAVE_STATUS[wens].label.toLowerCase() : ', niets ingevuld'}"
-                                    data-tooltip="${escapeHtml(m.name)} · ${leaveWeekLabel(w)} · ${keuze === 'verlof' ? 'verlof' : 'werken'}${wens ? ', vroeg ' + LEAVE_STATUS[wens].label.toLowerCase() : ', niets ingevuld'}"
+                                    data-wens="${wensTekst(wens)}"
+                                    data-tooltip="${escapeHtml(m.name)} · ${leaveWeekLabel(w)} · ${keuze === 'verlof' ? 'verlof' : 'werken'}${wensTekst(wens)}"
                                     data-tooltip-pos="top">${wens ? LEAVE_STATUS[wens].kort : ''}</td>`;
                             }).join('')}
                         </tr>`;
@@ -681,7 +722,8 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
             </table>
         </div>
         <div class="leave-fill-actions">
-            <button class="btn btn-secondary" id="leave-verdeel-reset">Voorstel opnieuw</button>
+            <button class="btn btn-secondary" id="leave-verdeel-reset">${
+                verdeeld ? 'Terug naar de vastgelegde verdeling' : 'Voorstel opnieuw'}</button>
             <button class="btn btn-primary" id="leave-verdeel-save" data-block="${block.id}">Verdeling vastleggen</button>
         </div>`;
 }
@@ -1023,9 +1065,15 @@ async function saveLeaveVerdeling(data, blockId) {
     });
 
     const vrij = entries.filter(e => e.status === 'verlof').length;
+    // #307: de waarschuwing zei wel dat de invulling vervangen wordt, maar niet
+    // dat "liever niet" en "zeker niet" daarmee onherroepelijk weg zijn. Dat is
+    // precies de informatie die je nodig hebt als je de verdeling later wil
+    // bijsturen, dus wijs op de export nu het nog kan.
     const bevestigd = await showConfirm(
-        `${escapeHtml(block.name)}\n\n${vrij} verlofdagen worden vastgelegd. Dit vervangt wat mensen zelf invulden voor deze vakantie; de andere vakanties blijven ongemoeid.\n\nDoorgaan?`,
-        'Verdeling vastleggen'
+        `${escapeHtml(block.name)}\n\n${vrij} verlofdagen worden vastgelegd. Dit vervangt wat mensen zelf invulden voor deze vakantie; de andere vakanties blijven ongemoeid.\n\n` +
+        `Let op: "liever niet" en "zeker niet" zijn daarna niet meer te zien. Wil je ze bewaren, annuleer dan en exporteer eerst de CSV.\n\nDoorgaan?`,
+        'Verdeling vastleggen',
+        { confirmText: 'Vastleggen', cancelText: 'Annuleren', danger: true }
     );
     if (!bevestigd) return;
 
@@ -1464,5 +1512,6 @@ if (typeof module !== 'undefined' && module.exports) {
         leaveBlockGewijzigd,
         leaveBlockHerstel,
         leaveConceptVoorBlok,
+        leaveBlokIsVerdeeld,
     };
 }

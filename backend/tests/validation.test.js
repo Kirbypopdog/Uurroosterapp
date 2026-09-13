@@ -345,7 +345,8 @@ const {
   leaveBlockDates,
   leaveBlockGewijzigd,
   leaveBlockHerstel,
-  leaveConceptVoorBlok
+  leaveConceptVoorBlok,
+  leaveBlokIsVerdeeld
 } = require('../../frontend/app-leave.js');
 
 // Kerstvakantie 21 dec 2026 t/m 3 jan 2027 = twee volle maandagweken.
@@ -719,5 +720,51 @@ describe('leaveConceptVoorBlok', () => {
     const blok = { holidayPeriodId: 'kerst', closedSource: { draftId: 22 } };
     expect(leaveConceptVoorBlok(blok).concept.name).toBe('Nieuw');
     expect(leaveConceptVoorBlok(blok).herkomst).toBe('ronde');
+  });
+});
+
+
+// ===== VERLOFPLANNING: is een voorkeurblok al verdeeld (#307) =====
+//
+// Het vastleggen vervangt elke entry in het blok door verlof of werken, dus
+// liever_niet en zeker_niet zijn daarna weg. Het verdeelscherm bleef beweren
+// dat de letter toont wat die persoon vroeg, terwijl het voortaan de eigen
+// beslissing van de beheerder toont.
+//
+// Het invulscherm van een voorkeurblok biedt alleen werken, liever niet en
+// zeker niet aan. Een entry met status 'verlof' kan er dus alleen staan door
+// het vastleggen. Dat is het kenmerk waarop we gaan.
+describe('leaveBlokIsVerdeeld', () => {
+  const ZOMER = { mode: 'voorkeur', startDate: '2027-07-05', endDate: '2027-07-18' };
+  const KERST = { mode: 'binair',   startDate: '2027-07-05', endDate: '2027-07-18' };
+
+  test('nog niet verdeeld zolang er voorkeuren staan', () => {
+    const entries = { 7: { '2027-07-05': 'liever_niet', '2027-07-06': 'zeker_niet' } };
+    expect(leaveBlokIsVerdeeld(ZOMER, entries)).toBe(false);
+  });
+
+  test('nog niet verdeeld bij een leeg blok', () => {
+    expect(leaveBlokIsVerdeeld(ZOMER, {})).toBe(false);
+  });
+
+  test('nog niet verdeeld wanneer iedereen werken invulde', () => {
+    const entries = { 7: { '2027-07-05': 'werken', '2027-07-06': 'werken' } };
+    expect(leaveBlokIsVerdeeld(ZOMER, entries)).toBe(false);
+  });
+
+  test('wel verdeeld zodra er verlof in staat', () => {
+    const entries = { 7: { '2027-07-05': 'verlof', '2027-07-06': 'werken' } };
+    expect(leaveBlokIsVerdeeld(ZOMER, entries)).toBe(true);
+  });
+
+  test('kijkt alleen naar dagen binnen dit blok', () => {
+    // Verlof in de kerstvakantie zegt niets over de zomer
+    const entries = { 7: { '2027-12-24': 'verlof' } };
+    expect(leaveBlokIsVerdeeld(ZOMER, entries)).toBe(false);
+  });
+
+  test('geldt niet voor een binair blok, daar is verlof gewoon invulling', () => {
+    const entries = { 7: { '2027-07-05': 'verlof' } };
+    expect(leaveBlokIsVerdeeld(KERST, entries)).toBe(false);
   });
 });
