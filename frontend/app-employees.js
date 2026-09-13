@@ -904,6 +904,8 @@ function closeEmployeeModal() {
     // Restore modal-actions visibility for next open (add mode needs it)
     const modalActions = DOM.employeeModal.querySelector('.modal-actions');
     if (modalActions) modalActions.classList.remove('hidden');
+    // #233: noodklep, zie closeShiftModal in app-shifts.js voor de toelichting.
+    hideSectionLoading('employees-view');
 }
 
 async function handleEmployeeSubmit(e) {

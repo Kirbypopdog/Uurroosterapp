@@ -117,14 +117,22 @@ const ToastManager = {
     show(message, type = 'info', duration = null) {
         this.init();
 
-        // Auto-duration based on type
+        // Auto-duration based on type.
+        //
+        // #271: dit stond op `[type] || 4000`. Voor 'error' geeft de lookup
+        // 0 terug (bedoeld als "nooit automatisch sluiten"), maar 0 is falsy
+        // in JS, dus `0 || 4000` viel terug op 4000. Elke error-toast in de
+        // hele app verdween daardoor na vier seconden, ondanks de comment
+        // hieronder en ondanks dat de gebruiker hem nooit zelf wegklikte.
+        // ?? in plaats van || behoudt 0 als geldige waarde en valt alleen
+        // terug op 4000 wanneer het type echt onbekend is (undefined).
         if (duration === null) {
             duration = {
                 'success': 3000,
                 'info': 4000,
                 'warning': 5000,
                 'error': 0 // Don't auto-dismiss errors
-            }[type] || 4000;
+            }[type] ?? 4000;
         }
 
         // Remove oldest if at max

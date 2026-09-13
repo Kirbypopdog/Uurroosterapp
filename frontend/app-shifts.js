@@ -355,6 +355,12 @@ function closeShiftModal() {
     DOM.shiftForm.reset();
     AppState.editingShiftId = null;
     resetShiftSubmitBtn();
+    // #233: noodklep. Sluit je de modal terwijl een opslag nog in de lucht
+    // hangt (bv. via Annuleren, of de klik buiten de modal), dan bleef de
+    // sectie-overlay op de planning anders staan tot het verzoek zelf
+    // afloopt. hideSectionLoading is veilig aan te roepen als er niets te
+    // verbergen is.
+    hideSectionLoading('planning-view');
 }
 
 async function handleShiftDelete(shiftId = null) {

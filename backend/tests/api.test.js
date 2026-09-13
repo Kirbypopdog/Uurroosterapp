@@ -3220,3 +3220,42 @@ describe('GET /availability en het redenveld (#219)', () => {
     expect(res.body.availability.map(r => r.reason)).toEqual(['operatie knie', 'burn-out', 'Vaste vrije dag']);
   });
 });
+
+// ===== PUT /users/:id: foreign key op team_id (#221) =====
+
+// Regressie #221: main_team/team_id verwijzen naar teams(id). Kwam een team
+// ooit half aan (in settings.teams maar niet in de teams-tabel, zie
+// openAddTeamModal in app-settings.js), dan gaf deze UPDATE een kale 500 en
+// stond de echte reden alleen in de serverlog.
+describe('PUT /users/:id en de foreign key op team_id (#221)', () => {
+  const beheerder = { id: 1, role: 'admin', name: 'Admin', team_id: null };
+
+  test('geeft een duidelijke 400 bij een niet-bestaand team', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ email: 'anna@hetvlot.be' }] }) // oude email opzoeken
+      .mockRejectedValueOnce(Object.assign(new Error('fk violation'), { code: '23503' })); // de UPDATE
+
+    const res = await request(app)
+      .put('/api/v1/users/5')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Anna', mainTeam: 'nietbestaand' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/team/i);
+  });
+
+  test('een andere databasefout blijft een 500', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ email: 'anna@hetvlot.be' }] })
+      .mockRejectedValueOnce(new Error('iets anders'));
+
+    const res = await request(app)
+      .put('/api/v1/users/5')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Anna', mainTeam: 'vlot1' });
+
+    expect(res.status).toBe(500);
+  });
+});

@@ -1,5 +1,19 @@
 // ===== ROOSTERBOUWER: CONCEPTEN (opslaan, laden, toepassen, vergelijken) =====
 
+/**
+ * #227: is de GET /schedule-drafts echt mislukt bij het opstarten (niet zomaar
+ * "geen rechten"), blokkeer dan elke schrijfactie op concepten. Zonder deze
+ * controle schrijft de bouwer stilzwijgend naar de oude settings-opslag in
+ * plaats van naar de echte tabel, en dat concept is na een geslaagde herlaad
+ * onvindbaar voor de rest van de app.
+ * @returns {boolean} true als de aanroeper moet stoppen
+ */
+function blokkeerBijMislukteDraftLoad() {
+    if (!DataStore._draftsLoadFailed) return false;
+    showToast('Concepten konden niet geladen worden bij het opstarten. Herlaad de pagina voor je een concept aanmaakt, wijzigt of verwijdert.', 'error');
+    return true;
+}
+
 // Een concept is meer dan zijn diensten: gesloten dagen, bezettingsregels en
 // vergaderingen tellen evengoed. Deze ene bron bepaalt zowel of de
 // opslaanknoppen aan staan als of opslaan zin heeft — anders raken die twee
@@ -27,6 +41,8 @@ function builderHeeftInhoud() {
 }
 
 async function saveBuilderDraft() {
+    if (blokkeerBijMislukteDraftLoad()) return;
+
     // Sync current week to cache before saving
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
 
@@ -154,6 +170,8 @@ async function saveBuilderDraft() {
 }
 
 async function saveBuilderDraftAs() {
+    if (blokkeerBijMislukteDraftLoad()) return;
+
     // Force "Save As": always show modal and create new draft
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
 
@@ -307,6 +325,8 @@ function showNewConceptTypeModal() {
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
 
     overlay.querySelector('#concept-type-confirm').addEventListener('click', async () => {
+        if (blokkeerBijMislukteDraftLoad()) return;
+
         const type = overlay.querySelector('input[name="concept-type"]:checked')?.value || 'basis';
         let holidayPeriodId = null;
 
@@ -550,6 +570,8 @@ function doLoadDraft(draft) {
 }
 
 async function deleteBuilderDraft(draftId) {
+    if (blokkeerBijMislukteDraftLoad()) return;
+
     const confirmed = await showConfirm('Dit concept verwijderen?');
     if (!confirmed) return;
 
@@ -572,6 +594,8 @@ async function deleteBuilderDraft(draftId) {
 }
 
 async function renameBuilderDraft(draftId) {
+    if (blokkeerBijMislukteDraftLoad()) return;
+
     const drafts = DataStore.settings.schedule_drafts || [];
     const draft = drafts.find(d => d.id === draftId);
     if (!draft) return;
@@ -1220,6 +1244,7 @@ function uploadBuilderDraft() {
     input.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        if (blokkeerBijMislukteDraftLoad()) return;
         try {
             const text = await file.text();
             const data = JSON.parse(text);

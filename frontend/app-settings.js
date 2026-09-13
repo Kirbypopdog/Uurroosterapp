@@ -1168,6 +1168,22 @@ async function openAddTeamModal() {
     const color = '#64748b'; // Default gray
 
     try {
+        // #221: hier stond eerst settings.teams geschreven en pas daarna de
+        // teams-tabel, met de tweede schrijfactie in een eigen try die alleen
+        // console.warn deed. Faalde die tweede, dan kreeg de gebruiker toch
+        // "Team aangemaakt" te zien, terwijl het team in elk keuzemenu
+        // verscheen zonder dat er iemand aan toe te wijzen was: PUT /users/:id
+        // faalde dan met een kale 500 op de foreign key.
+        //
+        // De teams-tabel is de kant met de foreign key, dus die schrijven we
+        // nu eerst. Faalt dat, dan raken settings.teams en de rest van de UI
+        // niet aan en krijgt de gebruiker een echte foutmelding in plaats van
+        // een valse succesmelding. Er is dan geen half aangemaakt team.
+        await dataApiFetch('/teams', {
+            method: 'POST',
+            body: JSON.stringify({ id: teamId, name, color })
+        });
+
         // Update settings (primary source of truth for frontend)
         const existingOrders = Object.values(DataStore.settings.teams).map(t => t.sort_order ?? 0);
         const nextOrder = existingOrders.length ? Math.max(...existingOrders) + 1 : 0;
@@ -1184,20 +1200,10 @@ async function openAddTeamModal() {
         applyTeamColors();
         AppState.apiTeams = null; // Invalidate cache
 
-        // Also create in teams DB table (for FK constraints)
-        try {
-            await dataApiFetch('/teams', {
-                method: 'POST',
-                body: JSON.stringify({ id: teamId, name, color })
-            });
-        } catch (e) {
-            console.warn('Teams DB insert skipped:', e.message);
-        }
-
         showToast(`Team "${name}" aangemaakt`, 'success');
         renderSettings();
     } catch (error) {
-        showToast(error.message || 'Fout bij aanmaken team', 'error');
+        showToast('Team aanmaken mislukt: ' + getUserFriendlyError(error), 'error');
     }
 }
 

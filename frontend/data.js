@@ -171,10 +171,37 @@ async function dataApiFetch(path, options = {}) {
         ...(token ? { 'Authorization': `Bearer ${token}` } : {})
     };
 
-    const response = await fetch(`${window.API_BASE}${path}`, {
-        ...options,
-        headers: { ...headers, ...(options.headers || {}) }
-    });
+    // #233: zonder tijdslimiet bleef een opslagoverlay ("Dienst opslaan...",
+    // "Afwezigheid opslaan...", "Medewerker opslaan...") eeuwig staan als de
+    // server het verzoek aanvaardde maar nooit antwoordde. Er was geen enkele
+    // manier waarop de await ooit zou teruggeven, dus de finally die
+    // hideSectionLoading aanroept werd nooit bereikt. Eén tijdslimiet hier
+    // dekt alle aanroepers in de app in één keer, in plaats van dit apart te
+    // repareren bij elke plek die een overlay toont.
+    //
+    // Een aanroeper die zelf al een signal meegeeft (bv. om zelf te kunnen
+    // annuleren) houdt voorrang; dan bemoeien we ons er niet mee.
+    const eigenSignal = !!options.signal;
+    const controller = eigenSignal ? null : new AbortController();
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 20000) : null;
+
+    let response;
+    try {
+        response = await fetch(`${window.API_BASE}${path}`, {
+            ...options,
+            headers: { ...headers, ...(options.headers || {}) },
+            signal: options.signal || controller.signal
+        });
+    } catch (err) {
+        if (!eigenSignal && err.name === 'AbortError') {
+            const fout = new Error('Geen antwoord van de server binnen 20 seconden. Controleer je verbinding en probeer opnieuw.');
+            fout.status = 0;
+            throw fout;
+        }
+        throw err;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
         if (response.status === 401) {
@@ -228,8 +255,21 @@ async function loadDataFromAPI() {
             dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
             dataApiFetch('/shift-blocks').catch(err => { loadErrors.push('shift-blocks'); console.error('[LoadData] Failed to load shift-blocks:', err); return []; }),
             dataApiFetch('/settings').catch(err => { loadErrors.push('settings'); console.error('[LoadData] Failed to load settings:', err); return { settings: {} }; }),
+            // #227: dit ving een echte laadfout af met console.log en gaf altijd
+            // { drafts: null } terug, zonder onderscheid tussen "geen rechten"
+            // (medewerker) en "de aanroep is mislukt" (bv. tijdens een
+            // backend-herstart). console.log is in productie gedempt
+            // (app-globals.js), dus dat tweede geval liet letterlijk geen
+            // spoor na. De bouwer viel dan stil terug op de oude
+            // settings-opslag, die op een moderne database meestal leeg of
+            // verouderd is, en een nieuw concept ging vervolgens ook naar die
+            // verkeerde plek.
             magConcepten
-                ? dataApiFetch('/schedule-drafts').catch(err => { console.log('[LoadData] Schedule drafts not available (using settings fallback)'); return { drafts: null }; })
+                ? dataApiFetch('/schedule-drafts').catch(err => {
+                    loadErrors.push('concepten');
+                    console.error('[LoadData] Failed to load schedule-drafts:', err);
+                    return { drafts: null, failed: true };
+                })
                 : Promise.resolve({ drafts: null }),
             dataApiFetch('/shift-activities').catch(err => { console.log('[LoadData] Activities not available'); return { activities: [] }; }),
             // Nodig op de startpagina: daar herinneren we mensen eraan dat een
@@ -244,8 +284,14 @@ async function loadDataFromAPI() {
         ]);
 
         if (loadErrors.length > 0) {
+            // #271: dit stond op 'warning' en verdween dus na vijf seconden.
+            // Daarna toont de planning een compleet raster met alle
+            // medewerkers en overal 0 uren, zonder enig blijvend teken dat de
+            // gegevens ontbreken. Wie de toast miste trok daar conclusies uit.
+            // Een 'error'-toast blijft staan tot de gebruiker hem zelf
+            // wegklikt (zie ToastManager.show: duration 0 voor 'error').
             if (typeof showToast === 'function') {
-                showToast(`Sommige data kon niet geladen worden: ${loadErrors.join(', ')}`, 'warning');
+                showToast(`Sommige data kon niet geladen worden: ${loadErrors.join(', ')}. Herlaad de pagina om het opnieuw te proberen.`, 'error');
             }
         }
 
@@ -288,6 +334,16 @@ async function loadDataFromAPI() {
         if (draftsData.drafts) {
             DataStore.settings.schedule_drafts = draftsData.drafts;
             DataStore._draftsFromTable = true;
+            DataStore._draftsLoadFailed = false;
+        } else if (draftsData.failed) {
+            // #227: de tabel-ophaling is echt mislukt (niet zomaar
+            // "geen rechten"). DataStore.settings.schedule_drafts houdt de
+            // oude/lege fallback dan aan, en de bouwer mag daar niet
+            // stilzwijgend naar gaan schrijven: dat concept zou na een
+            // geslaagde herlaad onvindbaar zijn voor de rest van de app, want
+            // die leest dan weer uit de echte tabel. app-builder-drafts.js
+            // controleert deze vlag vóór elke schrijfactie.
+            DataStore._draftsLoadFailed = true;
         }
 
         DataStore._loaded = true;

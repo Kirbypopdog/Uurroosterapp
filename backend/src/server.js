@@ -1763,6 +1763,16 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
 
     res.json({ user: result.rows[0] });
   } catch (err) {
+    // #221: main_team/team_id verwijzen naar teams(id). Kwam een team ooit
+    // half aan (in settings.teams maar niet in de tabel, zie POST /teams),
+    // dan gaf dit een kale 500 met de echte reden alleen in de serverlog.
+    // 23503 is Postgres' foreign_key_violation.
+    // main_team en team_id zijn de enige foreign keys in deze query, dus de
+    // code alleen is genoeg: er is hier maar één plek waar 23503 vandaan kan
+    // komen.
+    if (err.code === '23503') {
+      return res.status(400).json({ error: 'Dit team bestaat niet in de database. Maak het team opnieuw aan.' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Server error' });
   }

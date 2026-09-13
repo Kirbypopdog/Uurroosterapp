@@ -511,6 +511,8 @@ function openAvailabilityModal(employeeId = null, date = null) {
 function closeAvailabilityModal() {
     const modal = document.getElementById('availability-modal');
     modal.classList.add('hidden');
+    // #233: noodklep, zie closeShiftModal in app-shifts.js voor de toelichting.
+    hideSectionLoading('availability-view');
 }
 
 async function handleAvailabilitySave() {
@@ -661,20 +663,63 @@ async function handleRemoveAbsence() {
 
     showSectionLoading('availability-view', 'Afwezigheid verwijderen...');
 
-    // Remove absence for each day in range
-    let currentDate = parseDateOnly(start);
-    const removePromises = [];
+    // #226: de tegenhanger handleAvailabilitySave heeft try/catch/finally,
+    // hier ontbrak dat. Faalde één van de DELETE-aanroepen (bv. een
+    // netwerkfout of een herstart van de backend), dan verliet de functie de
+    // handler met een rejection: geen foutmelding, en closeAvailabilityModal,
+    // renderAvailability en hideSectionLoading werden nooit bereikt. De
+    // laadoverlay bleef zo over de tab staan, ook na wisselen van tab.
+    try {
+        // Remove absence for each day in range. allSettled i.p.v. all: een
+        // mislukte dag mag de andere dagen niet blokkeren, en we willen weten
+        // wélke dag het niet lukte in plaats van alleen dat er iets mislukte.
+        let currentDate = parseDateOnly(start);
+        const dateStrs = [];
+        while (currentDate <= end) {
+            dateStrs.push(formatDateYYYYMMDD(currentDate));
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+        const uitslagen = await Promise.allSettled(
+            dateStrs.map(dateStr => removeAvailability(employeeId, dateStr, { skipRefresh: true }))
+        );
+        const mislukt = dateStrs.filter((_, i) => uitslagen[i].status === 'rejected');
 
-    while (currentDate <= end) {
-        const dateStr = formatDateYYYYMMDD(currentDate);
-        removePromises.push(removeAvailability(employeeId, dateStr, { skipRefresh: true }));
-        currentDate.setDate(currentDate.getDate() + 1);
+        await refreshAvailability();
+
+        if (mislukt.length > 0) {
+            console.error('Fout bij verwijderen afwezigheid op:', mislukt);
+            showToast(
+                `Verwijderen mislukt voor ${mislukt.length} dag${mislukt.length !== 1 ? 'en' : ''}: ${mislukt.map(d => formatDate(d)).join(', ')}. De rest is verwijderd.`,
+                'error'
+            );
+            // Modal blijft open zodat de gebruiker het opnieuw kan proberen
+            // voor de dagen die nog niet gelukt zijn.
+            renderAvailability();
+            renderPlanning();
+            return;
+        }
+
+        await verwijderAutoCancelTakeovers(employeeId, start, end);
+
+        closeAvailabilityModal();
+        renderAvailability();
+        renderPlanning(); // Update planning view
+    } catch (error) {
+        console.error('Fout bij verwijderen afwezigheid:', error);
+        showToast('Verwijderen mislukt: ' + getUserFriendlyError(error), 'error');
+    } finally {
+        hideSectionLoading('availability-view');
     }
+}
 
-    // Wait for all deletions to complete, then refresh once
-    await Promise.all(removePromises);
-    await refreshAvailability();
-
+/**
+ * Annuleert openstaande overnameverzoeken voor diensten in de verwijderde
+ * periode. Losstaand van handleRemoveAbsence gehouden (#226) zodat een fout
+ * hierin niet de hoofdafhandeling (en dus hideSectionLoading) kan overslaan —
+ * die had al zijn eigen try/catch, maar leefde vroeger in dezelfde functie
+ * zonder omhullende bescherming.
+ */
+async function verwijderAutoCancelTakeovers(employeeId, start, end) {
     // Cancel any pending takeover requests for shifts on these dates
     try {
         console.log('[Auto-cancel] Starting auto-cancel for removed absence');
