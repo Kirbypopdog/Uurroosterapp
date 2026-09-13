@@ -722,13 +722,33 @@ async function deactivateBuilderDraft(draftId) {
     }
 }
 
+/**
+ * Past een concept toe, met bescherming tegen dubbel klikken.
+ *
+ * #303: die bescherming zat vroeger in de functie zelf, en één van de zeven
+ * vroege returns zette de vlag niet terug. Dat was de tak "gekoppelde
+ * vakantieperiode niet gevonden". Vanaf dat moment was élke volgende
+ * toepassing een stille no-op tot de pagina herladen werd, ook bij een ander
+ * concept en zonder enige melding: je klikte op Toepassen en er gebeurde
+ * niets.
+ *
+ * De vlag wordt nu hier beheerd, in een try/finally rond het geheel. Zo kan
+ * een nieuwe vroege return dit niet opnieuw veroorzaken.
+ */
 async function applyBuilderDraft(draftId) {
     if (AppState._applyingDraft) return;
     AppState._applyingDraft = true;
+    try {
+        return await voerConceptToepassenUit(draftId);
+    } finally {
+        AppState._applyingDraft = false;
+    }
+}
 
+async function voerConceptToepassenUit(draftId) {
     const drafts = DataStore.settings.schedule_drafts || [];
     const draft = drafts.find(d => d.id === draftId);
-    if (!draft) { AppState._applyingDraft = false; return; }
+    if (!draft) return;
 
     const isVakantie = draft.type === 'vakantie';
 
@@ -759,7 +779,7 @@ async function applyBuilderDraft(draftId) {
             `Overige medewerkers krijgen GEEN shift tijdens deze periode.`,
             'Vakantieconcept toepassen'
         );
-        if (!confirmed) { AppState._applyingDraft = false; return; }
+        if (!confirmed) return;
 
         showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
         try {
@@ -788,7 +808,6 @@ async function applyBuilderDraft(draftId) {
             showToast('Fout bij toepassen vakantieconcept: ' + getUserFriendlyError(error), 'error');
         } finally {
             hideSectionLoading('planning-view');
-            AppState._applyingDraft = false;
         }
         return;
     }
@@ -861,7 +880,7 @@ async function applyBuilderDraft(draftId) {
 
     // Show apply modal with editable dates + changes preview
     const applyResult = await showDraftApplyModal(draft, weekLabel, changesCount, allEmployees.length, changesSummary);
-    if (!applyResult) { AppState._applyingDraft = false; return; }
+    if (!applyResult) return;
 
     showSectionLoading('planning-view', 'Concept toepassen...');
     try {
@@ -882,7 +901,7 @@ async function applyBuilderDraft(draftId) {
                 `De volgende actieve concepten overlappen met deze periode:\n\n• ${overlapNames}\n\nDeze concepten worden ingekort tot ${result.newStartDate}. Doorgaan?`,
                 'Concepten overlappen'
             );
-            if (!confirmed) { AppState._applyingDraft = false; return; }
+            if (!confirmed) return;
             showSectionLoading('planning-view', 'Concept toepassen...');
             result = await applyScheduleDraft(draftId, {
                 clearBlocks: true,
@@ -987,7 +1006,6 @@ async function applyBuilderDraft(draftId) {
         showToast('Fout bij toepassen concept: ' + getUserFriendlyError(error), 'error');
     } finally {
         hideSectionLoading('planning-view');
-        AppState._applyingDraft = false;
     }
 }
 

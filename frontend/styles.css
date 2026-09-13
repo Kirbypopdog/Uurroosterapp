@@ -7861,6 +7861,13 @@ body[data-view-mode="day"] .timeline-day-cell {
     min-width: 100%;
 }
 
+/* #349: de melding als er geen enkele rij op te bouwen valt. Zonder padding
+   plakt hij tegen de koprij aan. */
+.availability-leeg {
+    padding: 20px 16px;
+    text-align: center;
+}
+
 .availability-header-row {
     display: grid;
     grid-template-columns: 180px repeat(7, 1fr);

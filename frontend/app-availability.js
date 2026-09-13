@@ -18,6 +18,7 @@ function renderAvailability() {
 
     // Group employees by team (same order as Timeline)
     let teamOrder = getTeamOrder();
+    let zonderTeam = false;
     // Medewerker only sees own team
     if (role === 'medewerker') {
         const userTeam = AppState.currentUser?.team_id
@@ -27,6 +28,11 @@ function renderAvailability() {
             teamOrder = teamOrder.filter(teamId => teamId === userTeam);
             employees = employees.filter(emp => emp.mainTeam === userTeam);
         } else {
+            // #349: een medewerker zonder team zag hier een tabel met alleen
+            // een koprij en verder niets. Dat is niet zijn fout en hij kan het
+            // zelf niet oplossen, dus hij hoort te weten waarom het scherm leeg
+            // is en bij wie hij moet zijn.
+            zonderTeam = true;
             teamOrder = [];
             employees = [];
         }
@@ -92,6 +98,15 @@ function renderAvailability() {
     });
 
     html += `</div>`; // End header row
+
+    // #349: geen enkele rij op te bouwen? Zeg dan waarom, zoals Planning en
+    // Ruilen dat ook doen, in plaats van een tabel met enkel een koprij.
+    if (zonderTeam) {
+        html += `<div class="no-items-text availability-leeg">
+            Je account hangt nog niet aan een team, dus er is hier niets te tonen.
+            Vraag je roosterverantwoordelijke om je bij een team te zetten.
+        </div>`;
+    }
 
     // Rows grouped by team
     teamOrder.forEach(teamId => {
