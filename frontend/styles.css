@@ -9,6 +9,9 @@
     --primary-hover: #3d6a5e;
     --primary-dark: #33594f;
     --primary-rgb: 74, 124, 111;
+    /* #364: de kleur van de toetsenbordring. In donkere modus staat hier een
+       helderder groen, want sage op de donkere randkleur haalt maar 2,5. */
+    --focus-ring: #4a7c6f;
     --sage: #4a7c6f;
     --sage-600: #3d6a5e;
     --sage-700: #33594f;
@@ -28,7 +31,12 @@
     --line-strong: #d8d3c6;
     --text-primary: #2b2a26;
     --text-secondary: #5e5b52;
-    --ink-3: #8d897c;
+    /* #181: dit was #8d897c en haalde ongeveer 3,3 contrast op de warme
+       achtergronden, terwijl het juist voor kleine tekst van 12 en 13 pixels
+       wordt gebruikt (eyebrow, stat-kaarten, hints, lege staten). De eis is
+       4,5. Deze tint haalt 5,1 op #faf9f6 en 4,8 op de donkerste warme
+       achtergrond #f5f3ec, en blijft binnen hetzelfde warme palet. */
+    --ink-3: #6f6b5e;
 
     /* Warme schaduwen */
     --shadow-sm: 0 1px 2px rgba(43,42,38,.04), 0 4px 16px rgba(43,42,38,.05);
@@ -158,7 +166,15 @@ body.dark-mode {
     --text-secondary:#9a9488;
     --ink:           #ede9df;
     --ink-2:         #9a9488;
-    --ink-3:         #6a665c;
+    /* #181: ook in donkere modus haalde --ink-3 het niet. #6a665c gaf 3,19
+       op de donkerste achtergrond #17150f, terwijl de tekst die hem gebruikt
+       12 en 13 pixels is. Deze tint haalt 5,57 op #17150f, 5,01 op #221f18 en
+       4,54 op #2a2720, dus op alle drie de donkere vlakken boven de eis. */
+    --ink-3:         #928e80;
+    /* #364: sage (#4a7c6f) op de donkere randkleur #3a3628 haalt 2,53 en zakt
+       daarmee onder de eis van 3 voor een focusaanduiding. Deze tint haalt
+       4,73. */
+    --focus-ring:    #6fae9d;
 
     --shadow-sm: 0 1px 2px rgba(0,0,0,.45), 0 4px 16px rgba(0,0,0,.28);
     --shadow-md: 0 4px 14px rgba(0,0,0,.45);
@@ -213,7 +229,7 @@ body.dark-mode .form-group select:focus,
 body.dark-mode .form-group textarea:focus,
 body.dark-mode .select-input:focus,
 body.dark-mode .form-input:focus {
-    border-color: var(--sage);
+    border-color: var(--focus-ring);
 }
 
 /* Browser autofill: overschrijf blauwe/gele bg via box-shadow truc */
@@ -1448,11 +1464,15 @@ html.session-restoring #login-container {
     background: var(--surface-color);
 }
 
+/* #364: hier stond outline: none. Die won op specificiteit van de bewust
+   toegevoegde regel input:focus-visible verderop, waardoor de bedoelde ring
+   van 2 pixels nooit te zien was en er alleen een rand van 1 pixel overbleef.
+   De rand en de schaduw blijven, de outline laten we nu over aan
+   focus-visible, zodat een muisklik geen ring geeft en het toetsenbord wel. */
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus,
 .select-input:focus {
-    outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.15);
 }
@@ -1573,20 +1593,29 @@ textarea {
 }
 
 /* Focus-visible: keyboard focus rings (accessibility) */
+
+/* #274, #275, #277, #190, #367, #363: dienstblokken, afwezigheidscellen,
+   medewerkerskaarten, verlofrondekaarten, ruilkoppen en de kaart Nieuw concept
+   zijn divs met role="button". Zonder deze regel krijgen ze wel focus maar zie
+   je niet waar je bent. */
+[role="button"]:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
 .btn:focus-visible {
-    outline: 2px solid var(--primary-color);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
 }
 
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-    outline: 2px solid var(--primary-color);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 1px;
 }
 
 .nav-btn:focus-visible {
-    outline: 2px solid var(--primary-color);
+    outline: 2px solid var(--focus-ring);
     outline-offset: -2px;
     border-radius: var(--radius-sm);
 }
@@ -6033,6 +6062,12 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .modal-close {
+    /* #234: dit was een span en is nu een echte button, zodat Tab, Enter en
+       spatie werken. De browser geeft een button een eigen achtergrond, rand
+       en lettertype; die zetten we hier weg zodat het uiterlijk niet wijzigt. */
+    background: none;
+    border: none;
+    font-family: inherit;
     font-size: var(--text-xl);
     color: var(--text-secondary);
     cursor: pointer;
@@ -6880,10 +6915,12 @@ body[data-view-mode="day"] .timeline-day-cell {
     background: #fffdf9;
 }
 
+/* #364: idem, plus een hardcoded blauwe schaduw terwijl het palet sage is.
+   Gemeten kwam die blauwe schaduw neer op ongeveer 1,05 contrast en droeg hij
+   dus vrijwel niets bij. */
 .form-input:focus {
-    outline: none;
     border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.25);
 }
 
 .form-input:read-only {
@@ -10874,7 +10911,30 @@ body[data-view-mode="day"] .timeline-day-cell {
     border-color: var(--primary-color);
     background: rgba(59, 130, 246, 0.08);
 }
-.concept-type-option input[type="radio"] { display: none; }
+/* #363: dit stond op display:none, waardoor de keuzerondjes helemaal uit de
+   tabvolgorde verdwenen en het concepttype niet met het toetsenbord te kiezen
+   was. Basisrooster werkte alleen omdat het toevallig de standaard is. Ze zijn
+   nu visueel weg maar blijven focusbaar, zodat de pijltjestoetsen werken.
+   De zichtbare selectie blijft het gekleurde kader op .selected. */
+.concept-type-option input[type="radio"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* Zichtbare focusaanduiding op het kader wanneer het verborgen rondje erin
+   focus heeft, anders zie je met het toetsenbord niet waar je bent. */
+.concept-type-option:focus-within {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
 .concept-type-icon {
     flex-shrink: 0;
     width: 36px;

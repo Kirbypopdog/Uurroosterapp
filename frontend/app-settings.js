@@ -164,12 +164,15 @@ function renderSettingsAccounts(container) {
                 <div class="admin-users-intro">
                     <p>Beheer rollen en teams per gebruiker. Gebruik "Reset wachtwoord" enkel wanneer nodig.</p>
                 </div>
+                <!-- #366: deze drie velden hadden geen enkel opschrift. Bij
+                     het zoekveld stond wel een placeholder, maar die verdwijnt
+                     zodra je typt en telt sowieso niet als naam. -->
                 <div class="admin-filter-bar">
-                    <input type="text" id="admin-user-search" class="form-input" placeholder="Zoek op naam of email" />
-                    <select id="admin-team-filter" class="form-input">
+                    <input type="text" id="admin-user-search" class="form-input" placeholder="Zoek op naam of email" aria-label="Zoek accounts op naam of e-mail" />
+                    <select id="admin-team-filter" class="form-input" aria-label="Filter op team">
                         <option value="">Alle teams</option>
                     </select>
-                    <select id="admin-status-filter" class="form-input">
+                    <select id="admin-status-filter" class="form-input" aria-label="Filter op status">
                         <option value="active" selected>Actief</option>
                         <option value="inactive">Inactief</option>
                         <option value="">Alle</option>
@@ -300,7 +303,7 @@ function showAddUserModal(teams) {
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2>Nieuwe gebruiker</h2>
-                <button class="modal-close" onclick="document.getElementById('add-user-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
+                <button type="button" class="modal-close" aria-label="Sluiten" onclick="document.getElementById('add-user-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <form id="add-user-form">
@@ -413,7 +416,7 @@ function showEditAccountModal(user, teams, onSave) {
         <div class="modal-content modal-content--md">
             <div class="modal-header">
                 <h2>Account bewerken</h2>
-                <button class="modal-close" onclick="document.getElementById('edit-account-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
+                <button type="button" class="modal-close" aria-label="Sluiten" onclick="document.getElementById('edit-account-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body modal-body-sm">
                 <form id="edit-account-form">
@@ -602,7 +605,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         <div class="modal-content modal-content--md">
             <div class="modal-header">
                 <h2>${IconHelper.html('user-round-plus', 'md')} Medewerker vervangen</h2>
-                <button class="modal-close" onclick="document.getElementById('replace-employee-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
+                <button type="button" class="modal-close" aria-label="Sluiten" onclick="document.getElementById('replace-employee-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <div class="info-box neutral mb-md">
@@ -1246,8 +1249,10 @@ function renderSettingsEmail(container) {
                 <span class="email-setting-label">${t.label}</span>
                 <span class="email-setting-desc">${t.desc}</span>
             </div>
+            <!-- #366: het omhullende label bevat alleen het schuifje en dus geen
+                 tekst, waardoor het vinkje geen naam had. -->
             <label class="toggle-switch">
-                <input type="checkbox" data-email-type="${t.key}" ${emailSettings.types?.[t.key] !== false ? 'checked' : ''} ${!emailSettings.globalEnabled ? 'disabled' : ''} />
+                <input type="checkbox" data-email-type="${t.key}" aria-label="${escapeHtml(t.label)}" ${emailSettings.types?.[t.key] !== false ? 'checked' : ''} ${!emailSettings.globalEnabled ? 'disabled' : ''} />
                 <span class="toggle-slider"></span>
             </label>
         </div>
@@ -1268,7 +1273,7 @@ function renderSettingsEmail(container) {
                         <span class="email-setting-desc">Schakel alle email notificaties in of uit</span>
                     </div>
                     <label class="toggle-switch">
-                        <input type="checkbox" id="email-global-toggle" ${emailSettings.globalEnabled ? 'checked' : ''} />
+                        <input type="checkbox" id="email-global-toggle" aria-label="Alle email notificaties" ${emailSettings.globalEnabled ? 'checked' : ''} />
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -1295,7 +1300,7 @@ function renderSettingsEmail(container) {
                     <span id="email-status-badge" class="email-status-badge">Laden...</span>
                 </div>
                 <div class="form-group mb-md">
-                    <label class="form-label">Afzenderadres</label>
+                    <label class="form-label" for="email-from-display">Afzenderadres</label>
                     <input type="text" id="email-from-display" class="form-input" readonly />
                     <span class="form-hint">Stel in via de <code>EMAIL_FROM</code> omgevingsvariabele op de server.</span>
                 </div>
@@ -1533,15 +1538,17 @@ function renderSettingsBeheer(container) {
                 <div class="audit-filters">
                     <div class="audit-filter-row">
                         <div class="form-group">
-                            <label>Van</label>
+                            <!-- #366: deze labels stonden zonder for-attribuut en hoorden
+                                 dus bij geen enkel veld. -->
+                            <label for="audit-start-date">Van</label>
                             <input type="date" id="audit-start-date" class="form-input" value="${getDefaultAuditStartDate()}">
                         </div>
                         <div class="form-group">
-                            <label>Tot</label>
+                            <label for="audit-end-date">Tot</label>
                             <input type="date" id="audit-end-date" class="form-input" value="${formatDateYYYYMMDD(new Date())}">
                         </div>
                         <div class="form-group">
-                            <label>Actie</label>
+                            <label for="audit-action-filter">Actie</label>
                             <select id="audit-action-filter" class="form-input">
                                 <option value="">Alle</option>
                                 <option value="CREATE">Aangemaakt</option>
@@ -1557,7 +1564,7 @@ function renderSettingsBeheer(container) {
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>Type</label>
+                            <label for="audit-resource-filter">Type</label>
                             <select id="audit-resource-filter" class="form-input">
                                 <option value="">Alle</option>
                                 <option value="shift">Diensten</option>
@@ -1890,10 +1897,10 @@ function renderTeamsConfig() {
                 </div>
             </div>
             <div class="team-actions">
-                <button class="btn-icon-only" onclick="editTeam('${teamId}')" title="Naam bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
+                <button type="button" class="btn-icon-only" onclick="editTeam('${teamId}')" title="Naam bewerken" aria-label="Naam van ${teamName} bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
                 <input type="color" class="color-picker" value="${team.color}"
-                       onchange="updateTeamColor('${teamId}', this.value)" title="Kleur wijzigen"/>
-                <button class="btn-icon-only danger" onclick="deleteTeam('${teamId}')" title="Verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
+                       onchange="updateTeamColor('${teamId}', this.value)" title="Kleur wijzigen" aria-label="Kleur van ${teamName} wijzigen"/>
+                <button type="button" class="btn-icon-only danger" onclick="deleteTeam('${teamId}')" title="Verwijderen" aria-label="Team ${teamName} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
             </div>
         </div>`;
     });
@@ -1965,8 +1972,8 @@ function renderTemplatesConfig() {
                 <span class="template-times">${template.start} - ${template.end} (${duration})</span>
             </div>
             <div class="template-actions">
-                <button class="btn-icon-only" onclick="editTemplate('${templateId}')" title="Bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
-                <button class="btn-icon-only danger" onclick="deleteTemplate('${templateId}')" title="Verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
+                <button type="button" class="btn-icon-only" onclick="editTemplate('${templateId}')" title="Bewerken" aria-label="Sjabloon ${templateName} bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
+                <button type="button" class="btn-icon-only danger" onclick="deleteTemplate('${templateId}')" title="Verwijderen" aria-label="Sjabloon ${templateName} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
             </div>
         </div>`;
     });
@@ -2121,7 +2128,7 @@ function openTemplateModal(templateId = null, template = null) {
         <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <h2>${title}</h2>
-                <button class="modal-close" onclick="closeTemplateModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
+                <button type="button" class="modal-close" aria-label="Sluiten" onclick="closeTemplateModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="template-id" value="${escapeHtml(templateId || '')}" />
@@ -2261,7 +2268,7 @@ function renderHolidayPeriods() {
                     <span class="holiday-period-days">(${days} dagen, ${totalWeeks} ${totalWeeks === 1 ? 'week' : 'weken'})</span>
                 </span>
             </div>
-            <button class="btn-icon-only danger" onclick="deleteHolidayPeriod(${period.id})" title="Verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
+            <button type="button" class="btn-icon-only danger" onclick="deleteHolidayPeriod(${period.id})" title="Verwijderen" aria-label="Vakantieperiode ${escapeHtml(period.name || '')} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
         </div>`;
     }).join('');
 }
@@ -2410,7 +2417,7 @@ async function openAddHolidayModal() {
         <div class="modal-content modal-content--sm" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <h2>Vakantieperiode toevoegen</h2>
-                <button class="modal-close" onclick="closeHolidayModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
+                <button type="button" class="modal-close" aria-label="Sluiten" onclick="closeHolidayModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
@@ -2733,7 +2740,7 @@ function showWeekendResponsiblePicker(mondayKey) {
         <div class="modal-content modal-content--xs">
             <div class="modal-header">
                 <h3>Weekendverantwoordelijke</h3>
-                <span class="modal-close" id="weekend-picker-close">&times;</span>
+                <button type="button" class="modal-close" id="weekend-picker-close" aria-label="Sluiten">&times;</button>
             </div>
             <div class="modal-body modal-body-md">
                 <p class="text-sm text-muted mb-md">${dateLabel}</p>

@@ -186,6 +186,16 @@ const ToastManager = {
         if (!this.container) {
             this.container = document.createElement('div');
             this.container.className = 'toast-container';
+            // #276: de meldingen stonden in geen enkele live region, dus een
+            // schermlezer kreeg niet te horen of het opslaan van een dienst
+            // gelukt of mislukt was. De stapel is nu zelf een beleefde live
+            // region: nieuwe meldingen worden voorgelezen zodra de gebruiker
+            // uitgesproken is. Fouten en waarschuwingen krijgen in render()
+            // role="alert" op de melding zelf, wat ze dringend maakt.
+            this.container.setAttribute('role', 'status');
+            this.container.setAttribute('aria-live', 'polite');
+            this.container.setAttribute('aria-relevant', 'additions');
+            this.container.setAttribute('aria-atomic', 'false');
             document.body.appendChild(this.container);
         }
     },
@@ -242,10 +252,16 @@ const ToastManager = {
         const el = document.createElement('div');
         el.className = `toast toast-${toast.type}`;
         el.dataset.toastId = toast.id;
+        // Een fout of waarschuwing onderbreekt wat de schermlezer aan het
+        // voorlezen is; een bevestiging of tip wacht netjes haar beurt af.
+        const dringend = toast.type === 'error' || toast.type === 'warning';
+        el.setAttribute('role', dringend ? 'alert' : 'status');
+        // De icoontjes zijn puur decoratief en zouden anders als "afbeelding"
+        // tussen de meldingstekst door worden voorgelezen.
         el.innerHTML = `
-            <span class="toast-icon">${IconHelper.html(iconMap[toast.type], 'sm')}</span>
+            <span class="toast-icon" aria-hidden="true">${IconHelper.html(iconMap[toast.type], 'sm')}</span>
             <span class="toast-message">${escapeHtml(toast.message)}</span>
-            <button class="toast-close" onclick="ToastManager.remove(${toast.id})">${IconHelper.html(ICONS.close, 'xs')}</button>
+            <button type="button" class="toast-close" aria-label="Melding sluiten" onclick="ToastManager.remove(${toast.id})">${IconHelper.html(ICONS.close, 'xs')}</button>
         `;
 
         this.container.appendChild(el);

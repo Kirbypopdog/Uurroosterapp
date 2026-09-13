@@ -532,10 +532,9 @@ function setupEventListeners() {
 
 document.addEventListener('DOMContentLoaded', () => {
     init();
-    // Aria-labels op icon-only knoppen (accessibility)
-    document.querySelectorAll('.modal-close:not([aria-label])').forEach(el => {
-        el.setAttribute('aria-label', 'Sluiten');
-        el.setAttribute('role', 'button');
-    });
+    // #234: de sluitkruisjes staan nu als echte button met aria-label in
+    // index.html, dus hier hoeft niets meer bijgezet te worden. Deze lus liep
+    // ook maar een keer, bij het laden, en raakte de vensters die later door
+    // JavaScript worden opgebouwd dus sowieso niet.
     console.log('Het Vlot Roosterplanning is gestart!');
 });

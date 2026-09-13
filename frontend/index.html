@@ -303,7 +303,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="shift-modal-title">Dienst toevoegen</h2>
-                <span class="modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <form id="shift-form">
                 <div class="form-row">
@@ -373,7 +373,7 @@
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2 id="activity-modal-title">Activiteit toevoegen</h2>
-                <span class="modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <form id="activity-form">
                 <input type="hidden" id="activity-id">
@@ -426,7 +426,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Meldingen</h2>
-                <span class="modal-close" id="warning-details-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="warning-details-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div id="warning-details-list"></div>
@@ -439,7 +439,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Fouten</h2>
-                <span class="modal-close" id="error-details-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="error-details-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div id="error-details-list"></div>
@@ -452,7 +452,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="employee-modal-title">Medewerker toevoegen</h2>
-                <span class="modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <form id="employee-form">
                 <!-- Editable profile fields (shown for admin/roosterverantwoordelijke) -->
@@ -510,7 +510,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="availability-modal-title">Afwezigheid registreren</h2>
-                <span class="modal-close" id="availability-modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="availability-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div id="availability-warning"></div>
             <div class="modal-body">
@@ -574,7 +574,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Dienst Ruilen</h2>
-                <span class="modal-close" id="swap-request-modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="swap-request-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <!-- Shift Preview -->
@@ -626,7 +626,7 @@
         <div class="modal-content modal-content--md">
             <div class="modal-header">
                 <h2>Shift afstaan</h2>
-                <span class="modal-close" id="shift-afstaan-choice-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="shift-afstaan-choice-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <p class="modal-intro-text">
@@ -656,7 +656,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Iemand Zoeken voor Shift</h2>
-                <span class="modal-close" id="takeover-request-modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="takeover-request-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <p class="modal-intro-text">
@@ -705,7 +705,7 @@
     <!-- Input Prompt Modal (replaces browser prompt()) -->
     <div id="input-prompt-modal" class="modal hidden">
         <div class="modal-content input-prompt-content">
-            <label id="input-prompt-message" class="input-prompt-label"></label>
+            <label id="input-prompt-message" class="input-prompt-label" for="input-prompt-value"></label>
             <input type="text" id="input-prompt-value" class="form-input">
             <div class="input-prompt-actions">
                 <button type="button" class="btn btn-secondary btn-sm" id="input-prompt-cancel">Annuleren</button>
@@ -719,7 +719,7 @@
         <div class="modal-content modal-content--xs">
             <div class="modal-header">
                 <h2 id="builder-shift-modal-title">Dienst toewijzen</h2>
-                <span class="modal-close" id="builder-shift-modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="builder-shift-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div id="builder-shift-employee-info" class="form-group mb-md"></div>
@@ -758,7 +758,7 @@
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2>Week kopiëren</h2>
-                <span class="modal-close" id="copy-week-modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="copy-week-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div class="form-row">
@@ -791,16 +791,16 @@
         <div class="modal-content modal-content--lg">
             <div class="modal-header">
                 <h2>Concepten vergelijken</h2>
-                <span class="modal-close" id="draft-diff-modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="draft-diff-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div class="form-row mb-md">
                     <div class="form-group">
-                        <label class="form-label">Concept A</label>
+                        <label class="form-label" for="draft-diff-a">Concept A</label>
                         <select id="draft-diff-a" class="form-input"></select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Concept B</label>
+                        <label class="form-label" for="draft-diff-b">Concept B</label>
                         <select id="draft-diff-b" class="form-input"></select>
                     </div>
                     <div class="form-group" style="flex:0">

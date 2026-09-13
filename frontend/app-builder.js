@@ -125,7 +125,8 @@ function renderBuilderOverview(container) {
                     ${getEffectiveRole() === 'admin' ? `<button class="btn btn-secondary btn-sm" id="builder-upload-concept" title="Concept importeren"><i data-lucide="upload" class="lucide-xs"></i> Importeren</button>` : ''}
                 </div>
                 <div class="builder-overview-filter-row">
-                    <select id="builder-overview-filter" class="form-input form-input-sm">
+                    <select id="builder-overview-filter" class="form-input form-input-sm"
+                            aria-label="Filter concepten">
                         ${filterOptions.map(o => `<option value="${o.value}" ${filter === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
                     </select>
                 </div>
@@ -133,8 +134,11 @@ function renderBuilderOverview(container) {
             ${activeSectionHtml}
             ${otherDrafts.length > 0 || activeDrafts.length > 0 ? '<div class="builder-other-label">Overige concepten</div>' : ''}
             <div class="builder-concept-grid">
-                <div class="builder-concept-card builder-concept-new" id="builder-new-concept-card">
-                    <i data-lucide="plus" class="lucide-lg"></i>
+                <!-- #363: dit was een div met alleen een click-listener, dus
+                     een nieuw concept starten kon enkel met de muis. -->
+                <div class="builder-concept-card builder-concept-new" id="builder-new-concept-card"
+                     role="button" tabindex="0" aria-label="Nieuw concept aanmaken">
+                    <i data-lucide="plus" class="lucide-lg" aria-hidden="true"></i>
                     <span class="text-xs">Nieuw concept</span>
                 </div>
                 ${cardsHtml}
@@ -211,8 +215,14 @@ function renderConceptCard(draft, newestActiveId) {
                     <span class="concept-card-name">${escapeHtml(draft.name)}</span>
                 </span>
                 <div class="concept-card-menu">
-                    <button class="concept-card-menu-trigger" data-draft-id="${dId}">
-                        <i data-lucide="more-vertical" class="lucide-sm"></i>
+                    <!-- #365: deze knop bevat alleen een icoon, dus zonder
+                         aria-label meldde een schermlezer enkel "knop", zeven
+                         keer na elkaar. De conceptnaam erin maakt elke knop
+                         uniek benoemd. -->
+                    <button type="button" class="concept-card-menu-trigger" data-draft-id="${dId}"
+                            aria-haspopup="true" aria-expanded="false"
+                            aria-label="Acties voor ${escapeHtml(draft.name)}">
+                        <i data-lucide="more-vertical" class="lucide-sm" aria-hidden="true"></i>
                     </button>
                     <div class="concept-card-menu-dropdown">
                         ${menuItems}
@@ -1471,14 +1481,20 @@ function attachBuilderOverviewListeners(container) {
             e.stopPropagation();
             const menu = btn.closest('.concept-card-menu');
             const wasOpen = menu.classList.contains('open');
-            // Sluit alle open menus
-            document.querySelectorAll('.concept-card-menu.open').forEach(m => m.classList.remove('open'));
+            // Sluit alle open menus. #365: aria-expanded meldt de toestand ook
+            // aan een schermlezer, dus die moet overal mee terug naar false.
+            document.querySelectorAll('.concept-card-menu.open').forEach(m => {
+                m.classList.remove('open');
+                m.querySelector('.concept-card-menu-trigger')?.setAttribute('aria-expanded', 'false');
+            });
             if (!wasOpen) {
                 menu.classList.add('open');
+                btn.setAttribute('aria-expanded', 'true');
                 // Sluit bij volgende klik ergens
                 setTimeout(() => {
                     document.addEventListener('click', function closeMenu() {
                         menu.classList.remove('open');
+                        btn.setAttribute('aria-expanded', 'false');
                         document.removeEventListener('click', closeMenu);
                     }, { once: true });
                 }, 0);

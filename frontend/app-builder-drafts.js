@@ -249,7 +249,7 @@ function showNewConceptTypeModal() {
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2>Nieuw concept</h2>
-                <span class="modal-close">&times;</span>
+                <button type="button" class="modal-close" aria-label="Sluiten">&times;</button>
             </div>
             <div class="modal-body modal-body-padded">
                 <p class="text-sm text-muted mb-md">Kies het type concept dat je wilt aanmaken.</p>
@@ -299,17 +299,24 @@ function showNewConceptTypeModal() {
     IconHelper.init(overlay);
 
     // Toggle highlight + vakantie period select
+    //
+    // #363: dit hing alleen aan click. Nu de keuzerondjes weer focusbaar zijn
+    // (ze stonden op display:none) kiest de gebruiker met de pijltjestoetsen,
+    // en dat geeft change, geen click. Beide gebeurtenissen lopen daarom door
+    // dezelfde functie.
+    const kiesType = (opt) => {
+        overlay.querySelectorAll('.concept-type-option').forEach(o => o.classList.remove('selected'));
+        opt.classList.add('selected');
+        opt.querySelector('input').checked = true;
+        const periodSelect = overlay.querySelector('#vakantie-period-select');
+        const isVakantie = opt.dataset.value === 'vakantie';
+        periodSelect.classList.toggle('hidden', !isVakantie);
+        const nameInput = overlay.querySelector('#concept-name-input');
+        if (!isVakantie) nameInput.value = 'Basisrooster';
+    };
     overlay.querySelectorAll('.concept-type-option').forEach(opt => {
-        opt.addEventListener('click', () => {
-            overlay.querySelectorAll('.concept-type-option').forEach(o => o.classList.remove('selected'));
-            opt.classList.add('selected');
-            opt.querySelector('input').checked = true;
-            const periodSelect = overlay.querySelector('#vakantie-period-select');
-            const isVakantie = opt.dataset.value === 'vakantie';
-            periodSelect.classList.toggle('hidden', !isVakantie);
-            const nameInput = overlay.querySelector('#concept-name-input');
-            if (!isVakantie) nameInput.value = 'Basisrooster';
-        });
+        opt.addEventListener('click', () => kiesType(opt));
+        opt.querySelector('input')?.addEventListener('change', () => kiesType(opt));
     });
 
     // Auto-fill name when a vakantie period is selected
@@ -435,7 +442,7 @@ function showDraftSaveModal() {
             <div class="modal-content modal-content--xs">
                 <div class="modal-header">
                     <h2>Concept opslaan</h2>
-                    <span class="modal-close" id="draft-save-close"><i data-lucide="x"></i></span>
+                    <button type="button" class="modal-close" id="draft-save-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
                 </div>
                 <div class="modal-body">
                     <div class="form-group">
@@ -684,7 +691,7 @@ async function deactivateBuilderDraft(draftId) {
             <div class="modal-content modal-content--sm">
                 <div class="modal-header">
                     <h2>Concept deactiveren</h2>
-                    <span class="modal-close" id="deactivate-close"><i data-lucide="x"></i></span>
+                    <button type="button" class="modal-close" id="deactivate-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-sm"><strong>${escapeHtml(draft.name)}</strong> deactiveren?</p>
@@ -1066,7 +1073,7 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
             <div class="modal-content modal-content--md">
                 <div class="modal-header">
                     <h2>Concept toepassen</h2>
-                    <span class="modal-close" id="draft-apply-close"><i data-lucide="x"></i></span>
+                    <button type="button" class="modal-close" id="draft-apply-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-sm text-secondary">Periode kiezen voor <strong>${escapeHtml(draft.name)}</strong>:</p>
@@ -1164,7 +1171,7 @@ function showReapplyAfterEditModal(draftName) {
             <div class="modal-content modal-content--xs">
                 <div class="modal-header">
                     <h2>Wijzigingen toepassen?</h2>
-                    <span class="modal-close" id="reapply-close"><i data-lucide="x"></i></span>
+                    <button type="button" class="modal-close" id="reapply-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-xs">Het concept <strong>"${escapeHtml(draftName)}"</strong> is momenteel actief.</p>
