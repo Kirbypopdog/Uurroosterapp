@@ -430,6 +430,44 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
 }
 
 /**
+ * Waarschuwt wanneer je een dienst aanneemt op een dag waarop je zelf afwezig
+ * staat.
+ *
+ * #318: takeover-accept controleert status, type, aanvrager en datum, maar
+ * raadpleegt de availability-tabel niet. Wie die dag als ziek of met verlof
+ * geregistreerd stond kon de dienst gewoon aannemen, waarna de
+ * verlofadministratie en de planning elkaar tegenspraken zonder dat iemand iets
+ * te zien kreeg.
+ *
+ * Bij een ruil bestaat de controle wel (validation.js), maar die draait alleen
+ * bij het AANMAKEN van het verzoek. Meldt de goedkeurder zich daarna ziek, dan
+ * glipt hij er net zo goed door. Vandaar dat beide knoppen deze bevestiging
+ * krijgen.
+ *
+ * Bewust een bevestiging en geen blokkade: de backend dwingt availability
+ * nergens af, ook niet bij een ruil of een handmatige toewijzing. Alleen hier
+ * blokkeren zou de app inconsistent maken. En soms klopt het gewoon: je verlof
+ * gaat niet door, of je bent weer beter.
+ *
+ * @returns {Promise<boolean>} true als er doorgegaan mag worden
+ */
+async function bevestigBijEigenAfwezigheid(datum, watGebeurtEr) {
+    if (!datum) return true;
+    const eigen = getAvailability(AppState.currentUser?.id, datum);
+    if (!eigen || !eigen.type) return true;
+
+    const label = (typeof ABSENCE_LABELS !== 'undefined' && ABSENCE_LABELS[eigen.type]) || eigen.type;
+    const dag = formatDateShort(parseDateOnly(datum));
+
+    return showConfirm(
+        `Je staat op ${dag} genoteerd als ${label.toLowerCase()}${eigen.reason ? ` (${eigen.reason})` : ''}.\n\n` +
+        `${watGebeurtEr} Je afwezigheid en je dienst staan dan allebei in de planning. Klopt dat niet, pas dan eerst je afwezigheid aan.`,
+        'Je staat die dag afwezig',
+        { confirmText: 'Toch doorgaan', cancelText: 'Annuleren', danger: true }
+    );
+}
+
+/**
  * Zegt of de backend deze weigering laat doordrukken.
  *
  * #202: ruilen en overnemen sloegen de roosterregels volledig over. Nu weigert
@@ -478,6 +516,16 @@ function attachSwapActionListeners() {
     document.querySelectorAll('.btn-target-approve-swap').forEach(btn => {
         btn.addEventListener('click', async () => {
             const swapId = parseInt(btn.dataset.swapId);
+
+            // #318: bij een ruil krijg jij de dienst van de aanvrager. De
+            // controle in validation.js draait alleen bij het aanmaken van het
+            // verzoek, dus een afwezigheid die daarna is ingevoerd komt hier
+            // nooit langs.
+            const ruil = (DataStore.swapRequests || []).find(r => Number(r.id) === swapId);
+            if (!await bevestigBijEigenAfwezigheid(
+                    ruil?.requester_shift_date,
+                    'Accepteer je de ruil toch, dan werk je die dag.')) return;
+
             const notes = await showInputPrompt('Wil je een bericht toevoegen?', 'Ruil accepteren');
             if (notes !== null) {
                 try {
@@ -554,6 +602,15 @@ function attachSwapActionListeners() {
     document.querySelectorAll('.btn-accept-takeover').forEach(btn => {
         btn.addEventListener('click', async () => {
             const requestId = parseInt(btn.dataset.requestId);
+
+            // #318: eerst vragen, vóór het berichtvenster. Anders typ je een
+            // bericht en krijg je pas daarna te horen dat je die dag afwezig
+            // staat.
+            const verzoek = (DataStore.swapRequests || []).find(r => Number(r.id) === requestId);
+            if (!await bevestigBijEigenAfwezigheid(
+                    verzoek?.requester_shift_date,
+                    'Neem je de dienst toch over, dan werk je die dag.')) return;
+
             const notes = await showInputPrompt('Wil je een bericht toevoegen?', 'Shift overnemen');
 
             if (notes !== null) {
