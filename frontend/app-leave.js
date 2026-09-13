@@ -1257,32 +1257,68 @@ async function resyncLeaveClosedDays(data) {
     );
     if (!bevestigd) return;
 
+    // #272: dit liep in één for-lus zonder per-blok afhandeling. Faalde het
+    // tweede blok, dan sprong de lus meteen naar de catch en meldde
+    // "Bijwerken mislukt" — terwijl het eerste blok allang echt was
+    // bijgewerkt op de server: nieuwe gesloten dagen, een closedSource-stempel
+    // en de ingevulde dagen die daardoor vervielen. renderLeave() werd in de
+    // catch niet aangeroepen, dus het scherm bleef ook nog de oude toestand
+    // tonen. De beheerder geloofde dus dat er niets gebeurd was, terwijl een
+    // deel van de invulling al weg was.
+    //
+    // Elk blok krijgt nu zijn eigen try/catch, zodat een mislukt blok de
+    // andere niet blokkeert, en de melding zegt exact welk blok wel en welk
+    // niet lukte in plaats van één vage "mislukt".
     let gewist = 0;
+    const gelukt = [];
+    const mislukt = [];
     try {
         await metLeaveVoortgang('leave-resync', 'Gesloten dagen bijwerken…', async () => {
             for (const { blok, concept } of teDoen) {
-                const res = await dataApiFetch(
-                    `/leave-rounds/${round.id}/blocks/${blok.id}${gesloten ? '?force=1' : ''}`, {
-                    method: 'PUT',
-                    body: JSON.stringify({
-                        closedDates: closedDatesFromPattern(blok.startDate, blok.startDate, blok.endDate, concept.grid?._pattern),
-                        closedSource: {
-                            draftId: String(concept.id), draftName: concept.name,
-                            holidayPeriodId: String(blok.holidayPeriodId || ''),
-                            syncedAt: new Date().toISOString(),
-                            syncedBy: AppState.currentUser?.id ?? null,
-                            syncedByName: AppState.currentUser?.name || ''
-                        }
-                    })
-                });
-                gewist += res.entriesRemoved || 0;
+                try {
+                    const res = await dataApiFetch(
+                        `/leave-rounds/${round.id}/blocks/${blok.id}${gesloten ? '?force=1' : ''}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            closedDates: closedDatesFromPattern(blok.startDate, blok.startDate, blok.endDate, concept.grid?._pattern),
+                            closedSource: {
+                                draftId: String(concept.id), draftName: concept.name,
+                                holidayPeriodId: String(blok.holidayPeriodId || ''),
+                                syncedAt: new Date().toISOString(),
+                                syncedBy: AppState.currentUser?.id ?? null,
+                                syncedByName: AppState.currentUser?.name || ''
+                            }
+                        })
+                    });
+                    gewist += res.entriesRemoved || 0;
+                    gelukt.push(blok.name);
+                } catch (err) {
+                    console.error(`Gesloten dagen bijwerken mislukt voor blok "${blok.name}":`, err);
+                    mislukt.push({ naam: blok.name, fout: getUserFriendlyError(err) });
+                }
             }
         });
-        showToast(gewist ? `Gesloten dagen bijgewerkt.\n${gewist} ingevulde dagen vervallen.` : 'Gesloten dagen bijgewerkt', 'success');
-        renderLeave();
+
+        if (mislukt.length === 0) {
+            showToast(gewist ? `Gesloten dagen bijgewerkt.\n${gewist} ingevulde dagen vervallen.` : 'Gesloten dagen bijgewerkt', 'success');
+        } else if (gelukt.length === 0) {
+            showToast(`Bijwerken mislukt voor ${mislukt.map(m => `${m.naam} (${m.fout})`).join(', ')}.`, 'error');
+        } else {
+            showToast(
+                `${gelukt.join(', ')} bijgewerkt${gewist ? `, ${gewist} ingevulde dagen vervallen` : ''}.\n` +
+                `Mislukt: ${mislukt.map(m => `${m.naam} (${m.fout})`).join(', ')}.`,
+                'error'
+            );
+        }
     } catch (err) {
+        // Een fout buiten de per-blok afhandeling (bv. in metLeaveVoortgang zelf)
         console.error('Gesloten dagen bijwerken mislukt:', err);
         showToast('Bijwerken mislukt: ' + getUserFriendlyError(err), 'error');
+    } finally {
+        // Altijd herteken, ook bij een deelmislukking: de server kan al
+        // bijgewerkt zijn terwijl de melding "mislukt" zegt, en het scherm mag
+        // dat nooit verbergen.
+        renderLeave();
     }
 }
 
