@@ -801,8 +801,13 @@ async function handleShiftSubmit(e) {
                     // Combine errors and warnings into one overview
                     let html = '<div class="conflict-resolution">';
 
-                    // Show errors
-                    validation.errors.forEach(error => {
+                    // Show errors. #247: een overlap eerst, want die is de
+                    // echte blokkade. Bij twee diensten op dezelfde dag volgt
+                    // de rustmelding er automatisch uit (0 uur rust), en die
+                    // bovenaan zetten leidt de aandacht weg van de oorzaak.
+                    const gesorteerd = [...validation.errors].sort(
+                        (a, b) => (b.code === 'overlap') - (a.code === 'overlap'));
+                    gesorteerd.forEach(error => {
                         const suggestions = generateSuggestions(error, shiftData);
                         html += `<div class="conflict-item">
                             <div class="conflict-error">${escapeHtml(error.message)}</div>`;
@@ -827,9 +832,30 @@ async function handleShiftSubmit(e) {
                         </div>`;
                     });
 
+                    // #247: een overlap is een harde regel. De backend weigert
+                    // hem ook met force: true, want die slaat alleen de
+                    // rustcontrole over. "Toch opslaan" aanbieden beloofde dus
+                    // een uitweg die niet bestaat: je klikte, kreeg een andere
+                    // foutmelding, klikte nog eens en zat weer bij het eerste
+                    // overzicht. Bij een overlap tonen we alleen de melding en
+                    // de suggestieknoppen.
+                    const harteRegel = validation.errors.some(e => e.code === 'overlap');
+                    if (harteRegel) {
+                        html += `<p class="conflict-uitleg">Een overlap kan niet opgeslagen worden:
+                            iemand kan niet op twee plaatsen tegelijk staan. Pas de tijden aan of
+                            verwijder eerst de andere dienst.</p>`;
+                    }
                     html += '</div>';
                     DOM.shiftValidationErrors.innerHTML = html;
                     IconHelper.init(DOM.shiftValidationErrors);
+
+                    if (harteRegel) {
+                        DOM.shiftSubmitBtn.textContent = 'Opslaan';
+                        DOM.shiftSubmitBtn.classList.add('btn-primary');
+                        DOM.shiftSubmitBtn.classList.remove('btn-warning');
+                        AppState._shiftForceOverride = false;
+                        return;
+                    }
 
                     // Change submit button to indicate override
                     DOM.shiftSubmitBtn.textContent = 'Toch opslaan';
@@ -860,8 +886,11 @@ async function handleShiftSubmit(e) {
         }
     } catch (error) {
         const msg = getUserFriendlyError(error);
-        // 422 = backend 11-uur validatie — geef "Toch opslaan" optie
-        if (error.status === 422 || (error.message && error.message.includes('11-uur'))) {
+        // #247: dit testte op status 422, en sinds die status er werkelijk op
+        // staat ving die tak ook de overlap af. De backend zegt nu zelf of de
+        // regel te overrulen is (canOverride), dus daar testen we op. Alleen de
+        // rusttijd komt met true terug.
+        if (error.status === 422 && error.data?.canOverride) {
             DOM.shiftValidationErrors.innerHTML =
                 `<div class="conflict-resolution"><div class="conflict-item"><div class="conflict-warning">${escapeHtml(msg)}</div></div></div>`;
             IconHelper.init(DOM.shiftValidationErrors);
@@ -871,7 +900,15 @@ async function handleShiftSubmit(e) {
             AppState._shiftBackendForce = true;
         } else {
             AppState._shiftBackendForce = false;
-            DOM.shiftValidationErrors.innerHTML = '<ul><li>Er is een fout opgetreden: ' + escapeHtml(msg) + '</li></ul>';
+            AppState._shiftForceOverride = false;
+            DOM.shiftSubmitBtn.textContent = 'Opslaan';
+            DOM.shiftSubmitBtn.classList.add('btn-primary');
+            DOM.shiftSubmitBtn.classList.remove('btn-warning');
+            const uitleg = error.data?.rule === 'overlap'
+                ? '<p class="conflict-uitleg">Een overlap kan niet opgeslagen worden: iemand kan niet op twee plaatsen tegelijk staan. Pas de tijden aan of verwijder eerst de andere dienst.</p>'
+                : '';
+            DOM.shiftValidationErrors.innerHTML =
+                `<div class="conflict-resolution"><div class="conflict-item"><div class="conflict-error">${escapeHtml(msg)}</div></div>${uitleg}</div>`;
         }
     }
 }

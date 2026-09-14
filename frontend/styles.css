@@ -14029,3 +14029,12 @@ body.dark-mode .heatmap-red { background: var(--alert-error-bg); color: var(--al
 body.dark-mode .diff-removed,
 body.dark-mode .diff-badge.diff-removed { background: var(--alert-error-bg); color: var(--alert-error-text); }
 body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--alert-error-text); }
+
+/* #247: korte uitleg onder een conflict dat niet te overrulen is, zodat de
+   planner weet dat verder klikken geen zin heeft. */
+.conflict-uitleg {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}

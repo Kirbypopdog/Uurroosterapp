@@ -2138,7 +2138,15 @@ v1.post('/shifts', requireAuth, async (req, res) => {
 
     // Valideer 11-uur regel en overlap (force=true slaat enkel rusttijd over, niet overlap)
     const validation = await validateShiftRules(pool, userId, { date, start_time: startTime, end_time: endTime }, null, !!force);
-    if (!validation.valid) return res.status(422).json({ error: validation.message });
+    // #247: het antwoord bevatte alleen een tekst, dus de frontend kon niet
+    // zien of dit een overlap was (nooit te overrulen) of de rusttijd (wel).
+    // Ze bood daardoor bij allebei "Toch opslaan" aan, terwijl force enkel de
+    // rustcontrole overslaat. De ruilendpoints gaven dit al mee.
+    if (!validation.valid) return res.status(422).json({
+      error: validation.message,
+      rule: validation.rule,
+      canOverride: validation.rule === 'rest'
+    });
 
     // Insert the new shift
     const result = await pool.query(`
@@ -2238,7 +2246,12 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
     if (updatedShift.date && updatedShift.start_time && updatedShift.end_time) {
       const targetUserId = userId || oldShift?.userId;
       const validation = await validateShiftRules(pool, targetUserId, updatedShift, id, !!force);
-      if (!validation.valid) return res.status(422).json({ error: validation.message });
+      // #247: zie POST /shifts.
+      if (!validation.valid) return res.status(422).json({
+        error: validation.message,
+        rule: validation.rule,
+        canOverride: validation.rule === 'rest'
+      });
     }
 
     const result = await pool.query(`

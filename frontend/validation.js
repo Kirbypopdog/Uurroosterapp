@@ -73,7 +73,10 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
             const employeeName = employee?.name || `Medewerker #${employeeId}`;
             errors.push({
                 type: ValidationRules.ERROR,
-                rule: '11-uur regel',
+                // #247: 'rule' is de tekst die de gebruiker leest en is al eens
+                // hernoemd. 'code' is waar de code op mag testen.
+                code: 'rust',
+                rule: `${minHoursBetweenShifts}-uur regel`,
                 message: `${employeeName} heeft minder dan ${minHoursBetweenShifts} uur rust tussen diensten (${displayHours} uur tussen ${formatDate(existingShift.date)} en ${formatDate(newShift.date)})`,
                 shift1: existingShift,
                 shift2: newShift
@@ -99,6 +102,10 @@ function validateShiftOverlap(employeeId, newShift, excludeShiftId = null) {
             const employeeName = employee?.name || `Medewerker #${employeeId}`;
             errors.push({
                 type: ValidationRules.ERROR,
+                // #247: een overlap is nooit te overrulen, iemand kan niet op
+                // twee plekken tegelijk staan. De backend weigert hem ook met
+                // force: true.
+                code: 'overlap',
                 rule: 'Overlappende diensten',
                 message: `${employeeName} heeft al een dienst op ${formatDate(existingShift.date)} van ${existingShift.startTime} tot ${existingShift.endTime}`,
                 shift1: existingShift,
