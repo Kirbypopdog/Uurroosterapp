@@ -709,6 +709,47 @@ const MIGRATIONS = [
       await client.query(`UPDATE shifts SET end_time = '00:00' WHERE end_time::text LIKE '24:00%'`);
       await client.query(`UPDATE shifts SET start_time = '00:00' WHERE start_time::text LIKE '24:00%'`);
     }
+  },
+  {
+    // #237: de overlapcontrole en de invoeging stonden los van elkaar, dus twee
+    // gelijktijdige verzoeken kregen allebei een dienst. POST /shifts draait nu
+    // in een transactie met een advisory lock, maar dat dekt alleen dat ene
+    // endpoint. Een unieke index is het vangnet voor elk ander schrijfpad
+    // (bulk aanmaken, een concept toepassen) en voor een eventueel tweede
+    // serverproces.
+    //
+    // Twee diensten voor dezelfde medewerker op dezelfde dag met dezelfde
+    // starttijd overlappen altijd, dus dit sluit niets geldigs uit.
+    //
+    // Staan er al dubbels, dan is de index niet aan te maken. Die wegwerken is
+    // een inhoudelijke keuze over iemands rooster en hoort niet stil in een
+    // migratie thuis. De migratie slaat de index dan over en noemt precies om
+    // welke rijen het gaat. Let op: een migratie draait maar een keer, dus de
+    // index komt er daarna niet vanzelf; het logbericht geeft het commando mee.
+    name: '040_unieke_dienst_per_start',
+    up: async (client) => {
+      const dubbels = await client.query(`
+        SELECT user_id, date::text AS datum, start_time::text AS start, COUNT(*)::int AS aantal
+        FROM shifts
+        GROUP BY user_id, date, start_time
+        HAVING COUNT(*) > 1
+        ORDER BY aantal DESC
+        LIMIT 20
+      `);
+      if (dubbels.rows.length > 0) {
+        console.warn('Migratie 040: de unieke index is NIET aangemaakt, er staan al dubbele diensten:');
+        dubbels.rows.forEach(r => console.warn(
+          `  medewerker ${r.user_id}, ${r.datum} om ${r.start}: ${r.aantal} keer`));
+        console.warn(
+          'Deze migratie draait niet opnieuw. Ruim de dubbels op en voer daarna dit uit:\n' +
+          '  CREATE UNIQUE INDEX CONCURRENTLY idx_shifts_uniek_per_start ON shifts (user_id, date, start_time);'
+        );
+        return;
+      }
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_shifts_uniek_per_start ON shifts (user_id, date, start_time)`
+      );
+    }
   }
 ];
 
@@ -2147,28 +2188,48 @@ v1.post('/shifts', requireAuth, async (req, res) => {
   // source defaults to 'manual' if not specified
   const shiftSource = source === 'auto' ? 'auto' : 'manual';
 
+  // #237: de controle en de invoeging stonden los van elkaar, zonder
+  // transactie en zonder vergrendeling. Twee verzoeken tegelijk lazen allebei
+  // "geen overlap" voordat de eerste INSERT geland was, en kregen allebei een
+  // dienst. Twintig tegelijk gaf zeventien diensten. Twee tegelijk is het
+  // echte scenario: een dubbelklik op Opslaan, of een slepen dat twee keer
+  // afvuurt.
+  //
+  // Een SELECT ... FOR UPDATE helpt hier niet: als er nog geen rij is, valt er
+  // niets te vergrendelen. Een advisory lock op de combinatie medewerker en
+  // datum wel. Die duurt tot het einde van de transactie, werkt ook als er
+  // ooit een tweede serverproces bijkomt, en vraagt geen schemawijziging met
+  // tijdvakberekeningen voor nachtdiensten.
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`shift:${userId}:${date}`]);
+
     // Check if the date is manually closed
-    const closedDatesResult = await pool.query("SELECT value FROM settings WHERE key = 'closedDates'");
+    const closedDatesResult = await client.query("SELECT value FROM settings WHERE key = 'closedDates'");
     const closedDates = (closedDatesResult.rows[0]?.value || []).map(d => d.date);
     if (closedDates.includes(date)) {
+      await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Deze dag is manueel gesloten' });
     }
 
     // Valideer 11-uur regel en overlap (force=true slaat enkel rusttijd over, niet overlap)
-    const validation = await validateShiftRules(pool, userId, { date, start_time: startTime, end_time: endTime }, null, !!force);
+    const validation = await validateShiftRules(client, userId, { date, start_time: startTime, end_time: endTime }, null, !!force);
     // #247: het antwoord bevatte alleen een tekst, dus de frontend kon niet
     // zien of dit een overlap was (nooit te overrulen) of de rusttijd (wel).
     // Ze bood daardoor bij allebei "Toch opslaan" aan, terwijl force enkel de
     // rustcontrole overslaat. De ruilendpoints gaven dit al mee.
-    if (!validation.valid) return res.status(422).json({
-      error: validation.message,
-      rule: validation.rule,
-      canOverride: validation.rule === 'rest'
-    });
+    if (!validation.valid) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({
+        error: validation.message,
+        rule: validation.rule,
+        canOverride: validation.rule === 'rest'
+      });
+    }
 
     // Insert the new shift
-    const result = await pool.query(`
+    const result = await client.query(`
       INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source, is_reserve)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as "date", start_time as "startTime",
@@ -2180,17 +2241,21 @@ v1.post('/shifts', requireAuth, async (req, res) => {
     // Remove shift block ONLY if a MANUAL shift is created (manual overrides the block)
     // Auto shifts should NOT remove blocks (they should respect blocks and not be created at all)
     if (shiftSource === 'manual') {
-      await pool.query(
+      await client.query(
         'DELETE FROM shift_blocks WHERE user_id = $1 AND date = $2',
         [userId, date]
       );
     }
 
+    await client.query('COMMIT');
     await logAudit(req, 'CREATE', 'shift', newShift.id, { shift: newShift });
     res.status(201).json({ shift: newShift });
   } catch (err) {
-    console.error(err);
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('POST /shifts error:', err);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 

@@ -24,9 +24,19 @@ beforeAll(() => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   jest.spyOn(console, 'warn').mockImplementation(() => {});
 
-  // Mock pool.connect used by ensureSchema()
+  // Mock pool.connect used by ensureSchema() and by endpoints that need a
+  // transaction. De client stuurt zijn queries door naar dezelfde pool.query-mock,
+  // zodat een endpoint dat op een transactie overgaat (#237) niet ineens een
+  // andere set antwoorden krijgt dan de tests klaarzetten. BEGIN, COMMIT,
+  // ROLLBACK en de advisory lock hebben geen antwoord nodig.
   pool.connect.mockResolvedValue({
-    query: jest.fn().mockResolvedValue({ rows: [] }),
+    query: jest.fn((...args) => {
+      const sql = typeof args[0] === 'string' ? args[0] : '';
+      if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(sql) || /pg_advisory/i.test(sql)) {
+        return Promise.resolve({ rows: [] });
+      }
+      return pool.query(...args);
+    }),
     release: jest.fn()
   });
 
