@@ -93,6 +93,23 @@ function updateShiftRefreshRange() {
                 .then(() => { if (AppState.currentView === 'planning') renderPlanning(); })
                 .catch(() => {});
         }
+
+        // #378: afwezigheid zit sinds die wijziging ook in een venster. Hier
+        // dezelfde afweging als bij de diensten hierboven, maar met een andere
+        // toets: de meeste weken hebben helemaal geen afwezigheden, dus
+        // "staat er iets in deze week" zou elke navigatie opnieuw laten laden.
+        // zorgAfwezigheidVoorBereik kijkt daarom naar het GELADEN BEREIK en
+        // niet naar de inhoud.
+        if (typeof zorgAfwezigheidVoorBereik === 'function') {
+            zorgAfwezigheidVoorBereik(weekStart, weekEndStr).then(gelukt => {
+                if (!gelukt) {
+                    showToast('Afwezigheden voor deze week konden niet geladen worden. De weergave kan onvolledig zijn.', 'error');
+                    return;
+                }
+                if (AppState.currentView === 'planning') renderPlanning();
+                else if (AppState.currentView === 'availability') renderAvailability();
+            });
+        }
     }
 }
 

@@ -574,6 +574,24 @@ function doLoadDraft(draft) {
     AppState.builderScreen = 'editor';
     renderBuilder();
     showToast(`Concept "${draft.name}" geladen`, 'info');
+
+    // #378: de afwezigheden zitten in een venster. Een vakantieconcept kijkt
+    // naar een periode die maanden vooruit kan liggen, en de filter "Verberg
+    // verlof" leest die afwezigheden. Buiten het venster zou die filter stil
+    // niemand verbergen, wat eruitziet als "niemand heeft verlof" in plaats van
+    // "we weten het niet".
+    const hp = AppState.builderHolidayPeriodId
+        ? (DataStore.settings.holidayPeriods || []).find(x => String(x.id) === String(AppState.builderHolidayPeriodId))
+        : null;
+    if (hp && typeof zorgAfwezigheidVoorBereik === 'function') {
+        zorgAfwezigheidVoorBereik(hp.startDate, hp.endDate).then(gelukt => {
+            if (!gelukt) {
+                showToast('De afwezigheden voor deze vakantieperiode konden niet geladen worden. "Verberg verlof" is daardoor onbetrouwbaar.', 'error');
+                return;
+            }
+            if (AppState.builderScreen === 'editor') renderBuilder();
+        });
+    }
 }
 
 async function deleteBuilderDraft(draftId) {

@@ -2761,11 +2761,23 @@ v1.get('/availability', requireAuth, async (req, res) => {
     const params = [];
     let paramIndex = 1;
 
-    if (startDate && endDate) {
-      query += ` AND date >= $${paramIndex} AND date <= $${paramIndex + 1}`;
-      params.push(startDate, endDate);
-      paramIndex += 2;
-    }
+    // #378: zonder datums gaf dit de VOLLEDIGE historiek terug, van iedereen,
+    // sinds het begin. Bij elke pagina-load van elke gebruiker. Dat groeit mee
+    // met de jaren en het is bovendien een patroon dat niet in de browser van
+    // elke collega hoeft te liggen: wie was wanneer ziek, de afgelopen jaren.
+    //
+    // Een oproep zonder datums levert nu het lopende schooljaar op, ruim
+    // genomen: een jaar terug tot een jaar vooruit. Wie meer nodig heeft,
+    // zoals de backup, vraagt een expliciet bereik.
+    const standaardVan = new Date(); standaardVan.setFullYear(standaardVan.getFullYear() - 1);
+    const standaardTot = new Date(); standaardTot.setFullYear(standaardTot.getFullYear() + 1);
+    const van = startDate && endDate ? startDate : formatDateYYYYMMDD(standaardVan);
+    const tot = startDate && endDate ? endDate : formatDateYYYYMMDD(standaardTot);
+
+    query += ` AND date >= $${paramIndex} AND date <= $${paramIndex + 1}`;
+    params.push(van, tot);
+    paramIndex += 2;
+
     if (userId) {
       query += ` AND user_id = $${paramIndex}`;
       params.push(userId);

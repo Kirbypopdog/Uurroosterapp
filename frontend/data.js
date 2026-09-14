@@ -230,6 +230,16 @@ async function dataApiFetch(path, options = {}) {
 // ===== LOAD DATA FROM API =====
 
 // Initieel datumvenster: 3 maanden terug t/m 3 maanden vooruit
+// #378: het afwezigheidsvenster is ruimer dan dat van de diensten. Een
+// vakantieconcept in de bouwer kijkt naar een periode die maanden vooruit kan
+// liggen, en de afwezigheidstabel navigeert per week door het hele schooljaar.
+function _getAfwezigheidVensterStart() {
+    const d = new Date(); d.setMonth(d.getMonth() - 6); return formatDateYYYYMMDD(d);
+}
+function _getAfwezigheidVensterEind() {
+    const d = new Date(); d.setMonth(d.getMonth() + 12); return formatDateYYYYMMDD(d);
+}
+
 function _getInitialWindowStart() {
     const d = new Date(); d.setMonth(d.getMonth() - 3); return formatDateYYYYMMDD(d);
 }
@@ -252,7 +262,11 @@ async function loadDataFromAPI() {
         const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData, leaveRoundsData, swapRequestsData] = await Promise.all([
             dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
             dataApiFetch(`/shifts?startDate=${_getInitialWindowStart()}&endDate=${_getInitialWindowEnd()}`).catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
-            dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
+            // #378: hetzelfde venster als de diensten, maar een jaar breed, want
+            // de bouwer en de afwezigheidstabel kijken verder vooruit dan de
+            // planning. Alles buiten dit venster wordt bijgeladen via
+            // zorgAfwezigheidVoorBereik.
+            dataApiFetch(`/availability?startDate=${_getAfwezigheidVensterStart()}&endDate=${_getAfwezigheidVensterEind()}`).catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
             dataApiFetch('/shift-blocks').catch(err => { loadErrors.push('shift-blocks'); console.error('[LoadData] Failed to load shift-blocks:', err); return []; }),
             dataApiFetch('/settings').catch(err => { loadErrors.push('settings'); console.error('[LoadData] Failed to load settings:', err); return { settings: {} }; }),
             // #227: dit ving een echte laadfout af met console.log en gaf altijd
@@ -301,6 +315,10 @@ async function loadDataFromAPI() {
         DataStore.shifts = (shiftsData.shifts || []).map(normalizeShift);
         DataStore.activities = (activitiesData.activities || []).map(normalizeActivity);
         DataStore.availability = (availabilityData.availability || []).map(normalizeAvailability);
+        // #378: vastleggen welk bereik er nu in de store zit, zodat schermen
+        // erbuiten weten dat ze moeten bijladen.
+        _geladenAfwezigheidBereik = { startDate: _getAfwezigheidVensterStart(), endDate: _getAfwezigheidVensterEind() };
+        _afwezigheidInitieelGeladen = true;
         DataStore.shiftBlocks = (Array.isArray(shiftBlocksData) ? shiftBlocksData : []).map(normalizeShiftBlock);
         AppState.leaveRounds = leaveRoundsData.rounds || [];
         DataStore.swapRequests = swapRequestsData.swapRequests || [];
@@ -597,16 +615,71 @@ async function refreshUsers() {
     }
 }
 
-async function refreshAvailability() {
+// #378: het bereik dat op dit moment in DataStore.availability zit. Zonder dat
+// weten we niet of een scherm iets niet vindt omdat er niets is, of omdat het
+// buiten het geladen venster valt. Dat onderscheid is precies wat een windowed
+// store gevaarlijk maakt: een scherm blijft stil leeg in plaats van een fout te
+// tonen.
+let _geladenAfwezigheidBereik = null;
+// Tijdens het opstarten roept setCurrentWeek al een bijlading aan, terwijl de
+// initiële lading nog onderweg is. Dat leverde twee oproepen op waarvan de
+// eerste meteen achterhaald was. Pas bijladen zodra we weten wat er al is.
+let _afwezigheidInitieelGeladen = false;
+
+async function refreshAvailability({ startDate, endDate, merge = false } = {}) {
     try {
-        const data = await dataApiFetch('/availability');
-        DataStore.availability = (data.availability || []).map(normalizeAvailability);
+        const params = new URLSearchParams();
+        if (startDate && endDate) {
+            params.set('startDate', startDate);
+            params.set('endDate', endDate);
+        }
+        const url = '/availability' + (params.toString() ? '?' + params.toString() : '');
+        const data = await dataApiFetch(url);
+        const vers = (data.availability || []).map(normalizeAvailability);
+
+        if (merge && startDate && endDate) {
+            DataStore.availability = (DataStore.availability || [])
+                .filter(a => a.date < startDate || a.date > endDate)
+                .concat(vers);
+            _geladenAfwezigheidBereik = {
+                startDate: _geladenAfwezigheidBereik
+                    ? (startDate < _geladenAfwezigheidBereik.startDate ? startDate : _geladenAfwezigheidBereik.startDate)
+                    : startDate,
+                endDate: _geladenAfwezigheidBereik
+                    ? (endDate > _geladenAfwezigheidBereik.endDate ? endDate : _geladenAfwezigheidBereik.endDate)
+                    : endDate
+            };
+        } else {
+            DataStore.availability = vers;
+            _geladenAfwezigheidBereik = startDate && endDate ? { startDate, endDate } : null;
+        }
         return DataStore.availability;
     } catch (error) {
         console.error('[Refresh] Failed to refresh availability:', error);
         throw error;
     }
 }
+
+// Zorg dat het gevraagde bereik in de store zit. Laadt bij wanneer nodig en
+// geeft terug of dat gelukt is, zodat de aanroeper een melding kan tonen in
+// plaats van stil een leeg scherm te laten staan.
+async function zorgAfwezigheidVoorBereik(startDate, endDate) {
+    if (!_afwezigheidInitieelGeladen) return true;
+    const b = _geladenAfwezigheidBereik;
+    if (b && startDate >= b.startDate && endDate <= b.endDate) return true;
+    try {
+        // Ruim nemen, zodat een klik op de volgende week niet meteen weer laadt.
+        const van = b && b.startDate < startDate ? b.startDate : startDate;
+        const tot = b && b.endDate > endDate ? b.endDate : endDate;
+        await refreshAvailability({ startDate: van, endDate: tot, merge: true });
+        return true;
+    } catch (error) {
+        console.error('[Availability] Bijladen mislukt:', error);
+        return false;
+    }
+}
+
+function getGeladenAfwezigheidBereik() { return _geladenAfwezigheidBereik; }
 
 async function fetchShiftBlocks() {
     try {
