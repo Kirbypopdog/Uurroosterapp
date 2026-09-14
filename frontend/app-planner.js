@@ -1,22 +1,49 @@
 // HET VLOT ROOSTERPLANNING - PLANNING RENDERING
 
+// Welk element scrollt er écht? Op desktop is dat de shell (.app-views met
+// overflow:auto), op mobiel het document zelf (zie de 900px-mediaquery in
+// styles.css — daar scrollt de pagina natuurlijk zodat de URL-balk meebeweegt).
+function getAppScrollEl() {
+    const av = document.querySelector('.app-views');
+    if (av && getComputedStyle(av).overflowY !== 'visible') return av;
+    return document.scrollingElement || document.documentElement;
+}
+
+// Waarom is deze dag bewust leeg? De reden staat op de blokkade en bepaalt
+// wat er in de tooltip en in de dienstmodal komt te staan. Een dag die is
+// vrijgekomen door een ruil is iets anders dan een dag die iemand heeft
+// leeggemaakt, en "leeggemaakt" klopt dan gewoon niet.
+const BLOCK_REASON_LABELS = {
+    manual_delete:   'Dienst hier verwijderd',
+    manual_move:     'Dienst verplaatst naar een andere dag of collega',
+    manual_swap:     'Dienst weggeruild',
+    manual_takeover: 'Dienst afgestaan aan een collega'
+};
+
+function blockReasonLabel(reason) {
+    return BLOCK_REASON_LABELS[reason] || 'Dag manueel leeggemaakt';
+}
+
 function renderPlanning() {
-    // Save window scroll position before re-rendering
-    const savedScrollY = window.scrollY || document.documentElement.scrollTop;
+    // Save scroll position before re-rendering
+    const scrollEl = getAppScrollEl();
+    const savedScrollY = scrollEl ? scrollEl.scrollTop : 0;
 
     if (!AppState.currentWeekStart) {
         setCurrentWeek(new Date());
     }
 
     // Lazy-fetch public holidays for visible year if not yet cached
-    const visibleDate = AppState.viewMode === 'month' && AppState.currentMonthStart
-        ? AppState.currentMonthStart
-        : AppState.currentWeekStart || new Date();
+    const visibleDate = AppState.currentWeekStart || new Date();
     const visibleYear = visibleDate.getFullYear();
     if (!DataStore._publicHolidaysCache[visibleYear] && !DataStore._publicHolidaysFetching.has(visibleYear)) {
         fetchPublicHolidays(visibleYear).then(() => renderCalendar());
         return;
     }
+
+    // #228: een validatieronde per render, zodat de meldingenbalk en het raster
+    // hetzelfde antwoord delen in plaats van het twee keer uit te rekenen.
+    beginValidatieRonde();
 
     updatePeriodDisplay();
     updateMobileDayDisplay();
@@ -45,61 +72,143 @@ function renderPlanning() {
         filterBtn.checked = AppState.filterOnlyWithShifts;
     }
 
-    // Restore window scroll position after DOM updates
+    // Restore scroll position after DOM updates
     requestAnimationFrame(() => {
-        window.scrollTo(0, savedScrollY);
+        if (scrollEl) scrollEl.scrollTop = savedScrollY;
     });
+
+    // #228: de ronde sluiten, zodat een latere losse validatie (bijvoorbeeld bij
+    // het opslaan van een dienst) verse gegevens gebruikt en niet iets uit deze
+    // render.
+    eindValidatieRonde();
+}
+
+// #258: calcPlanningHourlyHeadcount liep per aanroep over de VOLLEDIGE
+// DataStore.shifts en parseerde daarbij elke start- en eindtijd opnieuw, ook
+// voor de duizenden diensten die niets met die datum te maken hebben. Daarnaast
+// deed hij per aanroep opnieuw DataStore.activities.filter(...). De heatmap
+// roept hem 7 dagen maal 34 halfuurblokken aan, dus 238 keer per render.
+//
+// De index zit bewust in de functie zelf en niet in renderCoverageHeatmap:
+// validateMinimumStaffing en de startpaginawaarschuwingen gebruiken dezelfde
+// functie, en die profiteren nu mee.
+//
+// De index vervalt zodra een van de drie bronlijsten vervangen wordt. Dat is
+// dezelfde identiteitscontrole als bij de validatie-index (#257): de app
+// vervangt die arrays bij elke refresh, ze worden niet ter plaatse aangepast.
+let _bezettingIndex = null;
+let _bezettingBron = null;
+
+function _bouwBezettingIndex() {
+    const shifts = DataStore.shifts || [];
+    const activities = DataStore.activities || [];
+    const availability = DataStore.availability || [];
+
+    // 'vrij' telt als afwezig: dat is een vaste vrije dag, dus die persoon staat
+    // niet op de vloer. Zie de toelichting bij #204 verderop.
+    const AFWEZIG = ['ziek', 'verlof', 'vrij'];
+    const afwezig = new Set();
+    for (const a of availability) {
+        if (AFWEZIG.includes(a.type)) afwezig.add(`${a.employeeId || a.userId}_${a.date}`);
+    }
+
+    // Diensten per datum, met de tijden al omgerekend naar decimalen.
+    const perDatum = new Map();
+    for (const s of shifts) {
+        const [sh, sm] = s.startTime.split(':').map(Number);
+        const [eh, em] = s.endTime.split(':').map(Number);
+        const startDec = sh + sm / 60;
+        const endDec = eh + em / 60;
+        let lijst = perDatum.get(s.date);
+        if (!lijst) { lijst = []; perDatum.set(s.date, lijst); }
+        lijst.push({
+            team: s.team,
+            emp: String(s.employeeId || s.userId || s.user_id),
+            sleutel: `${s.employeeId || s.userId || s.user_id}_${s.date}`,
+            startDec, endDec, isNight: endDec <= startDec
+        });
+    }
+
+    // Activiteiten per datum, idem.
+    const actPerDatum = new Map();
+    for (const a of activities) {
+        const [ash, asm] = a.startTime.split(':').map(Number);
+        const [aeh, aem] = a.endTime.split(':').map(Number);
+        let lijst = actPerDatum.get(a.date);
+        if (!lijst) { lijst = []; actPerDatum.set(a.date, lijst); }
+        lijst.push({ emp: String(a.userId), start: ash + asm / 60, eind: aeh + aem / 60 });
+    }
+
+    _bezettingIndex = { perDatum, actPerDatum, afwezig };
+    _bezettingBron = {
+        ruwShifts: DataStore.shifts,
+        ruwActivities: DataStore.activities,
+        ruwAvailability: DataStore.availability
+    };
+}
+
+function _bezetting() {
+    // De ruwe waarden vergelijken, niet de || []-variant: die maakt elke keer
+    // een nieuwe lege array en zou de index altijd opnieuw laten bouwen.
+    if (!_bezettingIndex
+        || _bezettingBron.ruwShifts !== DataStore.shifts
+        || _bezettingBron.ruwActivities !== DataStore.activities
+        || _bezettingBron.ruwAvailability !== DataStore.availability) {
+        _bouwBezettingIndex();
+    }
+    return _bezettingIndex;
 }
 
 function calcPlanningHourlyHeadcount(date, hour) {
     const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
+    const index = _bezetting();
 
     // Previous day (for overnight shifts extending into this day)
     const prev = new Date(parseDateOnly(date));
     prev.setDate(prev.getDate() - 1);
     const prevDate = formatDateYYYYMMDD(prev);
 
+    // #204: wie afwezig is telde gewoon mee. Een ziekmelding laat de dienst
+    // namelijk staan: sick-with-takeover maakt afwezigheidsrijen en
+    // overnameverzoeken aan, maar raakt de diensten niet. De grafiek meldde
+    // daardoor drie mensen aan het werk terwijl het er twee waren, precies op
+    // het moment dat het ertoe doet.
+    //
+    // 'vrij' telt hier ook als afwezig: dat is een vaste vrije dag, dus die
+    // persoon staat niet op de vloer. Een dienst op zo'n dag is een
+    // tegenstrijdigheid die de validatie elders meldt, niet iets om hier als
+    // bezetting mee te tellen.
+    // De afwezigheid hoort bij de dag waarop de dienst BEGINT, niet bij het uur
+    // dat we tellen. Anders zou een nachtdienst van gisteravond wegvallen omdat
+    // iemand zich vanochtend ziek meldde, of net blijven staan terwijl hij
+    // gisteren al ziek was. Vandaar de sleutel op medewerker plus datum.
+    const afwezig = index.afwezig;
+
     let bruto = 0;
     const workingEmployees = new Set(); // track who is working at this hour
 
-    for (const s of DataStore.shifts) {
+    // Alleen de dag zelf en de dag ervoor; die laatste voor een nachtdienst die
+    // doorloopt. De rest van het schooljaar staat hier buiten.
+    for (const s of (index.perDatum.get(date) || [])) {
         if (!coverageTeams.includes(s.team)) continue;
-        const [sh, sm] = s.startTime.split(':').map(Number);
-        const [eh, em] = s.endTime.split(':').map(Number);
-        const startDec = sh + sm / 60;
-        const endDec = eh + em / 60;
-        const isNight = endDec <= startDec;
-
-        let isWorking = false;
-        if (s.date === date) {
-            if (isNight) {
-                if (hour >= startDec) isWorking = true;
-            } else {
-                if (hour >= startDec && hour < endDec) isWorking = true;
-            }
-        } else if (s.date === prevDate && isNight) {
-            if (hour < endDec) isWorking = true;
-        }
-
-        if (isWorking) {
-            bruto++;
-            workingEmployees.add(String(s.employeeId || s.userId || s.user_id));
-        }
+        if (afwezig.has(s.sleutel)) continue;
+        const isWorking = s.isNight
+            ? hour >= s.startDec
+            : (hour >= s.startDec && hour < s.endDec);
+        if (isWorking) { bruto++; workingEmployees.add(s.emp); }
+    }
+    for (const s of (index.perDatum.get(prevDate) || [])) {
+        if (!s.isNight) continue;
+        if (!coverageTeams.includes(s.team)) continue;
+        if (afwezig.has(s.sleutel)) continue;
+        if (hour < s.endDec) { bruto++; workingEmployees.add(s.emp); }
     }
 
     // Netto: subtract employees who have an activity at this hour (only if they have a shift)
     let activityCount = 0;
-    const activities = DataStore.activities.filter(a => a.date === date);
-    for (const act of activities) {
-        const empId = String(act.userId);
-        if (!workingEmployees.has(empId)) continue; // only count if employee has a shift
-        const [ash, asm] = act.startTime.split(':').map(Number);
-        const [aeh, aem] = act.endTime.split(':').map(Number);
-        const actStart = ash + asm / 60;
-        const actEnd = aeh + aem / 60;
-        if (hour >= actStart && hour < actEnd) {
-            activityCount++;
-        }
+    for (const act of (index.actPerDatum.get(date) || [])) {
+        if (!workingEmployees.has(act.emp)) continue; // only count if employee has a shift
+        if (hour >= act.start && hour < act.eind) activityCount++;
     }
 
     return { bruto, netto: bruto - activityCount };
@@ -169,12 +278,12 @@ function renderCoverageHeatmap() {
                 let tooltipText;
                 if (required >= 0) {
                     tooltipText = netto < bruto
-                        ? `${timeLabel} — ${netto}/${required} mdw (${bruto - netto} in activiteit)`
-                        : `${timeLabel} — ${netto}/${required} mdw`;
+                        ? `${timeLabel} · ${netto}/${required} mdw (${bruto - netto} in activiteit)`
+                        : `${timeLabel} · ${netto}/${required} mdw`;
                 } else {
                     tooltipText = netto < bruto
-                        ? `${timeLabel} — ${netto} beschikbaar (${bruto} ingepland, ${bruto - netto} in activiteit)`
-                        : `${timeLabel} — ${bruto} medewerkers`;
+                        ? `${timeLabel} · ${netto} beschikbaar (${bruto} ingepland, ${bruto - netto} in activiteit)`
+                        : `${timeLabel} · ${bruto} medewerkers`;
                 }
                 html += `<span class="${segClass}" style="left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%"
                     data-tooltip="${tooltipText}" data-tooltip-pos="top"></span>`;
@@ -202,7 +311,7 @@ function showHeatmapDetail(teamId, date) {
     const teamsToShow = teamId ? [teamId] : coverageTeams;
     const shifts = DataStore.shifts.filter(s => teamsToShow.includes(s.team) && s.date === date);
 
-    let msg = `Bezetting - ${formatDate(date)}\n`;
+    let msg = `Bezetting · ${formatDate(date)}\n`;
     if (shifts.length === 0) {
         msg += 'Geen diensten ingepland.';
     } else {
@@ -226,8 +335,9 @@ const VALIDATION_CATEGORY_CONFIG = {
 function renderValidationAlerts() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
-    const startDate = weekDates[0];
-    const endDate = weekDates[6];
+    // In day view only show alerts for the visible day, not the full week (#142)
+    const startDate = AppState.viewMode === 'day' ? weekDates[AppState.mobileDayIndex] : weekDates[0];
+    const endDate   = AppState.viewMode === 'day' ? weekDates[AppState.mobileDayIndex] : weekDates[6];
     const summary = getValidationSummary(startDate, endDate);
 
     let html = '';
@@ -465,11 +575,7 @@ function groupOverlappingShifts(shifts) {
 
 function renderCalendar() {
     try {
-        if (AppState.viewMode === 'month') {
-            renderMonthView();
-        } else {
-            renderTimelineView();
-        }
+        renderTimelineView();
     } catch (error) {
         console.error('Error rendering calendar:', error);
         DOM.rosterCalendar.innerHTML = '<div class="no-shifts-message">Planner kon niet geladen worden. Probeer de pagina te herladen.</div>';
@@ -494,7 +600,17 @@ function renderOvernightContinuation(empId, date, START_HOUR, TOTAL_HOURS) {
                 ? ((endFrac - START_HOUR) / TOTAL_HOURS) * 100
                 : 2; // eindigt voor 7u: toon mini-indicator aan linkerrand
             const reserveBadge = prevShift.isReserve ? '<span class="reserve-badge">R</span>' : '';
-            html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation"
+            // #356: het doorloopblok kreeg nooit de --xs of --sm klasse die
+            // gewone blokken wel krijgen, dus bleef het tijdlabel staan in een
+            // blok van 20 pixels waar het er 40 nodig heeft. Je las dan "→07:0"
+            // of "→0…", en dat leest als een ander tijdstip. Dezelfde regel als
+            // bij de gewone blokken: onder 2,5 zichtbare uren geen label, onder
+            // de 6 uur geen activiteitenchips.
+            const doorloopUren = endFrac > START_HOUR ? endFrac - START_HOUR : 0;
+            let doorloopKlasse = '';
+            if (doorloopUren < 2.5)    doorloopKlasse = ' timeline-block--xs';
+            else if (doorloopUren < 6) doorloopKlasse = ' timeline-block--sm';
+            html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation${doorloopKlasse}"
                          data-shift-id="${prevShift.id}"
                          data-employee-id="${prevShift.employeeId}"
                          data-date="${prevShift.date}"
@@ -574,9 +690,41 @@ function renderTimelineView() {
     const needsResponsible = isWeekendOrHolidayWeek(currentWeekStart);
     const responsible = needsResponsible ? getOrCalculateResponsible(currentWeekStart) : null;
 
+    // Bouwt de naam+uren-cel (redesign: initialen-avatar + rustige urennotatie)
+    const _teamsMap = DataStore.settings.teams || {};
+    const _fmtHrs = (n) => Number.isInteger(n) ? String(n) : n.toFixed(1);
+    function buildTimelineEmpCell(emp) {
+        const isResp = responsible && String(responsible.id) === String(emp.id);
+        const respBadge = isResp ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
+        const respClass = isResp ? ' is-responsible' : '';
+        const respTip = isResp ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
+        const name = escapeHtml(emp.name);
+        const initials = escapeHtml(getInitials(emp.name || ''));
+        const teamColor = _teamsMap[emp.mainTeam]?.color || '#8d897c';
+        const contractH = emp.contractHours || emp.contract_hours || 0;
+        const weekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
+        const periodH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
+        const periodContract = contractH > 0 ? contractH * 4 : 0;
+        const weekCls = contractH > 0 ? (weekH > contractH ? ' over-hours' : ' under-hours') : '';
+        const periodCls = periodContract > 0 ? (periodH > periodContract ? ' over-hours' : ' under-hours') : '';
+        const weekLabel = contractH > 0 ? `${_fmtHrs(weekH)}/${contractH}u` : `${_fmtHrs(weekH)}u`;
+        const periodLabel = periodContract > 0 ? `${_fmtHrs(periodH)}/${periodContract}u` : `${_fmtHrs(periodH)}u`;
+        return `<div class="timeline-employee-cell${respClass}" ${respTip}>
+            <div class="emp-name-row">
+                <span class="emp-av" style="background:${teamColor};color:${getContrastColor(teamColor)}">${initials}</span>
+                ${respBadge}<span class="emp-name">${name}</span>
+            </div>
+            <div class="emp-hours-line">
+                <span class="emp-hours${weekCls}">${weekLabel}</span>
+                <span class="emp-hours-sub${periodCls}">${periodLabel}</span>
+            </div>
+        </div>`;
+    }
+
     let html = '<div class="timeline-view-wrapper">';
 
     // Header row with days
+    const _todayStr = formatDateYYYYMMDD(new Date());
     html += '<div class="timeline-header">';
     html += '<div class="timeline-name-header">Medewerker</div>';
     weekDates.forEach((date) => {
@@ -592,20 +740,24 @@ function renderTimelineView() {
         const closedDateInfo = getClosedDateInfo(date);
 
         let headerClass = 'timeline-day-header';
+        if (date === _todayStr) headerClass += ' today';
         if (isWeekend) headerClass += ' weekend';
         if (isClosed) headerClass += ' closed';
         if (isHoliday) headerClass += ' holiday';
         if (feestdag) headerClass += ' feestdag';
         if (closedDateInfo) headerClass += ' manually-closed';
 
+        // Een vakantiedag herken je al aan de kleur van de kop; een los
+        // (bovendien wippend) paraplu-icoontje erbij is enkel ruis. De naam
+        // van de vakantie blijft wel bereikbaar via de tooltip op de kop zelf.
         const holidayLabel = escapeHtml(holidayInfo?.name || 'Vakantie');
-        const holidayBadge = isHoliday ? `<span class="holiday-badge" data-tooltip="${holidayLabel}">${IconHelper.html(ICONS.holiday, 'xs')}</span>` : '';
+        const holidayTip = isHoliday ? ` data-tooltip="${holidayLabel}" data-tooltip-pos="bottom"` : '';
         const feestdagBadge = feestdag ? `<span class="feestdag-badge" data-tooltip="${escapeHtml(feestdag.name)}">${IconHelper.html(ICONS.feestdag, 'xs')}</span>` : '';
         const closedBadge = closedDateInfo ? `<span class="closed-date-badge" data-tooltip="${escapeHtml(closedDateInfo.reason || 'Manueel gesloten')}">${IconHelper.html(ICONS.lock, 'xs')}</span>` : '';
 
-        html += `<div class="${headerClass}" data-date="${date}">
+        html += `<div class="${headerClass}" data-date="${date}"${holidayTip}>
             <span class="day-name">${dayName}</span>
-            <span class="day-num">${dateNum}${holidayBadge}${feestdagBadge}${closedBadge}</span>
+            <span class="day-num">${dateNum}${feestdagBadge}${closedBadge}</span>
         </div>`;
     });
     html += '</div>';
@@ -623,38 +775,30 @@ function renderTimelineView() {
 
             const team = teams[teamKey] || { name: teamKey };
             const teamName = escapeHtml(team.name);
+            const isCollapsed = AppState.collapsedTeams.has(teamKey);
 
-            // Team header row
-            html += `<div class="timeline-team-header team-${teamKey}">
+            html += `<div class="tcard${isCollapsed ? ' collapsed' : ''}" data-tcard-team="${teamKey}">`;
+
+            // Team header row (acts as card head + collapse trigger)
+            html += `<div class="tcard-head timeline-team-header team-${teamKey}">
+                <span class="team-header-dot"></span>
                 <div class="team-header-name">${teamName}</div>
                 <div class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</div>
+                <div class="tcard-spacer"></div>
+                <button class="tcard-toggle" aria-label="${isCollapsed ? 'Uitklappen' : 'Inklappen'}">
+                    ${IconHelper.html('chevron-up', 'sm')}
+                </button>
             </div>`;
+
+            html += `<div class="tcard-body">`;
 
             // Employee rows for this team
             teamEmployees.forEach((emp, index) => {
                 const isAlt = index % 2 === 1;
                 html += `<div class="timeline-row ${isAlt ? 'alt' : ''}">`;
 
-                // Employee name - check if this is the weekend responsible
-                const isResponsible = responsible && String(responsible.id) === String(emp.id);
-                const responsibleBadge = isResponsible ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
-                const responsibleClass = isResponsible ? ' is-responsible' : '';
-                const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
-
-                const employeeName = escapeHtml(emp.name);
-                const empContractH = emp.contractHours || emp.contract_hours || 0;
-                const empWeekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
-                const empMonthH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
-                const empMonthContract = empContractH > 0 ? empContractH * 4 : 0;
-                const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
-                const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
-                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(2)}/${empContractH}u` : `${empWeekH.toFixed(2)}u`;
-                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(2)}/${empMonthContract}u` : `${empMonthH.toFixed(2)}u`;
-                html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
-                    <div class="emp-name-row">${responsibleBadge}<span class="emp-name">${employeeName}</span></div>
-                    <span class="emp-hours${empWeekClass}">${empWeekLabel}</span>
-                    <span class="emp-hours${empMonthClass}">${empMonthLabel}</span>
-                </div>`;
+                // Employee name + uren (redesign-cel)
+                html += buildTimelineEmpCell(emp);
 
                 // Day cells with time blocks
                 weekDates.forEach(date => {
@@ -678,19 +822,28 @@ function renderTimelineView() {
 
                     if (!isClosed) {
                         // Check if there's a shift block for this employee on this date
-                        const hasShiftBlock = DataStore.shiftBlocks.some(
+                        const shiftBlock = DataStore.shiftBlocks.find(
                             block => String(block.user_id) === String(emp.id) && block.date === date
                         );
 
                         // Show shift block indicator if present
-                        if (hasShiftBlock) {
-                            html += `<div class="shift-block-indicator" data-tooltip="Shift geblokkeerd (auto-schedule overgeslagen)" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
+                        if (shiftBlock) {
+                            const canRelease = hasPermission('MANAGE_SHIFTS');
+                            const releaseTip = canRelease ? ' · Klik om dag terug vrij te geven aan het concept' : '';
+                            html += `<div class="shift-block-indicator${canRelease ? ' shift-block-indicator--clickable' : ''}" data-block-id="${shiftBlock.id}" data-employee="${emp.id}" data-date="${date}" data-tooltip="${blockReasonLabel(shiftBlock.reason)}${releaseTip}" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
                         }
 
                         // Get shifts for this employee on this date
                         let shifts = getShiftsByEmployee(emp.id, date, date);
                         // Filter by visible teams (include shifts without team)
                         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
+
+                        // Toon "niet werkzaam" markering op lege cellen (#173)
+                        const cellAvail = getAvailability(emp.id, date);
+                        if (!shiftBlock && shifts.length === 0 && cellAvail?.type === 'vrij') {
+                            const nwReason = cellAvail.reason ? ` · ${escapeHtml(cellAvail.reason)}` : '';
+                            html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                        }
 
                         const isDayView = AppState.viewMode === 'day';
 
@@ -701,7 +854,7 @@ function renderTimelineView() {
 
                         // Render shifts that start on this day
                         shifts.forEach(shift => {
-                            const validation = validateShift(shift, shift.id);
+                            const validation = validateBestaandeDienst(shift);
                             const availability = getAvailability(shift.employeeId, date);
 
                             // Check if employee is absent - this is a conflict!
@@ -719,6 +872,13 @@ function renderTimelineView() {
                             const leftPercent = Math.max(0, ((startFrac - START_HOUR) / TOTAL_HOURS) * 100);
 
                             let widthPercent;
+                            // #208: hoeveel uren van de tijdlijn het blok ECHT
+                            // beslaat. Dat is iets anders dan de duur van de
+                            // dienst: de tijdlijn loopt van 07:00 tot 24:00, dus
+                            // een nachtdienst van 22:00 tot 07:00 duurt negen uur
+                            // maar krijgt op een geknipte cel maar twee uren
+                            // breedte. Het tijdlabel moet hierop afgaan.
+                            let breedteUren;
                             if (isOvernight) {
                                 // Nachtdienst: bereken totale breedte over beide dagen
                                 // Van starttijd tot middernacht (24:00) op dag 1
@@ -730,6 +890,7 @@ function renderTimelineView() {
                                 if (dayOfWeek === 0 || isDayView) {
                                     const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
                                     widthPercent = `${widthDay1Percent}%`;
+                                    breedteUren = hoursDay1;
                                 } else {
                                     // Other days: show full overnight shift spanning two day cells
                                     // We moeten de width berekenen als: dag1 deel + kleine gap + dag2 deel
@@ -740,11 +901,13 @@ function renderTimelineView() {
 
                                     // Totaal: dag1 + gap (4px) + dag2
                                     widthPercent = `calc(${widthDay1Percent}% + 4px + ${widthDay2Percent}%)`;
+                                    breedteUren = hoursDay1 + hoursDay2;
                                 }
                             } else {
                                 const endFrac = endHour + endMin / 60;
                                 const rightEnd = Math.min(END_HOUR, endFrac);
                                 widthPercent = ((rightEnd - Math.max(startFrac, START_HOUR)) / TOTAL_HOURS) * 100;
+                                breedteUren = rightEnd - Math.max(startFrac, START_HOUR);
                             }
 
                             let blockClass = `timeline-block team-${shift.team}`;
@@ -772,7 +935,7 @@ function renderTimelineView() {
                                 titleText += ' (nachtdienst)';
                             }
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
+                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'vrij': 'Vrij' };
                                 titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
@@ -793,6 +956,22 @@ function renderTimelineView() {
                             // Remove inline onclick - handled by DragHandler
                             const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
+                            // Determine display density based on duration (#147)
+                            // #208: dit ging op de DUUR van de dienst, niet op de
+                            // breedte die het blok krijgt. Een nachtdienst van
+                            // 22:00 tot 07:00 duurt negen uur, dus de smalle
+                            // klasse en het korte label bleven uit, terwijl het
+                            // blok op een geknipte cel maar 21 pixels breed werd.
+                            // Het label werd dan gecentreerd afgeknipt en je las
+                            // het MIDDEN van de tekst, zoiets als "0-07", wat op
+                            // een geldige tijd lijkt en het niet is.
+                            // Drempels gemeten op een dagcel van ongeveer 170px: één uur
+                            // is dan een kleine 10px. "22:00" heeft 31px nodig en
+                            // "22:00-07:00" 57px, dus ruwweg 2,5 en 6 uur breedte.
+                            const zichtbaarUren = Math.max(0, breedteUren || 0);
+                            if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
+                            else if (zichtbaarUren < 6) blockClass += ' timeline-block--sm';
+
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
                             let actChips = '';
@@ -802,17 +981,48 @@ function renderTimelineView() {
                                 actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
                             });
 
-                            html += `<div class="${blockClass}"
+                            // Show only start time when block is too narrow for full range (#147)
+                            // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
+                            // niet, dus dan alleen de starttijd. Die is
+                            // ondubbelzinnig, een afgeknipte reeks niet.
+                            const timeLabel = zichtbaarUren < 6
+                                ? shift.startTime
+                                : `${shift.startTime}-${shift.endTime}`;
+
+                            // #274: een dienstblok is een div en stond dus niet
+                            // in de tabvolgorde; met het toetsenbord was er geen
+                            // enkele dienst te openen. Alleen blokken die je mag
+                            // bewerken worden focusbaar, want een tabstop die
+                            // niets doet is alleen maar in de weg. De gedeelde
+                            // handler in app-ui.js maakt Enter en spatie gelijk
+                            // aan een klik.
+                            // #246: een nachtdienst loopt door in de cel van de
+                            // volgende dag, maar updateResizeDrag rekent met de
+                            // cel van de eerste dag. De muis ligt dan altijd
+                            // voorbij het einde van die cel, dus elke sleep van
+                            // het handvat zette de eindtijd op middernacht en
+                            // gooide de uren van de nachtdienst weg. Zolang dat
+                            // niet tegen de juiste cel gerekend wordt, is geen
+                            // handvat eerlijker dan een handvat dat altijd
+                            // hetzelfde verkeerde antwoord geeft. Bewerken kan
+                            // gewoon via het venster.
+                            const isNachtdienst = shift.endTime <= shift.startTime;
+                            const blokNaam = getEmployee(shift.employeeId)?.name || 'Medewerker';
+                            const toetsAttrs = canEdit
+                                ? ` role="button" tabindex="0" aria-label="${escapeHtml(`Dienst ${blokNaam}, ${shift.date}, ${shift.startTime} tot ${shift.endTime}`)}"`
+                                : '';
+
+                            html += `<div class="${blockClass}"${toetsAttrs}
                                          data-shift-id="${shift.id}"
                                          data-employee-id="${shift.employeeId}"
                                          data-date="${shift.date}"
                                          style="left: ${leftPercent}%; width: ${widthStyle}; ${cursorStyle}"
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
-                                ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
+                                ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                <span class="block-time">${shift.startTime}-${shift.endTime}</span>
+                                <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
-                                ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
+                                ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
                     }
@@ -822,41 +1032,33 @@ function renderTimelineView() {
 
                 html += '</div>'; // Close row
             });
+
+            html += '</div>'; // Close tcard-body
+            html += '</div>'; // Close tcard
         });
 
         // Render employees without a team (if any)
         const noTeamEmployees = employeesByTeam['_no_team'];
         if (noTeamEmployees && noTeamEmployees.length > 0) {
-            // Team header row for "No Team"
-            html += `<div class="timeline-team-header team-no-team">
+            const noTeamCollapsed = AppState.collapsedTeams.has('_no_team');
+            html += `<div class="tcard${noTeamCollapsed ? ' collapsed' : ''}" data-tcard-team="_no_team">`;
+            html += `<div class="tcard-head timeline-team-header team-no-team">
+                <span class="team-header-dot"></span>
                 <div class="team-header-name">Geen Team</div>
                 <div class="team-header-count">${noTeamEmployees.length} medewerker${noTeamEmployees.length !== 1 ? 's' : ''}</div>
+                <div class="tcard-spacer"></div>
+                <button class="tcard-toggle" aria-label="${noTeamCollapsed ? 'Uitklappen' : 'Inklappen'}">
+                    ${IconHelper.html('chevron-up', 'sm')}
+                </button>
             </div>`;
+            html += `<div class="tcard-body">`;
 
             // Employee rows for no-team employees
             noTeamEmployees.forEach((emp, index) => {
                 const isAlt = index % 2 === 1;
                 html += `<div class="timeline-row ${isAlt ? 'alt' : ''}">`;
 
-                const isResponsible = responsible && String(responsible.id) === String(emp.id);
-                const responsibleBadge = isResponsible ? `<span class="responsible-badge">${IconHelper.html(ICONS.star, 'xs')}</span>` : '';
-                const responsibleClass = isResponsible ? ' is-responsible' : '';
-                const responsibleTooltip = isResponsible ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
-
-                const employeeName = escapeHtml(emp.name);
-                const empContractH = emp.contractHours || emp.contract_hours || 0;
-                const empWeekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
-                const empMonthH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
-                const empMonthContract = empContractH > 0 ? empContractH * 4 : 0;
-                const empWeekClass = empContractH > 0 ? (empWeekH > empContractH ? ' over-hours' : ' under-hours') : '';
-                const empMonthClass = empMonthContract > 0 ? (empMonthH > empMonthContract ? ' over-hours' : ' under-hours') : '';
-                const empWeekLabel = empContractH > 0 ? `${empWeekH.toFixed(2)}/${empContractH}u` : `${empWeekH.toFixed(2)}u`;
-                const empMonthLabel = empMonthContract > 0 ? `${empMonthH.toFixed(2)}/${empMonthContract}u` : `${empMonthH.toFixed(2)}u`;
-                html += `<div class="timeline-employee-cell${responsibleClass}" ${responsibleTooltip}>
-                    <div class="emp-name-row">${responsibleBadge}<span class="emp-name">${employeeName}</span></div>
-                    <span class="emp-hours${empWeekClass}">${empWeekLabel}</span>
-                    <span class="emp-hours${empMonthClass}">${empMonthLabel}</span>
-                </div>`;
+                html += buildTimelineEmpCell(emp);
 
                 weekDates.forEach(date => {
                     const d = parseDateOnly(date);
@@ -883,6 +1085,25 @@ function renderTimelineView() {
 
                         const isDayView = AppState.viewMode === 'day';
 
+                        // Toon "niet werkzaam" markering op lege cellen (#173)
+                        // Zelfde blokkade-indicator als in de team-tak hierboven;
+                        // ontbrak hier, waardoor medewerkers zonder team geen
+                        // enkel teken kregen dat een dag bewust leeg is.
+                        const shiftBlock2 = DataStore.shiftBlocks.find(
+                            block => String(block.user_id) === String(emp.id) && block.date === date
+                        );
+                        if (shiftBlock2) {
+                            const canRelease2 = hasPermission('MANAGE_SHIFTS');
+                            const releaseTip2 = canRelease2 ? ' · Klik om dag terug vrij te geven aan het concept' : '';
+                            html += `<div class="shift-block-indicator${canRelease2 ? ' shift-block-indicator--clickable' : ''}" data-block-id="${shiftBlock2.id}" data-employee="${emp.id}" data-date="${date}" data-tooltip="${blockReasonLabel(shiftBlock2.reason)}${releaseTip2}" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
+                        }
+
+                        const cellAvail2 = getAvailability(emp.id, date);
+                        if (!shiftBlock2 && shifts.length === 0 && cellAvail2?.type === 'vrij') {
+                            const nwReason2 = cellAvail2.reason ? ` · ${escapeHtml(cellAvail2.reason)}` : '';
+                            html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason2}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                        }
+
                         // Doorloop van nachtshift: enkel tonen op maandag (zondag→maandag weekgrens) of in dagweergave
                         if (isDayView || dayOfWeek === 1) {
                             html += renderOvernightContinuation(emp.id, date, START_HOUR, TOTAL_HOURS);
@@ -890,7 +1111,7 @@ function renderTimelineView() {
 
                         // Render shifts that start on this day
                         shifts.forEach(shift => {
-                            const validation = validateShift(shift, shift.id);
+                            const validation = validateBestaandeDienst(shift);
                             const availability = getAvailability(shift.employeeId, date);
 
                             // Check if employee is absent - this is a conflict!
@@ -908,6 +1129,13 @@ function renderTimelineView() {
                             const leftPercent = Math.max(0, ((startFrac - START_HOUR) / TOTAL_HOURS) * 100);
 
                             let widthPercent;
+                            // #208: hoeveel uren van de tijdlijn het blok ECHT
+                            // beslaat. Dat is iets anders dan de duur van de
+                            // dienst: de tijdlijn loopt van 07:00 tot 24:00, dus
+                            // een nachtdienst van 22:00 tot 07:00 duurt negen uur
+                            // maar krijgt op een geknipte cel maar twee uren
+                            // breedte. Het tijdlabel moet hierop afgaan.
+                            let breedteUren;
                             if (isOvernight) {
                                 // Nachtdienst: bereken totale breedte over beide dagen
                                 const hoursDay1 = END_HOUR - startFrac; // van start tot 24:00
@@ -917,16 +1145,19 @@ function renderTimelineView() {
                                 if (dayOfWeek === 0 || isDayView) {
                                     const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
                                     widthPercent = `${widthDay1Percent}%`;
+                                    breedteUren = hoursDay1;
                                 } else {
                                     // Other days: show full overnight shift spanning two day cells
                                     const widthDay1Percent = (hoursDay1 / TOTAL_HOURS) * 100;
                                     const widthDay2Percent = (hoursDay2 / TOTAL_HOURS) * 100;
                                     widthPercent = `calc(${widthDay1Percent}% + 4px + ${widthDay2Percent}%)`;
+                                    breedteUren = hoursDay1 + hoursDay2;
                                 }
                             } else {
                                 const endFrac = endHour + endMin / 60;
                                 const rightEnd = Math.min(END_HOUR, endFrac);
                                 widthPercent = ((rightEnd - Math.max(startFrac, START_HOUR)) / TOTAL_HOURS) * 100;
+                                breedteUren = rightEnd - Math.max(startFrac, START_HOUR);
                             }
 
                             let blockClass = `timeline-block team-${shift.team}`;
@@ -954,7 +1185,7 @@ function renderTimelineView() {
                                 titleText += ' (nachtdienst)';
                             }
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig' };
+                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'vrij': 'Vrij' };
                                 titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
@@ -974,6 +1205,22 @@ function renderTimelineView() {
                             const canEdit = canUserEditShift(shift);
                             const cursorStyle = canEdit ? 'cursor: grab;' : 'cursor: default;';
 
+                            // Determine display density based on duration (#147)
+                            // #208: dit ging op de DUUR van de dienst, niet op de
+                            // breedte die het blok krijgt. Een nachtdienst van
+                            // 22:00 tot 07:00 duurt negen uur, dus de smalle
+                            // klasse en het korte label bleven uit, terwijl het
+                            // blok op een geknipte cel maar 21 pixels breed werd.
+                            // Het label werd dan gecentreerd afgeknipt en je las
+                            // het MIDDEN van de tekst, zoiets als "0-07", wat op
+                            // een geldige tijd lijkt en het niet is.
+                            // Drempels gemeten op een dagcel van ongeveer 170px: één uur
+                            // is dan een kleine 10px. "22:00" heeft 31px nodig en
+                            // "22:00-07:00" 57px, dus ruwweg 2,5 en 6 uur breedte.
+                            const zichtbaarUren = Math.max(0, breedteUren || 0);
+                            if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
+                            else if (zichtbaarUren < 6) blockClass += ' timeline-block--sm';
+
                             // Render activity chips inside the block
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
                             let actChips = '';
@@ -983,17 +1230,48 @@ function renderTimelineView() {
                                 actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
                             });
 
-                            html += `<div class="${blockClass}"
+                            // Show only start time when block is too narrow for full range (#147)
+                            // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
+                            // niet, dus dan alleen de starttijd. Die is
+                            // ondubbelzinnig, een afgeknipte reeks niet.
+                            const timeLabel = zichtbaarUren < 6
+                                ? shift.startTime
+                                : `${shift.startTime}-${shift.endTime}`;
+
+                            // #274: een dienstblok is een div en stond dus niet
+                            // in de tabvolgorde; met het toetsenbord was er geen
+                            // enkele dienst te openen. Alleen blokken die je mag
+                            // bewerken worden focusbaar, want een tabstop die
+                            // niets doet is alleen maar in de weg. De gedeelde
+                            // handler in app-ui.js maakt Enter en spatie gelijk
+                            // aan een klik.
+                            // #246: een nachtdienst loopt door in de cel van de
+                            // volgende dag, maar updateResizeDrag rekent met de
+                            // cel van de eerste dag. De muis ligt dan altijd
+                            // voorbij het einde van die cel, dus elke sleep van
+                            // het handvat zette de eindtijd op middernacht en
+                            // gooide de uren van de nachtdienst weg. Zolang dat
+                            // niet tegen de juiste cel gerekend wordt, is geen
+                            // handvat eerlijker dan een handvat dat altijd
+                            // hetzelfde verkeerde antwoord geeft. Bewerken kan
+                            // gewoon via het venster.
+                            const isNachtdienst = shift.endTime <= shift.startTime;
+                            const blokNaam = getEmployee(shift.employeeId)?.name || 'Medewerker';
+                            const toetsAttrs = canEdit
+                                ? ` role="button" tabindex="0" aria-label="${escapeHtml(`Dienst ${blokNaam}, ${shift.date}, ${shift.startTime} tot ${shift.endTime}`)}"`
+                                : '';
+
+                            html += `<div class="${blockClass}"${toetsAttrs}
                                          data-shift-id="${shift.id}"
                                          data-employee-id="${shift.employeeId}"
                                          data-date="${shift.date}"
                                          style="left: ${leftPercent}%; width: ${widthStyle}; ${cursorStyle}"
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
-                                ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
+                                ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                <span class="block-time">${shift.startTime}-${shift.endTime}</span>
+                                <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
-                                ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
+                                ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
                     }
@@ -1003,6 +1281,9 @@ function renderTimelineView() {
 
                 html += '</div>'; // Close row
             });
+
+            html += '</div>'; // Close tcard-body
+            html += '</div>'; // Close tcard
         }
     }
 
@@ -1025,290 +1306,6 @@ function renderTimelineView() {
     if (typeof DragHandler !== 'undefined') {
         DragHandler.init();
     }
-}
-
-function renderMonthView() {
-    const monthStart = AppState.currentMonthStart || getMonthStart(new Date());
-    const weeks = getMonthWeeks(monthStart);
-    const allDates = getMonthDates(monthStart);
-
-    // Get all shifts this month (filtered by visible teams)
-    let allShifts = [];
-    allDates.forEach(date => {
-        let shifts = getShiftsByDate(date);
-        shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
-        allShifts = allShifts.concat(shifts);
-    });
-
-    // Get employees: those with shifts + all active employees in visible teams
-    const employeeIdsWithShifts = new Set(allShifts.map(s => s.employeeId));
-    const activeEmployees = getAllEmployees(true).filter(emp =>
-        emp.mainTeam && AppState.visibleTeams.includes(emp.mainTeam)
-    );
-    const employeeMap = new Map();
-    activeEmployees.forEach(emp => employeeMap.set(emp.id, emp));
-    employeeIdsWithShifts.forEach(id => {
-        if (!employeeMap.has(id)) {
-            const emp = getEmployee(id);
-            if (emp) employeeMap.set(id, emp);
-        }
-    });
-    let employees = [...employeeMap.values()];
-
-    // Group by team (reuse logic from renderTimelineView)
-    const teams = DataStore.settings.teams || {};
-    const teamOrder = getTeamOrder()
-        .filter(t => AppState.visibleTeams.includes(t));
-    const employeesByTeam = {};
-
-    teamOrder.forEach(teamKey => {
-        employeesByTeam[teamKey] = employees
-            .filter(emp => emp.mainTeam === teamKey)
-            .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
-    });
-
-    // Employees without team
-    const employeesWithoutTeam = employees
-        .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
-        .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
-    if (employeesWithoutTeam.length > 0) {
-        employeesByTeam['_no_team'] = employeesWithoutTeam;
-    }
-
-    let html = '<div class="month-view-wrapper">';
-
-    // Header: week rows with dates
-    html += '<div class="month-header">';
-    html += '<div class="month-name-header">Medewerker</div>';
-
-    weeks.forEach((weekStart) => {
-        const weekDates = getWeekDates(weekStart);
-        html += '<div class="month-week-header">';
-
-        weekDates.forEach(date => {
-            const d = parseDateOnly(date);
-            const dayOfWeek = d.getDay();
-            const dayNames = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
-            const dayName = dayNames[dayOfWeek];
-            const dayNum = d.getDate();
-            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-            const isClosed = isDayClosed(date);
-            const isHoliday = isHolidayPeriod(date);
-            const feestdag = getPublicHoliday(date);
-            const closedDateInfo = getClosedDateInfo(date);
-
-            // Highlight dates outside current month
-            const currentMonth = monthStart.getMonth();
-            const isCurrentMonth = d.getMonth() === currentMonth;
-
-            let headerClass = 'month-day-header';
-            if (isWeekend) headerClass += ' weekend';
-            if (isClosed) headerClass += ' closed';
-            if (isHoliday) headerClass += ' holiday';
-            if (feestdag) headerClass += ' feestdag';
-            if (closedDateInfo) headerClass += ' manually-closed';
-            if (!isCurrentMonth) headerClass += ' other-month';
-
-            const feestdagBadge = feestdag ? `<span class="feestdag-badge" data-tooltip="${escapeHtml(feestdag.name)}">${IconHelper.html(ICONS.feestdag, 'xs')}</span>` : '';
-            const closedBadge = closedDateInfo ? `<span class="closed-date-badge" data-tooltip="${escapeHtml(closedDateInfo.reason || 'Manueel gesloten')}">${IconHelper.html(ICONS.lock, 'xs')}</span>` : '';
-
-            html += `<div class="${headerClass}" data-date="${date}">
-                <span class="day-name">${dayName}</span>
-                <span class="day-num">${dayNum}${feestdagBadge}${closedBadge}</span>
-            </div>`;
-        });
-
-        html += '</div>'; // month-week-header
-    });
-    html += '</div>'; // month-header
-
-    // Body: employee rows with shift badges
-    html += '<div class="month-body">';
-
-    if (employees.length === 0) {
-        html += '<div class="empty-state"><i data-lucide="calendar-x" class="empty-state-icon"></i><p>Geen shifts gepland voor deze periode.</p><small>Pas een concept toe of voeg shifts handmatig toe.</small></div>';
-    } else {
-        teamOrder.forEach(teamKey => {
-            const teamEmployees = employeesByTeam[teamKey];
-            if (!teamEmployees || teamEmployees.length === 0) return;
-
-            const team = teams[teamKey] || { name: teamKey };
-            const teamName = escapeHtml(team.name);
-
-            // Team header
-            html += `<div class="month-team-header team-${teamKey}">
-                <div class="team-header-name">${teamName}</div>
-                <div class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</div>
-            </div>`;
-
-            // Employee rows
-            teamEmployees.forEach((emp, index) => {
-                const isAlt = index % 2 === 1;
-                html += `<div class="month-row ${isAlt ? 'alt' : ''}">`;
-
-                const employeeName = escapeHtml(emp.name);
-                const empContractH = emp.contractHours || emp.contract_hours || 0;
-                const empMonthH = getEmployeeHoursThisPeriod(emp.id, formatDateYYYYMMDD(monthStart));
-                const monthContract = empContractH > 0 ? empContractH * 4 : 0;
-                const empMonthOverClass = monthContract > 0 ? (empMonthH > monthContract ? ' over-hours' : ' under-hours') : '';
-                const empMonthLabel = monthContract > 0 ? `${empMonthH.toFixed(2)}/${monthContract}u` : `${empMonthH.toFixed(2)}u`;
-                html += `<div class="month-employee-cell">
-                    <span class="emp-name">${employeeName}</span>
-                    <span class="emp-hours${empMonthOverClass}">${empMonthLabel}</span>
-                </div>`;
-
-                // Week columns
-                weeks.forEach(weekStart => {
-                    const weekDates = getWeekDates(weekStart);
-                    html += '<div class="month-week-cells">';
-
-                    weekDates.forEach(date => {
-                        const d = parseDateOnly(date);
-                        const dayOfWeek = d.getDay();
-                        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                        const isClosed = isDayClosed(date);
-                        const isCurrentMonth = d.getMonth() === monthStart.getMonth();
-
-                        let cellClass = 'month-day-cell';
-                        if (isWeekend) cellClass += ' weekend';
-                        if (isClosed) cellClass += ' closed';
-                        if (!isCurrentMonth) cellClass += ' other-month';
-
-                        html += `<div class="${cellClass}" data-date="${date}" data-employee="${emp.id}">`;
-
-                        if (!isClosed) {
-                            let shifts = getShiftsByEmployee(emp.id, date, date);
-                            shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
-
-                            const maxVisible = 3;
-                            const visibleShifts = shifts.slice(0, maxVisible);
-                            const hiddenCount = Math.max(0, shifts.length - maxVisible);
-
-                            visibleShifts.forEach(shift => {
-                                const timeStr = `${shift.startTime.substring(0, 5)}-${shift.endTime.substring(0, 5)}`;
-                                const validation = validateShift(shift, shift.id);
-                                const hasErrors = validation.errors.length > 0;
-                                const hasWarnings = validation.warnings.length > 0;
-
-                                let badgeClass = `month-shift-badge team-${shift.team}`;
-                                if (hasErrors) badgeClass += ' has-error';
-                                else if (hasWarnings) badgeClass += ' has-warning';
-
-                                const canEdit = canUserEditShift(shift);
-                                const onClick = canEdit ? `onclick="openEditShiftModal('${shift.id}')"` : '';
-
-                                const shiftTeam = teams[shift.team];
-                                const teamNameText = shiftTeam ? shiftTeam.name : shift.team;
-                                const tooltipText = `${timeStr}\\n${teamNameText}${shift.notes ? '\\n' + shift.notes : ''}`;
-
-                                html += `<div class="${badgeClass}" ${onClick} title="${escapeHtml(tooltipText)}">${timeStr}</div>`;
-                            });
-
-                            if (hiddenCount > 0) {
-                                html += `<div class="month-shift-more">+${hiddenCount}</div>`;
-                            }
-                        }
-
-                        html += '</div>'; // month-day-cell
-                    });
-
-                    html += '</div>'; // month-week-cells
-                });
-
-                html += '</div>'; // month-row
-            });
-        });
-
-        // Handle employees without team
-        if (employeesByTeam['_no_team']) {
-            const teamEmployees = employeesByTeam['_no_team'];
-            html += `<div class="month-team-header">
-                <div class="team-header-name">Geen team</div>
-                <div class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</div>
-            </div>`;
-
-            teamEmployees.forEach((emp, index) => {
-                const isAlt = index % 2 === 1;
-                html += `<div class="month-row ${isAlt ? 'alt' : ''}">`;
-
-                const employeeName = escapeHtml(emp.name);
-                const empContractH = emp.contractHours || emp.contract_hours || 0;
-                const empMonthH = getEmployeeHoursThisPeriod(emp.id, formatDateYYYYMMDD(monthStart));
-                const monthContract = empContractH > 0 ? empContractH * 4 : 0;
-                const empMonthOverClass = monthContract > 0 ? (empMonthH > monthContract ? ' over-hours' : ' under-hours') : '';
-                const empMonthLabel = monthContract > 0 ? `${empMonthH.toFixed(2)}/${monthContract}u` : `${empMonthH.toFixed(2)}u`;
-                html += `<div class="month-employee-cell">
-                    <span class="emp-name">${employeeName}</span>
-                    <span class="emp-hours${empMonthOverClass}">${empMonthLabel}</span>
-                </div>`;
-
-                weeks.forEach(weekStart => {
-                    const weekDates = getWeekDates(weekStart);
-                    html += '<div class="month-week-cells">';
-
-                    weekDates.forEach(date => {
-                        const d = parseDateOnly(date);
-                        const dayOfWeek = d.getDay();
-                        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                        const isClosed = isDayClosed(date);
-                        const isCurrentMonth = d.getMonth() === monthStart.getMonth();
-
-                        let cellClass = 'month-day-cell';
-                        if (isWeekend) cellClass += ' weekend';
-                        if (isClosed) cellClass += ' closed';
-                        if (!isCurrentMonth) cellClass += ' other-month';
-
-                        html += `<div class="${cellClass}">`;
-
-                        if (!isClosed) {
-                            let shifts = getShiftsByEmployee(emp.id, date, date);
-                            shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
-
-                            const maxVisible = 3;
-                            const visibleShifts = shifts.slice(0, maxVisible);
-                            const hiddenCount = Math.max(0, shifts.length - maxVisible);
-
-                            visibleShifts.forEach(shift => {
-                                const timeStr = `${shift.startTime.substring(0, 5)}-${shift.endTime.substring(0, 5)}`;
-                                const validation = validateShift(shift, shift.id);
-                                const hasErrors = validation.errors.length > 0;
-                                const hasWarnings = validation.warnings.length > 0;
-
-                                let badgeClass = `month-shift-badge team-${shift.team}`;
-                                if (hasErrors) badgeClass += ' has-error';
-                                else if (hasWarnings) badgeClass += ' has-warning';
-
-                                const canEdit = canUserEditShift(shift);
-                                const onClick = canEdit ? `onclick="openEditShiftModal('${shift.id}')"` : '';
-
-                                const shiftTeam = teams[shift.team];
-                                const teamNameText = shiftTeam ? shiftTeam.name : shift.team;
-                                const tooltipText = `${timeStr}\\n${teamNameText}${shift.notes ? '\\n' + shift.notes : ''}`;
-
-                                html += `<div class="${badgeClass}" ${onClick} title="${escapeHtml(tooltipText)}">${timeStr}</div>`;
-                            });
-
-                            if (hiddenCount > 0) {
-                                html += `<div class="month-shift-more">+${hiddenCount}</div>`;
-                            }
-                        }
-
-                        html += '</div>';
-                    });
-
-                    html += '</div>';
-                });
-
-                html += '</div>';
-            });
-        }
-    }
-
-    html += '</div>'; // month-body
-    html += '</div>'; // month-view-wrapper
-
-    DOM.rosterCalendar.innerHTML = html;
-    IconHelper.init(DOM.rosterCalendar);
 }
 
 function getShiftsForDateAndTimeSlot(date, slotStart, slotEnd) {

@@ -93,17 +93,22 @@ async function importBackup() {
     if (backup.availability && backup.availability.length > 0) {
       console.log(`Importing ${backup.availability.length} availability records...`);
       for (const avail of backup.availability) {
+        // #206: hier stond `notes`, maar die kolom bestaat niet op
+        // availability. Het is `reason`. Elke backup met afwezigheid erin
+        // liep hier stuk op "column notes of relation availability does not
+        // exist", dus er was geen enkele werkende weg terug.
+        // `avail.notes` blijft aanvaard voor oudere backupbestanden.
         await client.query(`
-          INSERT INTO availability (user_id, date, type, notes)
+          INSERT INTO availability (user_id, date, type, reason)
           VALUES ($1, $2, $3, $4)
           ON CONFLICT (user_id, date) DO UPDATE SET
             type = EXCLUDED.type,
-            notes = EXCLUDED.notes
+            reason = EXCLUDED.reason
         `, [
           avail.userId || avail.employeeId,
           avail.date,
           avail.type,
-          avail.notes || ''
+          avail.reason || avail.notes || ''
         ]);
       }
     }

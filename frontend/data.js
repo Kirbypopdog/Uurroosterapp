@@ -52,6 +52,9 @@ function normalizeSettings(settings) {
     if (!Array.isArray(merged.holidayPeriods)) {
         merged.holidayPeriods = defaults.holidayPeriods || [];
     }
+    if (!Array.isArray(merged.conceptClosedDates)) {
+        merged.conceptClosedDates = [];
+    }
     if (!merged.holidayRules || typeof merged.holidayRules !== 'object') {
         merged.holidayRules = defaults.holidayRules || {};
     } else if (defaults.holidayRules) {
@@ -168,10 +171,37 @@ async function dataApiFetch(path, options = {}) {
         ...(token ? { 'Authorization': `Bearer ${token}` } : {})
     };
 
-    const response = await fetch(`${window.API_BASE}${path}`, {
-        ...options,
-        headers: { ...headers, ...(options.headers || {}) }
-    });
+    // #233: zonder tijdslimiet bleef een opslagoverlay ("Dienst opslaan...",
+    // "Afwezigheid opslaan...", "Medewerker opslaan...") eeuwig staan als de
+    // server het verzoek aanvaardde maar nooit antwoordde. Er was geen enkele
+    // manier waarop de await ooit zou teruggeven, dus de finally die
+    // hideSectionLoading aanroept werd nooit bereikt. Eén tijdslimiet hier
+    // dekt alle aanroepers in de app in één keer, in plaats van dit apart te
+    // repareren bij elke plek die een overlay toont.
+    //
+    // Een aanroeper die zelf al een signal meegeeft (bv. om zelf te kunnen
+    // annuleren) houdt voorrang; dan bemoeien we ons er niet mee.
+    const eigenSignal = !!options.signal;
+    const controller = eigenSignal ? null : new AbortController();
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 20000) : null;
+
+    let response;
+    try {
+        response = await fetch(`${window.API_BASE}${path}`, {
+            ...options,
+            headers: { ...headers, ...(options.headers || {}) },
+            signal: options.signal || controller.signal
+        });
+    } catch (err) {
+        if (!eigenSignal && err.name === 'AbortError') {
+            const fout = new Error('Geen antwoord van de server binnen 20 seconden. Controleer je verbinding en probeer opnieuw.');
+            fout.status = 0;
+            throw fout;
+        }
+        throw err;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
         if (response.status === 401) {
@@ -184,7 +214,14 @@ async function dataApiFetch(path, options = {}) {
         const data = await response.json().catch(() => ({}));
         const msg = data.error || `HTTP ${response.status}`;
         const detail = data.detail ? ` (${data.detail})` : '';
-        throw new Error(msg + detail);
+        const fout = new Error(msg + detail);
+        // De statuscode en het volledige antwoord meegeven, zodat een aanroeper
+        // kan reageren op wat de backend zegt in plaats van op de tekst te
+        // moeten matchen. Gebruikt door de ruil- en overnameknoppen, die bij
+        // canOverride een bevestiging tonen en het opnieuw proberen met force.
+        fout.status = response.status;
+        fout.data = data;
+        throw fout;
     }
 
     return response.json();
@@ -193,6 +230,16 @@ async function dataApiFetch(path, options = {}) {
 // ===== LOAD DATA FROM API =====
 
 // Initieel datumvenster: 3 maanden terug t/m 3 maanden vooruit
+// #378: het afwezigheidsvenster is ruimer dan dat van de diensten. Een
+// vakantieconcept in de bouwer kijkt naar een periode die maanden vooruit kan
+// liggen, en de afwezigheidstabel navigeert per week door het hele schooljaar.
+function _getAfwezigheidVensterStart() {
+    const d = new Date(); d.setMonth(d.getMonth() - 6); return formatDateYYYYMMDD(d);
+}
+function _getAfwezigheidVensterEind() {
+    const d = new Date(); d.setMonth(d.getMonth() + 12); return formatDateYYYYMMDD(d);
+}
+
 function _getInitialWindowStart() {
     const d = new Date(); d.setMonth(d.getMonth() - 3); return formatDateYYYYMMDD(d);
 }
@@ -204,19 +251,61 @@ async function loadDataFromAPI() {
     try {
         // Load all data in parallel - users now includes employee/schedule data
         const loadErrors = [];
-        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData] = await Promise.all([
+
+        // /schedule-drafts is admin-only. Voor een medewerker gaf dit bij elke
+        // login een rode 403 in de console — opgevangen, maar verwarrend.
+        // Let op: de échte rol, niet getEffectiveRole(): een admin die een
+        // medewerker simuleert moet de concepten wél geladen hebben.
+        const echteRol = AppState.currentUser?.role;
+        const magConcepten = ['admin', 'roosterverantwoordelijke',
+            'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(echteRol);
+        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData, leaveRoundsData, swapRequestsData] = await Promise.all([
             dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
             dataApiFetch(`/shifts?startDate=${_getInitialWindowStart()}&endDate=${_getInitialWindowEnd()}`).catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
-            dataApiFetch('/availability').catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
+            // #378: hetzelfde venster als de diensten, maar een jaar breed, want
+            // de bouwer en de afwezigheidstabel kijken verder vooruit dan de
+            // planning. Alles buiten dit venster wordt bijgeladen via
+            // zorgAfwezigheidVoorBereik.
+            dataApiFetch(`/availability?startDate=${_getAfwezigheidVensterStart()}&endDate=${_getAfwezigheidVensterEind()}`).catch(err => { loadErrors.push('availability'); console.error('[LoadData] Failed to load availability:', err); return { availability: [] }; }),
             dataApiFetch('/shift-blocks').catch(err => { loadErrors.push('shift-blocks'); console.error('[LoadData] Failed to load shift-blocks:', err); return []; }),
             dataApiFetch('/settings').catch(err => { loadErrors.push('settings'); console.error('[LoadData] Failed to load settings:', err); return { settings: {} }; }),
-            dataApiFetch('/schedule-drafts').catch(err => { console.log('[LoadData] Schedule drafts not available (using settings fallback)'); return { drafts: null }; }),
-            dataApiFetch('/shift-activities').catch(err => { console.log('[LoadData] Activities not available'); return { activities: [] }; })
+            // #227: dit ving een echte laadfout af met console.log en gaf altijd
+            // { drafts: null } terug, zonder onderscheid tussen "geen rechten"
+            // (medewerker) en "de aanroep is mislukt" (bv. tijdens een
+            // backend-herstart). console.log is in productie gedempt
+            // (app-globals.js), dus dat tweede geval liet letterlijk geen
+            // spoor na. De bouwer viel dan stil terug op de oude
+            // settings-opslag, die op een moderne database meestal leeg of
+            // verouderd is, en een nieuw concept ging vervolgens ook naar die
+            // verkeerde plek.
+            magConcepten
+                ? dataApiFetch('/schedule-drafts').catch(err => {
+                    loadErrors.push('concepten');
+                    console.error('[LoadData] Failed to load schedule-drafts:', err);
+                    return { drafts: null, failed: true };
+                })
+                : Promise.resolve({ drafts: null }),
+            dataApiFetch('/shift-activities').catch(err => { console.log('[LoadData] Activities not available'); return { activities: [] }; }),
+            // Nodig op de startpagina: daar herinneren we mensen eraan dat een
+            // verlofronde nog op hen wacht, zonder dat ze de verloftab openen.
+            dataApiFetch('/leave-rounds').catch(err => { console.log('[LoadData] Verlofrondes niet beschikbaar'); return { rounds: [] }; }),
+            // #198: ruilverzoeken werden pas geladen bij het openen van de
+            // ruiltab. Daardoor zweeg de kaart "Vraagt je aandacht" op de
+            // startpagina precies bij het inloggen, en las de sleepbescherming
+            // uit #175 een lege lijst. Wie inlogde, home bekeek en weer wegging
+            // miste elke ruil- of overnamevraag.
+            dataApiFetch('/swap-requests').catch(err => { loadErrors.push('ruilverzoeken'); console.error('[LoadData] Failed to load swap-requests:', err); return { swapRequests: [] }; })
         ]);
 
         if (loadErrors.length > 0) {
+            // #271: dit stond op 'warning' en verdween dus na vijf seconden.
+            // Daarna toont de planning een compleet raster met alle
+            // medewerkers en overal 0 uren, zonder enig blijvend teken dat de
+            // gegevens ontbreken. Wie de toast miste trok daar conclusies uit.
+            // Een 'error'-toast blijft staan tot de gebruiker hem zelf
+            // wegklikt (zie ToastManager.show: duration 0 voor 'error').
             if (typeof showToast === 'function') {
-                showToast(`Sommige data kon niet geladen worden: ${loadErrors.join(', ')}`, 'warning');
+                showToast(`Sommige data kon niet geladen worden: ${loadErrors.join(', ')}. Herlaad de pagina om het opnieuw te proberen.`, 'error');
             }
         }
 
@@ -226,7 +315,13 @@ async function loadDataFromAPI() {
         DataStore.shifts = (shiftsData.shifts || []).map(normalizeShift);
         DataStore.activities = (activitiesData.activities || []).map(normalizeActivity);
         DataStore.availability = (availabilityData.availability || []).map(normalizeAvailability);
+        // #378: vastleggen welk bereik er nu in de store zit, zodat schermen
+        // erbuiten weten dat ze moeten bijladen.
+        _geladenAfwezigheidBereik = { startDate: _getAfwezigheidVensterStart(), endDate: _getAfwezigheidVensterEind() };
+        _afwezigheidInitieelGeladen = true;
         DataStore.shiftBlocks = (Array.isArray(shiftBlocksData) ? shiftBlocksData : []).map(normalizeShiftBlock);
+        AppState.leaveRounds = leaveRoundsData.rounds || [];
+        DataStore.swapRequests = swapRequestsData.swapRequests || [];
 
         // Merge API settings with defaults
         const apiSettings = settingsData.settings || {};
@@ -238,6 +333,7 @@ async function loadDataFromAPI() {
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
             closedDates: apiSettings.closedDates || DataStore.settings.closedDates,
+            conceptClosedDates: apiSettings.conceptClosedDates || DataStore.settings.conceptClosedDates || [],
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
             // planningHorizon: legacy, replaced by school year logic
             schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
@@ -256,6 +352,16 @@ async function loadDataFromAPI() {
         if (draftsData.drafts) {
             DataStore.settings.schedule_drafts = draftsData.drafts;
             DataStore._draftsFromTable = true;
+            DataStore._draftsLoadFailed = false;
+        } else if (draftsData.failed) {
+            // #227: de tabel-ophaling is echt mislukt (niet zomaar
+            // "geen rechten"). DataStore.settings.schedule_drafts houdt de
+            // oude/lege fallback dan aan, en de bouwer mag daar niet
+            // stilzwijgend naar gaan schrijven: dat concept zou na een
+            // geslaagde herlaad onvindbaar zijn voor de rest van de app, want
+            // die leest dan weer uit de echte tabel. app-builder-drafts.js
+            // controleert deze vlag vóór elke schrijfactie.
+            DataStore._draftsLoadFailed = true;
         }
 
         DataStore._loaded = true;
@@ -463,6 +569,9 @@ async function updateShift(id, updates) {
 // Herladen van specifieke data types van de server (DataStore als pure cache)
 
 async function refreshShifts({ startDate, endDate, merge = false } = {}) {
+    // Geen actieve sessie → niets ophalen. Voorkomt 401-ruis wanneer init-code
+    // (bv. setCurrentWeek) een refresh triggert vóór de gebruiker is ingelogd.
+    if (!sessionStorage.getItem('hetvlot_token')) return DataStore.shifts;
     try {
         // Auto-use active range if set and no explicit params given
         if (!startDate && !endDate && _activeShiftRange) {
@@ -506,16 +615,71 @@ async function refreshUsers() {
     }
 }
 
-async function refreshAvailability() {
+// #378: het bereik dat op dit moment in DataStore.availability zit. Zonder dat
+// weten we niet of een scherm iets niet vindt omdat er niets is, of omdat het
+// buiten het geladen venster valt. Dat onderscheid is precies wat een windowed
+// store gevaarlijk maakt: een scherm blijft stil leeg in plaats van een fout te
+// tonen.
+let _geladenAfwezigheidBereik = null;
+// Tijdens het opstarten roept setCurrentWeek al een bijlading aan, terwijl de
+// initiële lading nog onderweg is. Dat leverde twee oproepen op waarvan de
+// eerste meteen achterhaald was. Pas bijladen zodra we weten wat er al is.
+let _afwezigheidInitieelGeladen = false;
+
+async function refreshAvailability({ startDate, endDate, merge = false } = {}) {
     try {
-        const data = await dataApiFetch('/availability');
-        DataStore.availability = (data.availability || []).map(normalizeAvailability);
+        const params = new URLSearchParams();
+        if (startDate && endDate) {
+            params.set('startDate', startDate);
+            params.set('endDate', endDate);
+        }
+        const url = '/availability' + (params.toString() ? '?' + params.toString() : '');
+        const data = await dataApiFetch(url);
+        const vers = (data.availability || []).map(normalizeAvailability);
+
+        if (merge && startDate && endDate) {
+            DataStore.availability = (DataStore.availability || [])
+                .filter(a => a.date < startDate || a.date > endDate)
+                .concat(vers);
+            _geladenAfwezigheidBereik = {
+                startDate: _geladenAfwezigheidBereik
+                    ? (startDate < _geladenAfwezigheidBereik.startDate ? startDate : _geladenAfwezigheidBereik.startDate)
+                    : startDate,
+                endDate: _geladenAfwezigheidBereik
+                    ? (endDate > _geladenAfwezigheidBereik.endDate ? endDate : _geladenAfwezigheidBereik.endDate)
+                    : endDate
+            };
+        } else {
+            DataStore.availability = vers;
+            _geladenAfwezigheidBereik = startDate && endDate ? { startDate, endDate } : null;
+        }
         return DataStore.availability;
     } catch (error) {
         console.error('[Refresh] Failed to refresh availability:', error);
         throw error;
     }
 }
+
+// Zorg dat het gevraagde bereik in de store zit. Laadt bij wanneer nodig en
+// geeft terug of dat gelukt is, zodat de aanroeper een melding kan tonen in
+// plaats van stil een leeg scherm te laten staan.
+async function zorgAfwezigheidVoorBereik(startDate, endDate) {
+    if (!_afwezigheidInitieelGeladen) return true;
+    const b = _geladenAfwezigheidBereik;
+    if (b && startDate >= b.startDate && endDate <= b.endDate) return true;
+    try {
+        // Ruim nemen, zodat een klik op de volgende week niet meteen weer laadt.
+        const van = b && b.startDate < startDate ? b.startDate : startDate;
+        const tot = b && b.endDate > endDate ? b.endDate : endDate;
+        await refreshAvailability({ startDate: van, endDate: tot, merge: true });
+        return true;
+    } catch (error) {
+        console.error('[Availability] Bijladen mislukt:', error);
+        return false;
+    }
+}
+
+function getGeladenAfwezigheidBereik() { return _geladenAfwezigheidBereik; }
 
 async function fetchShiftBlocks() {
     try {
@@ -526,6 +690,11 @@ async function fetchShiftBlocks() {
         console.error('Error fetching shift blocks:', error);
         return [];
     }
+}
+
+async function deleteShiftBlock(blockId) {
+    await dataApiFetch(`/shift-blocks/${blockId}`, { method: 'DELETE' });
+    DataStore.shiftBlocks = DataStore.shiftBlocks.filter(b => b.id !== blockId);
 }
 
 async function refreshActivities() {
@@ -590,9 +759,17 @@ function getActivitiesByEmployee(userId, date) {
     );
 }
 
-async function deleteShift(id) {
+// skipBlock=true slaat het aanmaken van een shift_block over. Gebruik dat bij
+// systeemopkuis, waar het verwijderen geen bewuste keuze is om de cel leeg te
+// laten. Zonder blokkade vult een concept de dag bij een volgende toepassing
+// gewoon weer.
+//
+// #189: deze parameter werd wel meegegeven door 'Dag sluiten' maar bestond hier
+// niet, dus hij werd stilzwijgend genegeerd en er kwam alsnog een blokkade.
+async function deleteShift(id, skipBlock = false) {
     try {
-        await dataApiFetch(`/shifts/${id}`, { method: 'DELETE' });
+        const url = `/shifts/${id}` + (skipBlock ? '?skipBlock=true' : '');
+        await dataApiFetch(url, { method: 'DELETE' });
 
         await refreshShifts();
         await fetchShiftBlocks();
@@ -604,8 +781,16 @@ async function deleteShift(id) {
     }
 }
 
+// #245: dit vergeleek strikt met ===, terwijl id soms als tekst binnenkomt.
+// Elke werkende weg parseerde hem eerst naar een getal, maar de maandweergave
+// gaf hem via een inline onclick als tekst door ('42'). getShift gaf dan
+// undefined, openEditShiftModal deed een stille return, en een klik op een
+// dienst opende daar dus niets. Hier vergelijken op getal haalt die valkuil
+// voorgoed weg in plaats van hem per aanroeper op te lossen.
 function getShift(id) {
-    return DataStore.shifts.find(s => s.id === id);
+    const gezocht = Number(id);
+    if (Number.isNaN(gezocht)) return undefined;
+    return DataStore.shifts.find(s => Number(s.id) === gezocht);
 }
 
 function getShiftsByDate(date) {
@@ -906,11 +1091,11 @@ async function cancelSwapRequest(id) {
     }
 }
 
-async function targetApproveSwapRequest(id, responseNotes) {
+async function targetApproveSwapRequest(id, responseNotes, force = false) {
     try {
         await dataApiFetch(`/swap-requests/${id}/target-approve`, {
             method: 'PUT',
-            body: JSON.stringify({ responseNotes })
+            body: JSON.stringify({ responseNotes, ...(force ? { force: true } : {}) })
         });
 
         // Refresh swap requests + shifts (target approval executes the swap)
@@ -964,11 +1149,11 @@ async function createTakeoverRequest(shiftId, message) {
     }
 }
 
-async function acceptTakeoverRequest(id, responseNotes) {
+async function acceptTakeoverRequest(id, responseNotes, force = false) {
     try {
         await dataApiFetch(`/shift-requests/${id}/takeover-accept`, {
             method: 'PUT',
-            body: JSON.stringify({ responseNotes })
+            body: JSON.stringify({ responseNotes, ...(force ? { force: true } : {}) })
         });
         await getSwapRequests();
         return true;
@@ -992,6 +1177,7 @@ async function refreshSettings() {
             holidayPeriods: apiSettings.holidayPeriods || DataStore.settings.holidayPeriods,
             holidayRules: apiSettings.holidayRules || DataStore.settings.holidayRules,
             closedDates: apiSettings.closedDates || DataStore.settings.closedDates,
+            conceptClosedDates: apiSettings.conceptClosedDates || DataStore.settings.conceptClosedDates || [],
             responsibleRotation: apiSettings.responsibleRotation || DataStore.settings.responsibleRotation,
             schedule_templates: apiSettings.schedule_templates || DataStore.settings.schedule_templates || [],
             schedulePattern: apiSettings.schedule_pattern || DataStore.settings.schedulePattern,
@@ -1154,18 +1340,10 @@ function getFourWeekPeriodDates(date) {
     if (schoolWeek === null) return null;
     const periodIndex = Math.floor((schoolWeek - 1) / 4); // 0-based
 
-    const syStart = getSchoolYearStart();
-    const syDate = parseDateOnly(syStart);
-    const d = parseDateOnly(date);
-    let syYear = d.getFullYear();
-    let thisYearStart = new Date(syYear, syDate.getMonth(), syDate.getDate());
-    thisYearStart.setHours(0, 0, 0, 0);
-    if (d < thisYearStart) {
-        syYear--;
-        thisYearStart = new Date(syYear, syDate.getMonth(), syDate.getDate());
-        thisYearStart.setHours(0, 0, 0, 0);
-    }
-    const startMonday = getSchoolAnchorMonday(thisYearStart);
+    // #244: dit bepaalde het schooljaar zelf, op basis van de datum in plaats
+    // van de maandag van de week. Nu dezelfde helper als getSchoolWeekNumber.
+    const startMonday = getSchoolYearAnchorMonday(date);
+    if (!startMonday) return null;
 
     const periodStart = new Date(startMonday);
     periodStart.setDate(periodStart.getDate() + periodIndex * 28);
@@ -1377,6 +1555,10 @@ function getWeekLabel(weekNumber, forDate) {
 function isDayClosed(date) {
     const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
     if (isDateManuallyClosed(dateStr)) return true;
+    // Een vakantieconcept schrijft zijn patroon niet naar schedule_pattern —
+    // die cyclus is vakantie-relatief. Zijn gesloten dagen staan daarom als
+    // absolute datums in conceptClosedDates.
+    if (isDateClosedByDraft(dateStr)) return true;
     const d = parseDateOnly(date);
     const dayOfWeek = d.getDay();
     const weekNumber = getWeekNumber(date);
@@ -1513,9 +1695,20 @@ function isDateManuallyClosed(date) {
     return (DataStore.settings.closedDates || []).some(d => d.date === dateStr);
 }
 
+// Gesloten dagen die uit een toegepast VAKANTIEconcept komen. Ze staan apart
+// van closedDates omdat die lijst van de gebruiker is: deze horen bij hun
+// concept, worden bij elke toepassing vervangen, en verschijnen daarom niet
+// in het lijstje "manueel gesloten datums" in Instellingen.
+function isDateClosedByDraft(date) {
+    const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
+    return (DataStore.settings.conceptClosedDates || []).some(d => d.date === dateStr);
+}
+
 function getClosedDateInfo(date) {
     const dateStr = typeof date === 'string' ? date : formatDateYYYYMMDD(date);
-    return (DataStore.settings.closedDates || []).find(d => d.date === dateStr) || null;
+    return (DataStore.settings.closedDates || []).find(d => d.date === dateStr)
+        || (DataStore.settings.conceptClosedDates || []).find(d => d.date === dateStr)
+        || null;
 }
 
 async function addClosedDate(date, reason = '') {
@@ -1736,68 +1929,22 @@ function getWeekDates(date) {
 }
 
 // Get first day of month (always 1st of month, 00:00:00)
-function getMonthStart(date) {
-    const d = parseDateOnly(date);
-    return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-
-// Get all weeks in a month (array of Monday date strings YYYY-MM-DD)
-// Returns 4-6 weeks, starting from Monday before or on month start
-function getMonthWeeks(monthStartDate) {
-    const monthStart = parseDateOnly(monthStartDate);
-    const firstMonday = getMonday(monthStart); // Monday on or before 1st
-
-    // Find last day of month
-    const nextMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
-    const lastDay = new Date(nextMonth.getTime() - 1);
-
-    const weeks = [];
-    let currentMonday = new Date(firstMonday);
-
-    // Add weeks until we cover the entire month
-    while (currentMonday <= lastDay) {
-        weeks.push(formatDateYYYYMMDD(currentMonday));
-        currentMonday.setDate(currentMonday.getDate() + 7);
-    }
-
-    return weeks;
-}
-
-// Get all dates in a month (array of date strings YYYY-MM-DD)
-function getMonthDates(monthStartDate) {
-    const weeks = getMonthWeeks(monthStartDate);
-    const dates = [];
-    weeks.forEach(weekStart => {
-        dates.push(...getWeekDates(weekStart));
-    });
-    return dates;
-}
-
-// Format month display (e.g., "februari 2026")
-function formatMonthDisplay(monthStartDate) {
-    const d = parseDateOnly(monthStartDate);
-    return d.toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
-}
-
 // ===== LEGACY COMPATIBILITY =====
 // These functions are kept for compatibility but do nothing with localStorage
 
-function saveToStorage() {
-    // No-op - data is saved via API
-    return true;
-}
-
-function loadFromStorage() {
-    // No-op - data is loaded via API
-    return true;
-}
+// #273: saveToStorage en loadFromStorage waren sinds de overstap naar de API
+// lege functies die alleen true teruggaven. Ze stonden er als
+// legacy-compatibiliteit, maar de enige gebruikers waren aanroepen die deden
+// alsof er iets bewaard werd. Die zijn weg, dus deze twee ook.
 
 async function resetData() {
     const scope = await showSelectPrompt(
         'Wat wil je verwijderen? Dit kan niet ongedaan worden gemaakt!',
         'Data wissen',
         [
-            { value: 'data', label: 'Alleen planning data (diensten, afwezigheden, instellingen)' },
+            // #292: de verlofrondes werden niet gewist én niet genoemd. Nu
+            // worden ze wel gewist, dus hoort de keuze dat ook te zeggen.
+            { value: 'data', label: 'Alleen planning data (diensten, afwezigheden, verlofrondes, concepten, instellingen)' },
             { value: 'data_users', label: 'Planning data + medewerker-accounts' },
             { value: 'all', label: 'Alles behalve mijn account' }
         ]
@@ -1918,32 +2065,62 @@ function getSchoolAnchorMonday(date) {
     return getMonday(d);
 }
 
-function getSchoolWeekNumber(date) {
+// #244: de ankermaandag van het schooljaar waar deze datum in valt.
+//
+// Dit stond twee keer uitgeschreven, en de twee kopieën kozen het schooljaar
+// net iets anders: getSchoolWeekNumber vergeleek de MAANDAG van de week met de
+// startdatum, getFourWeekPeriodDates de datum zelf. Zodra de schooljaarstart
+// niet op een maandag valt, kiezen die twee voor de dagen tussen de startdatum
+// en de eerstvolgende maandag een verschillend schooljaar. Het weeknummer kwam
+// dan uit het vorige schooljaar (week 53, dus periodeIndex 13) terwijl de
+// ankermaandag uit het nieuwe kwam, en de periode sprong 364 dagen vooruit.
+//
+// Met één helper kunnen ze niet opnieuw uit elkaar lopen. De maandag is de
+// juiste maatstaf, want zowel het weeknummer als de periode lopen per week.
+function getSchoolYearAnchorMonday(date) {
     const start = getSchoolYearStart();
     if (!start) return null;
     const currentMonday = getMonday(parseDateOnly(date));
     currentMonday.setHours(0, 0, 0, 0);
-    // Find the school year that contains this date (adjusts year automatically)
+
     const startDate = parseDateOnly(start);
     const syMonth = startDate.getMonth();
     const syDay = startDate.getDate();
+
+    // De grens tussen twee schooljaren is de ANKERMAANDAG, niet de ruwe
+    // startdatum. Vergeleken we met de startdatum zelf, dan viel de maandag
+    // van de startweek nog in het vorige schooljaar terwijl hij tegelijk het
+    // anker van het nieuwe was. Bij een start op dinsdag 1 september 2026 gaf
+    // dat voor maandag 31 augustus week 53, terwijl diezelfde dag ook week 1
+    // van het nieuwe jaar is.
+    const ankerVan = (jaar) => {
+        const d = new Date(jaar, syMonth, syDay);
+        d.setHours(0, 0, 0, 0);
+        const m = getSchoolAnchorMonday(d);
+        m.setHours(0, 0, 0, 0);
+        return m;
+    };
+
     let syYear = currentMonday.getFullYear();
-    let thisYearStart = new Date(syYear, syMonth, syDay);
-    thisYearStart.setHours(0, 0, 0, 0);
-    if (currentMonday < thisYearStart) {
+    let startMonday = ankerVan(syYear);
+    if (currentMonday < startMonday) {
         syYear--;
-        thisYearStart = new Date(syYear, syMonth, syDay);
-        thisYearStart.setHours(0, 0, 0, 0);
+        startMonday = ankerVan(syYear);
     }
-    const startMonday = getSchoolAnchorMonday(thisYearStart);
-    startMonday.setHours(0, 0, 0, 0);
+    return startMonday;
+}
+
+function getSchoolWeekNumber(date) {
+    const startMonday = getSchoolYearAnchorMonday(date);
+    if (!startMonday) return null;
+    const currentMonday = getMonday(parseDateOnly(date));
+    currentMonday.setHours(0, 0, 0, 0);
     const diffWeeks = Math.round((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
     return diffWeeks + 1; // 1-based
 }
 
 async function saveSchoolYearStart(date) {
     DataStore.settings.schoolYearStart = { date };
-    saveToStorage();
     await dataApiFetch('/settings/school_year_start', {
         method: 'PUT',
         body: JSON.stringify({ value: { date } })
@@ -2016,3 +2193,17 @@ function getWeekScheduleFromDraft(employee, weekNumber, draft) {
 
 // ===== INITIALISATIE =====
 // Data wordt geladen via loadDataFromAPI() na login in app.js
+
+// Allow the pure school-year helpers to be imported in Node.js (for unit tests).
+// This does not affect browser behavior since `module` is not defined there.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    parseDateOnly,
+    formatDateYYYYMMDD,
+    getMonday,
+    getSchoolAnchorMonday,
+    getSchoolYearAnchorMonday,
+    getSchoolWeekNumber,
+    getFourWeekPeriodDates
+  };
+}

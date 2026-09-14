@@ -38,6 +38,7 @@ open ../frontend/index.html
 | `app-planner.js` | ~1330 | renderPlanning, timeline, maand, heatmap, validatiemeldingen, uren-per-naam |
 | `app-shifts.js` | ~1105 | Shift modals, swap modals, shift CRUD, activiteiten |
 | `app-swaps.js` | ~512 | renderSwaps, swap- en overnamekaartenrendering |
+| `app-leave.js` | ~700 | Verlofplanning: rondes, invullen (week/dag), matrix, goedkeuren, export |
 | `app-employees.js` | ~1010 | renderEmployees, profiel, medewerker CRUD, weekrooster |
 | `app-availability.js` | ~640 | renderAvailability, afwezigheidsmodal |
 | `app-builder.js` | ~3065 | Roosterbouwer: grid, concepten, vergaderingen, staffing |
@@ -73,7 +74,7 @@ open ../frontend/index.html
 
 ## Database Schema
 
-**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities
+**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions
 
 Kernrelaties:
 - `shifts.user_id` → `users.id`
@@ -98,7 +99,7 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 3. **ALTIJD** parameterized queries gebruiken (nooit string concatenation in SQL)
 4. **Backend retourneert BEIDE** `userId` EN `employeeId` (backward compatibility alias)
 5. **Permissions** checken in ZOWEL frontend ALS backend
-6. **Auto-migratie**: `ensureSchema()` in server.js draait bij elke startup - voeg nieuwe schema changes daar toe
+6. **Migraties**: geversioneerd via de `MIGRATIONS`-array + `runMigrations()` in server.js (draait bij elke startup, elke migratie exact één keer). Voeg nieuwe schema changes toe als nieuwe migratie-entry. Migratie `000_base_schema` draait `schema.sql` idempotent, dus een verse database (bv. staging) initialiseert zichzelf; `ensureBootstrapData()` maakt standaardteams + admin-account aan zonder bestaande data te overschrijven
 7. **shift_blocks**: Bij shift delete wordt block aangemaakt (voorkomt auto-regeneratie). Manual shift create verwijdert block.
 8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging
 9. **Fetch wrapper**: Gebruik uitsluitend `dataApiFetch()` uit `data.js`. `apiFetch()` is verwijderd (issue #26 opgelost). Uitzondering: `fetchPublicHolidays()` gebruikt plain `fetch()` want `/public-holidays` vereist geen auth.
@@ -138,6 +139,17 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - `PUT /api/v1/swap-requests/:id/approve` - Lead keurt goed
 - `PUT /api/v1/swap-requests/:id/reject` - Lead wijst af
 
+### Verlofplanning
+- `GET /api/v1/leave-rounds` - Alle verlofrondes (concepten enkel voor beheerders)
+- `GET /api/v1/leave-rounds/:id` - Ronde met volledige matrix + indienstatus
+- `POST|PUT|DELETE /api/v1/leave-rounds[/:id]` - Ronde beheren (admin/roosterverantw.)
+- `PUT /api/v1/leave-rounds/:id/entries` - Invulling opslaan (eigen; beheerder ook voor anderen)
+- `POST /api/v1/leave-rounds/:id/submit` - Indienen
+- `PUT /api/v1/leave-rounds/:id/submissions/:userId` - Goedkeuren/afwijzen
+- `PUT /api/v1/leave-rounds/:id/blocks/:blockId` - Gesloten dagen van een blok opnieuw uit het concept overnemen (409 op een gesloten ronde zonder `?force=1`)
+- `PUT /api/v1/leave-rounds/:id/blocks/:blockId/entries` - Definitieve verdeling van een voorkeurblok vastleggen (enkel bij status `gesloten`; vervangt uitsluitend binnen het blokbereik)
+- `POST /api/v1/leave-rounds/:id/apply` - Goedgekeurd verlof → availability
+
 ### Admin
 - `GET /api/v1/audit-log` - Audit log met filters en paginatie
 - `POST /api/v1/admin/users/:id/replace` - Medewerker vervangen
@@ -150,7 +162,11 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - **Modals**: `openShiftModal(shift, canEdit)` - view vs edit mode op basis van permissies
 - **Scroll preservation**: ScrollY wordt bewaard bij planner re-renders
 - **Validation**: `validation.js` draait client-side checks voor shift toewijzingen
+- **Verlofplanning**: één ronde = één SCHOOLJAAR, opgebouwd uit blokken (`leave_round_blocks`) die verwijzen naar `settings.holidayPeriods` — dus geen tweede plek waar vakantiedatums staan. Modus staat per BLOK: `binair` (kleine vakanties: werken/verlof) of `voorkeur` (zomer: werken/liever_niet/zeker_niet). De UI groepeert blokken in tabs zoals de Excel: alle binaire blokken samen onder "Kleine vakanties", de voorkeurblokken onder "Zomer". Invulling per DAG (week-snelknoppen in de UI, want de praktijk vult per werkweek + weekend apart in). Een dag moet binnen één van de blokken vallen — de schoolweken ertussen zijn geen geldige invoer. Bij een voorkeurblok legt de beheerder ná het sluiten de definitieve verdeling vast (entries op `verlof` zetten) vóór `apply`. Matrix zichtbaar voor iedereen; invullen enkel voor jezelf en enkel per WEEK — er is geen dag-modus meer, ook niet voor beheerders.
+- **Zomerronde afwerken**: `apply` neemt alleen entries met status `verlof` over, terwijl een voorkeurblok enkel `werken`/`liever_niet`/`zeker_niet` bevat. Zonder tussenstap levert een zomerronde dus niets op. De beheerder legt daarom eerst de verdeling vast via het verdeelscherm (`AppState.leaveScreen = 'verdelen'`, knop "Verlof verdelen" bij een gesloten ronde). `leaveVerdeelVoorstel()` zet een voorstel klaar: wie iets anders dan werken vroeg krijgt verlof, wie niets invulde krijgt werken, en een al vastgelegde `verlof` blijft staan zodat heropenen de verdeling niet wist. Bewust géén bezettings- of eerlijkheidsregels — die komen later. Opslaan gebeurt via het blok-scoped entries-endpoint, nooit via `PUT /leave-rounds/:id/entries`: dat vervangt álle entries van een gebruiker in de ronde en zou de kleine vakanties wissen.
+- **Gesloten dagen in een verlofronde**: welke dagen tijdens een vakantie gesloten zijn, wordt beslist in het roosterconcept (`draft.grid._pattern.weeks[i].closedDays`, JS-daggetallen met 0=zo, 6=za). De ronde neemt dat bij het openen over in `leave_round_blocks.closed_dates` (absolute datums), zodat een medewerker het ziet zonder `GET /schedule-drafts` te mogen lezen én zodat later na te gaan is welke weekends toen werkweekends waren. Drie toestanden: `null` = onbekend (geen concept gekoppeld), `[]` = alles open, `[...]` = deze dagen dicht — die mogen nooit op één hoop. Bijwerken gebeurt expliciet via de knop "Gesloten dagen bijwerken uit concept", nooit automatisch. **WEEKCONVENTIE**: `_pattern.weeks["i"]` betekent "de i-de maandagweek van de vakantieperiode" — dat is wat de bouwer toont (`getBuilderVakantieWeekStart`), NIET het resultaat van `getWeekNumber()`. `closedDatesFromPattern()` in `app-leave.js` en de shiftgeneratie in `server.js` volgen die conventie.
 - **Feestdagen**: `DataStore._publicHolidaysCache` — lazy geladen via `fetchPublicHolidays(year)`. Gebruik `getPublicHoliday(date)` voor rendering. Let op: gebruik hier plain `fetch()`, niet `dataApiFetch()` (endpoint vereist geen auth)
+- **Gesloten dagen uit een vakantieconcept**: een basisrooster schrijft zijn patroon bij het toepassen naar `settings.schedule_pattern`, waardoor `isDayClosed()` het kent. Een vakantieconcept doet dat bewust NIET — zijn cyclus is vakantie-relatief en zou het jaarpatroon verzieken. Bij het toepassen worden zijn gesloten dagen daarom als absolute datums weggeschreven naar `settings.conceptClosedDates` (`[{date, reason, draftId}]`), per concept vervangen. `isDayClosed()` en `getClosedDateInfo()` lezen die mee, zodat planning, drag-drop en shift aanmaken kloppen. Ze staan apart van `closedDates` en verschijnen dus niet in het lijstje "manueel gesloten datums" in Instellingen.
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.
 
@@ -191,13 +207,22 @@ De MCP server is actief en verbonden met de productie-API. Dit laat Claude toe o
 
 ## Deploy
 
-Zie `DEPLOY.md` voor deployment instructies (Render platform).
+Twee permanente branches, elk met een eigen Render-omgeving:
+
+| Branch | Omgeving |
+|--------|----------|
+| `main` | Productie (live data) |
+| `staging` | Testomgeving (eigen database) |
+
+Workflow: ontwikkel → `push origin staging` (test op de staging-URL) → merge naar `main` (live). Ontwikkel bij voorkeur niet rechtstreeks op `main`. De frontend kiest automatisch de juiste backend op basis van zijn hostname (`frontend/config/settings.js`: bevat "staging" → staging-backend).
+
+Zie `DEPLOY.md` voor deployment instructies en `STAGING.md` voor de eenmalige setup van de testomgeving.
 
 ## Tests
 
 ```bash
 cd backend
-npm test           # Alle tests uitvoeren (129 tests, ~3 seconden)
+npm test           # Alle tests uitvoeren (249 tests, ~6 seconden)
 ```
 
 Testbestanden in `backend/tests/`:

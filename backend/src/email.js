@@ -95,16 +95,42 @@ function baseTemplate(title, bodyContent) {
 
 // ===== CORE SEND FUNCTION =====
 
+/**
+ * Verstuurt één mail en geeft altijd een resultaat terug. Gooit nooit.
+ *
+ * #195: de Resend-bibliotheek gooit géén fout wanneer het versturen mislukt,
+ * ze geeft een object { data, error } terug. Het catch-blok hieronder ving dus
+ * alleen echte crashes op, zoals een netwerkfout. Een geweigerd adres, een
+ * domein dat nog niet geverifieerd is, een verlopen API-sleutel of een rate
+ * limit kwam netjes als `error` binnen en werd nergens gelezen. Zo'n mail
+ * verdween spoorloos: geen regel in de logs, geen signaal in de app.
+ *
+ * @returns {Promise<{ok: boolean, id?: string, error?: string, skipped?: boolean}>}
+ */
 async function sendEmail(to, subject, html) {
-  if (!resend) return;
+  if (!resend) {
+    return { ok: false, skipped: true, error: 'E-mail is niet geconfigureerd (RESEND_API_KEY ontbreekt).' };
+  }
   try {
-    await resend.emails.send({ from: EMAIL_FROM, to, subject, html });
+    const result = await resend.emails.send({ from: EMAIL_FROM, to, subject, html });
+    if (result && result.error) {
+      const message = result.error.message || JSON.stringify(result.error);
+      console.error(`Email send failed to ${to}: ${message}`);
+      return { ok: false, error: message };
+    }
+    return { ok: true, id: result && result.data ? result.data.id : undefined };
   } catch (err) {
     console.error(`Email send failed to ${to}:`, err.message);
+    return { ok: false, error: err.message || 'Onbekende fout' };
   }
 }
 
-/** Fire-and-forget: does not block caller */
+/**
+ * Fire-and-forget: blokkeert de aanroeper niet.
+ * Een mislukking wordt binnen sendEmail gelogd, want hier is niemand meer die
+ * op het antwoord wacht. sendEmail gooit niet, dus dit kan geen unhandled
+ * rejection opleveren.
+ */
 function sendEmailAsync(to, subject, html) {
   if (!resend) return;
   sendEmail(to, subject, html);

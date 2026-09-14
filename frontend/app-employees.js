@@ -32,6 +32,14 @@ function renderEmployees() {
         employeesByTeam[teamKey] = teamEmps;
     });
 
+    // #231: wie geen team heeft, of een team dat niet meer in de instellingen
+    // staat, viel hier volledig weg. De planner heeft hier al een bak voor
+    // ("Geen Team", app-planner.js), dus die aanpak overgenomen zodat de twee
+    // schermen dezelfde medewerkers tonen.
+    const zonderTeam = employees
+        .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
+
     let html = '';
 
     // Render per team
@@ -41,9 +49,11 @@ function renderEmployees() {
 
         const team = teams[teamKey];
         const teamName = escapeHtml(team.name);
+        const teamColor = team?.color || '#8d897c';
 
         html += `<div class="employees-team-section">
             <div class="employees-team-header team-${teamKey}">
+                <span class="team-header-dot" style="background:${teamColor}"></span>
                 <span class="team-header-name">${teamName}</span>
                 <span class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</span>
             </div>
@@ -56,7 +66,23 @@ function renderEmployees() {
         html += `</div></div>`;
     });
 
-    if (employees.length === 0 || teamOrder.length === 0) {
+    if (zonderTeam.length > 0) {
+        html += `<div class="employees-team-section">
+            <div class="employees-team-header">
+                <span class="team-header-dot" style="background:var(--ink-3)"></span>
+                <span class="team-header-name">Geen team</span>
+                <span class="team-header-count">${zonderTeam.length} medewerker${zonderTeam.length !== 1 ? 's' : ''}</span>
+            </div>
+            <div class="employees-team-grid">`;
+        zonderTeam.forEach(emp => { html += renderEmployeeCard(emp); });
+        html += `</div></div>`;
+    }
+
+    // #231: de lege tekst hing aan "nul medewerkers of nul teams". Bij
+    // medewerkers die allemaal buiten de zichtbare teams vielen was geen van
+    // beide waar, bleef html een lege string, en toonde het scherm enkel de
+    // teamchips zonder enige uitleg. Nu is de voorwaarde wat je feitelijk ziet.
+    if (!html.trim()) {
         html = '<p>Nog geen medewerkers toegevoegd.</p>';
     }
 
@@ -68,6 +94,15 @@ function renderEmployees() {
         const employee = employees.find(e => e.id === employeeId);
         if (employee && canManageEmployee(employee)) {
             card.style.cursor = 'pointer';
+            // #275: de kaart is een div en stond dus niet in de tabvolgorde;
+            // het basisrooster van een medewerker was zonder muis niet te
+            // bereiken. Hier gezet en niet in de template, zodat de
+            // rechtencheck hierboven blijft gelden: een kaart die je niet mag
+            // openen wordt ook geen tabstop. Enter en spatie lopen via de
+            // gedeelde handler in app-ui.js.
+            card.setAttribute('role', 'button');
+            card.setAttribute('tabindex', '0');
+            card.setAttribute('aria-label', `${employee.name} bewerken`);
             card.addEventListener('click', () => {
                 openEditEmployeeModal(employeeId);
             });
@@ -106,6 +141,10 @@ function renderEmployees() {
 function renderProfile() {
     const user = AppState.currentUser;
     if (!user) return;
+
+    // Update eyebrow h2 with user name
+    const profileTitle = document.getElementById('profile-view-title');
+    if (profileTitle) profileTitle.textContent = user.name || 'Mijn profiel';
 
     const roleLabels = {
         admin: 'Admin',
@@ -504,7 +543,9 @@ function openProfileEditModal() {
     // Close handlers
     overlay.querySelector('.modal-close').addEventListener('click', closeModal);
     overlay.querySelector('.profile-edit-cancel').addEventListener('click', closeModal);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeModal(); });
     document.addEventListener('keydown', function escHandler(e) {
         if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', escHandler); }
     });
@@ -680,7 +721,7 @@ function renderEmployeeCard(emp) {
     const contractHours = emp.contractHours || 0;
     const teamName = (DataStore.settings.teams || {})[emp.mainTeam]?.name || emp.mainTeam || '';
     const teamColor = (DataStore.settings.teams || {})[emp.mainTeam]?.color || '#94a3b8';
-    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" title="Geen e-mail — voeg toe om welkomstmail te sturen">Geen email</span>` : '';
+    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" title="Geen e-mail, voeg er een toe om een welkomstmail te sturen">Geen email</span>` : '';
 
     // Hours for admin/planner view
     const weekStart = getEmployeeWeekStart(emp.id);
@@ -706,14 +747,20 @@ function renderEmployeeCard(emp) {
         hoursHtml = `<div class="emp-card-hours"><span>${hoursWeek.toFixed(1)}u deze week</span></div>`;
     }
 
+    const initials = escapeHtml(getInitials(emp.name || ''));
+    const subLine = contractHours > 0 ? `${contractHours}u/week` : 'Geen contracturen';
+
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
             <div class="employee-header">
-                <span class="team-color-dot" style="background: ${teamColor}" title="${escapeHtml(teamName)}"></span>
-                <div class="employee-name">${employeeName}</div>
-                ${noEmailBadge}
+                <span class="emp-avatar" style="background:${teamColor};color:${getContrastColor(teamColor)}" title="${escapeHtml(teamName)}">${initials}</span>
+                <div class="employee-card-info">
+                    <div class="employee-name">${employeeName}</div>
+                    <div class="employee-card-sub">${subLine}</div>
+                </div>
                 <span class="employee-status ${statusClass}">${statusText}</span>
             </div>
+            ${noEmailBadge ? `<div class="employee-card-badges">${noEmailBadge}</div>` : ''}
             ${hoursHtml}
         </div>
     `;
@@ -890,6 +937,8 @@ function closeEmployeeModal() {
     // Restore modal-actions visibility for next open (add mode needs it)
     const modalActions = DOM.employeeModal.querySelector('.modal-actions');
     if (modalActions) modalActions.classList.remove('hidden');
+    // #233: noodklep, zie closeShiftModal in app-shifts.js voor de toelichting.
+    hideSectionLoading('employees-view');
 }
 
 async function handleEmployeeSubmit(e) {

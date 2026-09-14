@@ -70,6 +70,38 @@ function populateShiftTemplateDropdown() {
     });
 }
 
+// Een handmatig leeggemaakte dag is "beschermd": het concept vult hem niet
+// opnieuw. Dat was alleen af te leiden uit een klein icoontje met tooltip —
+// op een telefoon dus onzichtbaar. Bij het toevoegen van een dienst zeggen
+// we het daarom expliciet, net zoals een handmatig aangepaste dienst dat doet.
+function updateShiftBlockNotice() {
+    if (!DOM.shiftValidationErrors) return;
+    const bestaand = DOM.shiftValidationErrors.querySelector('.shift-block-notice');
+    if (bestaand) bestaand.remove();
+
+    if (AppState.editingShiftId) return; // enkel bij toevoegen
+    const empId = DOM.shiftEmployee?.value;
+    const datum = DOM.shiftDate?.value;
+    if (!empId || !datum) return;
+
+    const block = (DataStore.shiftBlocks || []).find(
+        b => String(b.user_id) === String(empId) && b.date === datum
+    );
+    if (!block) return;
+
+    const wie = getEmployee(Number(empId))?.name || 'deze medewerker';
+    const melding = document.createElement('div');
+    melding.className = 'shift-source-info shift-block-notice';
+    melding.innerHTML = `
+        <span class="source-icon">${IconHelper.html('circle-slash', 'sm')}</span>
+        <span class="source-text">
+            ${escapeHtml(blockReasonLabel(block.reason))} voor ${escapeHtml(wie)}.
+            Het basisrooster vult deze dag daarom niet meer automatisch in.
+        </span>`;
+    DOM.shiftValidationErrors.prepend(melding);
+    IconHelper.init(melding);
+}
+
 function openAddShiftModal() {
     AppState.editingShiftId = null;
     DOM.shiftModalTitle.textContent = 'Dienst toevoegen';
@@ -98,6 +130,7 @@ function openAddShiftModal() {
     resetShiftSubmitBtn();
 
     DOM.shiftModal.classList.remove('hidden');
+    updateShiftBlockNotice();
 }
 
 function openAddShiftForEmployee(employeeId, date) {
@@ -110,6 +143,7 @@ function openAddShiftForEmployee(employeeId, date) {
     populateEmployeeDropdown();
     DOM.shiftEmployee.value = employeeId;
     DOM.shiftModal.classList.remove('hidden');
+    updateShiftBlockNotice();
 }
 
 function canUserEditShift(shift) {
@@ -195,6 +229,22 @@ function openShiftModal(shift, canEdit) {
         }
     });
 
+    // #262: het teamveld bleef bewerkbaar voor de eigenaar van de dienst,
+    // waardoor een medewerker zichzelf in een ander team kon schrijven. Wie
+    // geen diensten mag beheren, mag ook het team niet wijzigen. De backend
+    // weigert die wissel nu ook, dus dit is de zichtbare helft van dezelfde
+    // grens.
+    if (!hasPermission('MANAGE_SHIFTS')) {
+        DOM.shiftTeam.disabled = true;
+        DOM.shiftTeam.classList.add('readonly');
+        // Om dezelfde reden mag de dienst niet aan een collega worden
+        // toegewezen. De toevoegmodal doet dit al; het bewerkpad deed het niet,
+        // terwijl de backend die wissel nu wel weigert. Wie zijn dienst kwijt
+        // wil gebruikt 'Dienst afstaan'.
+        DOM.shiftEmployee.disabled = true;
+        DOM.shiftEmployee.classList.add('readonly');
+    }
+
     // Show/hide action buttons
     DOM.shiftSubmitBtn.classList.toggle('hidden', !canEdit);
     DOM.shiftDeleteBtn.classList.toggle('hidden', !canEdit);
@@ -255,7 +305,7 @@ function openShiftModal(shift, canEdit) {
             activitiesListHtml += '<div class="shift-activities-list">';
             shiftActivities.forEach(act => {
                 const label = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
-                const desc = act.description ? ` - ${escapeHtml(act.description)}` : '';
+                const desc = act.description ? ` · ${escapeHtml(act.description)}` : '';
                 activitiesListHtml += `<div class="shift-activity-item activity-badge activity-badge--list" data-activity-id="${act.id}">
                     <span class="activity-type-${escapeHtml(act.type)} activity-type-bar"></span>
                     <span><strong>${escapeHtml(label)}</strong> ${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}${desc}</span>
@@ -305,6 +355,12 @@ function closeShiftModal() {
     DOM.shiftForm.reset();
     AppState.editingShiftId = null;
     resetShiftSubmitBtn();
+    // #233: noodklep. Sluit je de modal terwijl een opslag nog in de lucht
+    // hangt (bv. via Annuleren, of de klik buiten de modal), dan bleef de
+    // sectie-overlay op de planning anders staan tot het verzoek zelf
+    // afloopt. hideSectionLoading is veilig aan te roepen als er niets te
+    // verbergen is.
+    hideSectionLoading('planning-view');
 }
 
 async function handleShiftDelete(shiftId = null) {
@@ -322,15 +378,26 @@ async function handleShiftDelete(shiftId = null) {
         : 'deze dienst';
 
     if (await showConfirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?`, 'Dienst verwijderen', { danger: true, confirmText: 'Verwijderen' })) {
-        // Wait for deletion to complete before re-rendering
-        await deleteShift(idToDelete);
+        // #270: zonder try/catch verdween een mislukte verwijdering spoorloos.
+        // De modal bleef openstaan zoals hij was, er kwam geen toast, geen
+        // rode regel, geen spinner. De beheerder dacht dat zijn klik niet was
+        // aangekomen en klikte opnieuw, of sloot de modal in de overtuiging
+        // dat de dienst weg was terwijl hij nog gewoon in de planning stond.
+        try {
+            // Wait for deletion to complete before re-rendering
+            await deleteShift(idToDelete);
 
-        // Close modal only if deleting from modal (when shiftId is event or null)
-        if (isEvent || !shiftId) {
-            closeShiftModal();
+            // Close modal only if deleting from modal (when shiftId is event or null)
+            if (isEvent || !shiftId) {
+                closeShiftModal();
+            }
+
+            renderPlanning();
+        } catch (error) {
+            console.error('Fout bij verwijderen dienst:', error);
+            showToast('Verwijderen mislukt: ' + getUserFriendlyError(error), 'error');
+            // Modal blijft open zodat de gebruiker het opnieuw kan proberen
         }
-
-        renderPlanning();
     }
 }
 
@@ -507,7 +574,7 @@ function runSwapValidation() {
                 <strong>${IconHelper.html(ICONS.warning, 'sm')} Waarschuwingen:</strong>
                 <ul>${validation.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
             </div>
-            <p class="validation-hint text-warning">Je kunt dit verzoek indienen, maar een verantwoordelijke moet het goedkeuren.</p>
+            <p class="validation-hint text-warning">Je kunt dit verzoek indienen. Je collega moet het nog accepteren.</p>
         `;
     } else {
         validationDisplay.classList.add('is-valid');
@@ -734,8 +801,13 @@ async function handleShiftSubmit(e) {
                     // Combine errors and warnings into one overview
                     let html = '<div class="conflict-resolution">';
 
-                    // Show errors
-                    validation.errors.forEach(error => {
+                    // Show errors. #247: een overlap eerst, want die is de
+                    // echte blokkade. Bij twee diensten op dezelfde dag volgt
+                    // de rustmelding er automatisch uit (0 uur rust), en die
+                    // bovenaan zetten leidt de aandacht weg van de oorzaak.
+                    const gesorteerd = [...validation.errors].sort(
+                        (a, b) => (b.code === 'overlap') - (a.code === 'overlap'));
+                    gesorteerd.forEach(error => {
                         const suggestions = generateSuggestions(error, shiftData);
                         html += `<div class="conflict-item">
                             <div class="conflict-error">${escapeHtml(error.message)}</div>`;
@@ -760,9 +832,30 @@ async function handleShiftSubmit(e) {
                         </div>`;
                     });
 
+                    // #247: een overlap is een harde regel. De backend weigert
+                    // hem ook met force: true, want die slaat alleen de
+                    // rustcontrole over. "Toch opslaan" aanbieden beloofde dus
+                    // een uitweg die niet bestaat: je klikte, kreeg een andere
+                    // foutmelding, klikte nog eens en zat weer bij het eerste
+                    // overzicht. Bij een overlap tonen we alleen de melding en
+                    // de suggestieknoppen.
+                    const harteRegel = validation.errors.some(e => e.code === 'overlap');
+                    if (harteRegel) {
+                        html += `<p class="conflict-uitleg">Een overlap kan niet opgeslagen worden:
+                            iemand kan niet op twee plaatsen tegelijk staan. Pas de tijden aan of
+                            verwijder eerst de andere dienst.</p>`;
+                    }
                     html += '</div>';
                     DOM.shiftValidationErrors.innerHTML = html;
                     IconHelper.init(DOM.shiftValidationErrors);
+
+                    if (harteRegel) {
+                        DOM.shiftSubmitBtn.textContent = 'Opslaan';
+                        DOM.shiftSubmitBtn.classList.add('btn-primary');
+                        DOM.shiftSubmitBtn.classList.remove('btn-warning');
+                        AppState._shiftForceOverride = false;
+                        return;
+                    }
 
                     // Change submit button to indicate override
                     DOM.shiftSubmitBtn.textContent = 'Toch opslaan';
@@ -793,8 +886,11 @@ async function handleShiftSubmit(e) {
         }
     } catch (error) {
         const msg = getUserFriendlyError(error);
-        // 422 = backend 11-uur validatie — geef "Toch opslaan" optie
-        if (error.status === 422 || (error.message && error.message.includes('11-uur'))) {
+        // #247: dit testte op status 422, en sinds die status er werkelijk op
+        // staat ving die tak ook de overlap af. De backend zegt nu zelf of de
+        // regel te overrulen is (canOverride), dus daar testen we op. Alleen de
+        // rusttijd komt met true terug.
+        if (error.status === 422 && error.data?.canOverride) {
             DOM.shiftValidationErrors.innerHTML =
                 `<div class="conflict-resolution"><div class="conflict-item"><div class="conflict-warning">${escapeHtml(msg)}</div></div></div>`;
             IconHelper.init(DOM.shiftValidationErrors);
@@ -804,7 +900,15 @@ async function handleShiftSubmit(e) {
             AppState._shiftBackendForce = true;
         } else {
             AppState._shiftBackendForce = false;
-            DOM.shiftValidationErrors.innerHTML = '<ul><li>Er is een fout opgetreden: ' + escapeHtml(msg) + '</li></ul>';
+            AppState._shiftForceOverride = false;
+            DOM.shiftSubmitBtn.textContent = 'Opslaan';
+            DOM.shiftSubmitBtn.classList.add('btn-primary');
+            DOM.shiftSubmitBtn.classList.remove('btn-warning');
+            const uitleg = error.data?.rule === 'overlap'
+                ? '<p class="conflict-uitleg">Een overlap kan niet opgeslagen worden: iemand kan niet op twee plaatsen tegelijk staan. Pas de tijden aan of verwijder eerst de andere dienst.</p>'
+                : '';
+            DOM.shiftValidationErrors.innerHTML =
+                `<div class="conflict-resolution"><div class="conflict-item"><div class="conflict-error">${escapeHtml(msg)}</div></div>${uitleg}</div>`;
         }
     }
 }
@@ -836,7 +940,7 @@ function applySuggestion(btn) {
 
     DOM.shiftValidationErrors.innerHTML = '';
     resetShiftSubmitBtn();
-    showToast('Suggestie toegepast - controleer en klik Opslaan', 'info');
+    showToast('Suggestie toegepast. Controleer en klik Opslaan', 'info');
 }
 
 // ===== ACTIVITY MODAL =====
