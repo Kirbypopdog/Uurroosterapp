@@ -312,13 +312,10 @@ body.dark-mode .btn-secondary:hover {
 body.dark-mode .employee-grid-row:hover,
 body.dark-mode .team-schedule-row:hover,
 body.dark-mode .team-schedule-row.alt:hover,
-body.dark-mode .month-row:hover,
-body.dark-mode .month-row.alt:hover,
 body.dark-mode .timeline-row:hover,
 body.dark-mode .timeline-row.alt:hover   { background: var(--raise); }
 body.dark-mode .employee-name-cell       { background: var(--raise); }
 body.dark-mode .team-schedule-row.alt    { background: var(--surface-2); }
-body.dark-mode .month-row.alt            { background: var(--surface-2); }
 body.dark-mode .timeline-row.alt         { background: var(--surface-2); }
 
 /* --- Vandaag kolom-header (donkerbruin #2b2a26 onzichtbaar op donkere bg) --- */
@@ -389,16 +386,6 @@ body.dark-mode .builder-cell.closed {
         rgba(255,255,255,.26) 10px
     );
 }
-body.dark-mode .month-day-cell.closed {
-    background-color: var(--surface-2);
-    background-image: repeating-linear-gradient(
-        45deg,
-        transparent,
-        transparent 10px,
-        rgba(255,255,255,.20) 10px,
-        rgba(255,255,255,.20) 20px
-    );
-}
 body.dark-mode .calendar-cell.closed::after { color: #6a665c; }
 
 /* Gesloten dag HEADERS: striped zodat de hele kolom herkenbaar is */
@@ -417,23 +404,11 @@ body.dark-mode .builder-day-header.closed {
     );
     opacity: 1;
 }
-body.dark-mode .month-day-header.closed {
-    background-color: var(--surface-2);
-    background-image: repeating-linear-gradient(
-        45deg,
-        transparent,
-        transparent 6px,
-        rgba(255,255,255,.18) 6px,
-        rgba(255,255,255,.18) 12px
-    );
-    opacity: 1;
-}
 /* Manueel gesloten HEADERS: rode tint OVER het streeppatroon (na .closed → overschrijft enkel background-color) */
 body.dark-mode .timeline-day-header.manually-closed,
 body.dark-mode .calendar-day-header.manually-closed,
 body.dark-mode .employee-grid-day-header.manually-closed,
-body.dark-mode .team-schedule-day-header.manually-closed,
-body.dark-mode .month-day-header.manually-closed {
+body.dark-mode .team-schedule-day-header.manually-closed {
     background-color: rgba(220,38,38,.18);
 }
 /* Leesbare dagtekst op manueel gesloten headers (light-mode #991b1b is onleesbaar op donker) */
@@ -4561,14 +4536,12 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 /* ===== BELGISCHE FEESTDAGEN ===== */
-.timeline-day-header.feestdag,
-.month-day-header.feestdag {
+.timeline-day-header.feestdag {
     background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
 }
 
 /* Feestdag wint visueel van vakantieperiode bij overlap */
-.timeline-day-header.holiday.feestdag,
-.month-day-header.holiday.feestdag {
+.timeline-day-header.holiday.feestdag {
     background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
 }
 
@@ -4579,14 +4552,12 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 /* ===== MANUEEL GESLOTEN DATUMS ===== */
-/* Rode tint OVER het streeppatroon van .closed (background-color → overschrijft alleen de kleur, niet het patroon).
-   Extra .closed in de selector: hogere specificiteit zodat dit wint van de
-   .month-day-header.closed regel die later in het bestand staat (cascade). */
+/* Rode tint OVER het streeppatroon van .closed (background-color → overschrijft
+   alleen de kleur, niet het patroon). */
 .timeline-day-header.closed.manually-closed,
 .calendar-day-header.closed.manually-closed,
 .employee-grid-day-header.closed.manually-closed,
-.team-schedule-day-header.closed.manually-closed,
-.month-day-header.closed.manually-closed {
+.team-schedule-day-header.closed.manually-closed {
     background-color: rgba(220, 38, 38, 0.18);
     opacity: 1;
 }
@@ -5237,252 +5208,6 @@ body[data-view-mode="day"] .timeline-day-cell {
     text-align: center;
     color: var(--text-secondary);
     font-size: 14px;
-}
-
-/* ===== MONTH VIEW ===== */
-.month-view-wrapper {
-    background: var(--surface-color);
-    border-radius: var(--radius-lg);
-    overflow-x: auto;
-    overflow-y: visible;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--border-color);
-    min-width: 100%;
-}
-
-/* Month header - sticky date headers */
-.month-header {
-    display: flex;
-    background: #2b2a26;
-    color: var(--surface-color);
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    border-bottom: 2px solid var(--border-color);
-}
-
-.month-name-header {
-    width: 160px;
-    min-width: 160px;
-    padding: 12px;
-    font-weight: 600;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    border-right: 2px solid rgba(255,255,255,0.15);
-    position: sticky;
-    left: 0;
-    background: #2b2a26;
-    z-index: 21;
-}
-
-.month-week-header {
-    display: flex;
-    flex: 1;
-}
-
-.month-day-header {
-    flex: 1;
-    min-width: 120px;
-    padding: 8px 4px;
-    text-align: center;
-    border-right: 1px solid rgba(255,255,255,0.2);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
-
-.month-day-header .day-name {
-    font-size: 11px;
-    text-transform: uppercase;
-    opacity: 0.9;
-    font-weight: 500;
-}
-
-.month-day-header .day-num {
-    font-size: var(--text-md);
-    font-weight: 700;
-    margin-top: 2px;
-}
-
-.month-day-header.weekend {
-    background: rgba(0, 0, 0, 0.1);
-}
-
-.month-day-header.closed {
-    background-color: var(--surface-2);
-    background-image: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(0,0,0,.06) 6px, rgba(0,0,0,.06) 12px);
-    opacity: 0.9;
-}
-
-.month-day-header.holiday {
-    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-}
-
-.month-day-header.other-month {
-    opacity: 0.4;
-}
-
-/* Month body - scrollable content */
-.month-body {
-    max-height: calc(100vh - 300px);
-    overflow-y: auto;
-}
-
-/* Team headers */
-.month-team-header {
-    display: flex;
-    align-items: center;
-    padding: 8px 12px;
-    font-weight: 600;
-    font-size: 13px;
-    border-bottom: 1px solid var(--border-color);
-    background: linear-gradient(135deg, #5e5b52 0%, #5e5b52 100%);
-    color: white;
-    position: sticky;
-    left: 0;
-    z-index: 10;
-}
-
-.month-team-header .team-header-name {
-    flex: 1;
-}
-
-.month-team-header .team-header-count {
-    font-size: 11px;
-    opacity: 0.8;
-}
-
-/* Employee rows */
-.month-row {
-    display: flex;
-    border-bottom: 1px solid var(--border-color);
-    transition: background 0.15s;
-    min-height: 80px;
-}
-
-.month-row:hover {
-    background: #f6f4ef;
-}
-
-.month-row.alt {
-    background: #fbfaf5;
-}
-
-.month-row.alt:hover {
-    background: #f1f3f5;
-}
-
-.month-employee-cell {
-    width: 160px;
-    min-width: 160px;
-    padding: 10px 12px;
-    border-right: 2px solid var(--border-color);
-    font-weight: 500;
-    font-size: 13px;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    position: sticky;
-    left: 0;
-    background: inherit;
-    z-index: 5;
-}
-
-.month-employee-cell .emp-hours {
-    font-size: 11px;
-    color: var(--text-secondary);
-    font-weight: 400;
-}
-
-.month-employee-cell .emp-hours.over-hours {
-    color: var(--danger-text);
-    font-weight: 600;
-}
-
-.month-employee-cell .emp-hours.under-hours {
-    color: var(--warn-text);
-    font-weight: 600;
-}
-
-.month-week-cells {
-    display: flex;
-    flex: 1;
-}
-
-.month-day-cell {
-    flex: 1;
-    min-width: 120px;
-    padding: 6px 4px;
-    border-right: 1px solid var(--border-color);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-    align-items: stretch;
-}
-
-.month-day-cell.weekend {
-    background: rgba(100, 116, 139, 0.05);
-}
-
-.month-day-cell.closed {
-    background: repeating-linear-gradient(
-        45deg,
-        transparent,
-        transparent 10px,
-        rgba(0, 0, 0, 0.03) 10px,
-        rgba(0, 0, 0, 0.03) 20px
-    );
-    pointer-events: none;
-}
-
-.month-day-cell.other-month {
-    opacity: 0.3;
-}
-
-/* Shift badges in month cells */
-.month-shift-badge {
-    padding: 4px 6px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 500;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.month-shift-badge:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.month-shift-badge.has-error {
-    border: 2px solid var(--danger-color);
-    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
-}
-
-.month-shift-badge.has-warning {
-    border: 1px solid var(--warning-color);
-}
-
-.month-shift-more {
-    padding: 4px 6px;
-    font-size: 10px;
-    font-weight: 600;
-    text-align: center;
-    color: var(--text-secondary);
-    background: var(--bg-color);
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.month-shift-more:hover {
-    background: var(--primary-color);
-    color: white;
 }
 
 /* ===== SHIFT CARDS ===== */
@@ -9183,47 +8908,6 @@ body[data-view-mode="day"] .timeline-day-cell {
         font-size: 13px;
     }
 
-    .month-name-header {
-        width: 80px;
-        min-width: 80px;
-        font-size: 12px;
-        padding: 8px 4px;
-    }
-
-    .month-employee-cell {
-        width: 80px;
-        min-width: 80px;
-        font-size: 11px;
-        padding: 8px 4px;
-    }
-
-    .month-day-header {
-        min-width: 80px;
-        padding: 6px 2px;
-    }
-
-    .month-day-header .day-name {
-        font-size: 9px;
-    }
-
-    .month-day-header .day-num {
-        font-size: 13px;
-    }
-
-    .month-day-cell {
-        min-width: 80px;
-        padding: 4px 2px;
-        gap: 2px;
-    }
-
-    .month-shift-badge {
-        font-size: 9px;
-        padding: 3px 4px;
-    }
-
-    .month-row {
-        min-height: 60px;
-    }
 }
 
 /* Smaller mobile */

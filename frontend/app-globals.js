@@ -23,8 +23,6 @@ const AppState = {
     leaveDraft: {},           // { 'YYYY-MM-DD': status } vóór opslaan
     schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
-    currentMonthStart: null, // First day of month for month view
-    previousWeekStart: null, // Store week when switching to month view
     viewMode: 'week',
     visibleTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     visibleEmployeeTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],

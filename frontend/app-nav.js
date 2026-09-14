@@ -1139,37 +1139,12 @@ function changeWeek(direction) {
     renderPlanning();
 }
 
-// Set current month
-function setCurrentMonth(date) {
-    const d = parseDateOnly(date);
-    d.setDate(1); // Set to 1st of month
-    d.setHours(0, 0, 0, 0);
-    AppState.currentMonthStart = d;
-    updatePeriodDisplay();
-}
-
-// Change month (direction: -1 for previous, 1 for next)
-function changeMonth(direction) {
-    if (!AppState.currentMonthStart) {
-        setCurrentMonth(new Date());
-        return;
-    }
-    const newDate = new Date(AppState.currentMonthStart);
-    newDate.setMonth(newDate.getMonth() + direction);
-    setCurrentMonth(newDate);
-    renderPlanning();
-}
-
-// Jump to today (unified function for both views)
+// Jump to today
 function jumpToToday() {
     const today = new Date();
-    if (AppState.viewMode === 'week' || AppState.viewMode === 'day') {
-        setCurrentWeek(today);
-        const dayOfWeek = today.getDay();
-        AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    } else {
-        setCurrentMonth(today);
-    }
+    setCurrentWeek(today);
+    const dayOfWeek = today.getDay();
+    AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
     renderPlanning();
 }
 
@@ -1290,18 +1265,7 @@ function changeViewMode(mode) {
     if (mode === AppState.viewMode) return; // Already in this mode
 
     // Store context before switching
-    if (mode === 'month' && AppState.viewMode === 'week') {
-        // Switching week → month
-        AppState.previousWeekStart = AppState.currentWeekStart;
-        setCurrentMonth(AppState.currentWeekStart || new Date());
-    } else if (mode === 'week' && AppState.viewMode === 'month') {
-        // Switching month → week
-        if (AppState.previousWeekStart) {
-            AppState.currentWeekStart = AppState.previousWeekStart;
-        } else {
-            setCurrentWeek(AppState.currentMonthStart || new Date());
-        }
-    } else if (mode === 'day') {
+    if (mode === 'day') {
         // Switching to day mode: default to today's day in current week
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
@@ -1329,14 +1293,7 @@ function changeViewMode(mode) {
 }
 
 function updatePeriodDisplay() {
-    if (AppState.viewMode === 'month') {
-        // Month view: show "februari 2026"
-        if (!AppState.currentMonthStart) {
-            setCurrentMonth(new Date());
-            return;
-        }
-        DOM.currentPeriod.textContent = formatMonthDisplay(AppState.currentMonthStart);
-    } else if (AppState.viewMode === 'day') {
+    if (AppState.viewMode === 'day') {
         // Day view: show "Week 6 · Maandag, 3 maart 2026"
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());

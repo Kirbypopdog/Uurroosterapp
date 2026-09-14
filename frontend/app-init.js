@@ -209,22 +209,12 @@ function setupEventListeners() {
 
     if (DOM.addShiftBtn) DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
     DOM.prevWeekBtn.addEventListener('click', () => {
-        if (AppState.viewMode === 'month') {
-            changeMonth(-1);
-        } else if (AppState.viewMode === 'day') {
-            changeMobileDay(-1);
-        } else {
-            changeWeek(-1);
-        }
+        if (AppState.viewMode === 'day') changeMobileDay(-1);
+        else changeWeek(-1);
     });
     DOM.nextWeekBtn.addEventListener('click', () => {
-        if (AppState.viewMode === 'month') {
-            changeMonth(1);
-        } else if (AppState.viewMode === 'day') {
-            changeMobileDay(1);
-        } else {
-            changeWeek(1);
-        }
+        if (AppState.viewMode === 'day') changeMobileDay(1);
+        else changeWeek(1);
     });
     DOM.todayBtn.addEventListener('click', jumpToToday);
 
