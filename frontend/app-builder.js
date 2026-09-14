@@ -212,7 +212,12 @@ function renderConceptCard(draft, newestActiveId) {
             <div class="concept-card-header">
                 <span class="concept-card-name-row">
                     <span class="concept-card-dot" style="background:${teamDotColor}" title="${escapeHtml(teamLabel)}"></span>
-                    <span class="concept-card-name">${escapeHtml(draft.name)}</span>
+                    <!-- #267: openen kon alleen via het kebabknopje van 30 bij
+                         26 px. De naam is nu zelf een knop met de standaardactie,
+                         en de hele kaart is aantikbaar (zie de klikafhandeling
+                         in attachConceptCardListeners). -->
+                    <button type="button" class="concept-card-name concept-card-open" data-draft-id="${dId}"
+                            title="${isActive ? 'Bewerken' : 'Laden'}">${escapeHtml(draft.name)}</button>
                 </span>
                 <div class="concept-card-menu">
                     <!-- #365: deze knop bevat alleen een icoon, dus zonder
@@ -291,10 +296,16 @@ function addBuilderWeek() {
     pattern.cycleLength = newLength;
     pattern.weeks[String(newLength)] = { closedDays: [], label: 'alle dagen open' };
     setBuilderDirty();
-    // Switch to new week
+    // Switch to new week. Raster EN bezettingsregels moeten allebei mee naar de
+    // cache, anders belanden de regels van de huidige week straks onder het
+    // nieuwe weeknummer.
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+    AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules || {}));
     AppState.builderWeekNumber = newLength;
     AppState.builderGrid = AppState.builderGridByWeek[newLength] || {};
+    AppState.builderStaffingRules = AppState.builderStaffingRulesByWeek[newLength]
+        ? JSON.parse(JSON.stringify(AppState.builderStaffingRulesByWeek[newLength]))
+        : {};
     renderBuilder();
 }
 
@@ -304,24 +315,38 @@ function removeBuilderWeek(weekNum) {
     if (cl <= 1) return;
     // Save current week first
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
-    // Shift down weeks above the removed one
+    AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules || {}));
+    // Shift down weeks above the removed one. Het raster en de bezettingsregels
+    // horen bij elkaar en schuiven dus samen op; anders houdt week 1 het raster
+    // van oude week 2 maar de bezettingsregels van de verwijderde week.
     const newWeeks = {};
     const newGridByWeek = {};
+    const newStaffingByWeek = {};
     let newIdx = 1;
     for (let w = 1; w <= cl; w++) {
         if (w === weekNum) continue;
         newWeeks[String(newIdx)] = pattern.weeks[String(w)] || { closedDays: [], label: 'alle dagen open' };
         newGridByWeek[newIdx] = AppState.builderGridByWeek[w] || {};
+        if (AppState.builderStaffingRulesByWeek[w]) {
+            newStaffingByWeek[newIdx] = AppState.builderStaffingRulesByWeek[w];
+        }
         newIdx++;
     }
     pattern.weeks = newWeeks;
     pattern.cycleLength = cl - 1;
     AppState.builderGridByWeek = newGridByWeek;
+    // Sleutels van weggevallen weken mogen niet blijven staan: autoSaveBuilderDraft
+    // schrijft dit object ongefilterd weg naar grid._staffingRules.
+    AppState.builderStaffingRulesByWeek = newStaffingByWeek;
     // Adjust current week number
     if (AppState.builderWeekNumber > pattern.cycleLength) {
         AppState.builderWeekNumber = pattern.cycleLength;
     }
     AppState.builderGrid = AppState.builderGridByWeek[AppState.builderWeekNumber] || {};
+    // Opnieuw uit de cache laden, net als switchBuilderWeek doet.
+    AppState.builderStaffingRules = AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber]
+        ? JSON.parse(JSON.stringify(AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber]))
+        : {};
     setBuilderDirty();
     renderBuilder();
 }
@@ -1451,11 +1476,22 @@ function attachBuilderOverviewListeners(container) {
     }
 
     // Card action buttons
-    container.querySelectorAll('.concept-card-load, .concept-card-edit').forEach(btn => {
+    container.querySelectorAll('.concept-card-load, .concept-card-edit, .concept-card-open').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             AppState.builderScreen = 'editor';
             loadBuilderDraft(btn.dataset.draftId);
+        });
+    });
+
+    // #267: de hele kaart opent het concept. Klikken op een knop erin (het
+    // kebabmenu of een menuactie) telt niet mee; die roepen stopPropagation
+    // aan, maar de controle hieronder maakt dat onafhankelijk van hun volgorde.
+    container.querySelectorAll('.builder-concept-card[data-draft-id]').forEach(kaart => {
+        kaart.addEventListener('click', (e) => {
+            if (e.target.closest('button, a, input, select')) return;
+            AppState.builderScreen = 'editor';
+            loadBuilderDraft(kaart.dataset.draftId);
         });
     });
     container.querySelectorAll('.concept-card-apply').forEach(btn => {

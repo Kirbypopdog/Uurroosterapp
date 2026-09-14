@@ -323,6 +323,54 @@ const DragHandler = {
         }
     },
 
+    // #248: één plek waar de sleepwegen met een validatiemelding omgaan,
+    // zodat ze zich net zo gedragen als het dienstenformulier.
+    //
+    // Geeft terug of er doorgegaan mag worden, en of de bevestigde afwijking
+    // als force meegestuurd moet worden. Een overlap krijgt geen bevestiging
+    // aangeboden: de backend weigert die ook met force, want force slaat
+    // uitsluitend de rustcontrole over. Een keuze tonen die niet bestaat
+    // levert alleen een tweede foutmelding op.
+    async vraagOverride(validation, vraag) {
+        if (!validation || (validation.isValid && !validation.hasWarnings)) {
+            return { doorgaan: true, force: false };
+        }
+        const overlap = (validation.errors || []).find(e => e.code === 'overlap');
+        if (overlap) {
+            showToast(`${overlap.message}. Iemand kan niet op twee plaatsen tegelijk staan.`, 'error');
+            return { doorgaan: false, force: false };
+        }
+        const issues = [...(validation.errors || []), ...(validation.warnings || [])]
+            .map(i => `- ${i.message}`).join('\n');
+        const confirmed = await showConfirm(
+            `Er zijn opmerkingen:\n\n${issues}\n\n${vraag}`,
+            'Validatie opmerkingen'
+        );
+        return { doorgaan: confirmed, force: confirmed };
+    },
+
+    // Opslaan, en als de backend alsnog 422 met canOverride geeft, de
+    // bevestiging daar vragen en het één keer opnieuw proberen. De
+    // frontendcontrole kijkt namelijk alleen naar de diensten die geladen
+    // zijn; de backend kijkt naar alles.
+    async slaOpMetOverride(shiftId, data, alBevestigd, vraag) {
+        try {
+            return await updateShift(shiftId, alBevestigd ? { ...data, force: true } : data);
+        } catch (fout) {
+            if (fout.status !== 422 || !fout.data?.canOverride || alBevestigd) throw fout;
+            const confirmed = await showConfirm(
+                `Er zijn opmerkingen:\n\n- ${fout.message}\n\n${vraag}`,
+                'Validatie opmerkingen'
+            );
+            if (!confirmed) {
+                const gestopt = new Error('geannuleerd');
+                gestopt.stilGeannuleerd = true;
+                throw gestopt;
+            }
+            return await updateShift(shiftId, { ...data, force: true });
+        }
+    },
+
     // Complete transfer drag
     async completeTransferDrag(e) {
         // 1. Capture all needed state SYNCHRONOUSLY before any async work
@@ -381,14 +429,9 @@ const DragHandler = {
             date: targetDate
         };
         const validation = validateShift(testShift, shiftId);
-        if (!validation.isValid || validation.hasWarnings) {
-            const issues = [...validation.errors, ...validation.warnings].map(i => `- ${i.message}`).join('\n');
-            const confirmed = await showConfirm(
-                `Er zijn opmerkingen:\n\n${issues}\n\nToch shift toewijzen?`,
-                'Validatie opmerkingen'
-            );
-            if (!confirmed) return;
-        }
+        const uitkomst = await this.vraagOverride(validation, 'Toch shift toewijzen?');
+        if (!uitkomst.doorgaan) return;
+        const forceerRust = uitkomst.force;
 
         console.log(`[DragHandler] Transferring shift ${shiftId} to ${targetEmployee.name} on ${targetDate}`);
 
@@ -399,7 +442,10 @@ const DragHandler = {
             const originalDate2 = originalData.date;
 
             // Update shift - mark as manual to prevent auto-schedule from replacing it
-            await updateShift(shiftId, {
+            // #248: de bevestigde rustafwijking moet ook mee naar de backend.
+            // Zonder force weigert die alsnog met 422 en sprong de dienst terug,
+            // terwijl dezelfde wijziging via het dienstenformulier wél lukte.
+            await this.slaOpMetOverride(shiftId, {
                 employeeId: targetEmployee.id,
                 date: targetDate,
                 team: originalData.team,
@@ -407,7 +453,7 @@ const DragHandler = {
                 endTime: originalData.endTime,
                 notes: originalData.notes || '',
                 source: 'manual' // Mark as manual so it persists
-            });
+            }, forceerRust, 'Toch shift toewijzen?');
 
             // Als de shift van dag of medewerker is veranderd, bescherm de originele
             // cel met een shift_block zodat het concept haar niet opnieuw vult (#146).
@@ -437,6 +483,12 @@ const DragHandler = {
 
             showToast(`Shift overgedragen aan ${targetEmployee.name}`, 'success');
         } catch (error) {
+            // De gebruiker heeft de bevestiging afgewezen; dat is geen fout.
+            if (error.stilGeannuleerd) {
+                try { await refreshShifts(); renderPlanning(); } catch (_) {}
+                return; // finally hieronder ruimt de laadindicator op
+
+            }
             console.error('[DragHandler] Error transferring shift:', error);
             showToast(`Fout bij overdragen shift: ${error.message}`, 'error');
             // Re-sync from server to ensure UI matches DB
@@ -588,6 +640,19 @@ const DragHandler = {
             return;
         }
 
+        // #248: hier werd helemaal niets gecontroleerd. Een dienst langer
+        // slepen kan de rust van de dag ervoor of erna opeten, en dan weigerde
+        // de backend met een rode foutmelding zonder dat de planner ooit de
+        // kans kreeg om de afwijking te aanvaarden.
+        const controle = validateShift({
+            ...originalData,
+            startTime: newStartTime,
+            endTime: newEndTime
+        }, shiftId);
+        const uitkomstResize = await this.vraagOverride(controle, 'Toch aanpassen?');
+        if (!uitkomstResize.doorgaan) return;
+        const forceerRustResize = uitkomstResize.force;
+
         console.log(`[DragHandler] Resizing shift ${shiftId} to ${newStartTime} - ${newEndTime}`);
 
         // 3. Update shift via API (using captured data, not this.state)
@@ -611,7 +676,7 @@ const DragHandler = {
             };
 
             // Mark as manual so resized shifts persist across auto-schedule regeneration
-            await updateShift(shiftId, newData);
+            await this.slaOpMetOverride(shiftId, newData, forceerRustResize, 'Toch aanpassen?');
 
             // Record undo action for drag resize (using captured shiftId)
             if (typeof UndoManager !== 'undefined') {
@@ -628,6 +693,10 @@ const DragHandler = {
 
             showToast('Shift aangepast', 'success');
         } catch (error) {
+            if (error.stilGeannuleerd) {
+                try { await refreshShifts(); renderPlanning(); } catch (_) {}
+                return;
+            }
             console.error('[DragHandler] Error resizing shift:', error);
             showToast(`Fout bij aanpassen shift: ${error.message}`, 'error');
             // Re-sync from server to ensure UI matches DB
