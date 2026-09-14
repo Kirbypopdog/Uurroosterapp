@@ -12357,6 +12357,16 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .builder-autosave-status.is-mislukt:hover { filter: brightness(0.96); }
 
+/* #222: zonder geladen concept wordt er niets automatisch bewaard. Dat is een
+   waarschuwing, geen fout: er is een weg vooruit via "Opslaan als…". Daarom de
+   kleur van een waarschuwing en niet die van een mislukking. */
+.builder-autosave-status.is-nietbewaard {
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    border-color: var(--warn-text);
+    font-weight: 600;
+}
+
 @media (max-width: 768px) {
     /* .builder-actions wordt daar een kolom */
     .builder-autosave-status { justify-content: center; }
@@ -13874,4 +13884,12 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
         margin: 0;
         padding-bottom: max(16px, env(safe-area-inset-bottom));
     }
+}
+
+/* #230: de periodegrenzen onder de urenbalk in het profiel. Klein en gedempt:
+   het is een verduidelijking bij het getal erboven, geen eigen gegeven. */
+.profile-hours-periode {
+    font-size: 11.5px;
+    color: var(--ink-3);
+    margin: -2px 0 6px;
 }

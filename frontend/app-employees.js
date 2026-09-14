@@ -1,5 +1,14 @@
 // HET VLOT ROOSTERPLANNING - MEDEWERKERS, PROFIEL EN BASISROOSTER
 
+// #230: het label zei "Deze maand" terwijl de noemer contractHours * 4 is, dus
+// een periode van vier weken. Erbij zetten welke periode het is maakt meteen
+// duidelijk dat het niet om de kalendermaand gaat.
+function formatPeriodeBereik(periode) {
+    if (!periode) return '';
+    const kort = (d) => parseDateOnly(d).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+    return `${kort(periode.startDate)} t/m ${kort(periode.endDate)}`;
+}
+
 function renderEmployees() {
     renderEmployeeTeamToggles();
     const role = getEffectiveRole();
@@ -173,7 +182,12 @@ function renderProfile() {
     const weekStart = getEmployeeWeekStart(resolvedId);
     const weekDates = getWeekDates(weekStart);
     const hoursWeek = getEmployeeHoursThisWeek(resolvedId, weekDates[0]);
-    const hoursMonth = getEmployeeHoursThisMonth(resolvedId, weekDates[0]);
+    // #230: dit was getEmployeeHoursThisMonth, de KALENDERMAAND, terwijl de
+    // noemer contractHours * 4 is en dus een periode van vier weken. De
+    // planning toont voor dezelfde persoon wél de echte periode, dus stonden er
+    // twee verschillende getallen bij dezelfde noemer op twee schermen.
+    const hoursPeriode = getEmployeeHoursThisPeriod(resolvedId, weekDates[0]);
+    const periode = getFourWeekPeriodDates(weekDates[0]);
 
     const canEditContract = ['admin', 'roosterverantwoordelijke'].includes(user.role);
 
@@ -187,8 +201,10 @@ function renderProfile() {
     function saldoLabel(actual, target) {
         const diff = actual - target;
         if (Math.abs(diff) < 0.1) return '';
+        // #230: "t.o.v. contract" stond alleen bij een tekort, waardoor een
+        // overschot als een los getal zonder noemer las.
         return diff > 0
-            ? `<span class="hours-saldo positive">+${diff.toFixed(1)}u</span>`
+            ? `<span class="hours-saldo positive">+${diff.toFixed(1)}u t.o.v. contract</span>`
             : `<span class="hours-saldo negative">${diff.toFixed(1)}u t.o.v. contract</span>`;
     }
 
@@ -214,11 +230,11 @@ function renderProfile() {
 
     let hoursCardContent = '';
     if (contractHours > 0) {
-        const monthContract = contractHours * 4;
+        const periodeContract = contractHours * 4;
         const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
-        const monthPct = Math.min((hoursMonth / monthContract) * 100, 100);
+        const periodePct = Math.min((hoursPeriode / periodeContract) * 100, 100);
         const weekClr = hoursColor(hoursWeek, contractHours);
-        const monthClr = hoursColor(hoursMonth, monthContract);
+        const periodeClr = hoursColor(hoursPeriode, periodeContract);
         hoursCardContent = `
             <div class="profile-hours-section">
                 <div class="profile-hours-row">
@@ -229,11 +245,12 @@ function renderProfile() {
                     <div class="progress-fill" style="width:${weekPct}%;background:${weekClr}"></div>
                 </div>
                 <div class="profile-hours-row">
-                    <span class="profile-hours-label">Deze maand</span>
-                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u / ${monthContract.toFixed(0)}u ${saldoLabel(hoursMonth, monthContract)}</span>
+                    <span class="profile-hours-label">Deze periode (4 weken)</span>
+                    <span class="profile-hours-value">${hoursPeriode.toFixed(1)}u / ${periodeContract.toFixed(0)}u ${saldoLabel(hoursPeriode, periodeContract)}</span>
                 </div>
+                ${periode ? `<div class="profile-hours-periode">${formatPeriodeBereik(periode)}</div>` : ''}
                 <div class="progress-bar mb-md">
-                    <div class="progress-fill" style="width:${monthPct}%;background:${monthClr}"></div>
+                    <div class="progress-fill" style="width:${periodePct}%;background:${periodeClr}"></div>
                 </div>
                 <div class="profile-week-shifts">${weekShiftRows}</div>
             </div>`;
@@ -245,8 +262,8 @@ function renderProfile() {
                     <span class="profile-hours-value">${hoursWeek.toFixed(1)}u</span>
                 </div>
                 <div class="profile-hours-row mb-md">
-                    <span class="profile-hours-label">Deze maand</span>
-                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u</span>
+                    <span class="profile-hours-label">Deze periode (4 weken)</span>
+                    <span class="profile-hours-value">${hoursPeriode.toFixed(1)}u</span>
                 </div>
                 <div class="profile-week-shifts">${weekShiftRows}</div>
                 <p class="form-hint mt-sm">Geen contracturen ingesteld.</p>
@@ -727,17 +744,19 @@ function renderEmployeeCard(emp) {
     const weekStart = getEmployeeWeekStart(emp.id);
     const weekDates = getWeekDates(weekStart);
     const hoursWeek = getEmployeeHoursThisWeek(emp.id, weekDates[0]);
-    const hoursMonth = getEmployeeHoursThisMonth(emp.id, weekDates[0]);
+    // #230: zie het profiel hierboven. Dezelfde noemer hoort hetzelfde getal
+    // te geven als in de planning.
+    const hoursPeriode = getEmployeeHoursThisPeriod(emp.id, weekDates[0]);
     let hoursHtml = '';
     if (contractHours > 0) {
-        const monthContract = contractHours * 4;
+        const periodeContract = contractHours * 4;
         const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
         const weekClr = hoursWeek >= contractHours * 0.9 ? '#10b981' : hoursWeek >= contractHours * 0.6 ? '#f59e0b' : '#ef4444';
         hoursHtml = `
             <div class="emp-card-hours">
                 <div class="emp-card-hours-row">
                     <span>${hoursWeek.toFixed(1)}u / ${contractHours}u week</span>
-                    <span class="emp-card-hours-month">${hoursMonth.toFixed(1)}u / ${monthContract.toFixed(0)}u maand</span>
+                    <span class="emp-card-hours-month">${hoursPeriode.toFixed(1)}u / ${periodeContract.toFixed(0)}u periode</span>
                 </div>
                 <div class="progress-bar progress-bar--xs">
                     <div class="progress-fill" style="width:${weekPct}%;background:${weekClr}"></div>

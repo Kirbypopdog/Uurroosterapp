@@ -209,10 +209,18 @@ async function dataApiFetch(path, options = {}) {
             sessionStorage.removeItem('hetvlot_token');
             sessionStorage.removeItem('hetvlot_user');
             if (typeof handleLogout === 'function') handleLogout();
-            throw new Error('Sessie verlopen. Log opnieuw in.');
+            // #268: deze fout kreeg als enige geen status mee. Een aanroeper die
+            // op error.status test kon een fout wachtwoord daardoor niet
+            // onderscheiden van een netwerkfout.
+            const fout401 = new Error('Sessie verlopen. Log opnieuw in.');
+            fout401.status = 401;
+            throw fout401;
         }
         const data = await response.json().catch(() => ({}));
-        const msg = data.error || `HTTP ${response.status}`;
+        // #268: hier stond alleen data.error. De inlogbegrenzer antwoordt met
+        // een message-veld, dus die tekst ging verloren en de gebruiker las
+        // "HTTP 429" in plaats van hoe lang hij moest wachten.
+        const msg = data.error || data.message || `HTTP ${response.status}`;
         const detail = data.detail ? ` (${data.detail})` : '';
         const fout = new Error(msg + detail);
         // De statuscode en het volledige antwoord meegeven, zodat een aanroeper

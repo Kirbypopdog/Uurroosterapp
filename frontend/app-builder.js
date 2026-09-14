@@ -440,22 +440,23 @@ function renderBuilderGrid(role, userTeam) {
     // Filter medewerkers met verlof in de huidige vakantieweek
     let hiddenOnLeaveCount = 0;
     if (AppState.builderConceptType === 'vakantie' && AppState.builderHideOnLeave) {
-        const weekStart = getBuilderVakantieWeekStart(AppState.builderWeekNumber);
-        if (weekStart) {
-            const weekDates = Array.from({ length: 7 }, (_, i) => {
-                const d = new Date(weekStart);
-                d.setDate(d.getDate() + i);
-                return d.toISOString().slice(0, 10);
-            });
-            employees = employees.filter(emp => {
-                const hasLeave = weekDates.some(dateStr => {
-                    const avail = getAvailability(emp.id, dateStr);
-                    return avail && avail.type === 'verlof';
-                });
-                if (hasLeave) hiddenOnLeaveCount++;
-                return !hasLeave;
-            });
-        }
+        // #218 en #177: hier stond een eigen lus met d.toISOString().slice(0,10)
+        // op een LOKALE datum. In de Belgische zomertijd levert dat de dag
+        // ervoor op, dus het filter keek naar zondag tot en met zaterdag in
+        // plaats van maandag tot en met zondag. Wie op de zondag vóór de week
+        // verlof had verdween, wie op de zondag ín de week verlof had bleef
+        // staan.
+        //
+        // Erger nog: de teller "(N met verlof)" ernaast rekende met
+        // getBuilderLeaveDays, dat de juiste helper gebruikt. Teller en filter
+        // konden elkaar dus tegenspreken op hetzelfde scherm.
+        //
+        // Ze delen nu één bron, zodat ze niet opnieuw uit elkaar kunnen lopen.
+        employees = employees.filter(emp => {
+            const hasLeave = getBuilderLeaveDays(emp.id, AppState.builderWeekNumber).length > 0;
+            if (hasLeave) hiddenOnLeaveCount++;
+            return !hasLeave;
+        });
     }
 
     if (employees.length === 0 && hiddenOnLeaveCount === 0) {
@@ -1296,6 +1297,19 @@ function loadBuilderFromBaseSchedules() {
 // veilig is. Eén functie voor zowel de render als de losse bijwerking, anders
 // lopen die twee uiteen — en dan liegt het scherm.
 function renderBuilderSaveStatus() {
+    // #222: zonder geladen concept is er niets om automatisch naar te schrijven
+    // (scheduleBuilderAutoSave keert dan meteen terug). "Bewaren…" tonen is dan
+    // een belofte die niet wordt ingelost, en juist deze regel is het enige wat
+    // vertelt of je werk veilig is.
+    if (!AppState.builderLoadedDraftId) {
+        if (!AppState.builderIsDirty && !AppState.builderSaveState) {
+            return `<span id="builder-autosave-status" class="builder-autosave-status"></span>`;
+        }
+        return `<span id="builder-autosave-status" class="builder-autosave-status is-nietbewaard">
+            ${IconHelper.html('triangle-alert', 'xs')} Nog niet bewaard. Gebruik "Opslaan als…"
+        </span>`;
+    }
+
     const state = AppState.builderSaveState
         || (AppState.builderIsDirty ? 'bezig' : (AppState.builderAutoSavedAt ? 'bewaard' : ''));
 
@@ -1763,6 +1777,13 @@ function attachBuilderEventListeners(container) {
             AppState.builderConceptType = 'basis';
             AppState.builderHolidayPeriodId = null;
             AppState.builderIsDirty = false;
+            // #222: de bewaarstatus bleef staan. Stond er "Bewaard om 14:32",
+            // dan sloeg dat op het concept dat je net verliet. En omdat er geen
+            // builderLoadedDraftId meer is, keert scheduleBuilderAutoSave
+            // meteen terug, zodat een volgende wijziging eeuwig "Bewaren…"
+            // toonde terwijl er niets gebeurde.
+            AppState.builderSaveState = null;
+            AppState.builderAutoSavedAt = null;
             renderBuilder();
             showToast('Grid leeggemaakt', 'info');
         };

@@ -45,13 +45,33 @@ async function handleLogin(e) {
         showApp();
     } catch (error) {
         console.error('Login error:', error);
-        const isDeactivated = error.message && error.message.includes('gedeactiveerd');
-        showToast(
-            isDeactivated
-                ? 'Je account is gedeactiveerd. Neem contact op met een beheerder.'
-                : 'Ongeldige gebruikersnaam of wachtwoord',
-            'error'
-        );
+
+        // #268: elke fout werd hier op een verkeerd wachtwoord gegooid. Of de
+        // backend nu plat lag, een 500 gaf of de inlogbegrenzing afging, de
+        // gebruiker las "Ongeldige gebruikersnaam of wachtwoord". Wie na tien
+        // pogingen begrensd is denkt dan dat zijn wachtwoord fout is en blijft
+        // proberen, wat de begrenzing alleen maar verlengt.
+        const status = error.status;
+        const isGedeactiveerd = error.message && error.message.includes('gedeactiveerd');
+        // Een technische fout zegt niets over wat je intikte, dus die laat je
+        // staan. Alleen bij foute gegevens maken we het formulier leeg.
+        let technisch = false;
+        let melding;
+
+        if (isGedeactiveerd) {
+            melding = 'Je account is gedeactiveerd. Neem contact op met een beheerder.';
+        } else if (status === 429) {
+            // De servertekst zegt hoe lang je moet wachten; die is bruikbaarder
+            // dan wat wij ervan zouden maken.
+            melding = error.message || 'Te veel inlogpogingen. Probeer het later opnieuw.';
+            technisch = true;
+        } else if (status === 0 || status === undefined || status >= 500) {
+            melding = 'De server is niet bereikbaar. Probeer het straks opnieuw.';
+            technisch = true;
+        } else {
+            melding = 'Ongeldige gebruikersnaam of wachtwoord';
+        }
+        showToast(melding, 'error');
 
         // Clear any existing session to prevent staying logged in with old credentials
         AppState.currentUser = null;
@@ -60,7 +80,12 @@ async function handleLogin(e) {
         sessionStorage.removeItem('hetvlot_token');
 
         // Ensure login screen is visible
+        const bewaardEmail = technisch ? email : '';
         showLogin();
+        if (bewaardEmail) {
+            DOM.usernameInput.value = bewaardEmail;
+            DOM.passwordInput.focus();
+        }
     } finally {
         // Clear guard flag
         AppState.isAuthenticating = false;

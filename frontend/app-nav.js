@@ -1181,6 +1181,16 @@ function changeMobileDay(direction) {
         updateTimelineMobileDayAttribute();
         if (AppState.viewMode === 'day') {
             updatePeriodDisplay();
+            // #266: de meldingenbalk rekent in dagweergave per ZICHTBARE dag
+            // (zie renderValidationAlerts), maar deze tak werkte alleen het
+            // label en het data-attribuut bij. Na een tik op de pijl bleven de
+            // waarschuwingen van de vorige dag staan, en die gaan over rusttijd
+            // en opeenvolgende werkdagen.
+            //
+            // Alleen de balk opnieuw, niet de hele planning: het raster rendert
+            // alle zeven dagen en verbergt de rest via data-mobile-day, dus daar
+            // verandert niets aan.
+            renderValidationAlerts();
         }
     }
 }
