@@ -497,6 +497,10 @@ body.dark-mode .availability-header-row .availability-day-col.today {
     background: var(--sage);
     border-color: var(--sage);
 }
+/* De tekst erop stond nog op var(--surface-color), dat in donkere modus juist
+   donker is. Wit op sage haalt 4,77; de andere dagkoppen deden dit al. */
+body.dark-mode .availability-header-row .availability-day-col.today .day-name,
+body.dark-mode .availability-header-row .availability-day-col.today .day-date { color: #fff; }
 body.dark-mode .availability-employee-row:hover                       { background: var(--raise); }
 body.dark-mode .availability-employee-row .availability-day-col.weekend { background: var(--surface-2); }
 body.dark-mode .availability-employee-row .availability-day-col.closed  {

@@ -846,7 +846,14 @@ const DragHandler = {
         hours = Math.max(this.constants.START_HOUR, Math.min(this.constants.END_HOUR, hours));
 
         // Format as HH:MM
-        const wholeHours = Math.floor(hours);
+        // #246: op de rechterrand klemde dit op END_HOUR (24) en leverde het de
+        // tekst '24:00' op. De backend aanvaardde die (isValidTime kijkt alleen
+        // naar het patroon HH:MM), maar <input type="time"> weigert hem, want
+        // geldige waarden lopen tot 23:59. Het veld Eindtijd bleef dan leeg en
+        // opslaan gaf "Vul start- en eindtijd in". Middernacht heet in deze app
+        // '00:00'; calculateDuration en de validatie rekenen dat al correct om
+        // naar de volgende dag.
+        const wholeHours = Math.floor(hours) % 24;
         const minutes = Math.round((hours % 1) * 60);
 
         return `${String(wholeHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
@@ -1320,7 +1327,8 @@ const BuilderDragHandler = {
         hours = snappedMinutes / 60;
         hours = Math.max(this.constants.START_HOUR, Math.min(this.constants.END_HOUR, hours));
 
-        const wholeHours = Math.floor(hours);
+        // #246: zie de toelichting bij de andere getTimeFromX hierboven.
+        const wholeHours = Math.floor(hours) % 24;
         const minutes = Math.round((hours % 1) * 60);
         return `${String(wholeHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
     },

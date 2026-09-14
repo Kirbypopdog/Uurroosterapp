@@ -124,8 +124,10 @@ function renderAvailability() {
         const teamName = teamId === '_no_team'
             ? 'Geen team'
             : escapeHtml(DataStore.settings.teams[teamId]?.name || teamId);
+        // Een vaste tint en geen CSS-variabele: getContrastColor rekent de
+        // tekstkleur uit de achtergrond en kan var(--ink-3) niet doorrekenen.
         const teamColor = teamId === '_no_team'
-            ? 'var(--ink-3)'
+            ? '#6f6b5e'
             : (DataStore.settings.teams[teamId]?.color || '#8d897c');
 
         // Team header (rustige stijl met team-kleur-dot, consistent met planning/medewerkers)

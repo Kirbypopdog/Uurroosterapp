@@ -696,6 +696,19 @@ const MIGRATIONS = [
         `CREATE INDEX IF NOT EXISTS idx_shift_activities_draft_id ON shift_activities(draft_id) WHERE draft_id IS NOT NULL`
       );
     }
+  },
+  {
+    // #246: het slepen van het rechterhandvat kon een eindtijd '24:00' opleveren,
+    // en isValidTime keek alleen naar het patroon HH:MM, dus die werd bewaard.
+    // <input type="time"> weigert die waarde, waardoor het veld Eindtijd leeg
+    // bleef en de dienst niet meer via het venster te bewerken was. Middernacht
+    // heet in deze app '00:00'. Nieuwe waarden worden nu genormaliseerd; deze
+    // migratie haalt de rijen op die er al staan.
+    name: '039_normaliseer_eindtijd_24u',
+    up: async (client) => {
+      await client.query(`UPDATE shifts SET end_time = '00:00' WHERE end_time::text LIKE '24:00%'`);
+      await client.query(`UPDATE shifts SET start_time = '00:00' WHERE start_time::text LIKE '24:00%'`);
+    }
   }
 ];
 
@@ -883,7 +896,19 @@ async function logAudit(req, action, resourceType, resourceId, details = {}) {
 // ===== SHIFT VALIDATIE =====
 
 function isValidTime(t) {
-  return typeof t === 'string' && /^\d{2}:\d{2}$/.test(t);
+  // #246: het patroon alleen is niet genoeg. '24:00' en '99:99' kwamen er zo
+  // doorheen en werden als tekst opgeslagen, waarna <input type="time"> in de
+  // frontend ze weigerde en het veld leeg bleef. De uren moeten 0 tot 23 zijn
+  // en de minuten 0 tot 59; middernacht heet in deze app '00:00'.
+  if (typeof t !== 'string' || !/^\d{2}:\d{2}$/.test(t)) return false;
+  const [u, m] = t.split(':').map(Number);
+  return u >= 0 && u <= 23 && m >= 0 && m <= 59;
+}
+
+// Een eindtijd van '24:00' betekent middernacht. Oudere clients en bestaande
+// rijen kunnen die nog sturen, dus zetten we hem om in plaats van te weigeren.
+function normaliseerTijd(t) {
+  return t === '24:00' ? '00:00' : t;
 }
 
 /**
@@ -2083,7 +2108,10 @@ v1.get('/shifts', requireAuth, async (req, res) => {
 });
 
 v1.post('/shifts', requireAuth, async (req, res) => {
-  const { userId, team, date, startTime, endTime, notes, source, isReserve, force } = req.body || {};
+  const { userId, team, date, notes, source, isReserve, force } = req.body || {};
+  // #246: '24:00' is middernacht, maar geen geldige waarde voor een tijdveld.
+  const startTime = normaliseerTijd((req.body || {}).startTime);
+  const endTime = normaliseerTijd((req.body || {}).endTime);
   if (!userId || !date || !startTime || !endTime) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
@@ -2141,7 +2169,10 @@ v1.post('/shifts', requireAuth, async (req, res) => {
 
 v1.put('/shifts/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
-  const { userId, team, date, startTime, endTime, notes, source, isReserve, force } = req.body || {};
+  const { userId, team, date, notes, source, isReserve, force } = req.body || {};
+  // #246: zie POST /shifts. Middernacht heet '00:00', niet '24:00'.
+  const startTime = (req.body || {}).startTime === undefined ? undefined : normaliseerTijd(req.body.startTime);
+  const endTime = (req.body || {}).endTime === undefined ? undefined : normaliseerTijd(req.body.endTime);
   if (!id) {
     return res.status(400).json({ error: 'ID is verplicht' });
   }

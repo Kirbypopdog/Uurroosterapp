@@ -708,8 +708,16 @@ async function deleteShift(id, skipBlock = false) {
     }
 }
 
+// #245: dit vergeleek strikt met ===, terwijl id soms als tekst binnenkomt.
+// Elke werkende weg parseerde hem eerst naar een getal, maar de maandweergave
+// gaf hem via een inline onclick als tekst door ('42'). getShift gaf dan
+// undefined, openEditShiftModal deed een stille return, en een klik op een
+// dienst opende daar dus niets. Hier vergelijken op getal haalt die valkuil
+// voorgoed weg in plaats van hem per aanroeper op te lossen.
 function getShift(id) {
-    return DataStore.shifts.find(s => s.id === id);
+    const gezocht = Number(id);
+    if (Number.isNaN(gezocht)) return undefined;
+    return DataStore.shifts.find(s => Number(s.id) === gezocht);
 }
 
 function getShiftsByDate(date) {

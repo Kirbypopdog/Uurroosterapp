@@ -928,6 +928,17 @@ function renderTimelineView() {
                             // niets doet is alleen maar in de weg. De gedeelde
                             // handler in app-ui.js maakt Enter en spatie gelijk
                             // aan een klik.
+                            // #246: een nachtdienst loopt door in de cel van de
+                            // volgende dag, maar updateResizeDrag rekent met de
+                            // cel van de eerste dag. De muis ligt dan altijd
+                            // voorbij het einde van die cel, dus elke sleep van
+                            // het handvat zette de eindtijd op middernacht en
+                            // gooide de uren van de nachtdienst weg. Zolang dat
+                            // niet tegen de juiste cel gerekend wordt, is geen
+                            // handvat eerlijker dan een handvat dat altijd
+                            // hetzelfde verkeerde antwoord geeft. Bewerken kan
+                            // gewoon via het venster.
+                            const isNachtdienst = shift.endTime <= shift.startTime;
                             const blokNaam = getEmployee(shift.employeeId)?.name || 'Medewerker';
                             const toetsAttrs = canEdit
                                 ? ` role="button" tabindex="0" aria-label="${escapeHtml(`Dienst ${blokNaam}, ${shift.date}, ${shift.startTime} tot ${shift.endTime}`)}"`
@@ -939,11 +950,11 @@ function renderTimelineView() {
                                          data-date="${shift.date}"
                                          style="left: ${leftPercent}%; width: ${widthStyle}; ${cursorStyle}"
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
-                                ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
+                                ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
-                                ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
+                                ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
                     }
@@ -1166,6 +1177,17 @@ function renderTimelineView() {
                             // niets doet is alleen maar in de weg. De gedeelde
                             // handler in app-ui.js maakt Enter en spatie gelijk
                             // aan een klik.
+                            // #246: een nachtdienst loopt door in de cel van de
+                            // volgende dag, maar updateResizeDrag rekent met de
+                            // cel van de eerste dag. De muis ligt dan altijd
+                            // voorbij het einde van die cel, dus elke sleep van
+                            // het handvat zette de eindtijd op middernacht en
+                            // gooide de uren van de nachtdienst weg. Zolang dat
+                            // niet tegen de juiste cel gerekend wordt, is geen
+                            // handvat eerlijker dan een handvat dat altijd
+                            // hetzelfde verkeerde antwoord geeft. Bewerken kan
+                            // gewoon via het venster.
+                            const isNachtdienst = shift.endTime <= shift.startTime;
                             const blokNaam = getEmployee(shift.employeeId)?.name || 'Medewerker';
                             const toetsAttrs = canEdit
                                 ? ` role="button" tabindex="0" aria-label="${escapeHtml(`Dienst ${blokNaam}, ${shift.date}, ${shift.startTime} tot ${shift.endTime}`)}"`
@@ -1177,11 +1199,11 @@ function renderTimelineView() {
                                          data-date="${shift.date}"
                                          style="left: ${leftPercent}%; width: ${widthStyle}; ${cursorStyle}"
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
-                                ${canEdit ? '<div class="resize-handle resize-handle-start"></div>' : ''}
+                                ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 <span class="block-time">${timeLabel}</span>
                                 ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
-                                ${canEdit ? '<div class="resize-handle resize-handle-end"></div>' : ''}
+                                ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
                     }
