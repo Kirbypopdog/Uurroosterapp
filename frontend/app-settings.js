@@ -1138,6 +1138,22 @@ async function deleteTeam(teamId) {
     const confirmed = await showConfirm(`Weet je zeker dat je team "${team.name}" wilt verwijderen?`);
     if (!confirmed) return;
 
+    // #256: dit verwijderde het team eerst uit de instellingen en probeerde
+    // pas daarna de rij in de teams-tabel weg te halen, met een leeg
+    // catch-blok eromheen. Een team met historische diensten gaf daar een
+    // FK-fout, die in de console verdween: het team was weg uit de
+    // instellingen maar stond nog in de tabel, en oude diensten toonden
+    // "Onbekend". Zelfde volgorde-fout als #221.
+    //
+    // De tabel is nu leidend. Lukt het daar niet, dan blijven de instellingen
+    // staan en weet de gebruiker waarom.
+    try {
+        await dataApiFetch(`/teams/${teamId}`, { method: 'DELETE' });
+    } catch (error) {
+        showToast('Team niet verwijderd: ' + getUserFriendlyError(error), 'error');
+        return;
+    }
+
     try {
         delete DataStore.settings.teams[teamId];
         await saveSettings('teams', DataStore.settings.teams);
@@ -1145,17 +1161,12 @@ async function deleteTeam(teamId) {
         AppState.apiTeams = null;
         syncTeamFilters();
 
-        try {
-            await dataApiFetch(`/teams/${teamId}`, { method: 'DELETE' });
-        } catch (e) {
-            console.warn('Teams DB delete skipped:', e.message);
-        }
-
         showToast(`Team "${team.name}" verwijderd`, 'success');
         renderSettings();
     } catch (error) {
         DataStore.settings.teams[teamId] = team;
-        showToast(error.message || 'Fout bij verwijderen team', 'error');
+        showToast('Team is uit de database verwijderd, maar de instellingen zijn niet bijgewerkt: '
+            + getUserFriendlyError(error), 'error');
     }
 }
 

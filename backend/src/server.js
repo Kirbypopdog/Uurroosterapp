@@ -1454,6 +1454,20 @@ v1.delete('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordeli
       return res.status(409).json({ error: `Team heeft nog ${usersWithTeam.rows[0].count} medewerker(s). Verplaats ze eerst naar een ander team.` });
     }
 
+    // #256: alleen medewerkers werden geteld, niet de diensten. shifts.team
+    // heeft ook een foreign key naar deze tabel, dus een team met historische
+    // diensten gaf hier een FK-fout en dus een kale 500. De frontend ving die
+    // op in een leeg catch-blok, waardoor het team uit de instellingen
+    // verdween maar in de tabel bleef staan en oude diensten "Onbekend" gingen
+    // tonen.
+    const shiftsWithTeam = await pool.query('SELECT COUNT(*) as count FROM shifts WHERE team = $1', [id]);
+    const aantalShifts = parseInt(shiftsWithTeam.rows[0].count, 10);
+    if (aantalShifts > 0) {
+      return res.status(409).json({
+        error: `Team heeft nog ${aantalShifts} dienst(en) in de planning. Verwijder of verplaats die eerst.`
+      });
+    }
+
     const result = await pool.query('DELETE FROM teams WHERE id = $1 RETURNING *', [id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Team niet gevonden' });
@@ -1463,6 +1477,11 @@ v1.delete('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordeli
     res.json({ success: true });
   } catch (err) {
     console.error('DELETE /teams/:id error:', err);
+    // #256: 23503 is een foreign key violation. Die als 500 teruggeven zegt
+    // de gebruiker niets; het is een geldige vraag met een geldig antwoord.
+    if (err.code === '23503') {
+      return res.status(409).json({ error: 'Dit team wordt nog gebruikt in de planning of door een medewerker.' });
+    }
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -3761,13 +3780,26 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
       DO UPDATE SET value = $2, updated_at = NOW()
     `, [key, JSON.stringify(value)]);
 
-    // When teams settings are saved, sync names/colors to the teams table
+    // When teams settings are saved, sync names/colors to the teams table.
+    //
+    // #256: dit was een kale UPDATE, dus een team-id dat nog geen rij had in
+    // de teams-tabel werd nooit ingevoegd. De frontend behandelt
+    // settings.teams als bron van waarheid, maar shifts.team en
+    // users.main_team hebben een foreign key naar die tabel. Een team dat
+    // alleen in de instellingen bestond gaf daardoor 500 zodra je er een
+    // dienst of medewerker aan hing. Een upsert lost dat op.
+    //
+    // Bewust geen verwijderingen hier: daar is DELETE /teams/:id voor, met de
+    // controles die daarbij horen. Stil rijen weggooien vanuit een
+    // instellingenopslag zou historische diensten losknippen.
     if (key === 'teams' && value && typeof value === 'object') {
       for (const [teamId, teamData] of Object.entries(value)) {
         if (!teamData || !teamData.name) continue;
         await pool.query(
-          `UPDATE teams SET name = $1, color = $2 WHERE id = $3`,
-          [teamData.name, teamData.color || null, teamId]
+          `INSERT INTO teams (id, name, color)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, color = EXCLUDED.color`,
+          [teamId, teamData.name, teamData.color || null]
         );
       }
     }
@@ -3775,7 +3807,11 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
     await logAudit(req, 'UPDATE', 'settings', key, { key });
     res.json({ ok: true });
   } catch (err) {
-    console.error(err);
+    console.error('PUT /settings/:key error:', err);
+    // #256: idem, een FK-fout hier hoort een leesbaar antwoord te krijgen.
+    if (err.code === '23503') {
+      return res.status(400).json({ error: 'Een van de teams verwijst naar iets dat niet bestaat.' });
+    }
     res.status(500).json({ error: 'Server error' });
   }
 });
