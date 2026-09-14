@@ -210,6 +210,41 @@ async function notifyTakeoverAvailable(teamMembers, requester, shift) {
 }
 
 /**
+ * 2b. Meerdere diensten in één keer beschikbaar → teamleden
+ *
+ * #225: een ziekmelding of verlofmelding met automatische overnameverzoeken
+ * verwittigde alleen de beheerders. De collega's hoorden niets, terwijl dat
+ * precies het moment is waarop er snel een vervanger nodig is.
+ *
+ * Bewust één samenvattende mail en niet notifyTakeoverAvailable per dienst:
+ * een week ziekte is al gauw vijf diensten, en vijf losse mails over hetzelfde
+ * leest als spam en verbergt het geheel.
+ */
+async function notifyTakeoverBatchAvailable(teamMembers, requester, shifts, reden) {
+  if (!await isTypeEnabled('takeover_available')) return;
+  if (!shifts || shifts.length === 0) return;
+
+  const aanleiding = reden === 'ziek' ? 'is ziek gemeld' : 'heeft verlof';
+  const lijst = shifts.map(sh => `<li><strong>${formatDate(sh.date)}</strong> &middot; ${formatTime(sh.start_time)} – ${formatTime(sh.end_time)}${sh.team ? ` &middot; ${escapeHtml(sh.team)}` : ''}</li>`).join('');
+  const aantal = shifts.length;
+  const html = baseTemplate('Diensten beschikbaar', `
+    <h2>${aantal} dienst${aantal !== 1 ? 'en' : ''} beschikbaar voor overname</h2>
+    <p>${escapeHtml(requester.name)} ${aanleiding}. De volgende dienst${aantal !== 1 ? 'en staan' : ' staat'} open voor overname:</p>
+    <ul>${lijst}</ul>
+    <p>Kun je er een overnemen? Bekijk de verzoeken in de app bij Ruilen.</p>
+  `);
+  const onderwerp = aantal === 1
+    ? `Dienst beschikbaar: ${formatDate(shifts[0].date)}`
+    : `${aantal} diensten beschikbaar voor overname`;
+
+  for (const member of teamMembers) {
+    if (!member.email_notifications_enabled) continue;
+    if (member.id === requester.id) continue;
+    sendEmailAsync(member.email, onderwerp, html);
+  }
+}
+
+/**
  * 3. Ziekmelding → roosterverantwoordelijken
  */
 async function notifySickLeave(managers, employee, startDate, endDate, shiftCount) {
@@ -357,6 +392,7 @@ module.exports = {
   sendEmailAsync,
   notifySwapRequest,
   notifyTakeoverAvailable,
+  notifyTakeoverBatchAvailable,
   notifySickLeave,
   notifySwapApproved,
   notifySwapRejected,

@@ -3000,6 +3000,7 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
 
     // 3. Optionally create takeover requests for conflicting shifts
     let takeoverCount = 0;
+    const aangebodenShifts = [];
     let conflictingShiftCount = 0;
 
     if (createTakeoverRequests) {
@@ -3040,6 +3041,11 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
           [userId, shift.id, message]
         );
         takeoverCount++;
+        // #225: bijhouden wát er is aangeboden, zodat de collega's er straks
+        // één samenvattende mail over kunnen krijgen.
+        aangebodenShifts.push({
+          date: shift.date, start_time: shift.start_time, end_time: shift.end_time, team: shift.team
+        });
       }
     }
 
@@ -3054,6 +3060,32 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
       conflictingShifts: conflictingShiftCount,
       overwritten
     });
+
+    // #225: de collega's kregen niets. Alleen de beheerders werden verwittigd,
+    // en bij verlof ging er helemaal geen mail uit. Precies op het moment
+    // waarop er snel een vervanger nodig is hoorde niemand dat er diensten
+    // openstonden.
+    //
+    // Eén samenvattende mail per persoon, niet één per dienst: een week ziekte
+    // is al gauw vijf diensten.
+    if (aangebodenShifts.length > 0) {
+      (async () => {
+        try {
+          const teams = [...new Set(aangebodenShifts.map(sh => sh.team).filter(Boolean))];
+          const teamLeden = teams.length > 0
+            ? await pool.query(
+                `SELECT id, name, email, email_notifications_enabled FROM users
+                 WHERE active = true AND main_team = ANY($1::text[])`, [teams])
+            : { rows: [] };
+          const melder = await pool.query('SELECT id, name, email FROM users WHERE id = $1', [userId]);
+          if (melder.rows[0] && teamLeden.rows.length > 0) {
+            emailService.notifyTakeoverBatchAvailable(
+              teamLeden.rows, melder.rows[0], aangebodenShifts, type
+            );
+          }
+        } catch (e) { console.error('Email notification error (takeover batch):', e.message); }
+      })();
+    }
 
     // Email notification to managers (fire-and-forget)
     if (type === 'ziek') {
