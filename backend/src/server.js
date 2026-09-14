@@ -750,6 +750,41 @@ const MIGRATIONS = [
         `CREATE UNIQUE INDEX IF NOT EXISTS idx_shifts_uniek_per_start ON shifts (user_id, date, start_time)`
       );
     }
+  },
+  {
+    // #243: hooguit een openstaand overnameverzoek per dienst. De advisory lock
+    // in POST /shift-requests/takeover dekt dat endpoint; deze index dekt ook de
+    // automatische ziekmelding en alles wat er later bijkomt.
+    //
+    // Zoals bij migratie 040: staan er al dubbels, dan wordt de index niet
+    // aangemaakt en zegt het log welke het zijn.
+    name: '041_een_openstaande_overname_per_dienst',
+    up: async (client) => {
+      const dubbels = await client.query(`
+        SELECT requester_shift_id, COUNT(*)::int AS aantal
+        FROM shift_swap_requests
+        WHERE request_type = 'takeover' AND status = 'pending' AND requester_shift_id IS NOT NULL
+        GROUP BY requester_shift_id
+        HAVING COUNT(*) > 1
+        ORDER BY aantal DESC
+        LIMIT 20
+      `);
+      if (dubbels.rows.length > 0) {
+        console.warn('Migratie 041: de unieke index is NIET aangemaakt, er staan al meerdere openstaande overnameverzoeken op dezelfde dienst:');
+        dubbels.rows.forEach(r => console.warn(`  dienst ${r.requester_shift_id}: ${r.aantal} verzoeken`));
+        console.warn(
+          'Deze migratie draait niet opnieuw. Annuleer de overtollige verzoeken en voer daarna dit uit:\n' +
+          "  CREATE UNIQUE INDEX CONCURRENTLY idx_een_openstaande_overname ON shift_swap_requests (requester_shift_id)\n" +
+          "    WHERE request_type = 'takeover' AND status = 'pending';"
+        );
+        return;
+      }
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_een_openstaande_overname
+        ON shift_swap_requests (requester_shift_id)
+        WHERE request_type = 'takeover' AND status = 'pending'
+      `);
+    }
   }
 ];
 
@@ -3532,6 +3567,30 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     if (shiftDate < now) {
       await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Shift ligt in het verleden' });
+    }
+
+    // #243: hier ontbrak de duplicaatcontrole die de automatische ziekmelding
+    // wel doet. Dezelfde dienst kon onbeperkt aangeboden worden, en dan zien
+    // drie collega's drie verzoeken op dezelfde dienst staan.
+    //
+    // Een SELECT ... FOR UPDATE is hier niet genoeg: is er nog geen verzoek,
+    // dan valt er niets te vergrendelen en lezen twee gelijktijdige verzoeken
+    // allebei "geen openstaand verzoek". Gemeten met vijf tegelijk vanaf nul
+    // gaven er dan twee een 200. Dezelfde valkuil als in #237, dus dezelfde
+    // oplossing: een advisory lock op de dienst, die tot het einde van de
+    // transactie duurt.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`takeover:${shiftId}`]);
+    const bestaand = await client.query(
+      `SELECT id FROM shift_swap_requests
+       WHERE requester_shift_id = $1 AND request_type = 'takeover' AND status = 'pending'`,
+      [shiftId]
+    );
+    if (bestaand.rows.length > 0) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(409).json({
+        error: 'Deze dienst staat al open voor overname.',
+        requestId: bestaand.rows[0].id
+      });
     }
 
     // Create takeover request
