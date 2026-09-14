@@ -768,3 +768,86 @@ describe('leaveBlokIsVerdeeld', () => {
     expect(leaveBlokIsVerdeeld(KERST, entries)).toBe(false);
   });
 });
+
+// ===== #257: alleen de diensten rond een datum valideren =====
+
+const {
+  _schuifDatum,
+  dienstenRondDatum,
+  VALIDATIE_MARGE_DAGEN
+} = require('../../frontend/validation.js');
+
+describe('_schuifDatum', () => {
+  test('schuift vooruit binnen dezelfde maand', () => {
+    expect(_schuifDatum('2026-09-14', 2)).toBe('2026-09-16');
+  });
+
+  test('schuift achteruit over een maandgrens', () => {
+    expect(_schuifDatum('2026-09-01', -2)).toBe('2026-08-30');
+  });
+
+  test('schuift over een jaargrens', () => {
+    expect(_schuifDatum('2026-01-01', -1)).toBe('2025-12-31');
+    expect(_schuifDatum('2026-12-31', 1)).toBe('2027-01-01');
+  });
+
+  test('houdt rekening met een schrikkeljaar', () => {
+    expect(_schuifDatum('2028-02-28', 1)).toBe('2028-02-29');
+    expect(_schuifDatum('2027-02-28', 1)).toBe('2027-03-01');
+  });
+
+  test('verdraagt een ISO-tijdstempel', () => {
+    expect(_schuifDatum('2026-09-14T00:00:00.000Z', 0)).toBe('2026-09-14');
+  });
+});
+
+describe('dienstenRondDatum', () => {
+  const maakStore = (shifts) => { global.DataStore = { shifts, settings: { rules: {} } }; };
+
+  test('geeft alleen de diensten binnen de marge terug', () => {
+    maakStore([
+      { id: 1, employeeId: 2, date: '2026-09-10' }, // te ver terug
+      { id: 2, employeeId: 2, date: '2026-09-12' }, // net binnen
+      { id: 3, employeeId: 2, date: '2026-09-14' }, // de dag zelf
+      { id: 4, employeeId: 2, date: '2026-09-16' }, // net binnen
+      { id: 5, employeeId: 2, date: '2026-09-18' }, // te ver vooruit
+    ]);
+    const gevonden = dienstenRondDatum(2, '2026-09-14').map(s => s.id).sort();
+    expect(gevonden).toEqual([2, 3, 4]);
+  });
+
+  test('de marge is twee dagen, net als in de backend', () => {
+    expect(VALIDATIE_MARGE_DAGEN).toBe(2);
+  });
+
+  test('laat diensten van andere medewerkers weg', () => {
+    maakStore([
+      { id: 1, employeeId: 2, date: '2026-09-14' },
+      { id: 2, employeeId: 3, date: '2026-09-14' },
+    ]);
+    expect(dienstenRondDatum(2, '2026-09-14').map(s => s.id)).toEqual([1]);
+  });
+
+  test('sluit de uitgesloten dienst uit, ook als lijst', () => {
+    maakStore([
+      { id: 1, employeeId: 2, date: '2026-09-14' },
+      { id: 2, employeeId: 2, date: '2026-09-14' },
+      { id: 3, employeeId: 2, date: '2026-09-14' },
+    ]);
+    expect(dienstenRondDatum(2, '2026-09-14', 2).map(s => s.id)).toEqual([1, 3]);
+    expect(dienstenRondDatum(2, '2026-09-14', [1, 3]).map(s => s.id)).toEqual([2]);
+  });
+
+  test('bouwt de index opnieuw op zodra de store vervangen wordt', () => {
+    maakStore([{ id: 1, employeeId: 2, date: '2026-09-14' }]);
+    expect(dienstenRondDatum(2, '2026-09-14').map(s => s.id)).toEqual([1]);
+    // Een nieuwe array betekent nieuwe data; de index mag niet blijven hangen.
+    global.DataStore.shifts = [{ id: 9, employeeId: 2, date: '2026-09-14' }];
+    expect(dienstenRondDatum(2, '2026-09-14').map(s => s.id)).toEqual([9]);
+  });
+
+  test('geeft een lege lijst voor een medewerker zonder diensten', () => {
+    maakStore([{ id: 1, employeeId: 2, date: '2026-09-14' }]);
+    expect(dienstenRondDatum(99, '2026-09-14')).toEqual([]);
+  });
+});

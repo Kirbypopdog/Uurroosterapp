@@ -56,12 +56,8 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
     const warnings = [];
     const minHoursBetweenShifts = DataStore.settings.rules?.minHoursBetweenShifts || 11;
 
-    // Haal alle diensten van deze medewerker op (behalve de dienst(en) die we aanpassen)
-    // excludeShiftId can be a single ID or an array of IDs
-    const excludeIds = Array.isArray(excludeShiftId) ? excludeShiftId : (excludeShiftId ? [excludeShiftId] : []);
-    const employeeShifts = DataStore.shifts.filter(s =>
-        s.employeeId === employeeId && !excludeIds.includes(s.id)
-    );
+    // #257: alleen de diensten rond deze datum, niet het hele schooljaar.
+    const employeeShifts = dienstenRondDatum(employeeId, newShift.date, excludeShiftId);
 
     // Check voor elke bestaande dienst
     employeeShifts.forEach(existingShift => {
@@ -87,14 +83,61 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
     return { errors, warnings };
 }
 
+// #257: beide regels hieronder haalden met DataStore.shifts.filter ALLE
+// diensten van de medewerker op en liepen die allemaal af, met vier
+// Date-objecten per paar. Een rustregel en een overlap kunnen alleen spelen
+// tussen diensten die hooguit een dag uit elkaar liggen, dus dat zijn er
+// hooguit een handvol. De backend deed dat al goed: validateShiftRules beperkt
+// de kandidaten met date BETWEEN datum-2 AND datum+2. Diezelfde grens hier.
+//
+// Twee dagen marge is ruim genoeg: de rustregel kijkt naar het gat tussen het
+// einde van de ene en het begin van de volgende dienst, en met een nachtdienst
+// erbij overspant dat nooit meer dan twee kalenderdagen.
+const VALIDATIE_MARGE_DAGEN = 2;
+
+// Schuif een datum van de vorm YYYY-MM-DD een aantal dagen op en geef hem in
+// dezelfde vorm terug. Bewust niet via parseDateOnly en formatDateYYYYMMDD uit
+// data.js: dit bestand wordt ook los in de tests geladen, en de vergelijking
+// verderop is toch een tekstvergelijking.
+function _schuifDatum(datum, dagen) {
+    const [j, m, d] = String(datum).slice(0, 10).split('-').map(Number);
+    const dt = new Date(j, m - 1, d);
+    dt.setDate(dt.getDate() + dagen);
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    return `${dt.getFullYear()}-${mm}-${dd}`;
+}
+
+function dienstenRondDatum(employeeId, datum, excludeShiftId = null) {
+    const excludeIds = Array.isArray(excludeShiftId) ? excludeShiftId : (excludeShiftId ? [excludeShiftId] : []);
+    const vanStr = _schuifDatum(datum, -VALIDATIE_MARGE_DAGEN);
+    const totStr = _schuifDatum(datum, VALIDATIE_MARGE_DAGEN);
+
+    // Index per medewerker, eenmaal opgebouwd en hergebruikt zolang de store
+    // niet wijzigt. Zonder deze index blijft elke aanroep nog altijd de hele
+    // lijst aflopen, ook al valideert hij er daarna maar een paar.
+    const shifts = DataStore.shifts;
+    if (DataStore._validatieIndexBron !== shifts) {
+        const index = new Map();
+        for (const s of shifts) {
+            let lijst = index.get(s.employeeId);
+            if (!lijst) { lijst = []; index.set(s.employeeId, lijst); }
+            lijst.push(s);
+        }
+        DataStore._validatieIndex = index;
+        DataStore._validatieIndexBron = shifts;
+    }
+
+    const vanMedewerker = DataStore._validatieIndex.get(employeeId) || [];
+    return vanMedewerker.filter(s =>
+        s.date >= vanStr && s.date <= totStr && !excludeIds.includes(s.id));
+}
+
 function validateShiftOverlap(employeeId, newShift, excludeShiftId = null) {
     const errors = [];
 
-    // excludeShiftId can be a single ID or an array of IDs
-    const excludeIds = Array.isArray(excludeShiftId) ? excludeShiftId : (excludeShiftId ? [excludeShiftId] : []);
-    const employeeShifts = DataStore.shifts.filter(s =>
-        s.employeeId === employeeId && !excludeIds.includes(s.id)
-    );
+    // #257: zie de toelichting bij dienstenRondDatum.
+    const employeeShifts = dienstenRondDatum(employeeId, newShift.date, excludeShiftId);
 
     employeeShifts.forEach(existingShift => {
         if (shiftsOverlap(existingShift, newShift)) {
@@ -311,6 +354,31 @@ function validateMaxConsecutiveDays(employeeId, newShift, excludeShiftId = null)
 
 // ===== VOLLEDIGE VALIDATIE =====
 
+// #228: renderPlanning() valideert elke zichtbare dienst twee keer. Eerst via
+// renderValidationAlerts -> getValidationSummary voor de meldingenbalk, en
+// direct daarna nog eens tijdens het renderen van het raster. Beide draaien
+// binnen dezelfde render met dezelfde data, dus het antwoord kan niet
+// verschillen. Gemeten: 250 validaties per render bij 125 zichtbare diensten.
+//
+// De cache leeft alleen binnen een render en enkel voor de vorm
+// validateShift(dienst, dienst.id). Aanroepen met gewijzigde gegevens, zoals
+// vanuit het dienstvenster of tijdens het slepen, gaan langs validateShift
+// zelf en raken deze cache niet.
+let _validatieRonde = null;
+
+function beginValidatieRonde() { _validatieRonde = new Map(); }
+function eindValidatieRonde() { _validatieRonde = null; }
+
+function validateBestaandeDienst(shift) {
+    if (!_validatieRonde) return validateShift(shift, shift.id);
+    let uitkomst = _validatieRonde.get(shift.id);
+    if (!uitkomst) {
+        uitkomst = validateShift(shift, shift.id);
+        _validatieRonde.set(shift.id, uitkomst);
+    }
+    return uitkomst;
+}
+
 function validateShift(shiftData, excludeShiftId = null) {
     const allErrors = [];
     const allWarnings = [];
@@ -498,7 +566,7 @@ function getValidationSummary(startDate, endDate) {
         };
 
         shiftsOnDate.forEach(shift => {
-            const validation = validateShift(shift, shift.id);
+            const validation = validateBestaandeDienst(shift);
 
             if (!validation.isValid) {
                 const uniqueErrors = validation.errors.filter(err => {
@@ -651,5 +719,6 @@ console.log('Validation systeem geladen');
 // Allow pure utility functions to be imported in Node.js (for unit tests)
 // This does not affect browser behavior since `module` is not defined there.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseDateTime, getShiftEndDateTime, getHoursBetweenShifts, shiftsOverlap };
+  module.exports = { parseDateTime, getShiftEndDateTime, getHoursBetweenShifts, shiftsOverlap,
+                     _schuifDatum, dienstenRondDatum, VALIDATIE_MARGE_DAGEN };
 }

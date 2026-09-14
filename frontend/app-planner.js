@@ -41,6 +41,10 @@ function renderPlanning() {
         return;
     }
 
+    // #228: een validatieronde per render, zodat de meldingenbalk en het raster
+    // hetzelfde antwoord delen in plaats van het twee keer uit te rekenen.
+    beginValidatieRonde();
+
     updatePeriodDisplay();
     updateMobileDayDisplay();
     renderTeamToggles();
@@ -72,6 +76,11 @@ function renderPlanning() {
     requestAnimationFrame(() => {
         if (scrollEl) scrollEl.scrollTop = savedScrollY;
     });
+
+    // #228: de ronde sluiten, zodat een latere losse validatie (bijvoorbeeld bij
+    // het opslaan van een dienst) verse gegevens gebruikt en niet iets uit deze
+    // render.
+    eindValidatieRonde();
 }
 
 function calcPlanningHourlyHeadcount(date, hour) {
@@ -780,7 +789,7 @@ function renderTimelineView() {
 
                         // Render shifts that start on this day
                         shifts.forEach(shift => {
-                            const validation = validateShift(shift, shift.id);
+                            const validation = validateBestaandeDienst(shift);
                             const availability = getAvailability(shift.employeeId, date);
 
                             // Check if employee is absent - this is a conflict!
@@ -1037,7 +1046,7 @@ function renderTimelineView() {
 
                         // Render shifts that start on this day
                         shifts.forEach(shift => {
-                            const validation = validateShift(shift, shift.id);
+                            const validation = validateBestaandeDienst(shift);
                             const availability = getAvailability(shift.employeeId, date);
 
                             // Check if employee is absent - this is a conflict!
