@@ -1171,7 +1171,13 @@ v1.post('/auth/login', loginLimiter, async (req, res) => {
                 contract_hours as "contractHours", active,
                 week_schedule_week1 as "weekScheduleWeek1",
                 week_schedule_week2 as "weekScheduleWeek2",
-                week_schedules as "weekSchedules"
+                week_schedules as "weekSchedules",
+                -- #255: dit veld ontbrak, terwijl GET /me het wel teruggeeft. De
+                -- frontend zet AppState.currentUser rechtstreeks uit dit antwoord en
+                -- rendert de schakelaar met !== false, dus een ontbrekende waarde
+                -- werd getoond als ingeschakeld. Pas na een paginaherlading klopte
+                -- het weer.
+                email_notifications_enabled as "emailNotificationsEnabled"
          FROM users WHERE LOWER(email) = LOWER($1)`,
         [email.trim()]
       );
