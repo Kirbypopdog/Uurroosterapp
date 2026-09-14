@@ -32,6 +32,14 @@ function renderEmployees() {
         employeesByTeam[teamKey] = teamEmps;
     });
 
+    // #231: wie geen team heeft, of een team dat niet meer in de instellingen
+    // staat, viel hier volledig weg. De planner heeft hier al een bak voor
+    // ("Geen Team", app-planner.js), dus die aanpak overgenomen zodat de twee
+    // schermen dezelfde medewerkers tonen.
+    const zonderTeam = employees
+        .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
+
     let html = '';
 
     // Render per team
@@ -58,7 +66,23 @@ function renderEmployees() {
         html += `</div></div>`;
     });
 
-    if (employees.length === 0 || teamOrder.length === 0) {
+    if (zonderTeam.length > 0) {
+        html += `<div class="employees-team-section">
+            <div class="employees-team-header">
+                <span class="team-header-dot" style="background:var(--ink-3)"></span>
+                <span class="team-header-name">Geen team</span>
+                <span class="team-header-count">${zonderTeam.length} medewerker${zonderTeam.length !== 1 ? 's' : ''}</span>
+            </div>
+            <div class="employees-team-grid">`;
+        zonderTeam.forEach(emp => { html += renderEmployeeCard(emp); });
+        html += `</div></div>`;
+    }
+
+    // #231: de lege tekst hing aan "nul medewerkers of nul teams". Bij
+    // medewerkers die allemaal buiten de zichtbare teams vielen was geen van
+    // beide waar, bleef html een lege string, en toonde het scherm enkel de
+    // teamchips zonder enige uitleg. Nu is de voorwaarde wat je feitelijk ziet.
+    if (!html.trim()) {
         html = '<p>Nog geen medewerkers toegevoegd.</p>';
     }
 

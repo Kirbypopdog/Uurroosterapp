@@ -505,7 +505,7 @@ async function loadBuilderDraft(draftId) {
     const lockResult = await lockScheduleDraft(draftId, false);
     if (!lockResult.ok && lockResult.status === 423) {
         const force = await showConfirm(
-            `Dit concept wordt momenteel bewerkt door ${escapeHtml(lockResult.lockedByName || 'iemand anders')}. Wil je het toch openen? De andere bewerker verliest dan zijn vergrendeling.`,
+            `Dit concept wordt momenteel bewerkt door ${lockResult.lockedByName || 'iemand anders'}. Wil je het toch openen? De andere bewerker verliest dan zijn vergrendeling.`,
             'Concept in gebruik'
         );
         if (!force) return;
@@ -803,6 +803,16 @@ async function voerConceptToepassenUit(draftId) {
             Object.keys(draftGrid).filter(k => !k.startsWith('_')).forEach(id => empIds.add(id));
         }
 
+        // #263: hetzelfde geval aan de vakantiekant. Dit liep niet vast, maar
+        // een leeg concept toepassen wist met clearBlocks wel de blokkades en
+        // levert nul shifts op. De melding zei dan "0 medewerkers krijgen een
+        // vakantie-shift", wat eruitziet als een geldige keuze in plaats van
+        // een concept dat nog niet is ingevuld.
+        if (empIds.size === 0) {
+            showToast('Dit vakantieconcept bevat nog geen ingevulde dagen. Open het, vul het rooster in en sla het op voor je het toepast.', 'warning');
+            return;
+        }
+
         const confirmed = await showConfirm(
             `Vakantieconcept "${draft.name}" toepassen?\n\n` +
             `Periode: ${fromStr} – ${untilStr}\n` +
@@ -857,6 +867,20 @@ async function voerConceptToepassenUit(draftId) {
         weeksToApply.sort((a, b) => a.weekNumber - b.weekNumber);
     } else {
         weeksToApply.push({ weekNumber: draft.weekNumber || 1, grid: draftGrid });
+    }
+
+    // #263: een pas aangemaakt basisconcept heeft wel _multiWeek en _pattern,
+    // maar nog geen genummerde weken. weeksToApply bleef dan leeg en verderop
+    // liep weeksToApply[0].weekNumber stuk op undefined. De fout kwam in de
+    // console terecht, er verscheen geen venster en geen melding, dus voor de
+    // gebruiker deed Toepassen gewoon niets. Dat is precies de handeling die de
+    // installatiechecklist aanraadt.
+    //
+    // Bewust niet stilletjes doorgaan met een leeg rooster: dat zou ieders
+    // basisrooster wissen. Zeggen wat er ontbreekt is de enige zinnige uitweg.
+    if (weeksToApply.length === 0) {
+        showToast('Dit concept bevat nog geen ingevulde weken. Open het, vul het rooster in en sla het op voor je het toepast.', 'warning');
+        return;
     }
 
     // Build preview of changes for ALL employees (not just those in the grid)
@@ -1144,15 +1168,29 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
         });
 
         overlay.querySelector('#draft-apply-reset').addEventListener('click', async () => {
-            const dates = validateDates();
-            if (!dates) return;
-            const confirmed = await showConfirm(
-                `Dit verwijdert ALLE diensten in de periode ${dates.startDate} – ${dates.endDate} en zet alles terug naar het concept "${escapeHtml(draftName)}", inclusief manuele aanpassingen en leeggemaakte dagen.\n\nDoorgaan?`,
-                'Reset alles naar concept'
-            );
-            if (!confirmed) return;
-            cleanup();
-            resolve({ ...dates, confirmOverwrite: true });
+            // #250: hier stond escapeHtml(draftName). Die variabele bestaat in
+            // deze functie niet; ze is een parameter van showReapplyAfterEditModal
+            // verderop. De sjabloonstring wordt pas bij de klik uitgevoerd, dus
+            // het werd een ReferenceError in een async handler: geen zichtbare
+            // fout, geen bevestigingsvraag, de knop deed simpelweg niets.
+            //
+            // escapeHtml hoort hier sowieso niet: showConfirm zet de boodschap
+            // als textContent, dus een concept "Vlot 1 & 2" werd "Vlot 1 &amp; 2".
+            try {
+                const dates = validateDates();
+                if (!dates) return;
+                const confirmed = await showConfirm(
+                    `Dit verwijdert ALLE diensten in de periode ${dates.startDate} – ${dates.endDate} en zet alles terug naar het concept "${draft.name}", inclusief manuele aanpassingen en leeggemaakte dagen.\n\nDoorgaan?`,
+                    'Reset alles naar concept'
+                );
+                if (!confirmed) return;
+                cleanup();
+                resolve({ ...dates, confirmOverwrite: true });
+            } catch (fout) {
+                // Een fout hier bleef stil in een afgewezen promise hangen.
+                console.error('Reset alles mislukt:', fout);
+                showToast('Reset alles mislukt: ' + getUserFriendlyError(fout), 'error');
+            }
         });
 
         overlay.querySelector('#draft-apply-cancel').addEventListener('click', () => { cleanup(); resolve(null); });

@@ -41,6 +41,13 @@ function renderAvailability() {
     teamOrder.forEach(team => {
         employeesByTeam[team] = employees.filter(emp => emp.mainTeam === team);
     });
+    // #231: de tabel groepeert per team, dus wie geen team heeft (of een team
+    // dat niet meer in de instellingen staat) viel er helemaal uit. Bij
+    // Afwezigheid is dat erger dan elders: je kunt voor die persoon dan geen
+    // verlof of ziekte registreren.
+    const geenTeamLeden = employees
+        .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
 
     let html = `
         <div class="planning-controls">
@@ -108,13 +115,18 @@ function renderAvailability() {
         </div>`;
     }
 
-    // Rows grouped by team
-    teamOrder.forEach(teamId => {
-        const teamEmployees = employeesByTeam[teamId];
-        if (teamEmployees.length === 0) return;
+    // Rows grouped by team. De bak "Geen team" hangt er als laatste achter.
+    const teamVolgorde = geenTeamLeden.length > 0 ? [...teamOrder, '_no_team'] : teamOrder;
+    teamVolgorde.forEach(teamId => {
+        const teamEmployees = teamId === '_no_team' ? geenTeamLeden : employeesByTeam[teamId];
+        if (!teamEmployees || teamEmployees.length === 0) return;
 
-        const teamName = escapeHtml(DataStore.settings.teams[teamId]?.name || teamId);
-        const teamColor = DataStore.settings.teams[teamId]?.color || '#8d897c';
+        const teamName = teamId === '_no_team'
+            ? 'Geen team'
+            : escapeHtml(DataStore.settings.teams[teamId]?.name || teamId);
+        const teamColor = teamId === '_no_team'
+            ? 'var(--ink-3)'
+            : (DataStore.settings.teams[teamId]?.color || '#8d897c');
 
         // Team header (rustige stijl met team-kleur-dot, consistent met planning/medewerkers)
         html += `<div class="availability-team-header">
@@ -415,10 +427,18 @@ function populateAbsenceEmployeeDropdown() {
 
     // Group by team
     const teamOrder = getTeamOrder();
-    teamOrder.forEach(teamId => {
-        const teamEmployees = employees.filter(emp => emp.mainTeam === teamId);
+    // #231: de keuzelijst groepeert per team en liet iedereen zonder team dus
+    // weg. Die konden daardoor nergens in de app afwezig gemeld worden.
+    const zonderTeam = employees.filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam));
+    const volgorde = zonderTeam.length > 0 ? [...teamOrder, '_no_team'] : teamOrder;
+    volgorde.forEach(teamId => {
+        const teamEmployees = teamId === '_no_team'
+            ? zonderTeam
+            : employees.filter(emp => emp.mainTeam === teamId);
         if (teamEmployees.length > 0) {
-            const teamName = DataStore.settings.teams[teamId]?.name || teamId;
+            const teamName = teamId === '_no_team'
+                ? 'Geen team'
+                : (DataStore.settings.teams[teamId]?.name || teamId);
             const optgroup = document.createElement('optgroup');
             optgroup.label = teamName;
 

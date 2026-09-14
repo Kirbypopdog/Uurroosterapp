@@ -1076,7 +1076,7 @@ async function saveLeaveVerdeling(data, blockId) {
     // precies de informatie die je nodig hebt als je de verdeling later wil
     // bijsturen, dus wijs op de export nu het nog kan.
     const bevestigd = await showConfirm(
-        `${escapeHtml(block.name)}\n\n${vrij} verlofdagen worden vastgelegd. Dit vervangt wat mensen zelf invulden voor deze vakantie; de andere vakanties blijven ongemoeid.\n\n` +
+        `${block.name}\n\n${vrij} verlofdagen worden vastgelegd. Dit vervangt wat mensen zelf invulden voor deze vakantie; de andere vakanties blijven ongemoeid.\n\n` +
         `Let op: "liever niet" en "zeker niet" zijn daarna niet meer te zien. Wil je ze bewaren, annuleer dan en exporteer eerst de CSV.\n\nDoorgaan?`,
         'Verdeling vastleggen',
         { confirmText: 'Vastleggen', cancelText: 'Annuleren', danger: true }
