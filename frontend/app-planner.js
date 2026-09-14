@@ -83,8 +83,85 @@ function renderPlanning() {
     eindValidatieRonde();
 }
 
+// #258: calcPlanningHourlyHeadcount liep per aanroep over de VOLLEDIGE
+// DataStore.shifts en parseerde daarbij elke start- en eindtijd opnieuw, ook
+// voor de duizenden diensten die niets met die datum te maken hebben. Daarnaast
+// deed hij per aanroep opnieuw DataStore.activities.filter(...). De heatmap
+// roept hem 7 dagen maal 34 halfuurblokken aan, dus 238 keer per render.
+//
+// De index zit bewust in de functie zelf en niet in renderCoverageHeatmap:
+// validateMinimumStaffing en de startpaginawaarschuwingen gebruiken dezelfde
+// functie, en die profiteren nu mee.
+//
+// De index vervalt zodra een van de drie bronlijsten vervangen wordt. Dat is
+// dezelfde identiteitscontrole als bij de validatie-index (#257): de app
+// vervangt die arrays bij elke refresh, ze worden niet ter plaatse aangepast.
+let _bezettingIndex = null;
+let _bezettingBron = null;
+
+function _bouwBezettingIndex() {
+    const shifts = DataStore.shifts || [];
+    const activities = DataStore.activities || [];
+    const availability = DataStore.availability || [];
+
+    // 'vrij' telt als afwezig: dat is een vaste vrije dag, dus die persoon staat
+    // niet op de vloer. Zie de toelichting bij #204 verderop.
+    const AFWEZIG = ['ziek', 'verlof', 'vrij'];
+    const afwezig = new Set();
+    for (const a of availability) {
+        if (AFWEZIG.includes(a.type)) afwezig.add(`${a.employeeId || a.userId}_${a.date}`);
+    }
+
+    // Diensten per datum, met de tijden al omgerekend naar decimalen.
+    const perDatum = new Map();
+    for (const s of shifts) {
+        const [sh, sm] = s.startTime.split(':').map(Number);
+        const [eh, em] = s.endTime.split(':').map(Number);
+        const startDec = sh + sm / 60;
+        const endDec = eh + em / 60;
+        let lijst = perDatum.get(s.date);
+        if (!lijst) { lijst = []; perDatum.set(s.date, lijst); }
+        lijst.push({
+            team: s.team,
+            emp: String(s.employeeId || s.userId || s.user_id),
+            sleutel: `${s.employeeId || s.userId || s.user_id}_${s.date}`,
+            startDec, endDec, isNight: endDec <= startDec
+        });
+    }
+
+    // Activiteiten per datum, idem.
+    const actPerDatum = new Map();
+    for (const a of activities) {
+        const [ash, asm] = a.startTime.split(':').map(Number);
+        const [aeh, aem] = a.endTime.split(':').map(Number);
+        let lijst = actPerDatum.get(a.date);
+        if (!lijst) { lijst = []; actPerDatum.set(a.date, lijst); }
+        lijst.push({ emp: String(a.userId), start: ash + asm / 60, eind: aeh + aem / 60 });
+    }
+
+    _bezettingIndex = { perDatum, actPerDatum, afwezig };
+    _bezettingBron = {
+        ruwShifts: DataStore.shifts,
+        ruwActivities: DataStore.activities,
+        ruwAvailability: DataStore.availability
+    };
+}
+
+function _bezetting() {
+    // De ruwe waarden vergelijken, niet de || []-variant: die maakt elke keer
+    // een nieuwe lege array en zou de index altijd opnieuw laten bouwen.
+    if (!_bezettingIndex
+        || _bezettingBron.ruwShifts !== DataStore.shifts
+        || _bezettingBron.ruwActivities !== DataStore.activities
+        || _bezettingBron.ruwAvailability !== DataStore.availability) {
+        _bouwBezettingIndex();
+    }
+    return _bezettingIndex;
+}
+
 function calcPlanningHourlyHeadcount(date, hour) {
     const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
+    const index = _bezetting();
 
     // Previous day (for overnight shifts extending into this day)
     const prev = new Date(parseDateOnly(date));
@@ -105,55 +182,33 @@ function calcPlanningHourlyHeadcount(date, hour) {
     // dat we tellen. Anders zou een nachtdienst van gisteravond wegvallen omdat
     // iemand zich vanochtend ziek meldde, of net blijven staan terwijl hij
     // gisteren al ziek was. Vandaar de sleutel op medewerker plus datum.
-    const AFWEZIG = ['ziek', 'verlof', 'vrij'];
-    const afwezig = new Set(
-        (DataStore.availability || [])
-            .filter(a => (a.date === date || a.date === prevDate) && AFWEZIG.includes(a.type))
-            .map(a => `${a.employeeId || a.userId}_${a.date}`)
-    );
+    const afwezig = index.afwezig;
 
     let bruto = 0;
     const workingEmployees = new Set(); // track who is working at this hour
 
-    for (const s of DataStore.shifts) {
+    // Alleen de dag zelf en de dag ervoor; die laatste voor een nachtdienst die
+    // doorloopt. De rest van het schooljaar staat hier buiten.
+    for (const s of (index.perDatum.get(date) || [])) {
         if (!coverageTeams.includes(s.team)) continue;
-        if (afwezig.has(`${s.employeeId || s.userId || s.user_id}_${s.date}`)) continue;
-        const [sh, sm] = s.startTime.split(':').map(Number);
-        const [eh, em] = s.endTime.split(':').map(Number);
-        const startDec = sh + sm / 60;
-        const endDec = eh + em / 60;
-        const isNight = endDec <= startDec;
-
-        let isWorking = false;
-        if (s.date === date) {
-            if (isNight) {
-                if (hour >= startDec) isWorking = true;
-            } else {
-                if (hour >= startDec && hour < endDec) isWorking = true;
-            }
-        } else if (s.date === prevDate && isNight) {
-            if (hour < endDec) isWorking = true;
-        }
-
-        if (isWorking) {
-            bruto++;
-            workingEmployees.add(String(s.employeeId || s.userId || s.user_id));
-        }
+        if (afwezig.has(s.sleutel)) continue;
+        const isWorking = s.isNight
+            ? hour >= s.startDec
+            : (hour >= s.startDec && hour < s.endDec);
+        if (isWorking) { bruto++; workingEmployees.add(s.emp); }
+    }
+    for (const s of (index.perDatum.get(prevDate) || [])) {
+        if (!s.isNight) continue;
+        if (!coverageTeams.includes(s.team)) continue;
+        if (afwezig.has(s.sleutel)) continue;
+        if (hour < s.endDec) { bruto++; workingEmployees.add(s.emp); }
     }
 
     // Netto: subtract employees who have an activity at this hour (only if they have a shift)
     let activityCount = 0;
-    const activities = DataStore.activities.filter(a => a.date === date);
-    for (const act of activities) {
-        const empId = String(act.userId);
-        if (!workingEmployees.has(empId)) continue; // only count if employee has a shift
-        const [ash, asm] = act.startTime.split(':').map(Number);
-        const [aeh, aem] = act.endTime.split(':').map(Number);
-        const actStart = ash + asm / 60;
-        const actEnd = aeh + aem / 60;
-        if (hour >= actStart && hour < actEnd) {
-            activityCount++;
-        }
+    for (const act of (index.actPerDatum.get(date) || [])) {
+        if (!workingEmployees.has(act.emp)) continue; // only count if employee has a shift
+        if (hour >= act.start && hour < act.eind) activityCount++;
     }
 
     return { bruto, netto: bruto - activityCount };
