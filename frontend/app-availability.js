@@ -552,6 +552,16 @@ function closeAvailabilityModal() {
 }
 
 async function handleAvailabilitySave() {
+    // #253: openAvailabilityModal zet editMode en originalDate, maar tot nu toe
+    // las niemand die uit. Wie een bestaande afwezigheid opende en het bereik
+    // verschoof (5 juli naar 6 tot 8 juli) hield 5 juli erbij staan, want er
+    // wordt alleen geschreven voor het NIEUWE bereik. De modal oogt als een
+    // bewerkscherm, compleet met een knop Verwijderen, dus dat is de verwachting
+    // die hij wekt.
+    const modalEl = document.getElementById('availability-modal');
+    const bewerktEen = modalEl?.dataset.editMode === 'single';
+    const oorspronkelijkeDatum = modalEl?.dataset.originalDate || null;
+
     const employeeId = Number(document.getElementById('absence-employee').value);
     const startDate = document.getElementById('absence-start-date').value;
     const endDate = document.getElementById('absence-end-date').value;
@@ -645,9 +655,29 @@ async function handleAvailabilitySave() {
             employeeId, startDate, endDate, absenceType, reason, createTakeoverRequests
         );
 
+        // #253: viel de oorspronkelijke dag buiten het nieuwe bereik, dan is hij
+        // verplaatst en hoort de oude registratie weg. Bewust ná het opslaan:
+        // mislukt het opslaan, dan is er niets gewist.
+        let weesMislukt = null;
+        if (bewerktEen && oorspronkelijkeDatum
+            && (oorspronkelijkeDatum < startDate || oorspronkelijkeDatum > endDate)) {
+            try {
+                await removeAvailability(employeeId, oorspronkelijkeDatum, { skipRefresh: true });
+            } catch (fout) {
+                console.error('Oude afwezigheidsdag niet verwijderd:', fout);
+                weesMislukt = oorspronkelijkeDatum;
+            }
+        }
+
         closeAvailabilityModal();
+        await refreshAvailability();
         renderAvailability();
         renderPlanning(); // Update planning view to show conflicts
+
+        if (weesMislukt) {
+            showToast(`De nieuwe afwezigheid is opgeslagen, maar ${formatDateShort(parseDateOnly(weesMislukt))} `
+                + 'kon niet verwijderd worden. Haal die dag met de hand weg.', 'error');
+        }
 
         const employee = getEmployee(employeeId);
         const employeeName = employee?.name || 'de medewerker';

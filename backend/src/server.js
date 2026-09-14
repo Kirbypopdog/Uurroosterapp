@@ -752,6 +752,41 @@ const MIGRATIONS = [
     }
   },
   {
+    // #236: een CHECK op availability.type, zodat rommel ook niet langs een
+    // andere weg dan de API binnenkomt.
+    //
+    // Zoals bij migratie 040 en 041: staan er al waarden buiten de lijst, dan
+    // wordt de constraint niet gezet en zegt het log welke het zijn. Zulke
+    // rijen weggooien of omzetten is een inhoudelijke keuze over iemands
+    // afwezigheid en hoort niet stil in een migratie thuis.
+    name: '042_availability_type_check',
+    up: async (client) => {
+      const geldig = ['verlof', 'ziek', 'overuren', 'vorming', 'andere', 'vrij'];
+      const raar = await client.query(
+        `SELECT type, COUNT(*)::int AS aantal FROM availability
+         WHERE type IS NULL OR NOT (type = ANY($1::text[]))
+         GROUP BY type ORDER BY aantal DESC LIMIT 20`, [geldig]);
+      if (raar.rows.length > 0) {
+        console.warn('Migratie 042: de CHECK is NIET gezet, er staan onbekende afwezigheidstypes in de database:');
+        raar.rows.forEach(r => console.warn(`  "${r.type}": ${r.aantal} rijen`));
+        console.warn(
+          'Deze migratie draait niet opnieuw. Zet die rijen recht en voer daarna dit uit:\n' +
+          "  ALTER TABLE availability ADD CONSTRAINT availability_type_check\n" +
+          "    CHECK (type IN ('verlof','ziek','overuren','vorming','andere','vrij'));"
+        );
+        return;
+      }
+      const bestaat = await client.query(
+        `SELECT 1 FROM information_schema.table_constraints
+         WHERE table_name = 'availability' AND constraint_name = 'availability_type_check'`);
+      if (bestaat.rows.length === 0) {
+        await client.query(
+          `ALTER TABLE availability ADD CONSTRAINT availability_type_check
+           CHECK (type IN ('verlof','ziek','overuren','vorming','andere','vrij'))`);
+      }
+    }
+  },
+  {
     // #243: hooguit een openstaand overnameverzoek per dienst. De advisory lock
     // in POST /shift-requests/takeover dekt dat endpoint; deze index dekt ook de
     // automatische ziekmelding en alles wat er later bijkomt.
@@ -970,6 +1005,20 @@ async function logAudit(req, action, resourceType, resourceId, details = {}) {
 }
 
 // ===== SHIFT VALIDATIE =====
+
+// #236: availability.type werd nergens gecontroleerd. "onzin" als type kwam er
+// met een 201 doorheen en bleef permanent in de database staan. Het leidt niet
+// tot injectie (de weergave valt terug op "Afwezig"), maar het keuzemenu toont
+// bij zo'n waarde niets, dus de gebruiker ziet niet eens wat er staat.
+//
+// Dit zijn de zes types die de app aanbiedt, letterlijk de opties uit het
+// keuzemenu in index.html. Het issue noemde er drie; dat waren de drie die
+// toevallig in de database stonden.
+const AFWEZIGHEIDSTYPES = ['verlof', 'ziek', 'overuren', 'vorming', 'andere', 'vrij'];
+
+function isGeldigAfwezigheidstype(t) {
+  return typeof t === 'string' && AFWEZIGHEIDSTYPES.includes(t);
+}
 
 function isValidTime(t) {
   // #246: het patroon alleen is niet genoeg. '24:00' en '99:99' kwamen er zo
@@ -2802,6 +2851,9 @@ v1.post('/availability', requireAuth, async (req, res) => {
   if (!userId || !date || !type) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
+  if (!isGeldigAfwezigheidstype(type)) {
+    return res.status(400).json({ error: `Onbekend type afwezigheid. Geldig zijn: ${AFWEZIGHEIDSTYPES.join(', ')}.` });
+  }
 
   // Permission check for availability (skip team check if main_team column doesn't exist)
   const { role, team_id } = req.user;
@@ -2885,6 +2937,9 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
 
   if (!userId || !startDate || !endDate || !type) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken (userId, startDate, endDate, type)' });
+  }
+  if (!isGeldigAfwezigheidstype(type)) {
+    return res.status(400).json({ error: `Onbekend type afwezigheid. Geldig zijn: ${AFWEZIGHEIDSTYPES.join(', ')}.` });
   }
 
   // Permission check (same logic as POST /availability)

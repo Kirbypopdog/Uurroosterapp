@@ -1165,7 +1165,7 @@ describe('POST /availability', () => {
   test('returns 401 without authentication', async () => {
     const res = await request(app)
       .post('/api/v1/availability')
-      .send({ userId: 1, date: '2026-05-01', type: 'beschikbaar' });
+      .send({ userId: 1, date: '2026-05-01', type: 'verlof' });
     expect(res.status).toBe(401);
   });
 
@@ -1186,13 +1186,13 @@ describe('POST /availability', () => {
     const res = await request(app)
       .post('/availability')
       .set('Authorization', `Bearer ${token}`)
-      .send({ userId: 99, date: '2026-05-01', type: 'beschikbaar' });
+      .send({ userId: 99, date: '2026-05-01', type: 'verlof' });
     expect(res.status).toBe(403);
   });
 
   test('upserts availability for own user (201)', async () => {
     mockActiveUser();
-    const avail = { id: 1, userId: 5, date: '2026-05-01', type: 'beschikbaar', reason: '', updatedAt: new Date().toISOString() };
+    const avail = { id: 1, userId: 5, date: '2026-05-01', type: 'verlof', reason: '', updatedAt: new Date().toISOString() };
     pool.query
       .mockResolvedValueOnce({ rows: [avail] }) // INSERT ON CONFLICT
       .mockResolvedValueOnce({ rows: [] });      // logAudit
@@ -1200,9 +1200,9 @@ describe('POST /availability', () => {
     const res = await request(app)
       .post('/availability')
       .set('Authorization', `Bearer ${token}`)
-      .send({ userId: 5, date: '2026-05-01', type: 'beschikbaar' });
+      .send({ userId: 5, date: '2026-05-01', type: 'verlof' });
     expect(res.status).toBe(201);
-    expect(res.body.availability.type).toBe('beschikbaar');
+    expect(res.body.availability.type).toBe('verlof');
     // #203: niets overschreven, dus geen vorige registratie
     expect(res.body.previous).toBeNull();
   });
@@ -3267,5 +3267,55 @@ describe('PUT /users/:id en de foreign key op team_id (#221)', () => {
       .send({ name: 'Anna', mainTeam: 'vlot1' });
 
     expect(res.status).toBe(500);
+  });
+});
+
+// ===== #236: het type van een afwezigheid wordt gevalideerd =====
+
+describe('POST /availability type-validatie', () => {
+  // De app biedt zes types aan, letterlijk de opties uit het keuzemenu in
+  // index.html. Alles daarbuiten hoort geweigerd te worden: het kwam vroeger
+  // met een 201 binnen en bleef permanent in de database staan.
+  const GELDIG = ['verlof', 'ziek', 'overuren', 'vorming', 'andere', 'vrij'];
+
+  test.each(GELDIG)('aanvaardt het type %s', async (type) => {
+    mockActiveUser();
+    pool.query.mockImplementation((sql) => {
+      if (/INSERT INTO availability/i.test(sql)) {
+        return Promise.resolve({ rows: [{ id: 1, userId: 1, date: '2026-05-01', type, reason: '', updatedAt: new Date().toISOString() }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/api/v1/availability')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 1, date: '2026-05-01', type });
+    expect(res.status).toBe(201);
+  });
+
+  // 'beschikbaar' zat vroeger in deze tests, maar de app schrijft die waarde
+  // nergens weg: geen rij betekent beschikbaar. Ze hoort dus ook geweigerd te
+  // worden.
+  test.each(['onzin', '<b>onzin</b>', 'beschikbaar', '', 123])(
+    'weigert het type %p met een 400', async (type) => {
+      mockActiveUser();
+      const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+      const res = await request(app)
+        .post('/api/v1/availability')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ userId: 1, date: '2026-05-01', type });
+      expect(res.status).toBe(400);
+    });
+
+  test('de bulkvariant weigert een onbekend type ook', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app)
+      .post('/api/v1/availability/sick-with-takeover')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 1, startDate: '2026-05-01', endDate: '2026-05-03', type: 'onzin' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Onbekend type/);
   });
 });
