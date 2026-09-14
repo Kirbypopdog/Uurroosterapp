@@ -2015,8 +2015,12 @@ textarea:focus-visible {
 .view-description {
     color: var(--text-secondary);
     font-size: 14px;
-    margin-top: -16px;
-    margin-bottom: 16px;
+    /* #345: hier stond margin-top: -16px, geschreven voor een gestapelde opzet.
+       In een .view-header (display: flex) tilde dat de beschrijving boven de
+       titel uit. Ze staat nu in dezelfde .view-title-kolom als de titel, dus is
+       de negatieve marge niet alleen overbodig maar ook schadelijk. */
+    margin-top: 0;
+    margin-bottom: 0;
 }
 
 .header-actions {
@@ -13845,5 +13849,29 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
     }
     .team-legend-item {
         white-space: normal;
+    }
+}
+
+/* #354: onder 480 px maakt `.modal-content { height: 100%; max-height: 100% }`
+   elk venster schermvullend. Dat is een bewuste keuze voor de grote
+   formulieren, maar een bevestiging met drie regels tekst werd zo een lege
+   pagina: gemeten 804 px hoog met de knoppen op y 385, en bij de naamvraag
+   stonden de knoppen op y 144 met ruim 650 px leegte eronder.
+
+   Deze twee kleine dialogen krijgen daarom hun eigen hoogte terug, en komen
+   onderaan te staan zodat de knoppen in het duimbereik liggen. */
+@media (max-width: 480px) {
+    .modal:has(> .confirm-modal-content),
+    .modal:has(> .input-prompt-content) {
+        align-items: flex-end;
+    }
+
+    .confirm-modal-content,
+    .input-prompt-content {
+        height: auto;
+        max-height: 85vh;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        margin: 0;
+        padding-bottom: max(16px, env(safe-area-inset-bottom));
     }
 }

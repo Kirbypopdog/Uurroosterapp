@@ -600,7 +600,17 @@ function renderOvernightContinuation(empId, date, START_HOUR, TOTAL_HOURS) {
                 ? ((endFrac - START_HOUR) / TOTAL_HOURS) * 100
                 : 2; // eindigt voor 7u: toon mini-indicator aan linkerrand
             const reserveBadge = prevShift.isReserve ? '<span class="reserve-badge">R</span>' : '';
-            html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation"
+            // #356: het doorloopblok kreeg nooit de --xs of --sm klasse die
+            // gewone blokken wel krijgen, dus bleef het tijdlabel staan in een
+            // blok van 20 pixels waar het er 40 nodig heeft. Je las dan "→07:0"
+            // of "→0…", en dat leest als een ander tijdstip. Dezelfde regel als
+            // bij de gewone blokken: onder 2,5 zichtbare uren geen label, onder
+            // de 6 uur geen activiteitenchips.
+            const doorloopUren = endFrac > START_HOUR ? endFrac - START_HOUR : 0;
+            let doorloopKlasse = '';
+            if (doorloopUren < 2.5)    doorloopKlasse = ' timeline-block--xs';
+            else if (doorloopUren < 6) doorloopKlasse = ' timeline-block--sm';
+            html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation${doorloopKlasse}"
                          data-shift-id="${prevShift.id}"
                          data-employee-id="${prevShift.employeeId}"
                          data-date="${prevShift.date}"

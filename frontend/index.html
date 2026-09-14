@@ -188,13 +188,13 @@
 
             <!-- Mobile day navigation (alleen zichtbaar op mobiel) -->
             <div id="mobile-day-nav" class="mobile-day-nav">
-                <button id="mobile-prev-day" class="btn btn-sm" aria-label="Vorige dag"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
+                <button id="mobile-prev-day" class="btn btn-secondary btn-sm" aria-label="Vorige dag"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
                 <div id="mobile-day-display" class="mobile-day-display">
                     <span class="mobile-day-name">Ma</span>
                     <span class="mobile-day-date">1 jan</span>
                     <input type="date" id="mobile-date-picker" class="mobile-date-picker">
                 </div>
-                <button id="mobile-next-day" class="btn btn-sm" aria-label="Volgende dag"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+                <button id="mobile-next-day" class="btn btn-secondary btn-sm" aria-label="Volgende dag"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
             </div>
 
             <div id="roster-calendar" class="calendar-container"></div>
@@ -235,9 +235,17 @@
 
         <!-- Afwezigheid View -->
         <div id="availability-view" class="view">
+            <!-- #345: de beschrijving stond als los flexkind naast de titel in een
+                 view-header met justify-content: space-between, en had bovendien
+                 margin-top: -16px uit een gestapelde opzet. Ze werd daardoor naar
+                 rechts geduwd en zestien pixels omhoog getild, boven de hoogte van
+                 de kop waar ze bij hoort. Dezelfde kolomopzet als .view-title op
+                 Planning zet ze weer onder de titel. -->
             <div class="view-header">
-                <h2>Afwezigheid</h2>
-                <p class="view-description">Registreer verlof, ziekte en andere afwezigheden</p>
+                <div class="view-title">
+                    <h2>Afwezigheid</h2>
+                    <p class="view-description">Registreer verlof, ziekte en andere afwezigheden</p>
+                </div>
             </div>
             <div id="availability-content"></div>
             <div class="section-loading-overlay hidden">
@@ -248,18 +256,34 @@
 
         <!-- Roosterbouwer View -->
         <div id="builder-view" class="view">
+            <!-- #345: de beschrijving stond als los flexkind naast de titel in een
+                 view-header met justify-content: space-between, en had bovendien
+                 margin-top: -16px uit een gestapelde opzet. Ze werd daardoor naar
+                 rechts geduwd en zestien pixels omhoog getild, boven de hoogte van
+                 de kop waar ze bij hoort. Dezelfde kolomopzet als .view-title op
+                 Planning zet ze weer onder de titel. -->
             <div class="view-header">
-                <h2>Rooster Bouwen</h2>
-                <p class="view-description">Bouw en beheer roosters en vakantieconcepten voor je team</p>
+                <div class="view-title">
+                    <h2>Rooster Bouwen</h2>
+                    <p class="view-description">Bouw en beheer roosters en vakantieconcepten voor je team</p>
+                </div>
             </div>
             <div id="builder-content"></div>
         </div>
 
         <!-- Dienstenruil View -->
         <div id="swaps-view" class="view">
+            <!-- #345: de beschrijving stond als los flexkind naast de titel in een
+                 view-header met justify-content: space-between, en had bovendien
+                 margin-top: -16px uit een gestapelde opzet. Ze werd daardoor naar
+                 rechts geduwd en zestien pixels omhoog getild, boven de hoogte van
+                 de kop waar ze bij hoort. Dezelfde kolomopzet als .view-title op
+                 Planning zet ze weer onder de titel. -->
             <div class="view-header">
-                <h2>Dienstenruil</h2>
-                <p class="view-description">Overzicht van dienstruilverzoeken tussen medewerkers</p>
+                <div class="view-title">
+                    <h2>Dienstenruil</h2>
+                    <p class="view-description">Overzicht van dienstruilverzoeken tussen medewerkers</p>
+                </div>
             </div>
             <div id="swaps-list"></div>
             <div class="section-loading-overlay hidden">
@@ -270,9 +294,17 @@
 
         <!-- Verlofplanning View -->
         <div id="leave-view" class="view">
+            <!-- #345: de beschrijving stond als los flexkind naast de titel in een
+                 view-header met justify-content: space-between, en had bovendien
+                 margin-top: -16px uit een gestapelde opzet. Ze werd daardoor naar
+                 rechts geduwd en zestien pixels omhoog getild, boven de hoogte van
+                 de kop waar ze bij hoort. Dezelfde kolomopzet als .view-title op
+                 Planning zet ze weer onder de titel. -->
             <div class="view-header">
-                <h2>Verlofplanning</h2>
-                <p class="view-description" id="leave-view-description">Duid je verlof aan voor de vakantieperiodes</p>
+                <div class="view-title">
+                    <h2>Verlofplanning</h2>
+                    <p class="view-description" id="leave-view-description">Duid je verlof aan voor de vakantieperiodes</p>
+                </div>
             </div>
             <div id="leave-content"></div>
             <div class="section-loading-overlay hidden">

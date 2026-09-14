@@ -73,11 +73,11 @@ function renderAvailability() {
 
         <!-- Mobile day navigation for availability -->
         <div id="availability-mobile-day-nav" class="mobile-day-nav availability-mobile-nav">
-            <button id="availability-mobile-prev-day" class="btn btn-sm">${IconHelper.html(ICONS.left, 'sm')}</button>
+            <button id="availability-mobile-prev-day" class="btn btn-secondary btn-sm" aria-label="Vorige dag">${IconHelper.html(ICONS.left, 'sm')}</button>
             <div id="availability-mobile-day-display" class="mobile-day-display">
                 ${getAvailabilityMobileDayDisplayHTML()}
             </div>
-            <button id="availability-mobile-next-day" class="btn btn-sm">${IconHelper.html(ICONS.right, 'sm')}</button>
+            <button id="availability-mobile-next-day" class="btn btn-secondary btn-sm" aria-label="Volgende dag">${IconHelper.html(ICONS.right, 'sm')}</button>
         </div>
 
         <div class="availability-container" data-mobile-day="${AppState.availabilityMobileDayIndex}">
