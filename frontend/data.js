@@ -1259,18 +1259,10 @@ function getFourWeekPeriodDates(date) {
     if (schoolWeek === null) return null;
     const periodIndex = Math.floor((schoolWeek - 1) / 4); // 0-based
 
-    const syStart = getSchoolYearStart();
-    const syDate = parseDateOnly(syStart);
-    const d = parseDateOnly(date);
-    let syYear = d.getFullYear();
-    let thisYearStart = new Date(syYear, syDate.getMonth(), syDate.getDate());
-    thisYearStart.setHours(0, 0, 0, 0);
-    if (d < thisYearStart) {
-        syYear--;
-        thisYearStart = new Date(syYear, syDate.getMonth(), syDate.getDate());
-        thisYearStart.setHours(0, 0, 0, 0);
-    }
-    const startMonday = getSchoolAnchorMonday(thisYearStart);
+    // #244: dit bepaalde het schooljaar zelf, op basis van de datum in plaats
+    // van de maandag van de week. Nu dezelfde helper als getSchoolWeekNumber.
+    const startMonday = getSchoolYearAnchorMonday(date);
+    if (!startMonday) return null;
 
     const periodStart = new Date(startMonday);
     periodStart.setDate(periodStart.getDate() + periodIndex * 28);
@@ -1902,15 +1894,10 @@ function formatMonthDisplay(monthStartDate) {
 // ===== LEGACY COMPATIBILITY =====
 // These functions are kept for compatibility but do nothing with localStorage
 
-function saveToStorage() {
-    // No-op - data is saved via API
-    return true;
-}
-
-function loadFromStorage() {
-    // No-op - data is loaded via API
-    return true;
-}
+// #273: saveToStorage en loadFromStorage waren sinds de overstap naar de API
+// lege functies die alleen true teruggaven. Ze stonden er als
+// legacy-compatibiliteit, maar de enige gebruikers waren aanroepen die deden
+// alsof er iets bewaard werd. Die zijn weg, dus deze twee ook.
 
 async function resetData() {
     const scope = await showSelectPrompt(
@@ -2040,32 +2027,62 @@ function getSchoolAnchorMonday(date) {
     return getMonday(d);
 }
 
-function getSchoolWeekNumber(date) {
+// #244: de ankermaandag van het schooljaar waar deze datum in valt.
+//
+// Dit stond twee keer uitgeschreven, en de twee kopieën kozen het schooljaar
+// net iets anders: getSchoolWeekNumber vergeleek de MAANDAG van de week met de
+// startdatum, getFourWeekPeriodDates de datum zelf. Zodra de schooljaarstart
+// niet op een maandag valt, kiezen die twee voor de dagen tussen de startdatum
+// en de eerstvolgende maandag een verschillend schooljaar. Het weeknummer kwam
+// dan uit het vorige schooljaar (week 53, dus periodeIndex 13) terwijl de
+// ankermaandag uit het nieuwe kwam, en de periode sprong 364 dagen vooruit.
+//
+// Met één helper kunnen ze niet opnieuw uit elkaar lopen. De maandag is de
+// juiste maatstaf, want zowel het weeknummer als de periode lopen per week.
+function getSchoolYearAnchorMonday(date) {
     const start = getSchoolYearStart();
     if (!start) return null;
     const currentMonday = getMonday(parseDateOnly(date));
     currentMonday.setHours(0, 0, 0, 0);
-    // Find the school year that contains this date (adjusts year automatically)
+
     const startDate = parseDateOnly(start);
     const syMonth = startDate.getMonth();
     const syDay = startDate.getDate();
+
+    // De grens tussen twee schooljaren is de ANKERMAANDAG, niet de ruwe
+    // startdatum. Vergeleken we met de startdatum zelf, dan viel de maandag
+    // van de startweek nog in het vorige schooljaar terwijl hij tegelijk het
+    // anker van het nieuwe was. Bij een start op dinsdag 1 september 2026 gaf
+    // dat voor maandag 31 augustus week 53, terwijl diezelfde dag ook week 1
+    // van het nieuwe jaar is.
+    const ankerVan = (jaar) => {
+        const d = new Date(jaar, syMonth, syDay);
+        d.setHours(0, 0, 0, 0);
+        const m = getSchoolAnchorMonday(d);
+        m.setHours(0, 0, 0, 0);
+        return m;
+    };
+
     let syYear = currentMonday.getFullYear();
-    let thisYearStart = new Date(syYear, syMonth, syDay);
-    thisYearStart.setHours(0, 0, 0, 0);
-    if (currentMonday < thisYearStart) {
+    let startMonday = ankerVan(syYear);
+    if (currentMonday < startMonday) {
         syYear--;
-        thisYearStart = new Date(syYear, syMonth, syDay);
-        thisYearStart.setHours(0, 0, 0, 0);
+        startMonday = ankerVan(syYear);
     }
-    const startMonday = getSchoolAnchorMonday(thisYearStart);
-    startMonday.setHours(0, 0, 0, 0);
+    return startMonday;
+}
+
+function getSchoolWeekNumber(date) {
+    const startMonday = getSchoolYearAnchorMonday(date);
+    if (!startMonday) return null;
+    const currentMonday = getMonday(parseDateOnly(date));
+    currentMonday.setHours(0, 0, 0, 0);
     const diffWeeks = Math.round((currentMonday.getTime() - startMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
     return diffWeeks + 1; // 1-based
 }
 
 async function saveSchoolYearStart(date) {
     DataStore.settings.schoolYearStart = { date };
-    saveToStorage();
     await dataApiFetch('/settings/school_year_start', {
         method: 'PUT',
         body: JSON.stringify({ value: { date } })
@@ -2138,3 +2155,17 @@ function getWeekScheduleFromDraft(employee, weekNumber, draft) {
 
 // ===== INITIALISATIE =====
 // Data wordt geladen via loadDataFromAPI() na login in app.js
+
+// Allow the pure school-year helpers to be imported in Node.js (for unit tests).
+// This does not affect browser behavior since `module` is not defined there.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    parseDateOnly,
+    formatDateYYYYMMDD,
+    getMonday,
+    getSchoolAnchorMonday,
+    getSchoolYearAnchorMonday,
+    getSchoolWeekNumber,
+    getFourWeekPeriodDates
+  };
+}

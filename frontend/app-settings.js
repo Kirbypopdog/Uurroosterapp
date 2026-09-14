@@ -128,6 +128,15 @@ function trackSettingsDirty(container) {
     }, true);
 }
 
+// #273: het tegenovergestelde van markSettingsSaved. Nodig wanneer het opslaan
+// mislukt: de waarden in DataStore gaan terug naar wat de server heeft, maar wat
+// de gebruiker intikte blijft in het formulier staan zodat hij het opnieuw kan
+// proberen zonder alles over te typen.
+function markSettingsUnsaved() {
+    AppState.settingsDirty = true;
+    document.querySelectorAll('.settings-dirty-indicator').forEach(el => el.classList.remove('hidden'));
+}
+
 function markSettingsSaved() {
     AppState.settingsDirty = false;
     document.querySelectorAll('.settings-dirty-indicator').forEach(el => el.classList.add('hidden'));
@@ -996,7 +1005,6 @@ async function saveSchedulePattern() {
         // Backward compat: sync biWeeklyReferenceDate
         DataStore.settings.biWeeklyReferenceDate = referenceDate;
 
-        saveToStorage();
         renderPlanning();
         showToast('Roosterpatroon opgeslagen', 'success');
     } catch (err) {
@@ -2017,19 +2025,27 @@ function calculateTemplateDuration(start, end) {
 }
 
 async function updateTeamColor(teamId, color) {
-    if (DataStore.settings.teams[teamId]) {
-        DataStore.settings.teams[teamId].color = color;
-        saveToStorage();
-        applyTeamColors();
+    if (!DataStore.settings.teams[teamId]) return;
 
-        // Save to backend
-        try {
-            await saveSettings('teams', DataStore.settings.teams);
-            showToast('Teamkleur opgeslagen', 'success');
-        } catch (error) {
-            console.error('Error saving team color to backend:', error);
-            showToast('Kleur is lokaal opgeslagen maar backend sync mislukt. Vernieuw de pagina om te synchroniseren.', 'warning');
-        }
+    // #273: de oude melding zei "lokaal opgeslagen maar backend sync mislukt,
+    // vernieuw de pagina om te synchroniseren". Er werd niets lokaal bewaard
+    // (saveToStorage is sinds de overstap naar de API een lege functie), en
+    // vernieuwen was juist wat de wijziging weggooide. We zetten de kleur nu
+    // terug zodra de server hem weigert, zodat het scherm niet iets anders
+    // toont dan wat er opgeslagen staat.
+    const vorigeKleur = DataStore.settings.teams[teamId].color;
+    DataStore.settings.teams[teamId].color = color;
+    applyTeamColors();
+
+    try {
+        await saveSettings('teams', DataStore.settings.teams);
+        showToast('Teamkleur opgeslagen', 'success');
+    } catch (error) {
+        console.error('Error saving team color to backend:', error);
+        DataStore.settings.teams[teamId].color = vorigeKleur;
+        applyTeamColors();
+        renderSettings();
+        showToast('Teamkleur niet opgeslagen: ' + getUserFriendlyError(error), 'error');
     }
 }
 
@@ -2037,17 +2053,24 @@ async function saveRules() {
     const minHours = parseInt(document.getElementById('rule-min-hours').value) || 11;
     const maxConsecutive = parseInt(document.getElementById('rule-max-consecutive')?.value) || 6;
 
+    // #273: "Regels lokaal opgeslagen, maar sync naar server mislukt" was een
+    // valse belofte: saveToStorage bewaart niets. Erger nog, zolang het tabblad
+    // openbleef rekende de validatie met de nieuwe regel terwijl de server en
+    // alle andere gebruikers de oude aanhielden. Bij een mislukking zetten we
+    // de waarden nu terug en blijft de knop op "niet opgeslagen" staan.
+    const vorigeRegels = { ...DataStore.settings.rules };
     DataStore.settings.rules.minHoursBetweenShifts = minHours;
     DataStore.settings.rules.maxConsecutiveDays = maxConsecutive;
 
-    saveToStorage();
     try {
         await saveSettings('rules', DataStore.settings.rules);
         markSettingsSaved();
         showToast('Planning regels zijn opgeslagen', 'success');
     } catch (err) {
         console.error('Error saving rules to backend:', err);
-        showToast('Regels lokaal opgeslagen, maar sync naar server mislukt', 'warning');
+        DataStore.settings.rules = vorigeRegels;
+        markSettingsUnsaved();
+        showToast('Regels niet opgeslagen: ' + getUserFriendlyError(err), 'error');
     }
 }
 
@@ -2086,7 +2109,6 @@ async function deleteTemplate(templateId) {
 
     if (await showConfirm(`Weet je zeker dat je de template "${template.name}" wilt verwijderen?`)) {
         delete DataStore.settings.shiftTemplates[templateId];
-        saveToStorage();
         try { await saveSettings('shiftTemplates', DataStore.settings.shiftTemplates); } catch (e) { console.error('Error saving templates:', e); }
         renderSettings();
     }
@@ -2217,7 +2239,6 @@ async function saveTemplate(originalId) {
     }
 
     DataStore.settings.shiftTemplates[id] = { name, start, end, icon };
-    saveToStorage();
     try {
         await saveSettings('shiftTemplates', DataStore.settings.shiftTemplates);
     } catch (e) {
@@ -2564,7 +2585,6 @@ async function saveTeamToggles() {
     DataStore.settings.responsibleRotation.eligibleTeams = eligibleTeams;
 
     try { await saveSettings('responsibleRotation', DataStore.settings.responsibleRotation); } catch (e) { console.error('Error saving responsibleRotation:', e); }
-    saveToStorage();
 
     showToast('Teaminstellingen opgeslagen', 'success');
 

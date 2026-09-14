@@ -1049,7 +1049,6 @@ async function voerConceptToepassenUit(draftId) {
                 DataStore.settings.schedulePattern = newPatternSetting;
                 DataStore.settings.biWeeklyReferenceDate = applyGrid._pattern.referenceDate;
 
-                saveToStorage();
             }
         }
         // Rotation is managed via Settings > Planning, not per concept

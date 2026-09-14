@@ -491,7 +491,7 @@ function renderHomeOnboarding() {
         <ul class="onboarding-steps">
             ${steps.map(s => `<li class="${s.done ? 'done' : ''}">
                 <span class="step-check">${s.done ? '✓' : '○'}</span>
-                <a href="#" onclick="event.preventDefault();${s.tab ? `AppState.settingsActiveTab='${s.tab}';` : ''}switchView('${s.view}');">${s.label}</a>
+                <a href="#" onclick="event.preventDefault();${s.tab ? `AppState.activeSettingsTab='${s.tab}';` : ''}switchView('${s.view}');">${s.label}</a>
                 ${s.hint ? `<p class="onboarding-hint">${s.hint}</p>` : ''}
             </li>`).join('')}
         </ul>
