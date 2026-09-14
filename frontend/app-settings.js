@@ -1718,8 +1718,13 @@ async function loadAuditLog(page) {
             const groupLogs = groups[groupName];
             if (!groupLogs || groupLogs.length === 0) return;
 
+            // #264: de tabel is bijna 800 pixels breed en de omhullende
+            // settings-card heeft overflow: hidden. Op een telefoon vielen de
+            // kolommen Type en Details daardoor buiten beeld zonder dat je er
+            // met vegen bij kon. Dezelfde wikkel als de verlofmatrix gebruikt.
             html += `<div class="audit-date-group">
                 <h4 class="audit-date-group-title">${groupName} <span class="text-muted fw-500">(${groupLogs.length})</span></h4>
+                <div class="audit-log-scroll">
                 <table class="audit-log-table"><thead><tr>
                     <th>Tijdstip</th><th>Gebruiker</th><th>Actie</th><th>Type</th><th>Details</th>
                 </tr></thead><tbody>`;
@@ -1761,7 +1766,7 @@ async function loadAuditLog(page) {
                 </tr>`;
             });
 
-            html += '</tbody></table></div>';
+            html += '</tbody></table></div></div>';
         });
 
         resultsEl.innerHTML = html;

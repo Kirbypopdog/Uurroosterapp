@@ -13722,3 +13722,128 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
     color: var(--text-secondary);
     line-height: 1.5;
 }
+
+/* #264: de audit-tabel is bijna 800 pixels breed, de settings-card eromheen
+   heeft overflow: hidden, en op schermen tot 480 px staat overflow-x: hidden op
+   html en body. Op een telefoon vielen de kolommen Type en Details daardoor
+   buiten beeld zonder dat je er met vegen bij kon. Zelfde aanpak als
+   .leave-matrix-scroll. */
+.audit-log-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.audit-log-scroll .audit-log-table {
+    min-width: 640px;
+}
+
+/* #355: drie tegels naast elkaar met flex: 1 passen niet op 390 px; de derde
+   liep tot 426 px en was niet bereikbaar. Onder de 600 px wikkelen ze. */
+@media (max-width: 600px) {
+    .data-stats {
+        flex-wrap: wrap;
+    }
+    .data-stats .stat-item {
+        flex: 1 1 calc(50% - var(--space-md));
+        min-width: 0;
+    }
+}
+
+/* #265: op schermen tot 480 px klemt de regel
+   `*, *::before, *::after { max-width: 100vw !important }` ALLES terug op
+   schermbreedte. De bouwer heeft daar juist last van: .builder-grid staat op
+   min-width: 600px met een scrollbare wikkel eromheen, maar de rijen erbinnen
+   werden op 390 px geklemd. De dagkolommen krompen dan tot 22 px en een
+   dienstblok van 09:00 tot 17:00 werd een streepje van 8 px terwijl het label
+   28 px nodig heeft.
+   Gemeten voor de wijziging: wikkel 600 px, rij 390 px, cel 22 px, blok 8 px.
+
+   De rijen zijn hier uitgezonderd van die klem. Ze staan in een container die
+   al horizontaal scrollt, dus breder mogen worden is precies de bedoeling. */
+@media (max-width: 480px) {
+    .builder-grid,
+    .builder-team-body,
+    .builder-grid-header,
+    .builder-row,
+    .builder-staffing-row,
+    .builder-heatmap-row,
+    .builder-grid-header > *,
+    .builder-row > *,
+    .builder-staffing-row > *,
+    .builder-heatmap-row > * {
+        max-width: none !important;
+    }
+
+    /* Een tijdlijn op schaal heeft in een kolom van 64 px geen betekenis meer:
+       een dienst van 09:00 tot 17:00 kreeg 28 px terwijl het label er 38 nodig
+       heeft. Onder 480 px vult het blok daarom de hele cel en toont het alleen
+       de begintijd. Dat is leesbaar, aantikbaar, en zegt wat er staat. */
+    .builder-timeline-block {
+        left: 2px !important;
+        right: 2px !important;
+        width: auto !important;
+    }
+    .builder-timeline-block .btb-label {
+        display: none;
+    }
+    .builder-timeline-block .btb-time {
+        font-size: 10px;
+    }
+
+    /* Een dagkolom van 22 px is niet aan te tikken en toont geen tijd. Met een
+       vaste 64 px wordt het raster 100 + 7x64 + 60 = 608 px breed, wat past
+       binnen de scrollcontainer die er al is. */
+    .builder-grid-header,
+    .builder-row,
+    .builder-staffing-row,
+    .builder-heatmap-row {
+        grid-template-columns: 100px repeat(7, 64px) 60px !important;
+    }
+}
+
+/* #232: op 390 px breekt de teamnaam over twee regels en heeft
+   .settings-team-toggles geen flex-wrap, terwijl het in een flexitem met
+   min-width: 0 zit. De vinkjes Bezetting en Weekend schoven daardoor over
+   .team-actions heen, en de mobiele regel min-height: 44px op elke input rekte
+   de kleurkiezer van 32 naar 44 px zodat de overlap ook verticaal werd.
+   Gemeten: alle zes de teamrijen hadden de kleurkiezer over het woord Weekend.
+
+   De min-height blijft staan, want die is er voor tikbaarheid. In plaats
+   daarvan stapelt de rij onder 480 px verticaal: naam boven, vinkjes eronder,
+   acties op hun eigen regel. */
+@media (max-width: 480px) {
+    .team-config-item {
+        flex-wrap: wrap;
+        align-items: flex-start;
+    }
+
+    .team-config-item .team-info {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+
+    .settings-team-toggles {
+        flex-wrap: wrap;
+    }
+
+    .team-config-item .team-actions {
+        flex: 1 1 100%;
+        justify-content: flex-end;
+        align-items: center;
+        margin-top: 4px;
+    }
+}
+
+/* De legenda boven de teamlijst zet elk item op white-space: nowrap. De ouder
+   mag wrappen, maar een enkel item dat breder is dan het scherm blijft dan te
+   breed: "Weekend = draait mee in weekendverantwoordelijke rotatie" liep op
+   390 px buiten het kader en werd afgekapt op "rotati". Op een smal scherm mag
+   zo'n zin gewoon over twee regels. */
+@media (max-width: 600px) {
+    .team-legend {
+        flex-direction: column;
+        gap: 4px;
+    }
+    .team-legend-item {
+        white-space: normal;
+    }
+}
