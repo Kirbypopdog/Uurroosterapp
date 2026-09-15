@@ -7,11 +7,22 @@
 // het resend-pakket en zetten we de sleutel vóór het requiren van de module.
 
 const verzonden = [];
+const batchAanroepen = [];
 
+// #324: de reeks vertrekt nu via resend.batch.send, één aanroep voor de hele
+// lijst. De mock registreert beide paden, zodat de tests hieronder blijven
+// kijken naar wat er per ontvanger de deur uit gaat.
 jest.mock('resend', () => ({
   Resend: jest.fn().mockImplementation(() => ({
     emails: {
       send: jest.fn(async (opts) => { verzonden.push(opts); return { data: { id: 'test' } }; })
+    },
+    batch: {
+      send: jest.fn(async (lijst) => {
+        batchAanroepen.push(lijst);
+        lijst.forEach(o => verzonden.push(o));
+        return { data: lijst.map((_, i) => ({ id: 'batch' + i })) };
+      })
     }
   }))
 }));
@@ -42,7 +53,7 @@ const leden = [
 const laatBezinken = () => new Promise(r => setTimeout(r, 10));
 
 describe('notifyTakeoverBatchAvailable', () => {
-  beforeEach(() => { verzonden.length = 0; });
+  beforeEach(() => { verzonden.length = 0; batchAanroepen.length = 0; });
 
   test('stuurt één mail per ontvanger, niet één per dienst', async () => {
     await notifyTakeoverBatchAvailable(leden, melder, shifts, 'ziek');

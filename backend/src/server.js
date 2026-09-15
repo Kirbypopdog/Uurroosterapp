@@ -2002,17 +2002,21 @@ v1.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req
       [passwordHash, userId]
     );
     await logAudit(req, 'UPDATE', 'user', userId, { action: 'password_reset' });
-    // Send password reset email (fire-and-forget)
     const userResult = await pool.query('SELECT name, email FROM users WHERE id = $1', [userId]);
     const targetUser = userResult.rows[0];
-    const hasEmail = !!(targetUser?.email);
-    if (hasEmail) {
-      emailService.notifyPasswordReset(targetUser);
-    }
-    // Only expose the new password when there is no email address — the admin
-    // must hand it over manually. When an email exists, the user receives it
-    // via email and we never include it in the API response.
-    res.json({ ok: true, ...(hasEmail ? {} : { newPassword: DEFAULT_RESET_PASSWORD }) });
+
+    // #322: het wachtwoord werd verzwegen zodra de medewerker een e-mailadres
+    // had, want "die krijgt het wel per mail". Dat klopte niet: de resetmail
+    // bevat geen wachtwoord en verwijst juist terug naar de beheerder. Niemand
+    // kreeg het dus te zien. Het wachtwoord gaat nu altijd mee in het antwoord,
+    // zodat de beheerder het één keer te zien krijgt en persoonlijk kan
+    // doorgeven, en de mail meldt enkel dát er gereset is.
+    //
+    // emailSent zegt of er effectief een mail vertrekt. Zonder adres, of met
+    // het mailtype uit, is dat niet zo, en dan mag de app dat ook niet beweren.
+    const emailSent = await emailService.notifyPasswordReset(targetUser);
+
+    res.json({ ok: true, newPassword: DEFAULT_RESET_PASSWORD, emailSent: !!emailSent });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });

@@ -543,16 +543,22 @@ function showEditAccountModal(user, teams, onSave) {
             const result = await dataApiFetch(`/admin/users/${user.id}/reset-password`, {
                 method: 'POST'
             });
+            // #322: hier werd het wachtwoord verzwegen zodra er een e-mailadres
+            // was, met de belofte dat de medewerker het per mail zou krijgen.
+            // Die mail bevat geen wachtwoord en verwijst juist terug naar de
+            // beheerder. Het wachtwoord wordt nu altijd één keer getoond, en de
+            // tekst zegt eerlijk of er daarnaast een bericht is vertrokken.
             if (result.newPassword) {
-                // No email on file — admin must hand over the password manually.
-                // Show once in a modal (never logged to console).
+                const mailregel = result.emailSent
+                    ? 'De medewerker krijgt een bericht dat het wachtwoord gereset is. Dat bericht bevat het wachtwoord niet, dus geef het hieronder persoonlijk door.'
+                    : 'Er vertrekt geen bericht, dus geef het wachtwoord hieronder persoonlijk door.';
                 await showConfirm(
-                    `Wachtwoord gereset.\n\nDe medewerker heeft geen e-mailadres, dus het nieuwe wachtwoord wordt hier eenmalig getoond:\n\n${result.newPassword}\n\nDeel dit persoonlijk mee aan de medewerker.`,
+                    `Wachtwoord gereset.\n\n${mailregel}\n\nNieuw wachtwoord:\n\n${result.newPassword}`,
                     'Wachtwoord gereset',
                     { confirmText: 'Begrepen', hideCancel: true }
                 );
             } else {
-                showToast('Wachtwoord gereset. Medewerker ontvangt een e-mail.', 'success');
+                showToast('Wachtwoord gereset.', 'success');
             }
         } catch (error) {
             showToast(`Reset mislukt: ${error.message}`, 'error');
@@ -1247,7 +1253,8 @@ function renderSettingsEmail(container) {
             swap_rejected: true,
             takeover_accepted: true,
             request_cancelled: true,
-            welcome: true
+            welcome: true,
+            password_reset: true
         }
     };
 
@@ -1259,7 +1266,10 @@ function renderSettingsEmail(container) {
         { key: 'swap_rejected', label: 'Ruil afgewezen', desc: 'Aanvrager wordt gemaild bij afwijzing' },
         { key: 'takeover_accepted', label: 'Dienst overgenomen', desc: 'Oorspronkelijke eigenaar wordt gemaild' },
         { key: 'request_cancelled', label: 'Verzoek geannuleerd', desc: 'Betrokkenen worden gemaild bij annulering' },
-        { key: 'welcome', label: 'Welkomst-email', desc: 'Nieuwe medewerker ontvangt inloggegevens per mail' }
+        { key: 'welcome', label: 'Welkomst-email', desc: 'Nieuwe medewerker ontvangt inloggegevens per mail' },
+        // #323: de resetmail hing aan de schakelaar hierboven. Wie de
+        // welkomstmail uitzette, zette daarmee ongemerkt ook dit bericht uit.
+        { key: 'password_reset', label: 'Wachtwoord gereset', desc: 'Medewerker krijgt bericht dat een beheerder het wachtwoord heeft gereset' }
     ];
 
     const typeToggles = emailTypes.map(t => `

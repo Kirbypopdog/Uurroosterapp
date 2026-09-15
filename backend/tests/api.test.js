@@ -1862,7 +1862,13 @@ describe('POST /admin/users/:id/reset-password', () => {
     expect(res.status).toBe(403);
   });
 
-  test('does not expose newPassword when user has email (email is sent instead)', async () => {
+  // #322: deze test legde het gedrag van #170 vast, dat het wachtwoord
+  // verzweeg zodra er een e-mailadres was. De aanname daarachter was dat de
+  // medewerker het per mail kreeg. Dat klopte niet: de resetmail bevat geen
+  // wachtwoord en verwijst juist terug naar de beheerder, dus niemand kreeg het
+  // te zien. #170 stond het antwoord al toe voor accounts zonder adres; zonder
+  // die foute aanname geldt diezelfde redenering voor iedereen.
+  test('exposes newPassword when user has email, and reports that a mail went out', async () => {
     mockActiveUser();
     pool.query
       .mockResolvedValueOnce({ rows: [] })                                         // UPDATE password_hash
@@ -1874,8 +1880,7 @@ describe('POST /admin/users/:id/reset-password', () => {
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    // #170: password must NOT be in response when an email exists
-    expect(res.body.newPassword).toBeUndefined();
+    expect(res.body.newPassword).toBeTruthy();
   });
 
   test('exposes newPassword in response when user has no email', async () => {
@@ -1892,6 +1897,9 @@ describe('POST /admin/users/:id/reset-password', () => {
     expect(res.body.ok).toBe(true);
     // Must include password so admin can hand it over manually
     expect(res.body.newPassword).toBeTruthy();
+    // #322: zonder adres vertrekt er niets, en dat moet het antwoord ook zeggen
+    // zodat de app geen mail belooft die er niet is.
+    expect(res.body.emailSent).toBe(false);
   });
 });
 
