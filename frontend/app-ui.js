@@ -103,8 +103,16 @@ const FocusTrap = {
     }
 };
 
+// #269: de vensters die in index.html staan worden door de app hergebruikt en
+// mogen dus alleen verborgen worden, niet verwijderd. Ze staan er allemaal bij
+// het opstarten, dus één momentopname volstaat om ze te onderscheiden van de
+// vensters die JavaScript later invoegt.
+const VASTE_VENSTERS = new Set();
+
 // Auto-activate focus trap when modals become visible
 function initModalFocusTrap() {
+    document.querySelectorAll('.modal').forEach(m => VASTE_VENSTERS.add(m));
+
     const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
             // #239: een venster dat later door JavaScript wordt ingevoegd is

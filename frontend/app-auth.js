@@ -95,12 +95,50 @@ async function handleLogin(e) {
     }
 }
 
-function handleLogout() {
+// #269: bij een 401 riep dataApiFetch dit aan terwijl de dienstmodal nog
+// openstond. Die staat buiten #app-container en bleef er dus met z-index 1000
+// bovenop hangen, met een knop "Toch opslaan" die niets meer kon doen en een
+// loginformulier eronder waar je niet bij kon. Alles wat bovenop de pagina ligt
+// gaat nu eerst dicht.
+//
+// reden mag 'sessie' zijn; dan volgt er een melding waarom je terug op het
+// loginscherm staat. Bij een gewone uitlog blijft die uiteraard achterwege.
+function handleLogout(reden) {
     AppState.currentUser = null;
     AppState.authToken = null;
     sessionStorage.removeItem('hetvlot_user');
     sessionStorage.removeItem('hetvlot_token');
+    sluitAlleVensters();
     showLogin();
+    if (reden === 'sessie') {
+        showToast('Je sessie is verlopen. Log opnieuw in.', 'warning');
+    }
+}
+
+// Sluit elk venster en elke bedekking die over de pagina ligt. De vensters die
+// in index.html staan worden verborgen, want de app hergebruikt ze. Alles wat
+// door JavaScript is ingevoegd wordt weggehaald, precies zoals de sluitknop van
+// die vensters het zelf doet; ze worden bij het volgende gebruik opnieuw
+// opgebouwd.
+function sluitAlleVensters() {
+    const vast = (typeof VASTE_VENSTERS !== 'undefined') ? VASTE_VENSTERS : new Set();
+    document.querySelectorAll('.modal').forEach(m => {
+        if (vast.has(m)) {
+            m.classList.add('hidden');
+        } else {
+            m.remove();
+        }
+    });
+    document.querySelectorAll('.section-loading-overlay').forEach(o => o.classList.add('hidden'));
+    if (typeof FocusTrap !== 'undefined') FocusTrap.deactivate();
+    // De opslaanknop van de dienstmodal kan in de stand "Toch opslaan" staan.
+    // Die mee terugzetten, anders begint de volgende sessie met een knop die
+    // een bevestiging suggereert die niemand gaf.
+    if (typeof resetShiftSubmitBtn === 'function') {
+        try { resetShiftSubmitBtn(); } catch (e) { /* DOM kan al opgeruimd zijn */ }
+    }
+    AppState._shiftForceOverride = false;
+    AppState._shiftBackendForce = false;
 }
 
 async function checkSession() {

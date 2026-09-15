@@ -102,6 +102,31 @@ function updateShiftBlockNotice() {
     IconHelper.init(melding);
 }
 
+// #178: de teamlijst stond hardgecodeerd in index.html, terwijl teams
+// instelbaar zijn en overal elders uit DataStore.settings.teams komen. Een
+// nieuw team verscheen er dus niet in, en een hernoemd team hield zijn oude
+// naam. Deze functie bouwt de lijst op uit dezelfde bron als de rest.
+//
+// Een dienst kan nog naar een team verwijzen dat sindsdien uit de
+// instellingen is gehaald. Dat team wordt er als losse optie bij gezet, met
+// het label "(niet meer in gebruik)". Zonder die optie zou de keuzelijst
+// stilletjes op de eerste regel springen en zou opslaan het team van de
+// dienst veranderen zonder dat iemand daarom vroeg.
+function populateShiftTeamDropdown(huidigTeam) {
+    const teams = DataStore.settings.teams || {};
+    const ids = Object.keys(teams);
+
+    let html = '<option value="">-- Selecteer team --</option>';
+    ids.forEach(id => {
+        html += `<option value="${escapeHtml(id)}">${escapeHtml(teams[id].name || id)}</option>`;
+    });
+    if (huidigTeam && !ids.includes(huidigTeam)) {
+        html += `<option value="${escapeHtml(huidigTeam)}">${escapeHtml(huidigTeam)} (niet meer in gebruik)</option>`;
+    }
+    DOM.shiftTeam.innerHTML = html;
+    DOM.shiftTeam.value = huidigTeam || '';
+}
+
 function openAddShiftModal() {
     AppState.editingShiftId = null;
     DOM.shiftModalTitle.textContent = 'Dienst toevoegen';
@@ -110,6 +135,7 @@ function openAddShiftModal() {
     DOM.shiftDate.value = formatDateYYYYMMDD(new Date());
     DOM.shiftDeleteBtn.classList.add('hidden');
     populateShiftTemplateDropdown();
+    populateShiftTeamDropdown();
 
     // Populate dropdown with filtered employees
     populateEmployeeDropdown();
@@ -142,6 +168,10 @@ function openAddShiftForEmployee(employeeId, date) {
     DOM.shiftDeleteBtn.classList.add('hidden');
     populateEmployeeDropdown();
     DOM.shiftEmployee.value = employeeId;
+    // Je voegt hier een dienst toe bij een bepaalde medewerker, dus het team
+    // waar die thuishoort is de enige zinnige beginwaarde.
+    const emp = getEmployee(employeeId);
+    populateShiftTeamDropdown(emp ? (emp.mainTeam || emp.main_team) : '');
     DOM.shiftModal.classList.remove('hidden');
     updateShiftBlockNotice();
 }
@@ -198,10 +228,10 @@ function openShiftModal(shift, canEdit) {
     // Populate dropdowns
     populateEmployeeDropdown();
     populateShiftTemplateDropdown();
+    populateShiftTeamDropdown(shift.team);
 
     // Fill form with shift data
     DOM.shiftEmployee.value = shift.employeeId;
-    DOM.shiftTeam.value = shift.team;
     DOM.shiftDate.value = shift.date;
     DOM.shiftStart.value = shift.startTime;
     DOM.shiftEnd.value = shift.endTime;

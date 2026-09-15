@@ -348,13 +348,11 @@
                     </div>
                     <div class="form-group">
                         <label for="shift-team">Team *</label>
-                        <select id="shift-team" required>
-                            <option value="vlot1">Vlot 1</option>
-                            <option value="vlot2">Vlot 2</option>
-                            <option value="cargo">Cargo</option>
-                            <option value="overkoepelend">Overkoepelend</option>
-                            <option value="jobstudent">Jobstudenten/Stagiairs</option>
-                        </select>
+                        <!-- #178: de opties werden hier vast opgesomd, waardoor een
+                             nieuw of hernoemd team niet doorkwam. De lijst wordt nu
+                             gevuld door populateShiftTeamDropdown() uit
+                             DataStore.settings.teams, net als elke andere teamkeuze. -->
+                        <select id="shift-team" required></select>
                     </div>
                 </div>
                 <div class="form-row">

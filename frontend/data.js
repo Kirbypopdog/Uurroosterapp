@@ -208,7 +208,9 @@ async function dataApiFetch(path, options = {}) {
             // Token ontbreekt of verlopen — sessie opruimen en terug naar login
             sessionStorage.removeItem('hetvlot_token');
             sessionStorage.removeItem('hetvlot_user');
-            if (typeof handleLogout === 'function') handleLogout();
+            // #269: 'sessie' zorgt dat handleLogout de openstaande vensters
+            // sluit en uitlegt waarom je terug op het loginscherm staat.
+            if (typeof handleLogout === 'function') handleLogout('sessie');
             // #268: deze fout kreeg als enige geen status mee. Een aanroeper die
             // op error.status test kon een fout wachtwoord daardoor niet
             // onderscheiden van een netwerkfout.
