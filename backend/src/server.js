@@ -4011,8 +4011,15 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
   // De gebruiker las "Opslaan mislukt" terwijl het gelukt was, en de
   // teams-tabel liep daarna permanent uit de pas met de instellingen. Alles
   // zit nu in één BEGIN/COMMIT, zodat het antwoord klopt met wat er staat.
-  const client = await pool.connect();
+  // pool.connect() hoort BINNEN de try: mislukt het verbinden (alle tien de
+  // verbindingen bezet, of de databank valt weg terwijl de server draait), dan
+  // gooit een async route-handler in Express 4 buiten de try een rejection die
+  // niemand opvangt, en blijft het verzoek hangen in plaats van een 500 te
+  // geven. Nagemeten: zonder deze opzet komt er binnen zes seconden geen
+  // antwoord.
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     await client.query(`
       INSERT INTO settings (key, value, updated_at)
@@ -4059,7 +4066,9 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
     await logAudit(req, 'UPDATE', 'settings', key, { key });
     res.json({ ok: true });
   } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* verbinding al weg */ }
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* verbinding al weg */ }
+    }
     console.error('PUT /settings/:key error:', err);
     // #256: idem, een FK-fout hier hoort een leesbaar antwoord te krijgen.
     if (err.code === '23503') {
@@ -4072,7 +4081,7 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
     }
     res.status(500).json({ error: 'Server error' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
