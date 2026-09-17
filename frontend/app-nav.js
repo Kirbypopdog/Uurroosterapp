@@ -235,13 +235,13 @@ function getOnboardingStatus() {
 
     return [
         { id: 'teams', label: 'Teams aanmaken', done: Object.keys(teams).length > 0, view: 'settings', tab: 'teams' },
-        { id: 'templates', label: 'Dienst templates instellen', done: Object.keys(templates).length > 0, view: 'settings', tab: 'teams' },
+        { id: 'templates', label: 'Dienstsjablonen instellen', done: Object.keys(templates).length > 0, view: 'settings', tab: 'teams' },
         { id: 'users', label: 'Medewerkers toevoegen', done: users.filter(u => u.role === 'medewerker').length > 0, view: 'settings', tab: 'accounts' },
         { id: 'rules', label: 'Planningsregels controleren', done: AppState.currentUser?.onboardingFlags?.planning_visited === true, view: 'settings', tab: 'planning',
           hint: `Stel de minimale rustperiode tussen diensten en het maximaal aantal opeenvolgende werkdagen in. Dit beschermt het welzijn van medewerkers en voldoet aan wettelijke vereisten. Huidig: ${minHours}u rust, max ${maxDays} dagen.` },
         { id: 'holidays', label: 'Vakantieperiodes invoeren', done: holidays.length > 0, view: 'settings', tab: 'planning' },
         { id: 'schedule', label: 'Basisrooster maken', done: DataStore.shifts.length > 0, view: 'builder' },
-        { id: 'email', label: 'Email notificaties configureren', done: DataStore.settings.emailNotifications?.globalEnabled === true, view: 'settings', tab: 'communicatie' }
+        { id: 'email', label: 'E-mailmeldingen instellen', done: DataStore.settings.emailNotifications?.globalEnabled === true, view: 'settings', tab: 'communicatie' }
     ];
 }
 
@@ -351,7 +351,7 @@ function renderHomeAlerts(role) {
         const emp = (DataStore.users || []).find(u => u.id === Number(empId));
         const dObj = parseDateOnly(dateStr);
         const absLabel = absenceLabels[absence.type] || 'afwezig';
-        const text = `${escapeHtml(emp?.name || 'Medewerker')}: shift op ${formatDateShort(dObj)} maar ${absLabel}`;
+        const text = `${escapeHtml(emp?.name || 'Medewerker')}: dienst op ${formatDateShort(dObj)} maar ${absLabel}`;
         const parts = [];
         if (s.startTime && s.endTime) parts.push(`Dienst: ${escapeHtml(s.startTime)}–${escapeHtml(s.endTime)}`);
         parts.push(`Afwezigheid: ${escapeHtml(absLabel)}`);
@@ -414,7 +414,7 @@ function renderHomeAlerts(role) {
     const alertCategoryConfig = [
         { id: 'unstaffed', label: 'Onderbezetting', icon: 'users' },
         { id: '11h', label: '11-uur schending', icon: 'clock' },
-        { id: 'conflict', label: 'Shift + afwezigheid', icon: 'calendar-x-2' },
+        { id: 'conflict', label: 'Dienst en afwezigheid', icon: 'calendar-x-2' },
         { id: 'consec', label: 'Opeenvolgende diensten', icon: 'trending-up' },
         { id: 'swaps', label: 'Ruilverzoeken', icon: 'arrow-left-right' },
         { id: 'other', label: 'Overig', icon: 'alert-triangle' },

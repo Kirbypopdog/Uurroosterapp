@@ -1954,14 +1954,14 @@ async function resetData() {
         [
             // #292: de verlofrondes werden niet gewist én niet genoemd. Nu
             // worden ze wel gewist, dus hoort de keuze dat ook te zeggen.
-            { value: 'data', label: 'Alleen planning data (diensten, afwezigheden, verlofrondes, concepten, instellingen)' },
+            { value: 'data', label: 'Alleen planningsdata (diensten, afwezigheden, verlofrondes, concepten, instellingen)' },
             { value: 'data_users', label: 'Planning data + medewerker-accounts' },
             { value: 'all', label: 'Alles behalve mijn account' }
         ]
     );
     if (!scope) return;
 
-    const labels = { data: 'planning data', data_users: 'planning data en medewerker-accounts', all: 'alle data en accounts (behalve jouw account)' };
+    const labels = { data: 'planningsdata', data_users: 'planningsdata en medewerkeraccounts', all: 'alle data en accounts (behalve jouw account)' };
     if (!await showConfirm(`LAATSTE WAARSCHUWING: ${labels[scope]} wordt permanent verwijderd. Doorgaan?`, 'Laatste waarschuwing')) {
         return;
     }

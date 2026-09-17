@@ -321,7 +321,7 @@ function showAddUserModal(teams) {
                         <input type="text" id="new-user-name" class="form-input" required />
                     </div>
                     <div class="form-group">
-                        <label for="new-user-email">Email</label>
+                        <label for="new-user-email">E-mail</label>
                         <input type="email" id="new-user-email" class="form-input" placeholder="Optioneel, welkomstmail wordt gestuurd bij invullen" />
                     </div>
                     <div class="form-group">
@@ -435,7 +435,7 @@ function showEditAccountModal(user, teams, onSave) {
                             <input type="text" id="edit-user-name" class="form-input" value="${escapeHtml(user.name)}" required />
                         </div>
                         <div class="form-group flex-1">
-                            <label for="edit-user-email">Email</label>
+                            <label for="edit-user-email">E-mail</label>
                             <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email || '')}" placeholder="Optioneel, welkomstmail wordt gestuurd bij invullen" />
                         </div>
                     </div>
@@ -462,7 +462,7 @@ function showEditAccountModal(user, teams, onSave) {
                             <input type="checkbox" id="edit-user-email-notif" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
                             <span class="toggle-slider"></span>
                         </label>
-                        <label for="edit-user-email-notif" class="text-xs cursor-pointer">Email notificaties</label>
+                        <label for="edit-user-email-notif" class="text-xs cursor-pointer">E-mailmeldingen</label>
                     </div>
                     <div class="modal-actions modal-actions-split">
                         <div class="modal-actions-left">
@@ -692,7 +692,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${fromDate})`;
             summaryHtml += `<br><small class="text-muted">Telling op basis van de geladen planning, het werkelijke aantal kan hoger zijn</small></li>`;
         } else {
-            summaryHtml += `<li>Geen diensten overgedragen. Pas het actieve concept opnieuw toe via Rooster Bouwen</li>`;
+            summaryHtml += `<li>Geen diensten overgedragen. Pas het actieve concept opnieuw toe via Rooster bouwen</li>`;
         }
 
         summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
@@ -762,7 +762,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             showToast(msg, 'success');
 
             if (result.hint === 'apply_concept') {
-                showToast(`${newUser.name} heeft nog geen diensten. Pas het actief concept opnieuw toe via Rooster Bouwen.`, 'info', 6000);
+                showToast(`${newUser.name} heeft nog geen diensten. Pas het actieve concept opnieuw toe via Rooster bouwen.`, 'info', 6000);
             }
 
             if (onComplete) onComplete();
@@ -891,11 +891,11 @@ function renderSettingsPlanning(container) {
 
     container.innerHTML = `
         ${holidayBanner}
-        <!-- Planning regels -->
+        <!-- Planningsregels -->
         <div class="settings-card mt-lg" id="settings-rules">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Planning regels</h3>
+                    <h3>Planningsregels</h3>
                     <p class="settings-card-subtitle">Regels voor rust en minimale bezetting.</p>
                 </div>
             </div>
@@ -953,7 +953,7 @@ function renderSettingsPlanning(container) {
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Manueel gesloten datums</h3>
-                    <p class="settings-card-subtitle">Brugdagen en uitzonderlijke sluitingen. Op deze datums kunnen geen nieuwe shifts worden aangemaakt.</p>
+                    <p class="settings-card-subtitle">Brugdagen en uitzonderlijke sluitingen. Op deze datums kunnen geen nieuwe diensten worden aangemaakt.</p>
                 </div>
                 <div class="settings-card-actions">
                     <button class="btn btn-sm btn-secondary" onclick="openAddClosedDateDialog()">+ Datum toevoegen</button>
@@ -976,14 +976,14 @@ async function saveSchedulePattern() {
     const referenceDate = refDateInput?.value;
 
     if (!referenceDate) {
-        showToast('Selecteer een referentie datum', 'warning');
+        showToast('Selecteer een referentiedatum', 'warning');
         return;
     }
 
     // Check if it's a Monday
     const date = parseDateOnly(referenceDate);
     if (date.getDay() !== 1) {
-        showToast('De referentie datum moet een maandag zijn', 'warning');
+        showToast('De referentiedatum moet een maandag zijn', 'warning');
         return;
     }
 
@@ -1044,11 +1044,11 @@ function renderSettingsTeams(container) {
             </div>
         </div>
 
-        <!-- Dienst templates -->
+        <!-- Dienstsjablonen -->
         <div class="settings-card mt-lg" id="settings-templates">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Dienst templates</h3>
+                    <h3>Dienstsjablonen</h3>
                     <p class="settings-card-subtitle">Standaard diensten voor snelle planning.</p>
                 </div>
                 <div class="settings-card-actions">
@@ -1266,7 +1266,7 @@ function renderSettingsEmail(container) {
         { key: 'swap_rejected', label: 'Ruil afgewezen', desc: 'Aanvrager wordt gemaild bij afwijzing' },
         { key: 'takeover_accepted', label: 'Dienst overgenomen', desc: 'Oorspronkelijke eigenaar wordt gemaild' },
         { key: 'request_cancelled', label: 'Verzoek geannuleerd', desc: 'Betrokkenen worden gemaild bij annulering' },
-        { key: 'welcome', label: 'Welkomst-email', desc: 'Nieuwe medewerker ontvangt inloggegevens per mail' },
+        { key: 'welcome', label: 'Welkomstmail', desc: 'Nieuwe medewerker ontvangt zijn inloggegevens per e-mail' },
         // #323: de resetmail hing aan de schakelaar hierboven. Wie de
         // welkomstmail uitzette, zette daarmee ongemerkt ook dit bericht uit.
         { key: 'password_reset', label: 'Wachtwoord gereset', desc: 'Medewerker krijgt bericht dat een beheerder het wachtwoord heeft gereset' }
@@ -1291,18 +1291,18 @@ function renderSettingsEmail(container) {
         <div class="settings-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Email & Notificaties</h3>
-                    <p class="settings-card-subtitle">Beheer welke emails automatisch verstuurd worden.</p>
+                    <h3>E-mail en meldingen</h3>
+                    <p class="settings-card-subtitle">Beheer welke e-mails automatisch verstuurd worden.</p>
                 </div>
             </div>
             <div class="settings-card-body">
                 <div class="email-setting-row email-setting-global">
                     <div class="email-setting-info">
-                        <span class="email-setting-label fw-600">Alle email notificaties</span>
-                        <span class="email-setting-desc">Schakel alle email notificaties in of uit</span>
+                        <span class="email-setting-label fw-600">Alle e-mailmeldingen</span>
+                        <span class="email-setting-desc">Schakel alle e-mailmeldingen in of uit</span>
                     </div>
                     <label class="toggle-switch">
-                        <input type="checkbox" id="email-global-toggle" aria-label="Alle email notificaties" ${emailSettings.globalEnabled ? 'checked' : ''} />
+                        <input type="checkbox" id="email-global-toggle" aria-label="Alle e-mailmeldingen" ${emailSettings.globalEnabled ? 'checked' : ''} />
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -1319,7 +1319,7 @@ function renderSettingsEmail(container) {
         <div class="settings-card mt-lg">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Email configuratie</h3>
+                    <h3>E-mailconfiguratie</h3>
                     <p class="settings-card-subtitle">Status van de e-mailservice en verificatie.</p>
                 </div>
             </div>
@@ -1413,11 +1413,11 @@ function renderSettingsEmail(container) {
             saveBtn.textContent = 'Opslaan...';
             await saveSettings('email_notifications', settings);
             DataStore.settings.emailNotifications = settings;
-            msg.textContent = 'Email instellingen opgeslagen.';
+            msg.textContent = 'E-mailinstellingen opgeslagen.';
             msg.className = 'form-message success';
             msg.classList.remove('hidden');
             markSettingsSaved();
-            showToast('Email instellingen opgeslagen', 'success');
+            showToast('E-mailinstellingen opgeslagen', 'success');
         } catch (err) {
             msg.textContent = 'Opslaan mislukt: ' + (err.message || 'Onbekende fout');
             msg.className = 'form-message error';
@@ -1434,11 +1434,11 @@ function renderSettingsSystem(container) {
     const isAdmin = getEffectiveRole() === 'admin';
 
     container.innerHTML = `
-        <!-- Data beheer -->
+        <!-- Databeheer -->
         <div class="settings-card" id="settings-data">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Data beheer</h3>
+                    <h3>Databeheer</h3>
                     <p class="settings-card-subtitle">Backup, import en reset van de data.</p>
                 </div>
             </div>
@@ -1463,8 +1463,8 @@ function renderSettingsSystem(container) {
                     </div>
                 </div>
                 <div class="button-group">
-                    <button class="btn btn-secondary" onclick="exportData()">Exporteer</button>
-                    <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeer</button>
+                    <button class="btn btn-secondary" onclick="exportData()">Exporteren</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeren</button>
                     <input type="file" id="import-file" accept=".json" class="hidden" onchange="importData(event)">
                 </div>
                 ${isAdmin && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:') ? `
@@ -1519,11 +1519,11 @@ function renderSettingsBeheer(container) {
     }
 
     container.innerHTML = `
-        <!-- Data beheer -->
+        <!-- Databeheer -->
         <div class="settings-card" id="settings-data">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Data beheer</h3>
+                    <h3>Databeheer</h3>
                     <p class="settings-card-subtitle">Backup, import en reset van de data.</p>
                 </div>
             </div>
@@ -1548,8 +1548,8 @@ function renderSettingsBeheer(container) {
                     </div>
                 </div>
                 <div class="button-group">
-                    <button class="btn btn-secondary" onclick="exportData()">Exporteer</button>
-                    <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeer</button>
+                    <button class="btn btn-secondary" onclick="exportData()">Exporteren</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeren</button>
                     <input type="file" id="import-file" accept=".json" class="hidden" onchange="importData(event)">
                 </div>
             </div>
@@ -1559,7 +1559,7 @@ function renderSettingsBeheer(container) {
         <div class="settings-card mt-lg">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Audit Log</h3>
+                    <h3>Auditlog</h3>
                     <p class="settings-card-subtitle">Overzicht van alle wijzigingen in het systeem.</p>
                 </div>
             </div>
@@ -1589,7 +1589,6 @@ function renderSettingsBeheer(container) {
                                 <option value="REPLACE">Vervangen</option>
                                 <option value="IMPORT">Geïmporteerd</option>
                                 <option value="MIGRATE">Gemigreerd</option>
-                                <option value="LOGIN">Login</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -1641,6 +1640,12 @@ function renderSettingsBeheer(container) {
     loadAuditLog(1);
 }
 
+// #373: REPLACE, IMPORT en MIGRATE stonden wel in de keuzelijst maar niet
+// hier, en verschenen dus als ruw REPLACE tussen Nederlandse deelwoorden.
+// LOGIN stond er wél in, maar de backend logt die actie nergens: nagegaan
+// met een inventaris van alle logAudit-aanroepen in server.js, en op de
+// productiedatabank komt de actie niet voor. De optie is uit de keuzelijst
+// gehaald, want ze gaf altijd nul resultaten.
 const AUDIT_ACTION_LABELS = {
     CREATE: 'Aangemaakt',
     UPDATE: 'Bijgewerkt',
@@ -1648,15 +1653,22 @@ const AUDIT_ACTION_LABELS = {
     APPROVE: 'Goedgekeurd',
     REJECT: 'Afgewezen',
     CANCEL: 'Geannuleerd',
-    LOGIN: 'Login'
+    REPLACE: 'Vervangen',
+    IMPORT: 'Geïmporteerd',
+    MIGRATE: 'Gemigreerd'
 };
 
+// De backend logt ook system, shift_block en shift_activity. Die stonden hier
+// niet en verschenen dus als ruwe tabelnaam.
 const AUDIT_RESOURCE_LABELS = {
     shift: 'Dienst',
     availability: 'Afwezigheid',
     swap_request: 'Ruilverzoek',
     user: 'Gebruiker',
-    settings: 'Instelling'
+    settings: 'Instelling',
+    shift_block: 'Geblokkeerde dag',
+    shift_activity: 'Activiteit',
+    system: 'Systeem'
 };
 
 const AUDIT_SYSTEM_ACTIONS = new Set(['MIGRATE', 'IMPORT']);
@@ -1747,25 +1759,7 @@ async function loadAuditLog(page) {
                 const resourceLabel = AUDIT_RESOURCE_LABELS[log.resource_type] || log.resource_type;
                 const actionClass = log.action.toLowerCase();
 
-                let detailStr = '';
-                if (log.details && typeof log.details === 'object') {
-                    if (log.details.before && log.details.after) {
-                        detailStr = formatAuditDiff(log.details.before, log.details.after);
-                    } else if (log.details.shift) {
-                        const s = log.details.shift;
-                        detailStr = `${s.date || ''} ${s.startTime || s.start_time || ''}-${s.endTime || s.end_time || ''}`;
-                    } else if (log.details.availability) {
-                        const a = log.details.availability;
-                        detailStr = `${a.date || ''} ${a.type || ''}`;
-                    } else if (log.details.key) {
-                        detailStr = log.details.key;
-                    } else if (log.details.user) {
-                        detailStr = log.details.user.name || log.details.user.email || '';
-                    } else {
-                        const keys = Object.keys(log.details);
-                        if (keys.length > 0) detailStr = keys.join(', ');
-                    }
-                }
+                const detailStr = formatAuditDetails(log.details, log.resource_type);
 
                 html += `<tr>
                     <td class="audit-time">${escapeHtml(timeStr)}</td>
@@ -1798,41 +1792,160 @@ async function loadAuditLog(page) {
     }
 }
 
+// #369: viel een logregel niet in een van de bekende vormen, dan zette de code
+// Object.keys(details).join(', ') in de kolom en las de beheerder een rij
+// Engelse variabelenamen: "type, userId, endDate, startDate, absenceType,
+// daysCreated, conflictingShifts, takeoverRequestsCreated".
+//
+// De vormen hieronder zijn niet bedacht maar afgelezen uit de echte audit_log
+// op productie, per combinatie van actie en resourcetype. Wat er dan nog
+// overblijft valt terug op de oude lijst met sleutels, zodat een nieuwe vorm
+// zichtbaar blijft in plaats van te verdwijnen.
+function formatAuditDetails(details, resourceType) {
+    if (!details || typeof details !== 'object') return '';
+
+    // Voor- en natoestand: de bestaande diff.
+    if (details.before && details.after) return formatAuditDiff(details.before, details.after);
+
+    // Eén dienst.
+    if (details.shift) {
+        const sh = details.shift;
+        const van = sh.startTime || sh.start_time;
+        const tot = sh.endTime || sh.end_time;
+        const tijd = van && tot ? ` ${String(van).slice(0,5)} tot ${String(tot).slice(0,5)}` : '';
+        return `${sh.date || ''}${tijd}`.trim();
+    }
+
+    // Eén activiteit binnen een dienst.
+    if (details.activity) {
+        const a = details.activity;
+        const tijd = a.startTime && a.endTime
+            ? ` ${String(a.startTime).slice(0,5)} tot ${String(a.endTime).slice(0,5)}` : '';
+        return `${a.date || ''}${tijd}${a.description ? ` · ${a.description}` : ''}`.trim();
+    }
+
+    // Eén gebruiker.
+    if (details.user) return details.user.name || details.user.email || '';
+
+    // Een ruil of overname in een omhullend object.
+    if (details.swap) return formatAuditDetails(details.swap, 'swap_request');
+
+    // Ziek- of verlofmelding met automatische overnameverzoeken.
+    if (details.type === 'bulk_sick_with_takeover') {
+        const soort = details.absenceType === 'ziek' ? 'Ziekmelding' : 'Afwezigheid';
+        const periode = details.startDate === details.endDate
+            ? details.startDate
+            : `${details.startDate} t/m ${details.endDate}`;
+        const stukken = [`${soort} ${periode}`];
+        if (details.daysCreated) stukken.push(`${details.daysCreated} ${details.daysCreated === 1 ? 'dag' : 'dagen'}`);
+        if (details.takeoverRequestsCreated) {
+            stukken.push(`${details.takeoverRequestsCreated} ${details.takeoverRequestsCreated === 1 ? 'dienst' : 'diensten'} aangeboden voor overname`);
+        }
+        return stukken.join(', ');
+    }
+
+    // Een concept toepassen op een datumbereik.
+    if (details.type === 'draft_apply') {
+        const stukken = [`Concept "${details.draftName || 'onbekend'}" toegepast`];
+        if (Array.isArray(details.weekNumbers) && details.weekNumbers.length) {
+            stukken.push(`week ${details.weekNumbers.join(' en ')}`);
+        }
+        if (details.employeesApplied) stukken.push(`${details.employeesApplied} medewerkers`);
+        if (details.shiftsCreated || details.shiftsDeleted) {
+            stukken.push(`${details.shiftsCreated || 0} diensten erbij, ${details.shiftsDeleted || 0} weg`);
+        }
+        return stukken.join(', ');
+    }
+
+    // Een basisrooster toepassen bij één medewerker.
+    if (details.action === 'apply_schedule') {
+        const stukken = [`Basisrooster toegepast op ${details.userName || 'medewerker'}`];
+        const bereik = details.dateRange;
+        if (bereik && bereik.start && bereik.end) stukken.push(`${bereik.start} t/m ${bereik.end}`);
+        stukken.push(`${details.created || 0} diensten erbij, ${details.deleted || 0} weg`);
+        return stukken.join(', ');
+    }
+
+    // Een concept: aangemaakt, hernoemd of verwijderd.
+    if (details.type === 'schedule_draft') {
+        const soort = details.draftType === 'vakantie' ? 'Vakantieconcept' : 'Concept';
+        return `${soort} "${details.name || 'zonder naam'}"`;
+    }
+
+    // Een team bijwerken.
+    if (details.action === 'update_team') {
+        return `Team "${details.name || ''}"${details.color ? ` · kleur ${details.color}` : ''}`;
+    }
+
+    // Losse benoemde acties zonder verdere inhoud.
+    const LOSSE_ACTIES = {
+        password_reset: 'Wachtwoord gereset',
+        ical_token_reset: 'Agenda-koppeling opnieuw ingesteld',
+        reset_data: 'Gegevens gewist'
+    };
+    if (details.action && LOSSE_ACTIES[details.action]) {
+        let tekst = LOSSE_ACTIES[details.action];
+        if (Array.isArray(details.tables)) tekst += ` (${details.tables.length} tabellen)`;
+        return tekst;
+    }
+
+    // Een ruil- of overnameverzoek.
+    if (details.type === 'swap' || details.type === 'takeover') {
+        return details.type === 'swap' ? 'Ruilverzoek' : 'Overnameverzoek';
+    }
+
+    // Een afwezigheid die verwijderd is.
+    if (resourceType === 'availability' && details.date) {
+        return `Afwezigheid ${details.date}`;
+    }
+
+    // Een gewijzigde instelling.
+    if (details.key) return details.key;
+
+    // Onbekende vorm: liever de ruwe sleutels dan niets, zodat een nieuwe vorm
+    // opvalt in plaats van stil te verdwijnen.
+    const sleutels = Object.keys(details);
+    return sleutels.length > 0 ? sleutels.join(', ') : '';
+}
+
+// Leesbare namen voor de velden die in een voor- en natoestand voorkomen.
+const AUDIT_VELD_LABELS = {
+    date: 'datum', startTime: 'begint', endTime: 'eindigt', team: 'team',
+    notes: 'notitie', userId: 'medewerker', employeeId: 'medewerker',
+    isReserve: 'reserve', source: 'herkomst', name: 'naam', email: 'e-mail',
+    role: 'rol', mainTeam: 'team', contractHours: 'contracturen'
+};
+
 function formatAuditDiff(before, after) {
     const changes = [];
     const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
     for (const key of keys) {
         if (key === 'createdAt' || key === 'id') continue;
-        const oldVal = before?.[key];
-        const newVal = after?.[key];
-        if (String(oldVal) !== String(newVal)) {
-            changes.push(`${key}: ${oldVal || '-'} -> ${newVal || '-'}`);
-        }
+        // #369: hier stond alleen een vergelijking van de waarden, dus een veld
+        // dat in het ene object ontbrak en in het andere false was, gaf
+        // "isReserve: - -> -": een wijziging waarin niets wijzigt. Een veld dat
+        // maar aan één kant bestaat is geen wijziging.
+        const inVoor = Object.prototype.hasOwnProperty.call(before || {}, key);
+        const inNa = Object.prototype.hasOwnProperty.call(after || {}, key);
+        if (!inVoor || !inNa) continue;
+        const oldVal = before[key];
+        const newVal = after[key];
+        if (String(oldVal) === String(newVal)) continue;
+        const label = AUDIT_VELD_LABELS[key] || key;
+        const toon = v => (v === null || v === undefined || v === '') ? 'leeg' : String(v);
+        changes.push(`${label}: ${toon(oldVal)} → ${toon(newVal)}`);
     }
     return changes.slice(0, 3).join(', ');
 }
 
-function formatAuditDetailsForCSV(details) {
-    if (!details || typeof details !== 'object') return '';
-    if (details.before && details.after) {
-        return formatAuditDiff(details.before, details.after);
-    } else if (details.shift) {
-        const s = details.shift;
-        return `${s.date || ''} ${s.startTime || s.start_time || ''}-${s.endTime || s.end_time || ''} ${s.team || ''}`.trim();
-    } else if (details.availability) {
-        const a = details.availability;
-        return `${a.date || ''} ${a.type || ''}`.trim();
-    } else if (details.key) {
-        return details.key;
-    } else if (details.user) {
-        return details.user.name || details.user.email || '';
-    }
-    const keys = Object.keys(details);
-    return keys.length > 0 ? keys.join(', ') : '';
+// #369: de export gebruikt dezelfde vertaling als de tabel. Voordien stonden
+// hier twee bijna gelijke lijsten die apart konden gaan afwijken.
+function formatAuditDetailsForCSV(details, resourceType) {
+    return formatAuditDetails(details, resourceType);
 }
 
 async function exportAuditLog() {
-    showToast('Audit log exporteren...', 'info');
+    showToast('Auditlog exporteren...', 'info');
     try {
         const filters = {
             page: 1,
@@ -1855,7 +1968,7 @@ async function exportAuditLog() {
                 log.actor_name || '',
                 AUDIT_ACTION_LABELS[log.action] || log.action,
                 AUDIT_RESOURCE_LABELS[log.resource_type] || log.resource_type,
-                formatAuditDetailsForCSV(log.details)
+                formatAuditDetailsForCSV(log.details, log.resource_type)
             ]);
         });
         const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
@@ -1868,7 +1981,7 @@ async function exportAuditLog() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        showToast(`${logs.length} regels geexporteerd`, 'success');
+        showToast(`${logs.length} regels geëxporteerd`, 'success');
     } catch (err) {
         showToast('Export mislukt: ' + (err.message || 'Onbekende fout'), 'error');
     }
@@ -2091,7 +2204,7 @@ async function saveRules() {
     try {
         await saveSettings('rules', DataStore.settings.rules);
         markSettingsSaved();
-        showToast('Planning regels zijn opgeslagen', 'success');
+        showToast('Planningsregels zijn opgeslagen', 'success');
     } catch (err) {
         console.error('Error saving rules to backend:', err);
         DataStore.settings.rules = vorigeRegels;

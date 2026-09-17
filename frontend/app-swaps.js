@@ -134,7 +134,7 @@ async function renderSwaps() {
             html += `<div class="swap-empty-state">
                 <i data-lucide="hand" class="empty-state-icon"></i>
                 <p>Geen overnameverzoeken</p>
-                <button class="btn btn-primary mt-md" onclick="switchView('planning')">Bekijk mijn shifts in de planning</button>
+                <button class="btn btn-primary mt-md" onclick="switchView('planning')">Bekijk mijn diensten in de planning</button>
             </div>`;
         } else {
             takeoverTypeRequests.forEach(sr => {
@@ -411,7 +411,7 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
 
     // Title based on mode
     const titleHtml = mode === 'view'
-        ? '<span class="swap-person-name">Je zoekt iemand voor deze shift</span>'
+        ? '<span class="swap-person-name">Je zoekt iemand voor deze dienst</span>'
         : `<span class="swap-person"><span class="emp-avatar" style="background:${takeoverColor};color:${getContrastColor(takeoverColor)}">${reqInitials}</span>${escapeHtml(takeoverRequest.requester_name)} zoekt iemand</span>`;
 
     return `
@@ -501,7 +501,7 @@ function bevestigRusttijdOverride(error, bevestigTekst) {
         ? 'De aanvrager houdt hierdoor te weinig rust tussen twee diensten.'
         : 'Je houdt hierdoor te weinig rust tussen twee diensten.';
 
-    // De norm komt uit Instellingen > Planning regels, dus noem de waarde die
+    // De norm komt uit Instellingen > Planningsregels, dus noem de waarde die
     // daar staat in plaats van een vast getal.
     const norm = data.minRest ?? DataStore.settings?.rules?.minHoursBetweenShifts ?? 11;
     let normUitleg;
@@ -540,7 +540,7 @@ function attachSwapActionListeners() {
             if (notes !== null) {
                 try {
                     await targetApproveSwapRequest(swapId, notes);
-                    showToast('Ruil geaccepteerd! De shifts zijn omgewisseld.', 'success');
+                    showToast('Ruil geaccepteerd. De diensten zijn omgewisseld.', 'success');
                     switchView('planning'); // Go to planning to see the result
                 } catch (error) {
                     // #202: de backend controleert nu overlap en rusttijd. Een te
@@ -621,28 +621,28 @@ function attachSwapActionListeners() {
                     verzoek?.requester_shift_date,
                     'Neem je de dienst toch over, dan werk je die dag.')) return;
 
-            const notes = await showInputPrompt('Wil je een bericht toevoegen?', 'Shift overnemen');
+            const notes = await showInputPrompt('Wil je een bericht toevoegen?', 'Dienst overnemen');
 
             if (notes !== null) {
-                if (await showConfirm('Weet je zeker dat je deze shift wilt overnemen?')) {
+                if (await showConfirm('Weet je zeker dat je deze dienst wilt overnemen?')) {
                     try {
                         await acceptTakeoverRequest(requestId, notes);
                         // Refresh shifts and swap requests
                         await Promise.all([refreshShifts(), getSwapRequests()]);
-                        showToast('Shift overgenomen! Je kunt hem nu zien in je planning.', 'success');
+                        showToast('Dienst overgenomen. Je ziet hem nu in je planning.', 'success');
                         switchView('planning'); // Go to planning to see the new shift
                     } catch (error) {
                         // #202: zie de toelichting bij de ruilknop hierboven.
                         if (magRusttijdOverrulen(error)) {
                             if (!await bevestigRusttijdOverride(error, 'Toch overnemen')) {
                                 // Bewust afgezien: dat is geen fout, dus ook geen foutmelding.
-                                showToast('Shift niet overgenomen.', 'info');
+                                showToast('Dienst niet overgenomen.', 'info');
                                 return;
                             }
                             try {
                                 await acceptTakeoverRequest(requestId, notes, true);
                                 await Promise.all([refreshShifts(), getSwapRequests()]);
-                                showToast('Shift overgenomen, met minder dan 11 uur rust.', 'warning');
+                                showToast('Dienst overgenomen, met minder dan 11 uur rust.', 'warning');
                                 switchView('planning');
                                 return;
                             } catch (tweede) {

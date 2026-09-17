@@ -403,7 +403,7 @@ function updateAbsenceDateInfo() {
                 if (conflictDates.length > 0) {
                     conflictDiv.innerHTML = `<div class="absence-conflict-alert">
                         ${IconHelper.html('alert-triangle', 'sm')}
-                        <span>${conflictDates.length} shift${conflictDates.length !== 1 ? 's' : ''} ingepland op deze dag${conflictDates.length !== 1 ? 'en' : ''}: ${conflictDates.map(d => formatDate(d)).join(', ')}</span>
+                        <span>${conflictDates.length} dienst${conflictDates.length !== 1 ? 'en' : ''} ingepland op deze dag${conflictDates.length !== 1 ? 'en' : ''}: ${conflictDates.map(d => formatDate(d)).join(', ')}</span>
                     </div>`;
                     IconHelper.init(conflictDiv);
 
@@ -686,7 +686,7 @@ async function handleAvailabilitySave() {
 
         let msg = `${typeName} geregistreerd voor ${employeeName} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
         if (result.takeoverRequests > 0) {
-            msg += `, ${result.takeoverRequests} shift${result.takeoverRequests !== 1 ? 's' : ''} aangeboden voor overname`;
+            msg += `, ${result.takeoverRequests} dienst${result.takeoverRequests !== 1 ? 'en' : ''} aangeboden voor overname`;
         }
         showToast(msg, 'success');
 

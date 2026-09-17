@@ -335,7 +335,7 @@ function renderProfile() {
 
             <div class="settings-card">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">${IconHelper.html(ICONS.clock, 'md')}</span> Uren overzicht</h3>
+                    <h3><span class="settings-icon">${IconHelper.html(ICONS.clock, 'md')}</span> Urenoverzicht</h3>
                 </div>
                 <div class="settings-card-body">
                     ${hoursCardContent}
@@ -343,10 +343,10 @@ function renderProfile() {
             </div>
         </div>
 
-        <!-- Account overzicht (full width) -->
+        <!-- Accountoverzicht over de volle breedte -->
         <div class="settings-card">
             <div class="settings-card-header">
-                <h3><span class="settings-icon">${IconHelper.html(ICONS.info, 'md')}</span> Account overzicht</h3>
+                <h3><span class="settings-icon">${IconHelper.html(ICONS.info, 'md')}</span> Accountoverzicht</h3>
             </div>
             <div class="settings-card-body">
                 <div class="profile-meta profile-meta-inline">
@@ -370,7 +370,7 @@ function renderProfile() {
                         </span>
                     </div>
                     <div class="profile-meta-row">
-                        <span class="profile-meta-label">Email notificaties</span>
+                        <span class="profile-meta-label">E-mailmeldingen</span>
                         <span class="profile-meta-value">
                             <label class="toggle-switch" title="Ontvang email meldingen bij ruilverzoeken, overnames en ziekmeldingen">
                                 <input type="checkbox" id="email-notifications-toggle" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
@@ -396,7 +396,7 @@ function renderProfile() {
                                 <button type="button" class="btn btn-secondary btn-xs" id="profile-ical-activate">
                                     ${IconHelper.html('calendar-plus', 'xs')} Agenda koppeling activeren
                                 </button>
-                                <div class="profile-ical-help">Synchroniseer je shifts naar Google Calendar, Apple Agenda of Outlook.</div>
+                                <div class="profile-ical-help">Synchroniseer je diensten naar Google Agenda, Apple Agenda of Outlook.</div>
                             `}
                         </span>
                     </div>
@@ -414,7 +414,7 @@ function renderProfile() {
     // Edit button opens modal
     document.getElementById('profile-edit-btn')?.addEventListener('click', openProfileEditModal);
 
-    // Email notifications toggle
+    // Schakelaar voor de e-mailmeldingen
     const emailToggle = document.getElementById('email-notifications-toggle');
     if (emailToggle) {
         emailToggle.addEventListener('change', async () => {
@@ -425,7 +425,7 @@ function renderProfile() {
                 });
                 AppState.currentUser.emailNotificationsEnabled = data.emailNotificationsEnabled;
                 sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
-                showToast(emailToggle.checked ? 'Email notificaties ingeschakeld' : 'Email notificaties uitgeschakeld', 'success');
+                showToast(emailToggle.checked ? 'E-mailmeldingen ingeschakeld' : 'E-mailmeldingen uitgeschakeld', 'success');
             } catch (error) {
                 emailToggle.checked = !emailToggle.checked;
                 showToast('Kon voorkeur niet opslaan: ' + error.message, 'error');
@@ -905,7 +905,7 @@ function generateReadOnlyWeekScheduleHTML(employee) {
     if (!container) return;
 
     let html = '<div class="read-only-schedule">';
-    html += '<p class="form-hint mb-sm">Het basisrooster wordt beheerd via Rooster Bouwen.</p>';
+    html += '<p class="form-hint mb-sm">Het basisrooster wordt beheerd via Rooster bouwen.</p>';
 
     const dayOrder = [1, 2, 3, 4, 5, 6, 0];
     const prevDayMap = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
@@ -995,7 +995,7 @@ async function handleEmployeeSubmit(e) {
             await updateEmployee(AppState.editingEmployeeId, employeeData);
         } else {
             await addEmployee(employeeData);
-            showToast('Medewerker aangemaakt. Stel het basisrooster in via Rooster Bouwen.', 'success');
+            showToast('Medewerker aangemaakt. Stel het basisrooster in via Rooster bouwen.', 'success');
         }
         closeEmployeeModal();
         renderEmployees();

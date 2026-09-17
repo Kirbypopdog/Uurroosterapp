@@ -510,7 +510,7 @@ function renderBuilderGrid(role, userTeam) {
             <div class="builder-vakantie-bar-inner">
                 <div>
                     <strong>Vakantieconcept voor ${hpName}</strong>${hpDates ? ` <span>(${hpDates})</span>` : ''}
-                    <div class="builder-vakantie-note">Medewerkers die niet in dit rooster staan krijgen geen shift tijdens deze vakantie.</div>
+                    <div class="builder-vakantie-note">Medewerkers die niet in dit rooster staan krijgen geen dienst tijdens deze vakantie.</div>
                 </div>
                 <div class="builder-vakantie-responsible">
                     <label class="builder-vakantie-label">Verantw. week ${wn}:</label>
@@ -1824,7 +1824,7 @@ function attachBuilderEventListeners(container) {
             showToast('Grid leeggemaakt', 'info');
         };
         if (builderGridHasData()) {
-            showConfirm('Alle shifts in het huidige rooster worden gewist. Ben je zeker?', 'Leeg beginnen', {
+            showConfirm('Alle diensten in het huidige rooster worden gewist. Weet je het zeker?', 'Leeg beginnen', {
                 confirmText: 'Ja, leegmaken',
                 danger: true
             }).then(ok => { if (ok) doReset(); });

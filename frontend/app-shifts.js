@@ -280,7 +280,7 @@ function openShiftModal(shift, canEdit) {
     DOM.shiftDeleteBtn.classList.toggle('hidden', !canEdit);
     resetShiftSubmitBtn();
 
-    // Add combined "Shift afstaan" button if user can request swap
+    // Add combined "Dienst afstaan" button if user can request swap
     const existingAfstaanBtn = document.getElementById('shift-afstaan-btn');
     if (existingAfstaanBtn) existingAfstaanBtn.remove();
 
@@ -289,7 +289,7 @@ function openShiftModal(shift, canEdit) {
         afstaanBtn.type = 'button';
         afstaanBtn.id = 'shift-afstaan-btn';
         afstaanBtn.className = 'btn btn-primary';
-        afstaanBtn.textContent = 'Shift afstaan';
+        afstaanBtn.textContent = 'Dienst afstaan';
         afstaanBtn.style.marginRight = 'auto';
         afstaanBtn.addEventListener('click', () => {
             closeShiftModal();
@@ -461,7 +461,7 @@ function openSwapRequestModal(shift) {
 
     // Clear target preview
     const targetPreview = document.getElementById('swap-target-shift-preview');
-    targetPreview.innerHTML = '<p class="text-muted">Selecteer eerst een collega en shift</p>';
+    targetPreview.innerHTML = '<p class="text-muted">Selecteer eerst een collega en dienst</p>';
 
     // Populate employee dropdown (exclude current user)
     const employeeSelect = document.getElementById('swap-target-employee');
@@ -515,7 +515,7 @@ async function handleSwapTargetEmployeeChange() {
         shiftSelect.disabled = true;
         swapRequestState.targetEmployeeId = null;
         swapRequestState.targetShiftId = null;
-        document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer eerst een collega en shift</p>';
+        document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer eerst een collega en dienst</p>';
         return;
     }
 
@@ -530,12 +530,12 @@ async function handleSwapTargetEmployeeChange() {
         .sort((a, b) => new Date(a.date) - new Date(b.date));
 
     if (employeeShifts.length === 0) {
-        shiftSelect.innerHTML = '<option value="">Geen toekomstige shifts beschikbaar</option>';
+        shiftSelect.innerHTML = '<option value="">Geen toekomstige diensten beschikbaar</option>';
         shiftSelect.disabled = true;
         return;
     }
 
-    let html = '<option value="">-- Selecteer shift --</option>';
+    let html = '<option value="">-- Selecteer dienst --</option>';
     employeeShifts.forEach(shift => {
         const dateStr = formatDate(shift.date);
         const timeStr = `${shift.startTime} - ${shift.endTime}`;
@@ -551,7 +551,7 @@ function handleSwapTargetShiftChange() {
 
     if (!shiftId) {
         swapRequestState.targetShiftId = null;
-        document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer een shift</p>';
+        document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer een dienst</p>';
         document.getElementById('swap-validation-display').classList.add('hidden');
         return;
     }
@@ -620,7 +620,7 @@ function runSwapValidation() {
 
 async function handleSwapRequestSubmit() {
     if (!swapRequestState.requesterShift || !swapRequestState.targetShiftId) {
-        showToast('Selecteer eerst een collega en een shift om te ruilen', 'warning');
+        showToast('Selecteer eerst een collega en een dienst om te ruilen', 'warning');
         return;
     }
 
@@ -730,7 +730,7 @@ function closeTakeoverRequestModal() {
 
 async function handleTakeoverRequestSubmit() {
     if (!takeoverRequestState.shiftToGiveAway) {
-        showToast('Geen shift geselecteerd', 'warning');
+        showToast('Geen dienst geselecteerd', 'warning');
         return;
     }
 
@@ -738,7 +738,7 @@ async function handleTakeoverRequestSubmit() {
 
     try {
         await createTakeoverRequest(takeoverRequestState.shiftToGiveAway.id, message || null);
-        showToast('Verzoek succesvol ingediend! Collega\'s kunnen deze shift nu overnemen.', 'success');
+        showToast('Verzoek succesvol ingediend! Collega\'s kunnen deze dienst nu overnemen.', 'success');
         closeTakeoverRequestModal();
 
         // Switch to swaps view to show the new request

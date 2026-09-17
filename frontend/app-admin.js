@@ -54,7 +54,7 @@ async function exportData() {
 }
 
 async function runMigration() {
-    if (!await showConfirm('VOLLEDIGE DATABASE MIGRATIE\n\nDit zal:\n- Employees tabel samenvoegen met users\n- Shifts migreren (employee_id -> user_id)\n- Availability migreren (employee_id -> user_id)\n- Employees tabel verwijderen\n- Weekroosters repareren\n\nDit is een grote wijziging, maar 100% veilig:\n- Gebruikt transactions (bij error: automatisch ROLLBACK)\n- Alle data blijft behouden\n- Foreign key mappings correct uitgevoerd\n\nDoorgaan?', 'Database Migratie')) {
+    if (!await showConfirm('VOLLEDIGE DATABASE MIGRATIE\n\nDit zal:\n- Employees tabel samenvoegen met users\n- Shifts migreren (employee_id -> user_id)\n- Availability migreren (employee_id -> user_id)\n- Employees tabel verwijderen\n- Weekroosters repareren\n\nDit is een grote wijziging, maar 100% veilig:\n- Gebruikt transactions (bij error: automatisch ROLLBACK)\n- Alle data blijft behouden\n- Foreign key mappings correct uitgevoerd\n\nDoorgaan?', 'Databasemigratie')) {
         return;
     }
 
@@ -344,7 +344,7 @@ async function importData(event) {
             console.log('Gevonden gebruikers/medewerkers:', usersToImport.length);
 
             if (usersToImport.length === 0) {
-                showToast('Geen medewerkers gevonden in backup bestand', 'warning');
+                showToast('Geen medewerkers gevonden in het back-upbestand', 'warning');
                 return;
             }
 

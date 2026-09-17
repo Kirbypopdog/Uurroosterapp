@@ -103,13 +103,13 @@ const DragHandler = {
             // Check permissions
             if (!canUserEditShift(shift)) {
                 console.log('[DragHandler] User cannot edit this shift');
-                showToast('Je hebt geen rechten om deze shift te bewerken', 'warning');
+                showToast('Je hebt geen rechten om deze dienst te bewerken', 'warning');
                 return;
             }
 
             // Check if shift has pending swap request
             if (this.hasPendingSwapRequest(shiftId)) {
-                showToast('Deze shift heeft een openstaande ruil/afstaan aanvraag. Annuleer eerst de aanvraag voordat je de shift kan verplaatsen.', 'warning');
+                showToast('Deze dienst heeft een openstaand ruil- of afstaanverzoek. Annuleer dat eerst voor je de dienst verplaatst.', 'warning');
                 return;
             }
 
@@ -171,7 +171,7 @@ const DragHandler = {
                 const shift = getShift(this.state.shiftId);
                 if (shift && !canUserTransferShift(shift)) {
                     console.log('[DragHandler] User cannot transfer shifts - cancelling drag');
-                    showToast('Je kunt alleen je eigen shift tijden aanpassen, niet naar anderen verplaatsen. Gebruik "Shift afstaan" om je shift over te dragen.', 'warning');
+                    showToast('Je kunt alleen de tijden van je eigen dienst aanpassen, niet naar anderen verplaatsen. Gebruik "Dienst afstaan" om je dienst over te dragen.', 'warning');
                     // #212: hier stond cleanup(), en die verwijdert ALLE
                     // listeners, ook die voor gewone klikken. De tijdlijn
                     // reageerde daarna nergens meer op: een dienst openen loopt
@@ -386,13 +386,13 @@ const DragHandler = {
         // 3. Validate using captured data
         if (!dayCell) {
             console.log('[DragHandler] Invalid drop target - cancelling');
-            showToast('Ongeldige locatie. Sleep de shift naar een dag in de planner.', 'warning');
+            showToast('Ongeldige locatie. Sleep de dienst naar een dag in de planner.', 'warning');
             return;
         }
 
         if (dayCell.classList.contains('closed')) {
             console.log('[DragHandler] Drop target is closed day');
-            showToast('Deze dag is gesloten. Je kunt hier geen shift toewijzen.', 'warning');
+            showToast('Deze dag is gesloten. Je kunt hier geen dienst toewijzen.', 'warning');
             return;
         }
 
@@ -416,7 +416,7 @@ const DragHandler = {
             };
             const reason = absenceLabels[availability.type] || 'afwezig is';
             const confirmed = await showConfirm(
-                `${targetEmployee.name} ${reason} op ${formatDate(targetDate)}.\n\nToch shift toewijzen?`,
+                `${targetEmployee.name} ${reason} op ${formatDate(targetDate)}.\n\nToch dienst toewijzen?`,
                 'Medewerker afwezig'
             );
             if (!confirmed) return;
@@ -429,14 +429,14 @@ const DragHandler = {
             date: targetDate
         };
         const validation = validateShift(testShift, shiftId);
-        const uitkomst = await this.vraagOverride(validation, 'Toch shift toewijzen?');
+        const uitkomst = await this.vraagOverride(validation, 'Toch dienst toewijzen?');
         if (!uitkomst.doorgaan) return;
         const forceerRust = uitkomst.force;
 
         console.log(`[DragHandler] Transferring shift ${shiftId} to ${targetEmployee.name} on ${targetDate}`);
 
         // 4. Update shift via API (using captured data, not this.state)
-        showSectionLoading('planning-view', 'Shift verplaatsen...');
+        showSectionLoading('planning-view', 'Dienst verplaatsen...');
         try {
             const originalEmployeeId = originalData.employeeId;
             const originalDate2 = originalData.date;
@@ -453,7 +453,7 @@ const DragHandler = {
                 endTime: originalData.endTime,
                 notes: originalData.notes || '',
                 source: 'manual' // Mark as manual so it persists
-            }, forceerRust, 'Toch shift toewijzen?');
+            }, forceerRust, 'Toch dienst toewijzen?');
 
             // Als de shift van dag of medewerker is veranderd, bescherm de originele
             // cel met een shift_block zodat het concept haar niet opnieuw vult (#146).
@@ -481,7 +481,7 @@ const DragHandler = {
             // Refresh view
             renderPlanning();
 
-            showToast(`Shift overgedragen aan ${targetEmployee.name}`, 'success');
+            showToast(`Dienst overgedragen aan ${targetEmployee.name}`, 'success');
         } catch (error) {
             // De gebruiker heeft de bevestiging afgewezen; dat is geen fout.
             if (error.stilGeannuleerd) {
@@ -490,7 +490,7 @@ const DragHandler = {
 
             }
             console.error('[DragHandler] Error transferring shift:', error);
-            showToast(`Fout bij overdragen shift: ${error.message}`, 'error');
+            showToast(`Fout bij overdragen dienst: ${error.message}`, 'error');
             // Re-sync from server to ensure UI matches DB
             try { await refreshShifts(); renderPlanning(); } catch (_) {}
         } finally {
@@ -636,7 +636,7 @@ const DragHandler = {
         // Validate duration (minimum 1 hour)
         const duration = this.calculateDuration(newStartTime, newEndTime);
         if (duration < 1) {
-            showToast('Een shift moet minimaal 1 uur duren', 'warning');
+            showToast('Een dienst moet minimaal 1 uur duren', 'warning');
             return;
         }
 
@@ -691,14 +691,14 @@ const DragHandler = {
             // Refresh view
             renderPlanning();
 
-            showToast('Shift aangepast', 'success');
+            showToast('Dienst aangepast', 'success');
         } catch (error) {
             if (error.stilGeannuleerd) {
                 try { await refreshShifts(); renderPlanning(); } catch (_) {}
                 return;
             }
             console.error('[DragHandler] Error resizing shift:', error);
-            showToast(`Fout bij aanpassen shift: ${error.message}`, 'error');
+            showToast(`Fout bij aanpassen dienst: ${error.message}`, 'error');
             // Re-sync from server to ensure UI matches DB
             try { await refreshShifts(); renderPlanning(); } catch (_) {}
         }
@@ -750,7 +750,7 @@ const DragHandler = {
         if (role === 'medewerker') {
             // Medewerkers can only create shifts for themselves
             if (employee.id !== AppState.currentUser.id) {
-                showToast('Je kan alleen shifts voor jezelf aanmaken', 'warning');
+                showToast('Je kunt alleen diensten voor jezelf aanmaken', 'warning');
                 return;
             }
         }

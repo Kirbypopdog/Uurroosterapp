@@ -691,7 +691,7 @@ async function deactivateBuilderDraft(draftId) {
                 cached.lastAppliedUntil = null;
             }
             renderBuilder();
-            showToast('Concept uitgeplanend', 'success');
+            showToast('Concept uitgepland', 'success');
         } catch (err) {
             console.error('Error unscheduling draft:', err);
             showToast('Fout bij uitplannen: ' + err.message, 'error');
@@ -714,14 +714,14 @@ async function deactivateBuilderDraft(draftId) {
                 <div class="modal-body">
                     <p class="mb-sm"><strong>${escapeHtml(draft.name)}</strong> deactiveren?</p>
                     <div class="form-group">
-                        <label>Einddatum (shifts na deze datum worden verwijderd)</label>
+                        <label>Einddatum (diensten na deze datum worden verwijderd)</label>
                         <input type="date" id="deactivate-end-date" class="form-input" value="${todayStr}">
                     </div>
                     <label class="checkbox-label-row">
                         <input type="checkbox" id="deactivate-delete-manual">
                         Verwijder ook handmatig aangemaakte shifts
                     </label>
-                    <span class="form-hint form-hint-block mt-sm">Auto-gegenereerde shifts na de einddatum worden altijd verwijderd.</span>
+                    <span class="form-hint form-hint-block mt-sm">Automatisch aangemaakte diensten na de einddatum worden altijd verwijderd.</span>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary btn-sm" id="deactivate-cancel">Annuleren</button>
@@ -834,8 +834,8 @@ async function voerConceptToepassenUit(draftId) {
         const confirmed = await showConfirm(
             `Vakantieconcept "${draft.name}" toepassen?\n\n` +
             `Periode: ${fromStr} – ${untilStr}\n` +
-            `${empIds.size} medewerkers krijgen een vakantie-shift.\n` +
-            `Overige medewerkers krijgen GEEN shift tijdens deze periode.`,
+            `${empIds.size} medewerkers krijgen een vakantiedienst.\n` +
+            `Overige medewerkers krijgen GEEN dienst tijdens deze periode.`,
             'Vakantieconcept toepassen'
         );
         if (!confirmed) return;
@@ -1133,7 +1133,7 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                             <input type="date" id="draft-apply-end-date" class="form-input" value="${defaultEnd}" required>
                         </div>
                     </div>
-                    <p class="form-hint mt-xs">Manuele aanpassingen worden bewaard. Shifts buiten deze periode blijven ongewijzigd.</p>
+                    <p class="form-hint mt-xs">Manuele aanpassingen worden bewaard. Diensten buiten deze periode blijven ongewijzigd.</p>
                     <div class="apply-changes-summary mt-sm">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
                 </div>
                 <div class="modal-footer">
@@ -1311,7 +1311,7 @@ function uploadBuilderDraft() {
             const text = await file.text();
             const data = JSON.parse(text);
             if (!data.grid || !data.name) {
-                showToast('Ongeldig concept bestand', 'error');
+                showToast('Ongeldig conceptbestand', 'error');
                 return;
             }
             // Strip _employeeName fields added during export

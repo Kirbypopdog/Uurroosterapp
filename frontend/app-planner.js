@@ -830,7 +830,7 @@ function renderTimelineView() {
     html += '<div class="timeline-body">';
 
     if (employees.length === 0) {
-        html += '<div class="empty-state"><i data-lucide="calendar-x" class="empty-state-icon"></i><p>Geen shifts gepland voor deze periode.</p><small>Pas een concept toe of voeg shifts handmatig toe.</small></div>';
+        html += '<div class="empty-state"><i data-lucide="calendar-x" class="empty-state-icon"></i><p>Geen diensten gepland voor deze periode.</p><small>Pas een concept toe of voeg diensten handmatig toe.</small></div>';
     } else {
         // Render each team group
         teamOrder.forEach(teamKey => {
