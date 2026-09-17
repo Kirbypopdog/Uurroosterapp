@@ -59,7 +59,7 @@ open ../frontend/index.html
 | `src/db.js` | PostgreSQL connection pool |
 | `src/email.js` | Resend email service (9 notificatie types) |
 | `src/utils.js` | Pure datumhulpfuncties (`getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`, `getEasterDate`, `getBelgianPublicHolidays`) |
-| `sql/schema.sql` | Database schema (bron van waarheid) |
+| `sql/schema.sql` | Volledig schema van de eindtoestand. Spiegelt wat de migraties samen opleveren, zodat een verse database in één keer goed staat |
 | `scripts/seed.js` | Seed teams + admin account |
 | `scripts/setup-db.js` | Voert schema.sql uit |
 | `import-backup.js` | CLI tool voor JSON backup import |
@@ -99,7 +99,7 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 3. **ALTIJD** parameterized queries gebruiken (nooit string concatenation in SQL)
 4. **Backend retourneert BEIDE** `userId` EN `employeeId` (backward compatibility alias)
 5. **Permissions** checken in ZOWEL frontend ALS backend
-6. **Migraties**: geversioneerd via de `MIGRATIONS`-array + `runMigrations()` in server.js (draait bij elke startup, elke migratie exact één keer). Voeg nieuwe schema changes toe als nieuwe migratie-entry. Migratie `000_base_schema` draait `schema.sql` idempotent, dus een verse database (bv. staging) initialiseert zichzelf; `ensureBootstrapData()` maakt standaardteams + admin-account aan zonder bestaande data te overschrijven
+6. **Migraties**: geversioneerd via de `MIGRATIONS`-array + `runMigrations()` in server.js (draait bij elke startup, elke migratie exact één keer). Voeg nieuwe schema changes toe als nieuwe migratie-entry **én werk `sql/schema.sql` bij**, zodat beide wegen dezelfde database opleveren. `backend/tests/schema-drift.test.js` bewaakt dat: een kolom, index of tabel die alleen in een migratie staat laat die test falen. Migratie `000_base_schema` draait `schema.sql` idempotent, dus een verse database (bv. staging) initialiseert zichzelf; `ensureBootstrapData()` maakt standaardteams + admin-account aan zonder bestaande data te overschrijven
 7. **shift_blocks**: Bij shift delete wordt block aangemaakt (voorkomt auto-regeneratie). Manual shift create verwijdert block.
 8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging
 9. **Fetch wrapper**: Gebruik uitsluitend `dataApiFetch()` uit `data.js`. `apiFetch()` is verwijderd (issue #26 opgelost). Uitzondering: `fetchPublicHolidays()` gebruikt plain `fetch()` want `/public-holidays` vereist geen auth.

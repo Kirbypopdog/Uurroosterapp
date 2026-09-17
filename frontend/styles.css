@@ -14009,3 +14009,10 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
     margin: 0 0 8px;
     background: transparent;
 }
+
+/* #353: een account zonder e-mailadres is een gewone toestand, geen fout.
+   Gedempt en cursief, zodat het duidelijk geen echt adres is. */
+.admin-user-email-leeg {
+    color: var(--ink-3);
+    font-style: italic;
+}

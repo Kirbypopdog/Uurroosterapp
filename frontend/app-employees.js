@@ -868,7 +868,11 @@ function openEditEmployeeModal(employeeId) {
     const modalActions = DOM.employeeModal.querySelector('.modal-actions');
     if (modalActions) modalActions.classList.toggle('hidden', !canEdit);
 
-    DOM.employeeDeleteBtn.classList.toggle('hidden', !canEdit);
+    // #341: deze knop hing aan canEdit, dus ook een roosterverantwoordelijke
+    // zag hem. DELETE /admin/users/:id staat achter requireAdmin, dus die kreeg
+    // eerst een bevestiging over zevenentwintig te verwijderen diensten en
+    // daarna een 403. Een knop die nooit kan slagen hoort er niet te staan.
+    DOM.employeeDeleteBtn.classList.toggle('hidden', getEffectiveRole() !== 'admin');
 
     // Show read-only schedule from active concept
     generateReadOnlyWeekScheduleHTML(employee);

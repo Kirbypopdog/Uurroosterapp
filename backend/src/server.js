@@ -1884,6 +1884,12 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
       }
       return res.json({ user: result.rows[0] });
     } catch (err) {
+      // #357: users.email heeft een UNIQUE-constraint (users_email_key). Een
+      // adres dat al bij een ander account hoort gaf een kale 500 met de tekst
+      // "Server error", terwijl POST /users diezelfde botsing wél netjes meldt.
+      if (err.code === '23505') {
+        return res.status(409).json({ error: 'Dit e-mailadres is al in gebruik door een ander account.' });
+      }
       console.error(err);
       return res.status(500).json({ error: 'Server error' });
     }
@@ -1947,6 +1953,12 @@ v1.put('/users/:id', requireAuth, async (req, res) => {
     // komen.
     if (err.code === '23503') {
       return res.status(400).json({ error: 'Dit team bestaat niet in de database. Maak het team opnieuw aan.' });
+    }
+    // #357: zie de medewerkerstak hierboven. 23505 is Postgres'
+    // unique_violation, en users_email_key is de enige unieke sleutel die deze
+    // query kan raken.
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Dit e-mailadres is al in gebruik door een ander account.' });
     }
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -3284,15 +3296,12 @@ v1.get('/swap-requests', requireAuth, async (req, res) => {
     }
 
     const result = await pool.query(query, params);
-    console.log(`[GET /swap-requests] User ${req.user.name} (ID: ${req.user.id}, role: ${role}): Found ${result.rows.length} requests`);
-    if (result.rows.length > 0) {
-      console.log(`[GET /swap-requests] First request:`, {
-        id: result.rows[0].id,
-        request_type: result.rows[0].request_type,
-        status: result.rows[0].status,
-        requester: result.rows[0].requester_name
-      });
-    }
+    // #320: hier stonden twee console.log-regels die bij ELKE paginaweergave de
+    // naam, het id en de rol van de gebruiker naar de log schreven, plus de
+    // naam van de aanvrager van het eerste verzoek. Namen van medewerkers
+    // hoorden niet in de Render-logs, en de functie werkt, dus ze zijn weg in
+    // plaats van achter een vlag gezet. Een echte fout wordt hieronder nog
+    // altijd gelogd, zonder persoonsgegevens.
     res.json({ swapRequests: result.rows });
   } catch (err) {
     console.error('GET /swap-requests error:', err);
@@ -3705,15 +3714,21 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     // Create takeover request
     // Use shift owner (shift.user_id) as requester, not currentUserId
     // This ensures auto-cancel can find requests by employee ID when absence is removed
-    await client.query(
+    // #319: hier stond geen RETURNING, dus ging er een lege string als
+    // resourceId naar logAudit. De CREATE-regel was daardoor niet aan de latere
+    // APPROVE- of CANCEL-regel van hetzelfde verzoek te koppelen, terwijl die
+    // twee het echte id wél loggen.
+    const nieuwVerzoek = await client.query(
       `INSERT INTO shift_swap_requests
        (requester_user_id, requester_shift_id, target_user_id, target_shift_id, request_type, message, status)
-       VALUES ($1, $2, NULL, NULL, 'takeover', $3, 'pending')`,
+       VALUES ($1, $2, NULL, NULL, 'takeover', $3, 'pending')
+       RETURNING id`,
       [shift.user_id, shiftId, message || null]
     );
+    const verzoekId = nieuwVerzoek.rows[0]?.id;
 
     await client.query('COMMIT');
-    await logAudit(req, 'CREATE', 'swap_request', '', { type: 'takeover', shiftId, shiftOwner: shift.user_id, createdBy: currentUserId });
+    await logAudit(req, 'CREATE', 'swap_request', verzoekId, { type: 'takeover', shiftId, shiftOwner: shift.user_id, createdBy: currentUserId });
 
     // Email notification to team members (fire-and-forget)
     (async () => {
@@ -3994,6 +4009,60 @@ v1.get('/settings', requireAuth, async (req, res) => {
   }
 });
 
+// #328: het endpoint accepteerde elke sleutel en elke vorm. Een typefout in
+// een handmatig verzoek maakte stil een nieuwe rij aan, en een verkeerde vorm
+// liep pas veel later stuk op een plek die er een array verwachtte.
+//
+// Deze lijst is niet gegokt maar verzameld uit drie bronnen: elke
+// saveSettings-aanroep in de frontend (alle veertien met een letterlijke
+// sleutel, geen enkele opgebouwd uit een variabele), elke plek waar de backend
+// zelf een settings-rij schrijft, en de sleutels die op de productiedatabank
+// staan.
+//
+// LET OP: een nieuwe instelling moet hier bij. Zonder die regel weigert het
+// endpoint haar met een 400 die precies dat zegt.
+const TOEGESTANE_SETTINGS = {
+  closedDates:         'array',
+  conceptClosedDates:  'array',
+  coverageTeams:       'array',
+  dismissedAlerts:     'array',
+  holidayPeriods:      'array',
+  schedule_drafts:     'array',
+  email_notifications: 'object',
+  holidayRules:        'object',
+  responsibleRotation: 'object',
+  rules:               'object',
+  schedule_pattern:    'object',
+  school_year_start:   'object',
+  shiftTemplates:      'object',
+  teams:               'object'
+};
+
+function klopDeVorm(sleutel, waarde) {
+  const verwacht = TOEGESTANE_SETTINGS[sleutel];
+  if (verwacht === 'array') return Array.isArray(waarde);
+  if (verwacht === 'object') return waarde !== null && typeof waarde === 'object' && !Array.isArray(waarde);
+  return true;
+}
+
+// De vorige waarde gaat mee in de audit, zodat een verkeerde wijziging aan de
+// instellingen achteraf terug te vinden en met de hand te herstellen is. Bij
+// diensten gebeurde dat al met before en after, bij instellingen niet.
+//
+// Wel begrensd: schedule_drafts kan als oudere opslagweg een groot object zijn,
+// en de audit-tabel is geen back-up. Boven de grens leggen we alleen vast dát
+// er iets stond en hoe groot het was.
+const AUDIT_WAARDE_MAX = 4000;
+
+function auditWaarde(waarde) {
+  if (waarde === undefined) return null;
+  const tekst = JSON.stringify(waarde);
+  if (tekst && tekst.length > AUDIT_WAARDE_MAX) {
+    return { tekort: true, lengte: tekst.length };
+  }
+  return waarde;
+}
+
 v1.put('/settings/:key', requireAuth, async (req, res) => {
   const { key } = req.params;
   const { value } = req.body || {};
@@ -4004,6 +4073,15 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
   const { role } = req.user;
   if (!['admin', 'roosterverantwoordelijke', 'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(role)) {
     return res.status(403).json({ error: 'Onvoldoende rechten' });
+  }
+
+  // #328: onbekende sleutels en verkeerde vormen worden nu geweigerd.
+  if (!Object.prototype.hasOwnProperty.call(TOEGESTANE_SETTINGS, key)) {
+    return res.status(400).json({ error: `Onbekende instelling "${key}".` });
+  }
+  if (!klopDeVorm(key, value)) {
+    const verwacht = TOEGESTANE_SETTINGS[key] === 'array' ? 'een lijst' : 'een object';
+    return res.status(400).json({ error: `De instelling "${key}" verwacht ${verwacht}.` });
   }
   // #327: de settings-rij werd eerst weggeschreven en de teams-tabel daarna
   // gesynchroniseerd, zonder transactie. Liep die synchronisatie tegen een
@@ -4018,9 +4096,14 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
   // geven. Nagemeten: zonder deze opzet komt er binnen zes seconden geen
   // antwoord.
   let client;
+  let vorigeWaarde;
   try {
     client = await pool.connect();
     await client.query('BEGIN');
+    // #328: de vorige waarde vastleggen vóór de overschrijving, binnen dezelfde
+    // transactie, zodat er geen andere schrijver tussen kan komen.
+    const vorige = await client.query('SELECT value FROM settings WHERE key = $1', [key]);
+    vorigeWaarde = vorige.rows.length > 0 ? vorige.rows[0].value : undefined;
     await client.query(`
       INSERT INTO settings (key, value, updated_at)
       VALUES ($1, $2, NOW())
@@ -4063,7 +4146,11 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
     // Na de commit, niet ervoor: logAudit gebruikt pool.query en zit dus buiten
     // deze transactie. Zou hij ervoor draaien en de commit alsnog falen, dan
     // stond er een auditregel voor een wijziging die niet is doorgegaan.
-    await logAudit(req, 'UPDATE', 'settings', key, { key });
+    await logAudit(req, 'UPDATE', 'settings', key, {
+      key,
+      before: auditWaarde(vorigeWaarde),
+      after: auditWaarde(value)
+    });
     res.json({ ok: true });
   } catch (err) {
     if (client) {

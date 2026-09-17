@@ -129,7 +129,11 @@ CREATE TABLE IF NOT EXISTS schedule_drafts (
   type TEXT DEFAULT 'basis',
   holiday_period_id TEXT,
   created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  updated_at TIMESTAMP DEFAULT NOW(),
+  -- #329: deze drie bestonden alleen via migratie 025.
+  locked_by INTEGER,
+  locked_by_name TEXT,
+  locked_at TIMESTAMPTZ
 );
 
 -- Shift activities (activiteiten binnen shifts)
@@ -256,6 +260,14 @@ CREATE INDEX IF NOT EXISTS idx_shifts_draft_id ON shifts(draft_id) WHERE draft_i
 CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false;
 CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id);
 CREATE INDEX IF NOT EXISTS idx_shift_activities_draft_id ON shift_activities(draft_id) WHERE draft_id IS NOT NULL;
+
+-- #237 en #243: de vangnetten tegen dubbele diensten en dubbele
+-- overnameverzoeken. In de migraties (040 en 041) worden ze overgeslagen als er
+-- al botsende rijen staan; een verse database heeft die niet, dus daar kunnen
+-- ze onvoorwaardelijk aangemaakt worden.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shifts_uniek_per_start ON shifts(user_id, date, start_time);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_een_openstaande_overname ON shift_swap_requests(requester_shift_id)
+  WHERE request_type = 'takeover' AND status = 'pending';
 
 -- draft_id verwijst naar schedule_drafts, dat verderop in dit bestand wordt
 -- aangemaakt. Daarom staan deze verwijzingen hier en niet in de tabellen zelf.

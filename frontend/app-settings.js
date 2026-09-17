@@ -215,12 +215,17 @@ async function loadAdminUsers(container) {
         const rows = users.map(user => {
             const isInactive = user.active === false;
             return `
-            <div class="admin-user-row${isInactive ? ' admin-user-inactive' : ''}" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email)}" data-team="${user.team_id || ''}" data-role="${user.role}" data-active="${user.active !== false}">
+            <div class="admin-user-row${isInactive ? ' admin-user-inactive' : ''}" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email || '')}" data-team="${user.team_id || ''}" data-role="${user.role}" data-active="${user.active !== false}">
                 ${isInactive ? '<span class="status-badge inactive">Inactief</span>' : ''}
                 <div class="admin-user-header">
                     <div>
                         <div class="admin-user-name">${escapeHtml(user.name)}</div>
-                        <div class="admin-user-email">${escapeHtml(user.email)}</div>
+                        <!-- #353: hier stond escapeHtml(user.email) zonder terugval, en
+                             escapeHtml doet String(null), dus stond er letterlijk "null"
+                             onder de naam van een account zonder e-mailadres. Het veld is
+                             uitdrukkelijk optioneel, dus dat is een gewone toestand.
+                             Dezelfde terugval als op de medewerkerskaart. -->
+                        <div class="admin-user-email${user.email ? '' : ' admin-user-email-leeg'}">${user.email ? escapeHtml(user.email) : 'Geen e-mail'}</div>
                     </div>
                     <div class="admin-user-header-actions">
                         <div class="admin-user-role-pill">${escapeHtml(user.role)}</div>
@@ -1804,6 +1809,20 @@ async function loadAuditLog(page) {
 function formatAuditDetails(details, resourceType) {
     if (!details || typeof details !== 'object') return '';
 
+    // Een gewijzigde instelling. Staat vóór de diff hieronder, want sinds #328
+    // draagt zo'n regel ook before en after, en die zijn hier vaak een lijst
+    // waarvoor een veld-voor-veld-diff niets zegt.
+    if (details.key) {
+        const telOp = w => Array.isArray(w) ? `${w.length} ${w.length === 1 ? 'item' : 'items'}` : null;
+        const voor = details.before, na = details.after;
+        if (voor && voor.tekort) return `${details.key} gewijzigd (vorige waarde te groot om te bewaren)`;
+        if (voor === null || voor === undefined) return `${details.key} voor het eerst ingesteld`;
+        const vT = telOp(voor), nT = telOp(na);
+        if (vT && nT) return vT === nT ? `${details.key}: ${nT}` : `${details.key}: ${vT} → ${nT}`;
+        const diff = formatAuditDiff(voor, na);
+        return diff ? `${details.key}: ${diff}` : `${details.key} gewijzigd`;
+    }
+
     // Voor- en natoestand: de bestaande diff.
     if (details.before && details.after) return formatAuditDiff(details.before, details.after);
 
@@ -1898,9 +1917,6 @@ function formatAuditDetails(details, resourceType) {
     if (resourceType === 'availability' && details.date) {
         return `Afwezigheid ${details.date}`;
     }
-
-    // Een gewijzigde instelling.
-    if (details.key) return details.key;
 
     // Onbekende vorm: liever de ruwe sleutels dan niets, zodat een nieuwe vorm
     // opvalt in plaats van stil te verdwijnen.

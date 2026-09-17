@@ -305,6 +305,13 @@ function getUserFriendlyError(err) {
     if (msg.includes('duplicate')) return 'Deze waarde bestaat al.';
     if (msg.includes('not found') || msg.includes('404')) return 'Dit item werd niet gevonden.';
     if (msg.includes('unauthorized') || msg.includes('401')) return 'Je bent niet gemachtigd voor deze actie.';
+    // #341: de backend antwoordt op een 403 met de kale Engelse tekst
+    // "Forbidden", die zo in een toast belandde. Onvertaald en zonder uitleg
+    // wat de gebruiker dan wél kan doen.
+    if (msg === 'Forbidden' || msg.includes('Forbidden') || msg.includes('403')) {
+        return 'Je hebt geen rechten voor deze actie. Alleen een beheerder kan dit.';
+    }
+    if (msg.includes('Onvoldoende rechten')) return msg;
     if (msg.includes('network') || msg.includes('fetch') || msg.includes('Failed to fetch')) return 'Verbindingsfout. Controleer je internetverbinding.';
     if (msg.includes('Te veel verzoeken')) return msg;
     return msg;
