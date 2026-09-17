@@ -193,12 +193,22 @@ function renderProfile() {
 
     // Build hours card content
     // Color: green = ≥90% contract (op schema), orange = 60–90% (licht onder), red = <60% (ver onder)
-    function hoursColor(actual, target) {
+    function hoursColor(actual, target, heeftDiensten) {
+        // #351: zonder geplande diensten is er niets om tegen af te zetten. Rood
+        // zou een tekort suggereren dat er niet is.
+        if (heeftDiensten === false) return 'var(--ink-3)';
         if (target <= 0) return '#10b981';
         const pct = actual / target;
         return pct >= 0.9 ? '#10b981' : pct >= 0.6 ? '#f59e0b' : '#ef4444';
     }
-    function saldoLabel(actual, target) {
+    // #351: zonder rooster stond hier een rood tekort van de volle
+    // contractnorm, bijvoorbeeld "-128.0u t.o.v. contract" bij een nieuw
+    // account. Dat gaat over loon en prestaties, dus dat is precies het soort
+    // cijfer waarover mensen meteen bellen, terwijl het enkel betekent dat het
+    // rooster nog niet gemaakt is. Een saldo tegenover nul geplande diensten
+    // zegt niets, dus dan komt er een neutrale regel in de plaats.
+    function saldoLabel(actual, target, heeftDiensten) {
+        if (!heeftDiensten) return '<span class="hours-saldo neutraal">nog geen rooster</span>';
         const diff = actual - target;
         if (Math.abs(diff) < 0.1) return '';
         // #230: "t.o.v. contract" stond alleen bij een tekort, waardoor een
@@ -228,25 +238,34 @@ function renderProfile() {
             </div>`;
         }).join('');
 
+    // #351: "nul uur" en "geen rooster" zijn niet hetzelfde. Het aantal diensten
+    // bepaalt of een saldo iets betekent, niet het aantal uren.
+    const weekHeeftDiensten = currentWeekShifts.length > 0;
+    const periodeHeeftDiensten = !periode ? weekHeeftDiensten : DataStore.shifts.some(s => {
+        const d = (s.date || '').split('T')[0];
+        return Number(s.employeeId || s.userId) === resolvedId
+            && d >= periode.startDate && d <= periode.endDate;
+    });
+
     let hoursCardContent = '';
     if (contractHours > 0) {
         const periodeContract = contractHours * 4;
         const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
         const periodePct = Math.min((hoursPeriode / periodeContract) * 100, 100);
-        const weekClr = hoursColor(hoursWeek, contractHours);
-        const periodeClr = hoursColor(hoursPeriode, periodeContract);
+        const weekClr = hoursColor(hoursWeek, contractHours, weekHeeftDiensten);
+        const periodeClr = hoursColor(hoursPeriode, periodeContract, periodeHeeftDiensten);
         hoursCardContent = `
             <div class="profile-hours-section">
                 <div class="profile-hours-row">
                     <span class="profile-hours-label">Deze week</span>
-                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u / ${contractHours}u ${saldoLabel(hoursWeek, contractHours)}</span>
+                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u / ${contractHours}u ${saldoLabel(hoursWeek, contractHours, weekHeeftDiensten)}</span>
                 </div>
                 <div class="progress-bar mb-sm">
                     <div class="progress-fill" style="width:${weekPct}%;background:${weekClr}"></div>
                 </div>
                 <div class="profile-hours-row">
                     <span class="profile-hours-label">Deze periode (4 weken)</span>
-                    <span class="profile-hours-value">${hoursPeriode.toFixed(1)}u / ${periodeContract.toFixed(0)}u ${saldoLabel(hoursPeriode, periodeContract)}</span>
+                    <span class="profile-hours-value">${hoursPeriode.toFixed(1)}u / ${periodeContract.toFixed(0)}u ${saldoLabel(hoursPeriode, periodeContract, periodeHeeftDiensten)}</span>
                 </div>
                 ${periode ? `<div class="profile-hours-periode">${formatPeriodeBereik(periode)}</div>` : ''}
                 <div class="progress-bar mb-md">

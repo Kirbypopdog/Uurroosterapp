@@ -214,6 +214,35 @@ function calcPlanningHourlyHeadcount(date, hour) {
     return { bruto, netto: bruto - activityCount };
 }
 
+// #342 en #350 hebben dezelfde oorzaak: er zijn geen bezettingsnormen. Zonder
+// die normen blijft de bezettingsbalk één onzichtbare strook en slaat
+// validateMinimumStaffing de controle stil over. Beide plekken vragen dus
+// dezelfde vraag, en die staat hier één keer.
+//
+// De normen komen uit het actieve basisconcept. Er is dus geen norm bij een
+// verse installatie, maar ook tussen twee schooljaren in, wanneer geen enkel
+// concept de huidige datum dekt.
+function heeftBezettingsnormen(datums) {
+    if (typeof getStaffingRulesForDay !== 'function') return false;
+    return datums.some(d => {
+        const regels = getStaffingRulesForDay(d);
+        return !!regels && regels.length > 0;
+    });
+}
+
+// De uitleg die bij het ontbreken van normen hoort. Alleen beheerders kunnen er
+// iets aan doen, dus een medewerker krijgt de verwijzing niet te zien.
+function bezettingsnormenUitleg(extraKlasse) {
+    const magBeheren = typeof hasPermission === 'function' && hasPermission('MANAGE_SHIFTS');
+    const verwijzing = magBeheren
+        ? ' Stel ze in bij Rooster bouwen, onder Bezetting.'
+        : '';
+    return `<div class="geen-bezettingsnormen${extraKlasse ? ' ' + extraKlasse : ''}">
+        ${IconHelper.html('info', 'sm')}
+        <span>Nog geen bezettingsnormen ingesteld, dus onderbezetting wordt niet gecontroleerd.${verwijzing}</span>
+    </div>`;
+}
+
 function renderCoverageHeatmap() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
@@ -222,6 +251,12 @@ function renderCoverageHeatmap() {
 
     let html = '<div class="coverage-heatmap">';
     html += `<div class="heatmap-title">Bezetting (${escapeHtml(coverageTeamNames)})</div>`;
+    // #342: zonder normen krijgt elk segment de klasse seg-none, en die heeft
+    // precies de achtergrondkleur van het paneel. De balk was dus leeg terwijl
+    // de legende eronder vier kleuren aankondigde. Nu staat er waarom.
+    if (!heeftBezettingsnormen(weekDates)) {
+        html += bezettingsnormenUitleg('in-heatmap');
+    }
     html += '<div class="heatmap-grid">';
 
     // Header row
@@ -343,6 +378,15 @@ function renderValidationAlerts() {
     let html = '';
     html += renderResponsibleSection();
     html += renderWeekLaadFout();
+    // #350: de onderbezettingscontrole werd stil overgeslagen zonder normen.
+    // Een week waarin niemand werkt gaf dus geen enkele melding, en de planner
+    // ging ervan uit dat de app zou waarschuwen. Alleen tonen aan wie diensten
+    // beheert: een medewerker heeft hier niets aan.
+    const zichtbareDagen = AppState.viewMode === 'day' ? [weekDates[AppState.mobileDayIndex]] : weekDates;
+    if (typeof hasPermission === 'function' && hasPermission('MANAGE_SHIFTS')
+        && !heeftBezettingsnormen(zichtbareDagen)) {
+        html += bezettingsnormenUitleg();
+    }
 
     const breakdown = buildIssueBreakdown(summary);
     AppState.validationBreakdown = breakdown;

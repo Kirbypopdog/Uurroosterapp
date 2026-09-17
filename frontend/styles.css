@@ -5694,6 +5694,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .hours-saldo.positive { color: #10b981; }
 .hours-saldo.negative { color: var(--color-danger); }
+/* #351: geen rooster is geen tekort. Gedempt, niet rood. */
+.hours-saldo.neutraal { color: var(--ink-3); font-weight: 400; }
 
 .emp-card-hours {
     padding-top: 8px;
@@ -13970,4 +13972,40 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
        de volle breedte in plaats van tot een onraakbaar hoekje te krimpen. */
     .week-laadfout { flex-direction: column; align-items: stretch; }
     .week-laadfout .btn { width: 100%; min-height: 44px; }
+}
+
+/* #342 en #350: de uitleg wanneer er geen bezettingsnormen zijn ingesteld.
+   Informatief van toon, niet alarmerend: er is niets stuk, er is alleen nog
+   iets niet ingesteld. */
+.geen-bezettingsnormen {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    padding: 10px 14px;
+    margin-bottom: var(--space-sm);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--info-text);
+    border-radius: var(--radius-md);
+    background: var(--surface-color);
+    color: var(--ink-2, var(--text-secondary));
+    font-size: 0.85rem;
+    line-height: 1.45;
+}
+/* Lucide zet de klasse van de <i> door op de svg die het maakt, en tekent met
+   currentColor. De klasse aanspreken werkt dus zowel vóór als na het omzetten. */
+.geen-bezettingsnormen .lucide-sm,
+.geen-bezettingsnormen svg {
+    color: var(--info-text);
+    flex: none;
+    margin-top: 1px;
+}
+/* In het bezettingspaneel staat ze al binnen een omkaderd blok, dus daar hoeft
+   er geen tweede kader omheen. */
+.geen-bezettingsnormen.in-heatmap {
+    border: none;
+    border-left: 3px solid var(--info-text);
+    border-radius: 0;
+    padding: 6px 10px;
+    margin: 0 0 8px;
+    background: transparent;
 }
