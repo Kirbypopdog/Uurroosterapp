@@ -2134,8 +2134,22 @@ async function deleteTemplate(templateId) {
     if (!template) return;
 
     if (await showConfirm(`Weet je zeker dat je de template "${template.name}" wilt verwijderen?`)) {
+        // #333: het sjabloon werd eerst lokaal verwijderd en de fout van het
+        // opslaan verdween in een console.error. Het sjabloon was dus weg uit
+        // de lijst maar stond er na een herlading weer, zonder dat iemand iets
+        // te zien kreeg. Nu wordt de verwijdering teruggedraaid en gemeld,
+        // zoals deleteTeam() dat al doet.
         delete DataStore.settings.shiftTemplates[templateId];
-        try { await saveSettings('shiftTemplates', DataStore.settings.shiftTemplates); } catch (e) { console.error('Error saving templates:', e); }
+        try {
+            await saveSettings('shiftTemplates', DataStore.settings.shiftTemplates);
+        } catch (e) {
+            console.error('Error saving templates:', e);
+            DataStore.settings.shiftTemplates[templateId] = template;
+            showToast(`Template "${template.name}" niet verwijderd: ${getUserFriendlyError(e)}`, 'error');
+            renderSettings();
+            return;
+        }
+        showToast(`Template "${template.name}" verwijderd`, 'success');
         renderSettings();
     }
 }
@@ -2589,15 +2603,44 @@ async function deleteHolidayPeriod(id) {
 
 // ===== TEAM TOGGLES (bezetting + weekend rotatie) =====
 
+// #330: deze functie muteerde eerst DataStore, ving daarna elke fout op met
+// alleen een console.error, en meldde vervolgens onvoorwaardelijk groen
+// "Teaminstellingen opgeslagen". De beheerder zag een valse bevestiging tot hij
+// herlaadde, en dan was de wijziging weg.
+//
+// Nu wordt de oude waarde bewaard, bij een fout teruggezet, en verschijnt de
+// succesmelding alleen als er ook echt iets bewaard is. updateTeamColor() deed
+// dat al goed en diende als voorbeeld.
 async function saveTeamToggles() {
+    const mislukt = [];
+
     // Coverage teams
     const coverageTeams = [];
     document.querySelectorAll('.coverage-team-cb').forEach(cb => {
         if (cb.checked) coverageTeams.push(cb.dataset.teamId);
     });
-    if (coverageTeams.length > 0) {
-        DataStore.settings.coverageTeams = coverageTeams;
-        try { await saveSettings('coverageTeams', coverageTeams); } catch (e) { console.error('Error saving coverageTeams:', e); }
+    // Alles uitvinken kan niet: zonder bezettingsteams valt de hele
+    // bezettingsberekening weg. Voordien werd er dan stil niets opgeslagen
+    // terwijl dezelfde groene melding verscheen.
+    if (coverageTeams.length === 0) {
+        showToast('Er moet minstens één team meetellen voor de bezetting. De bezettingsvinkjes zijn teruggezet.', 'error');
+        // Alleen de bezettingsvinkjes terugzetten, niet het hele scherm
+        // hertekenen: een wijziging aan de weekendrotatie in dezelfde
+        // bewerking mag niet verloren gaan doordat wij hier ingrijpen.
+        const bewaard = DataStore.settings.coverageTeams || [];
+        document.querySelectorAll('.coverage-team-cb').forEach(cb => {
+            cb.checked = bewaard.includes(cb.dataset.teamId);
+        });
+        return;
+    }
+    const vorigeCoverage = DataStore.settings.coverageTeams;
+    DataStore.settings.coverageTeams = coverageTeams;
+    try {
+        await saveSettings('coverageTeams', coverageTeams);
+    } catch (e) {
+        console.error('Error saving coverageTeams:', e);
+        DataStore.settings.coverageTeams = vorigeCoverage;
+        mislukt.push('bezettingsteams');
     }
 
     // Eligible teams for weekend rotation
@@ -2608,9 +2651,23 @@ async function saveTeamToggles() {
     if (!DataStore.settings.responsibleRotation) {
         DataStore.settings.responsibleRotation = { eligibleTeams: [], assignments: {} };
     }
+    const vorigeEligible = DataStore.settings.responsibleRotation.eligibleTeams;
     DataStore.settings.responsibleRotation.eligibleTeams = eligibleTeams;
 
-    try { await saveSettings('responsibleRotation', DataStore.settings.responsibleRotation); } catch (e) { console.error('Error saving responsibleRotation:', e); }
+    try {
+        await saveSettings('responsibleRotation', DataStore.settings.responsibleRotation);
+    } catch (e) {
+        console.error('Error saving responsibleRotation:', e);
+        DataStore.settings.responsibleRotation.eligibleTeams = vorigeEligible;
+        mislukt.push('weekendrotatie');
+    }
+
+    if (mislukt.length > 0) {
+        showToast(`Niet opgeslagen: ${mislukt.join(' en ')}. De vinkjes zijn teruggezet naar de bewaarde waarde.`, 'error');
+        // Opnieuw tekenen vanuit DataStore, dat nu weer de serverwaarde bevat.
+        renderSettings();
+        return;
+    }
 
     showToast('Teaminstellingen opgeslagen', 'success');
 

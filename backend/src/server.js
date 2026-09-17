@@ -4005,8 +4005,16 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
   if (!['admin', 'roosterverantwoordelijke', 'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(role)) {
     return res.status(403).json({ error: 'Onvoldoende rechten' });
   }
+  // #327: de settings-rij werd eerst weggeschreven en de teams-tabel daarna
+  // gesynchroniseerd, zonder transactie. Liep die synchronisatie tegen een
+  // fout aan, dan gaf het endpoint 500 terwijl de instelling al bewaard was.
+  // De gebruiker las "Opslaan mislukt" terwijl het gelukt was, en de
+  // teams-tabel liep daarna permanent uit de pas met de instellingen. Alles
+  // zit nu in één BEGIN/COMMIT, zodat het antwoord klopt met wat er staat.
+  const client = await pool.connect();
   try {
-    await pool.query(`
+    await client.query('BEGIN');
+    await client.query(`
       INSERT INTO settings (key, value, updated_at)
       VALUES ($1, $2, NOW())
       ON CONFLICT (key)
@@ -4028,24 +4036,43 @@ v1.put('/settings/:key', requireAuth, async (req, res) => {
     if (key === 'teams' && value && typeof value === 'object') {
       for (const [teamId, teamData] of Object.entries(value)) {
         if (!teamData || !teamData.name) continue;
-        await pool.query(
+        // #327: teams.color is NOT NULL. `teamData.color || null` liet een
+        // team zonder kleur de hele opslag opblazen. COALESCE valt terug op de
+        // kleur die er al staat, en pas als die er ook niet is op een neutraal
+        // grijs. Een ontbrekende kleur is geen reden om een naamswijziging te
+        // weigeren.
+        await client.query(
           `INSERT INTO teams (id, name, color)
-           VALUES ($1, $2, $3)
-           ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, color = EXCLUDED.color`,
+           VALUES ($1, $2, COALESCE($3, (SELECT color FROM teams WHERE id = $1), '#8d897c'))
+           ON CONFLICT (id) DO UPDATE
+             SET name = EXCLUDED.name,
+                 color = COALESCE($3, teams.color)`,
           [teamId, teamData.name, teamData.color || null]
         );
       }
     }
 
+    await client.query('COMMIT');
+    // Na de commit, niet ervoor: logAudit gebruikt pool.query en zit dus buiten
+    // deze transactie. Zou hij ervoor draaien en de commit alsnog falen, dan
+    // stond er een auditregel voor een wijziging die niet is doorgegaan.
     await logAudit(req, 'UPDATE', 'settings', key, { key });
     res.json({ ok: true });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* verbinding al weg */ }
     console.error('PUT /settings/:key error:', err);
     // #256: idem, een FK-fout hier hoort een leesbaar antwoord te krijgen.
     if (err.code === '23503') {
       return res.status(400).json({ error: 'Een van de teams verwijst naar iets dat niet bestaat.' });
     }
+    // #327: een schending van een not-null of een check hoort ook uitgelegd te
+    // worden in plaats van als kale 500 te eindigen.
+    if (err.code === '23502' || err.code === '23514') {
+      return res.status(400).json({ error: 'Een van de teams mist een verplicht veld.' });
+    }
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 

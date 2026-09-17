@@ -342,6 +342,7 @@ function renderValidationAlerts() {
 
     let html = '';
     html += renderResponsibleSection();
+    html += renderWeekLaadFout();
 
     const breakdown = buildIssueBreakdown(summary);
     AppState.validationBreakdown = breakdown;
@@ -505,6 +506,25 @@ async function dismissFromPlanningTab(key) {
         renderValidationAlerts();
         closeWarningDetailsModal();
     }
+}
+
+// #331: de balk voor een week die niet geladen kon worden. Staat boven de
+// meldingen, want zolang de diensten onbekend zijn, zeggen die meldingen ook
+// niets betrouwbaars over deze week.
+function renderWeekLaadFout() {
+    const fout = AppState.weekLaadFout;
+    if (!fout) return '';
+    // Alleen tonen bij de week waar het om ging. Doorbladeren naar een week die
+    // wel werkte mag de balk niet meesleuren.
+    if (fout.week !== formatDateYYYYMMDD(AppState.currentWeekStart)) return '';
+    return `<div class="week-laadfout" role="alert">
+        <span class="week-laadfout-tekst">
+            ${IconHelper.html('alert-circle', 'sm')}
+            <strong>Deze week kon niet geladen worden.</strong>
+            De diensten hieronder zijn onbekend, niet leeg.${fout.melding ? ` ${escapeHtml(fout.melding)}` : ''}
+        </span>
+        <button type="button" class="btn btn-sm btn-primary" id="week-laadfout-opnieuw">Opnieuw proberen</button>
+    </div>`;
 }
 
 function renderResponsibleSection() {

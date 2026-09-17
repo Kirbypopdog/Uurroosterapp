@@ -23,6 +23,10 @@ const AppState = {
     leaveDraft: {},           // { 'YYYY-MM-DD': status } vóór opslaan
     schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
+    // #331: gezet wanneer de diensten voor de zichtbare week niet geladen
+    // konden worden: { week: 'YYYY-MM-DD', melding: '...' }. De planner toont
+    // dan een balk in plaats van stilzwijgend een lege week.
+    weekLaadFout: null,
     viewMode: 'week',
     visibleTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     visibleEmployeeTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],

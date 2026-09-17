@@ -89,9 +89,27 @@ function updateShiftRefreshRange() {
         const weekEndStr = formatDateYYYYMMDD(weekEnd);
         const hasData = DataStore.shifts && DataStore.shifts.some(s => s.date >= weekStart && s.date <= weekEndStr);
         if (!hasData) {
+            // #331: hier stond .catch(() => {}). Mislukte de fetch, dan rendeerde
+            // de planner door met een lege week, en een lege week is niet te
+            // onderscheiden van een week waarin echt niemand staat. Een
+            // roosterverantwoordelijke leest dat als "niemand ingepland".
+            //
+            // De week wordt nu als ONBEKEND gemarkeerd in plaats van als leeg,
+            // met een balk erboven en een knop om het opnieuw te proberen.
+            AppState.weekLaadFout = null;
             refreshShifts({ startDate: startStr, endDate: endStr, merge: true })
-                .then(() => { if (AppState.currentView === 'planning') renderPlanning(); })
-                .catch(() => {});
+                .then(() => {
+                    AppState.weekLaadFout = null;
+                    if (AppState.currentView === 'planning') renderPlanning();
+                })
+                .catch(fout => {
+                    // Een verlopen sessie regelt zichzelf al: dataApiFetch stuurt
+                    // je terug naar het loginscherm. Daar hoort geen tweede
+                    // melding bij.
+                    if (fout && fout.status === 401) return;
+                    AppState.weekLaadFout = { week: weekStart, melding: getUserFriendlyError(fout) };
+                    if (AppState.currentView === 'planning') renderPlanning();
+                });
         }
 
         // #378: afwezigheid zit sinds die wijziging ook in een venster. Hier

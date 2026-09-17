@@ -362,6 +362,16 @@ function setupEventListeners() {
     });
 
     DOM.validationAlerts.addEventListener('click', (event) => {
+        // #331: de knop van de balk "Deze week kon niet geladen worden".
+        // Gedelegeerd, want de balk wordt bij elke render opnieuw opgebouwd.
+        if (event.target.closest('#week-laadfout-opnieuw')) {
+            AppState.weekLaadFout = null;
+            renderPlanning();
+            // updateShiftRefreshRange haalt de week opnieuw op zolang er geen
+            // data voor is, en die is er na de mislukte poging nog altijd niet.
+            updateShiftRefreshRange();
+            return;
+        }
         const chip = event.target.closest('.validation-chip');
         if (chip) openValidationDetailsModal(chip.dataset.rule || null);
     });

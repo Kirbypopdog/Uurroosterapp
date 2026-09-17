@@ -13938,3 +13938,36 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
         min-width: 200px;
     }
 }
+
+/* #331: de balk voor een week waarvan de diensten niet geladen konden worden.
+   Onderscheidt zich bewust van de meldingenbalk eronder: die gaat over wat er
+   mis is MET het rooster, deze gaat erover dat we het rooster niet kennen. */
+.week-laadfout {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    margin-bottom: var(--space-sm);
+    border: 1px solid var(--danger-color, #dc2626);
+    border-left-width: 4px;
+    border-radius: var(--radius-md);
+    background: var(--surface-color, #fff);
+}
+.week-laadfout-tekst {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    color: var(--danger-text);
+    font-size: 0.9rem;
+    min-width: 0;
+}
+.week-laadfout-tekst strong { color: inherit; }
+
+@media (max-width: 480px) {
+    /* Op een telefoon past knop en tekst niet naast elkaar; de knop krijgt dan
+       de volle breedte in plaats van tot een onraakbaar hoekje te krimpen. */
+    .week-laadfout { flex-direction: column; align-items: stretch; }
+    .week-laadfout .btn { width: 100%; min-height: 44px; }
+}
