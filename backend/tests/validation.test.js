@@ -346,7 +346,8 @@ const {
   leaveBlockGewijzigd,
   leaveBlockHerstel,
   leaveConceptVoorBlok,
-  leaveBlokIsVerdeeld
+  leaveBlokIsVerdeeld,
+  leaveWensenBewaard
 } = require('../../frontend/app-leave.js');
 
 // Kerstvakantie 21 dec 2026 t/m 3 jan 2027 = twee volle maandagweken.
@@ -734,6 +735,69 @@ describe('leaveConceptVoorBlok', () => {
 // Het invulscherm van een voorkeurblok biedt alleen werken, liever niet en
 // zeker niet aan. Een entry met status 'verlof' kan er dus alleen staan door
 // het vastleggen. Dat is het kenmerk waarop we gaan.
+// ===== #377: DE GEVRAAGDE VOORKEUR NAAST DE VASTGELEGDE VERDELING =====
+//
+// Sinds migratie 043 bewaart leave_round_entries beide. De frontend krijgt de
+// gevraagde waarde binnen als requestedStatus en houdt die apart van status.
+describe('#377 leaveWensenBewaard', () => {
+  const ZOMER = { mode: 'voorkeur', startDate: '2027-07-05', endDate: '2027-07-18' };
+
+  test('zonder gevraagde waarden is er niets bewaard', () => {
+    const geldt = { 7: { '2027-07-05': 'verlof' } };
+    expect(leaveWensenBewaard(ZOMER, geldt, null)).toBe(false);
+    expect(leaveWensenBewaard(ZOMER, geldt, {})).toBe(false);
+  });
+
+  // Migratie 043 zet requested_status gelijk aan status voor bestaande rijen.
+  // Bij een ronde die vóór die kolom verdeeld is, staat er dus overal 'verlof'
+  // als gevraagde waarde. Dat is de beslissing van de beheerder, geen wens, en
+  // het scherm mag dan niet beweren dat de letter toont wat iemand vroeg.
+  test('gevraagd gelijk aan geldend telt niet als bewaarde wens', () => {
+    const geldt    = { 7: { '2027-07-05': 'verlof', '2027-07-12': 'werken' } };
+    const gevraagd = { 7: { '2027-07-05': 'verlof', '2027-07-12': 'werken' } };
+    expect(leaveWensenBewaard(ZOMER, geldt, gevraagd)).toBe(false);
+  });
+
+  test('een verschil tussen gevraagd en geldend is wél een bewaarde wens', () => {
+    const geldt    = { 7: { '2027-07-05': 'verlof' } };
+    const gevraagd = { 7: { '2027-07-05': 'zeker_niet' } };
+    expect(leaveWensenBewaard(ZOMER, geldt, gevraagd)).toBe(true);
+  });
+
+  test('kijkt alleen naar dagen binnen dit blok', () => {
+    const geldt    = { 7: { '2027-12-24': 'verlof' } };
+    const gevraagd = { 7: { '2027-12-24': 'zeker_niet' } };
+    expect(leaveWensenBewaard(ZOMER, geldt, gevraagd)).toBe(false);
+  });
+});
+
+describe('#377 leaveVerdeelVoorstel gaat uit van de gevraagde waarde', () => {
+  const ZOMER = { startDate: '2027-07-05', endDate: '2027-07-18' };
+  const MENSEN = [{ id: 2 }, { id: 3 }];
+
+  // Dit was de kern van het probleem: na het vastleggen las het voorstel de
+  // geldende status, en dat waren de beslissingen van de beheerder zelf. De
+  // knop "Voorstel opnieuw" gaf dus gewoon de bestaande verdeling terug.
+  test('na een vastgelegde verdeling bouwt het voorstel uit de wensen', () => {
+    const geldt    = { 2: { '2027-07-05': 'verlof', '2027-07-12': 'verlof' },
+                       3: { '2027-07-05': 'werken', '2027-07-12': 'werken' } };
+    const gevraagd = { 2: { '2027-07-05': 'zeker_niet', '2027-07-12': 'werken' },
+                       3: { '2027-07-05': 'werken',     '2027-07-12': 'werken' } };
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, geldt, gevraagd);
+    // week 1 vroeg ze weg, week 2 niet: het voorstel volgt de wens, niet de
+    // verdeling die er nu ligt
+    expect(v[2]['2027-07-05']).toBe('verlof');
+    expect(v[2]['2027-07-12']).toBe('werken');
+    expect(v[3]['2027-07-05']).toBe('werken');
+  });
+
+  test('zonder gevraagde waarden gedraagt het zich als voorheen', () => {
+    const geldt = { 2: { '2027-07-05': 'zeker_niet' } };
+    const v = leaveVerdeelVoorstel(ZOMER, MENSEN, geldt);
+    expect(v[2]['2027-07-05']).toBe('verlof');
+  });
+});
+
 describe('leaveBlokIsVerdeeld', () => {
   const ZOMER = { mode: 'voorkeur', startDate: '2027-07-05', endDate: '2027-07-18' };
   const KERST = { mode: 'binair',   startDate: '2027-07-05', endDate: '2027-07-18' };
@@ -761,6 +825,14 @@ describe('leaveBlokIsVerdeeld', () => {
     // Verlof in de kerstvakantie zegt niets over de zomer
     const entries = { 7: { '2027-12-24': 'verlof' } };
     expect(leaveBlokIsVerdeeld(ZOMER, entries)).toBe(false);
+  });
+
+  test('#377 verdeeld zodra gevraagd en geldend uiteenlopen, ook zonder verlof', () => {
+    // Een beheerder kan iemand die "liever niet" vroeg tóch laten werken. Dan
+    // staat er nergens 'verlof', maar is het blok wel degelijk verdeeld.
+    const geldt    = { 7: { '2027-07-05': 'werken' } };
+    const gevraagd = { 7: { '2027-07-05': 'liever_niet' } };
+    expect(leaveBlokIsVerdeeld(ZOMER, geldt, gevraagd)).toBe(true);
   });
 
   test('geldt niet voor een binair blok, daar is verlof gewoon invulling', () => {

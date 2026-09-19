@@ -820,6 +820,26 @@ const MIGRATIONS = [
         WHERE request_type = 'takeover' AND status = 'pending'
       `);
     }
+  },
+  {
+    // #377: bij een voorkeurblok vult de medewerker werken, liever_niet of
+    // zeker_niet in. Legde de beheerder daarna de verdeling vast, dan verving
+    // dat elke entry door verlof of werken en was de oorspronkelijke voorkeur
+    // onherroepelijk weg. Net op het moment dat hij moet bijsturen (iemand
+    // wordt nog goedgekeurd, een week blijkt te dun) miste hij het verschil
+    // tussen "zeker niet" en "liever niet".
+    //
+    // requested_status bewaart wat de medewerker vroeg. status blijft wat er
+    // geldt. Bestaande rijen krijgen hun huidige status als gevraagde waarde:
+    // voor een nog niet verdeeld blok klopt dat exact, en voor een al verdeeld
+    // blok is het het enige wat we nog weten.
+    name: '043_leave_entries_requested_status',
+    up: async (client) => {
+      await client.query(
+        `ALTER TABLE leave_round_entries ADD COLUMN IF NOT EXISTS requested_status TEXT`);
+      await client.query(
+        `UPDATE leave_round_entries SET requested_status = status WHERE requested_status IS NULL`);
+    }
   }
 ];
 
@@ -5567,7 +5587,8 @@ v1.get('/leave-rounds/:id', requireAuth, async (req, res) => {
 
     const [entries, subs, blocks] = await Promise.all([
       pool.query(
-        `SELECT user_id AS "userId", date::text AS date, status, note
+        `SELECT user_id AS "userId", date::text AS date, status,
+                COALESCE(requested_status, status) AS "requestedStatus", note
          FROM leave_round_entries WHERE round_id = $1`, [req.params.id]),
       pool.query(
         `SELECT s.user_id AS "userId", s.submitted_at AS "submittedAt", s.approved,
@@ -5788,6 +5809,22 @@ v1.put('/leave-rounds/:id/blocks/:blockId/entries', requireAuth, requireRole(...
 
     await client.query('BEGIN');
     if (userIds.size > 0) {
+      // #377: de DELETE hieronder gooit de rijen weg en daarmee ook wat de
+      // medewerker oorspronkelijk vroeg. Die waarde wordt eerst opgehaald en
+      // bij het opnieuw invoegen meegegeven, zodat het verdeelscherm na het
+      // vastleggen nog steeds kan tonen wie "zeker niet" zei en wie alleen
+      // "liever niet". Staat er nog geen rij, dan vroeg die persoon niets en
+      // blijft requested_status leeg: een lege cel is eerlijker dan doen alsof
+      // hij om dit verlof gevraagd heeft.
+      const vorige = await client.query(
+        `SELECT user_id, date::text AS date, COALESCE(requested_status, status) AS gevraagd
+         FROM leave_round_entries
+         WHERE round_id = $1 AND user_id = ANY($2::int[]) AND date BETWEEN $3 AND $4`,
+        [req.params.id, [...userIds], blok.startDate, blok.endDate]
+      );
+      const gevraagd = new Map();
+      vorige.rows.forEach(r => gevraagd.set(`${r.user_id}|${r.date}`, r.gevraagd));
+
       await client.query(
         `DELETE FROM leave_round_entries
          WHERE round_id = $1 AND user_id = ANY($2::int[]) AND date BETWEEN $3 AND $4`,
@@ -5795,9 +5832,10 @@ v1.put('/leave-rounds/:id/blocks/:blockId/entries', requireAuth, requireRole(...
       );
       for (const e of entries) {
         await client.query(
-          `INSERT INTO leave_round_entries (round_id, user_id, date, status)
-           VALUES ($1, $2, $3, $4)`,
-          [req.params.id, Number(e.userId), e.date, e.status]
+          `INSERT INTO leave_round_entries (round_id, user_id, date, status, requested_status)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [req.params.id, Number(e.userId), e.date, e.status,
+           gevraagd.get(`${Number(e.userId)}|${e.date}`) ?? null]
         );
       }
     }
@@ -5904,9 +5942,11 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
     }
 
     for (const e of entries) {
+      // #377: hier wordt de wens uitgesproken, dus gevraagd en geldend zijn
+      // hetzelfde. Alleen het verdeelendpoint laat ze daarna uiteenlopen.
       await client.query(
-        `INSERT INTO leave_round_entries (round_id, user_id, date, status, note)
-         VALUES ($1, $2, $3, $4, $5)`,
+        `INSERT INTO leave_round_entries (round_id, user_id, date, status, requested_status, note)
+         VALUES ($1, $2, $3, $4, $4, $5)`,
         [req.params.id, targetUserId, e.date, e.status, e.note || '']
       );
     }

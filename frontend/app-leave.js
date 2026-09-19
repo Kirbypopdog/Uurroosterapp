@@ -578,17 +578,24 @@ function renderLeaveFillWeeks(block, entryMap, bewerkbaar) {
 // Het voorstel bevat bewust geen regels: wie iets anders dan werken vroeg,
 // krijgt verlof. Geen bezetting, geen limieten — die komen later. De beheerder
 // ziet per week hoeveel mensen er dan nog werken en stuurt zelf bij.
-function leaveVerdeelVoorstel(block, medewerkers, entriesPerUser) {
+// #377: het voorstel gaat uit van wat mensen VROEGEN, niet van wat er nu
+// geldt. Voordien las het de geldende status, en na een vastgelegde verdeling
+// waren dat de beslissingen van de beheerder zelf. "Voorstel opnieuw" gaf dan
+// gewoon de bestaande verdeling terug in plaats van een nieuw voorstel, en de
+// knop heette daarom "Terug naar de vastgelegde verdeling".
+//
+// gevraagdPerUser ontbreekt bij een ronde van vóór die kolom; dan valt het
+// terug op de geldende status, precies zoals het zich altijd gedroeg.
+function leaveVerdeelVoorstel(block, medewerkers, entriesPerUser, gevraagdPerUser) {
     const weken = leaveWeeksOfBlock(block).filter(w => w.openDays.length > 0);
     const voorstel = {};
     medewerkers.forEach(m => {
-        const map = entriesPerUser[Number(m.id)] || {};
+        const bron = (gevraagdPerUser && gevraagdPerUser[Number(m.id)])
+            || entriesPerUser[Number(m.id)] || {};
         voorstel[Number(m.id)] = {};
         weken.forEach(w => {
-            // 'verlof' staat er al zodra een eerdere verdeling is vastgelegd —
-            // die moet blijven staan, anders zet heropenen alles weer op werken.
             const wilWeg = w.openDays.some(d =>
-                map[d] === 'zeker_niet' || map[d] === 'liever_niet' || map[d] === 'verlof');
+                bron[d] === 'zeker_niet' || bron[d] === 'liever_niet' || bron[d] === 'verlof');
             // Wie niets invulde krijgt werken: nooit ongevraagd verlof.
             voorstel[Number(m.id)][w.maandag] = wilWeg ? 'verlof' : 'werken';
         });
@@ -606,16 +613,39 @@ function leaveVerdeelVoorstel(block, medewerkers, entriesPerUser) {
  * toont. Wie wil bijsturen mist dan precies de informatie waarop hij moet
  * beslissen, en het scherm doet alsof ze er nog staat.
  *
- * Het invulscherm van een voorkeurblok biedt alleen werken, liever niet en
- * zeker niet aan (leaveOptionsFor). Een entry met status 'verlof' kan er dus
- * alleen staan doordat de beheerder de verdeling heeft vastgelegd. Dat is een
- * betrouwbaar kenmerk zonder extra kolom in de database.
+ * #377: sinds er een requested_status bestaat is dit een expliciete vraag
+ * geworden: wijkt wat er geldt af van wat er gevraagd werd? Dat is preciezer
+ * dan de oude afleiding, die alleen keek of er ergens 'verlof' stond. Die
+ * afleiding blijft als terugval voor rondes van vóór deze kolom, waar de
+ * gevraagde waarde gelijk aan de geldende is gezet.
  */
-function leaveBlokIsVerdeeld(block, entriesPerUser) {
+function leaveBlokIsVerdeeld(block, entriesPerUser, gevraagdPerUser) {
     if (block.mode !== 'voorkeur') return false;
+    if (leaveWensenBewaard(block, entriesPerUser, gevraagdPerUser)) return true;
     const dagen = new Set(leaveBlockDates(block));
     return Object.values(entriesPerUser || {}).some(map =>
         Object.entries(map).some(([datum, status]) => status === 'verlof' && dagen.has(datum)));
+}
+
+/**
+ * Zijn de oorspronkelijke voorkeuren van dit blok nog beschikbaar?
+ *
+ * #377: de vraag is NIET of er een requested_status staat, want migratie 043
+ * heeft die voor bestaande rijen gelijkgezet aan de geldende status. Bij een
+ * ronde die vóór die kolom verdeeld is, staat er dus overal "verlof" als
+ * gevraagde waarde, en dat is de beslissing van de beheerder, niet de wens van
+ * de medewerker.
+ *
+ * De bruikbare vraag is of gevraagd en geldend ergens UITEENLOPEN. Alleen dan
+ * is er echt een voorkeur bewaard en mag het scherm zeggen dat de letter toont
+ * wat iemand vroeg.
+ */
+function leaveWensenBewaard(block, entriesPerUser, gevraagdPerUser) {
+    if (!gevraagdPerUser) return false;
+    const dagen = new Set(leaveBlockDates(block));
+    return Object.entries(gevraagdPerUser).some(([uid, wensen]) =>
+        Object.entries(wensen).some(([datum, wens]) =>
+            wens && dagen.has(datum) && (entriesPerUser[uid] || {})[datum] !== wens));
 }
 
 // De sterkste wens die iemand die week uitsprak — de reden waarop de beheerder
@@ -633,16 +663,22 @@ function leaveWeekWens(week, entryMap) {
 function renderLeaveVerdeelScherm(round, block, entries, submissions) {
     const medewerkers = getAllEmployees(true);
     const perUser = {};
+    // #377: wat er GELDT en wat er GEVRAAGD is, apart. De kleur van een cel
+    // volgt de verdeling, de letter volgt de wens.
+    const gevraagdPerUser = {};
     entries.forEach(e => {
         const id = Number(e.userId);
         (perUser[id] = perUser[id] || {})[e.date] = e.status;
+        if (e.requestedStatus) {
+            (gevraagdPerUser[id] = gevraagdPerUser[id] || {})[e.date] = e.requestedStatus;
+        }
     });
     const subMap = {};
     submissions.forEach(sub => { subMap[Number(sub.userId)] = sub; });
 
     const weken = leaveWeeksOfBlock(block).filter(w => w.openDays.length > 0);
     if (!AppState.leaveVerdeling) {
-        AppState.leaveVerdeling = leaveVerdeelVoorstel(block, medewerkers, perUser);
+        AppState.leaveVerdeling = leaveVerdeelVoorstel(block, medewerkers, perUser, gevraagdPerUser);
     }
     const verdeling = AppState.leaveVerdeling;
 
@@ -650,11 +686,18 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
     // letters tonen dan de beslissing van de beheerder, niet meer de wens, en
     // het scherm moet dat zeggen in plaats van het tegendeel te blijven
     // beweren.
-    const verdeeld = leaveBlokIsVerdeeld(block, perUser);
-    const letterUitleg = verdeeld ? 'letter = de vastgelegde verdeling' : 'letter = wat die persoon vroeg';
-    // Is het blok verdeeld, dan is de letter dezelfde beslissing als de kleur.
-    // "verlof, vastgelegd als verlof" erbij zetten is dan alleen ruis.
-    const wensTekst = (wens) => verdeeld
+    const verdeeld = leaveBlokIsVerdeeld(block, perUser, gevraagdPerUser);
+    // #377: de letter toont nu altijd de wens, ook na het vastleggen, want die
+    // wordt bewaard. Voordien werd ze door het vastleggen overschreven en moest
+    // de legende zeggen dat ze iets anders betekende dan er stond.
+    //
+    // Blijft gelden voor rondes van vóór die kolom: daar is de gevraagde waarde
+    // gelijkgezet aan de geldende, dus is er niets anders te tonen.
+    const heeftWensen = leaveWensenBewaard(block, perUser, gevraagdPerUser);
+    const letterUitleg = (verdeeld && !heeftWensen)
+        ? 'letter = de vastgelegde verdeling'
+        : 'letter = wat die persoon vroeg';
+    const wensTekst = (wens) => (verdeeld && !heeftWensen)
         ? ''
         : (wens ? ', vroeg ' + LEAVE_STATUS[wens].label.toLowerCase() : ', niets ingevuld');
 
@@ -671,15 +714,14 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
             <h3>Verlof verdelen voor ${escapeHtml(block.name)}</h3>
             <p class="text-muted text-sm">
                 ${verdeeld
-                    ? 'Deze verdeling is al vastgelegd. Klik een vakje om het om te zetten; onderaan zie je hoeveel mensen die week nog werken.'
+                    ? 'Deze verdeling is al vastgelegd. De letters tonen nog altijd wat mensen vroegen. Klik een vakje om het om te zetten; onderaan zie je hoeveel mensen die week nog werken.'
                     : 'Het voorstel geeft iedereen wat hij vroeg. Klik een vakje om het om te zetten; onderaan zie je hoeveel mensen die week nog werken.'}
             </p>
         </div>
-        ${verdeeld ? `
+        ${(verdeeld && !heeftWensen) ? `
             <div class="leave-banner leave-banner-warn">
-                Het vastleggen heeft de oorspronkelijke voorkeuren vervangen, dus "liever niet" en
-                "zeker niet" zijn niet meer te zien. Wil je die bij een volgende ronde bewaren,
-                exporteer dan de CSV vóór je vastlegt.
+                Deze ronde is verdeeld vóór de voorkeuren apart bewaard werden, dus "liever niet"
+                en "zeker niet" zijn hier niet meer te zien. Bij rondes vanaf nu blijven ze staan.
             </div>` : ''}
         ${nietGoedgekeurd.length ? `
             <div class="leave-banner leave-banner-warn">
@@ -701,7 +743,7 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
                 </thead>
                 <tbody>
                     ${medewerkers.map(m => {
-                        const map = perUser[Number(m.id)] || {};
+                        const map = gevraagdPerUser[Number(m.id)] || perUser[Number(m.id)] || {};
                         const open = subMap[Number(m.id)]?.approved !== true;
                         return `<tr class="${open ? 'leave-rij-onbeslist' : ''}">
                             <td class="leave-matrix-day">${escapeHtml(m.name)}</td>
@@ -728,8 +770,12 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
             </table>
         </div>
         <div class="leave-fill-actions">
+            <!-- #377: dit heette "Terug naar de vastgelegde verdeling", want het
+                 voorstel werd uit de geldende status opgebouwd en gaf na het
+                 vastleggen dus precies die verdeling terug. Nu het van de
+                 gevraagde waarden uitgaat, bouwt het weer een echt voorstel. -->
             <button class="btn btn-secondary" id="leave-verdeel-reset">${
-                verdeeld ? 'Terug naar de vastgelegde verdeling' : 'Voorstel opnieuw'}</button>
+                (verdeeld && !heeftWensen) ? 'Terug naar de vastgelegde verdeling' : 'Voorstel opnieuw'}</button>
             <button class="btn btn-primary" id="leave-verdeel-save" data-block="${block.id}">Verdeling vastleggen</button>
         </div>`;
 }
@@ -1077,7 +1123,9 @@ async function saveLeaveVerdeling(data, blockId) {
     // bijsturen, dus wijs op de export nu het nog kan.
     const bevestigd = await showConfirm(
         `${block.name}\n\n${vrij} verlofdagen worden vastgelegd. Dit vervangt wat mensen zelf invulden voor deze vakantie; de andere vakanties blijven ongemoeid.\n\n` +
-        `Let op: "liever niet" en "zeker niet" zijn daarna niet meer te zien. Wil je ze bewaren, annuleer dan en exporteer eerst de CSV.\n\nDoorgaan?`,
+        // #377: wat mensen vroegen blijft nu bewaard, dus de waarschuwing dat
+        // "liever niet" en "zeker niet" verdwijnen klopt niet meer.
+        `Wat mensen vroegen blijft bewaard, dus je kan hierna nog bijsturen.\n\nDoorgaan?`,
         'Verdeling vastleggen',
         { confirmText: 'Vastleggen', cancelText: 'Annuleren', danger: true }
     );
@@ -1332,13 +1380,27 @@ function exportLeaveRound(data) {
     const { round, blocks = [], entries } = data;
     const medewerkers = getAllEmployees(true);
     const perUser = {};
+    const gevraagdPerUser = {};
     entries.forEach(e => {
         const id = Number(e.userId);
         (perUser[id] = perUser[id] || {})[e.date] = e.status;
+        if (e.requestedStatus) {
+            (gevraagdPerUser[id] = gevraagdPerUser[id] || {})[e.date] = e.requestedStatus;
+        }
     });
 
+    // #377: twee kolommen per medewerker zodra gevraagd en vastgelegd uiteen
+    // kunnen lopen. Zijn ze overal gelijk (een binair blok, of een ronde die
+    // nog niet verdeeld is), dan zou een tweede kolom alleen ruis zijn.
+    const toontWens = Object.entries(gevraagdPerUser).some(([uid, wensen]) =>
+        Object.entries(wensen).some(([datum, wens]) => (perUser[uid] || {})[datum] !== wens));
+
     const dagNamen = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
-    const rijen = [['vakantie', 'dag', 'datum', 'open', ...medewerkers.map(m => m.name)]];
+    const kopMedewerkers = toontWens
+        ? medewerkers.flatMap(m => [`${m.name} (gevraagd)`, `${m.name} (vastgelegd)`])
+        : medewerkers.map(m => m.name);
+    const rijen = [['vakantie', 'dag', 'datum', 'open', ...kopMedewerkers]];
+    const label = (s) => (s && LEAVE_STATUS[s]) ? LEAVE_STATUS[s].label : '';
     blocks.forEach(block => {
         const gesloten = leaveClosedSet(block);
         leaveWeeksOfBlock(block).forEach(week => {
@@ -1348,9 +1410,11 @@ function exportLeaveRound(data) {
                 const open = gesloten ? (gesloten.has(d) ? 'nee' : 'ja') : '';
                 rijen.push([
                     block.name, dagNamen[dt.getDay()], d, open,
-                    ...medewerkers.map(m => {
-                        const s = (perUser[Number(m.id)] || {})[d];
-                        return s ? LEAVE_STATUS[s].label : '';
+                    ...medewerkers.flatMap(m => {
+                        const geldt = (perUser[Number(m.id)] || {})[d];
+                        if (!toontWens) return [label(geldt)];
+                        const gevraagd = (gevraagdPerUser[Number(m.id)] || {})[d];
+                        return [label(gevraagd), label(geldt)];
                     })
                 ]);
             });
@@ -1589,5 +1653,6 @@ if (typeof module !== 'undefined' && module.exports) {
         leaveBlockHerstel,
         leaveConceptVoorBlok,
         leaveBlokIsVerdeeld,
+        leaveWensenBewaard,
     };
 }

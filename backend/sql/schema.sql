@@ -234,6 +234,9 @@ CREATE TABLE IF NOT EXISTS leave_round_entries (
   user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   date      DATE NOT NULL,
   status    TEXT NOT NULL CHECK (status IN ('werken', 'verlof', 'liever_niet', 'zeker_niet')),
+  -- #377: wat de medewerker vroeg. status is wat er geldt; bij een voorkeurblok
+  -- legt de beheerder die na het sluiten vast en loopt hij dus uiteen.
+  requested_status TEXT,
   note      TEXT DEFAULT '',
   UNIQUE (round_id, user_id, date)
 );
