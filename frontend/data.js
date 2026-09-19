@@ -1962,7 +1962,8 @@ async function resetData() {
     if (!scope) return;
 
     const labels = { data: 'planningsdata', data_users: 'planningsdata en medewerkeraccounts', all: 'alle data en accounts (behalve jouw account)' };
-    if (!await showConfirm(`LAATSTE WAARSCHUWING: ${labels[scope]} wordt permanent verwijderd. Doorgaan?`, 'Laatste waarschuwing')) {
+    if (!await showConfirm(`LAATSTE WAARSCHUWING: ${labels[scope]} wordt permanent verwijderd. Doorgaan?`,
+        'Laatste waarschuwing', { danger: true, confirmText: 'Definitief wissen' })) {
         return;
     }
 

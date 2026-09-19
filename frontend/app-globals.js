@@ -77,6 +77,17 @@ function getTeamOrder() {
     });
 }
 
+// #370: de ruilmodal zette shift.team ongewijzigd op het scherm, dus daar stond
+// "Team: vlot1" terwijl de overnamemodal in dezelfde stroom wél "Vlot 1
+// (Begeleiding)" toonde. De opzoeking stond op een handvol plekken uitgeschreven
+// en op één plek helemaal niet. Nu één helper, met de sleutel als laatste
+// redmiddel zodat een team dat uit de instellingen is gehaald niet als lege
+// tekst verschijnt.
+function getTeamName(teamId) {
+    if (!teamId) return '';
+    return DataStore.settings.teams?.[teamId]?.name || teamId;
+}
+
 function syncTeamFilters() {
     const teams = getTeamOrder();
     if (teams.length > 0) {

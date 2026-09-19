@@ -1024,7 +1024,8 @@ async function handleEmployeeDelete() {
     const relatedShifts = getShiftsByEmployee(employee.id).length;
     const confirmMsg = `Weet je zeker dat je ${employee.name} wilt verwijderen?\n\nDit verwijdert ook ${relatedShifts} dienst${relatedShifts !== 1 ? 'en' : ''} en eventuele afwezigheden.`;
 
-    if (!await showConfirm(confirmMsg, 'Medewerker verwijderen')) return;
+    if (!await showConfirm(confirmMsg, 'Medewerker verwijderen',
+        { danger: true, confirmText: 'Medewerker verwijderen' })) return;
 
     showSectionLoading('employees-view', 'Medewerker verwijderen...');
     try {

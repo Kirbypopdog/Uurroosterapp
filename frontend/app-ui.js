@@ -421,6 +421,15 @@ function showConfirm(message, title = 'Bevestig actie', options = {}) {
     });
 }
 
+// #371: beide promptvensters kregen een titel mee en deden er niets mee.
+// Zet hem, of verberg de kop als er geen titel is.
+function zetPromptTitel(titel) {
+    const el = document.getElementById('input-prompt-title');
+    if (!el) return;
+    el.textContent = titel || '';
+    el.classList.toggle('hidden', !titel);
+}
+
 function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
     return new Promise((resolve) => {
         const modal = document.getElementById('input-prompt-modal');
@@ -429,6 +438,7 @@ function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
         const okBtn = document.getElementById('input-prompt-ok');
         const cancelBtn = document.getElementById('input-prompt-cancel');
 
+        zetPromptTitel(title);
         messageEl.textContent = message;
         inputEl.value = defaultValue;
         modal.classList.remove('hidden');
@@ -465,6 +475,7 @@ function showSelectPrompt(message, title, options) {
         const okBtn = document.getElementById('input-prompt-ok');
         const cancelBtn = document.getElementById('input-prompt-cancel');
 
+        zetPromptTitel(title);
         messageEl.textContent = message;
 
         // Replace input with select temporarily

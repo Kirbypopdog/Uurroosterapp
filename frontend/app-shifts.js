@@ -48,7 +48,7 @@ function renderShiftCard(shift) {
         <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
         <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
         <div class="shift-card-footer">
-            <span class="shift-team-badge team-${shift.team}">${escapeHtml(DataStore.settings.teams?.[shift.team]?.name || shift.team || 'Onbekend')}</span>
+            <span class="shift-team-badge team-${shift.team}">${escapeHtml(getTeamName(shift.team) || 'Onbekend')}</span>
             ${activityBadge}
             ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">${IconHelper.html(ICONS.close, 'xs')}</button>` : ''}
         </div>
@@ -493,7 +493,7 @@ function closeSwapRequestModal() {
 function formatShiftPreview(shift) {
     const employee = getEmployee(shift.employeeId || shift.userId);
     const employeeName = employee ? escapeHtml(employee.name) : 'Onbekend';
-    const team = escapeHtml(shift.team || shift.teamId || '');
+    const team = escapeHtml(getTeamName(shift.team || shift.teamId));
     const date = formatDate(shift.date);
     const time = `${shift.startTime} - ${shift.endTime}`;
 
@@ -539,7 +539,7 @@ async function handleSwapTargetEmployeeChange() {
     employeeShifts.forEach(shift => {
         const dateStr = formatDate(shift.date);
         const timeStr = `${shift.startTime} - ${shift.endTime}`;
-        html += `<option value="${shift.id}">${dateStr} | ${timeStr} | ${shift.team || shift.teamId}</option>`;
+        html += `<option value="${shift.id}">${dateStr} | ${timeStr} | ${escapeHtml(getTeamName(shift.team || shift.teamId))}</option>`;
     });
 
     shiftSelect.innerHTML = html;
@@ -697,8 +697,8 @@ function openTakeoverRequestModal(shift) {
     takeoverRequestState.shiftToGiveAway = shift;
 
     // Get team name
-    const teamName = shift.team && DataStore.settings.teams?.[shift.team]
-        ? DataStore.settings.teams[shift.team].name
+    const teamName = shift.team
+        ? getTeamName(shift.team)
         : shift.team || 'Onbekend team';
 
     // Show shift preview
@@ -1071,7 +1071,8 @@ async function handleActivitySubmit(e) {
 async function handleActivityDelete() {
     const id = document.getElementById('activity-id').value;
     if (!id) return;
-    if (!await showConfirm('Activiteit verwijderen?')) return;
+    if (!await showConfirm('Activiteit verwijderen?', 'Activiteit verwijderen',
+        { danger: true, confirmText: 'Activiteit verwijderen' })) return;
 
     try {
         await deleteActivity(parseInt(id, 10));

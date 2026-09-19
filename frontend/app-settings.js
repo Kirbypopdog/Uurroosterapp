@@ -1146,7 +1146,8 @@ async function deleteTeam(teamId) {
         return;
     }
 
-    const confirmed = await showConfirm(`Weet je zeker dat je team "${team.name}" wilt verwijderen?`);
+    const confirmed = await showConfirm(`Weet je zeker dat je team "${team.name}" wilt verwijderen?`,
+        'Team verwijderen', { danger: true, confirmText: 'Team verwijderen' });
     if (!confirmed) return;
 
     // #256: dit verwijderde het team eerst uit de instellingen en probeerde
@@ -2262,7 +2263,8 @@ async function deleteTemplate(templateId) {
     const template = DataStore.settings.shiftTemplates[templateId];
     if (!template) return;
 
-    if (await showConfirm(`Weet je zeker dat je de template "${template.name}" wilt verwijderen?`)) {
+    if (await showConfirm(`Weet je zeker dat je de template "${template.name}" wilt verwijderen?`,
+        'Sjabloon verwijderen', { danger: true, confirmText: 'Sjabloon verwijderen' })) {
         // #333: het sjabloon werd eerst lokaal verwijderd en de fout van het
         // opslaan verdween in een console.error. Het sjabloon was dus weg uit
         // de lijst maar stond er na een herlading weer, zonder dat iemand iets

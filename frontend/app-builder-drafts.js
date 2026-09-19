@@ -597,7 +597,8 @@ function doLoadDraft(draft) {
 async function deleteBuilderDraft(draftId) {
     if (blokkeerBijMislukteDraftLoad()) return;
 
-    const confirmed = await showConfirm('Dit concept verwijderen?');
+    const confirmed = await showConfirm('Dit concept verwijderen?', 'Concept verwijderen',
+        { danger: true, confirmText: 'Concept verwijderen' });
     if (!confirmed) return;
 
     try {

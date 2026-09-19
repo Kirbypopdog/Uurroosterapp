@@ -1167,7 +1167,7 @@ async function closeLeaveRound(round, aantalOpen) {
 async function deleteLeaveRound(round) {
     if (!await showConfirm(
         `Verlofronde "${round.name}" verwijderen? Alle ingevulde verlofkeuzes van deze ronde gaan mee weg.\n\nAl toegepaste afwezigheden in de planning blijven staan.`,
-        'Ronde verwijderen')) return;
+        'Ronde verwijderen', { danger: true, confirmText: 'Ronde verwijderen' })) return;
     try {
         await dataApiFetch(`/leave-rounds/${round.id}`, { method: 'DELETE' });
         AppState.leaveRoundId = null;

@@ -738,6 +738,11 @@
     <!-- Input Prompt Modal (replaces browser prompt()) -->
     <div id="input-prompt-modal" class="modal hidden">
         <div class="modal-content input-prompt-content">
+            <!-- #371: showInputPrompt en showSelectPrompt namen allebei een titel
+                 aan, maar er was hier geen element om die in te zetten, dus
+                 verdween ze. "Data wissen" boven een keuzelijst met drie
+                 onomkeerbare opties is precies het soort houvast dat je wil. -->
+            <h2 id="input-prompt-title" class="input-prompt-title hidden"></h2>
             <label id="input-prompt-message" class="input-prompt-label" for="input-prompt-value"></label>
             <input type="text" id="input-prompt-value" class="form-input">
             <div class="input-prompt-actions">

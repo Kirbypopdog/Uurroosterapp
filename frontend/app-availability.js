@@ -723,7 +723,8 @@ async function handleRemoveAbsence() {
 
     const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
 
-    if (!await showConfirm(`Afwezigheid verwijderen voor ${days} dag${days !== 1 ? 'en' : ''}?`)) {
+    if (!await showConfirm(`Afwezigheid verwijderen voor ${days} dag${days !== 1 ? 'en' : ''}?`,
+        'Afwezigheid verwijderen', { danger: true, confirmText: 'Afwezigheid verwijderen' })) {
         return;
     }
 

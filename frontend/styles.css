@@ -14016,3 +14016,12 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
     color: var(--ink-3);
     font-style: italic;
 }
+
+/* #371: de kop van het invoer- en keuzevenster. Die bestond niet, waardoor de
+   meegegeven titel nergens terechtkwam. */
+.input-prompt-title {
+    margin: 0 0 10px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}

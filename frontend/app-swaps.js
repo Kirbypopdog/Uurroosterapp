@@ -361,9 +361,7 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
     }
 
     // Get team name
-    const teamName = shift.team && DataStore.settings.teams?.[shift.team]
-        ? DataStore.settings.teams[shift.team].name
-        : shift.team || 'Onbekend team';
+    const teamName = getTeamName(shift.team) || 'Onbekend team';
 
     let messageHtml = '';
     if (takeoverRequest.message) {

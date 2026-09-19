@@ -162,7 +162,7 @@ function renderConceptCard(draft, newestActiveId) {
     const createdDate = draft.createdAt ? new Date(draft.createdAt) : null;
     const createdStr = createdDate ? createdDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
     const teamLabel = draft.teamFilter
-        ? (DataStore.settings.teams?.[draft.teamFilter]?.name || draft.teamFilter)
+        ? getTeamName(draft.teamFilter)
         : 'Alle teams';
 
     const draftGrid = draft.grid || {};
@@ -1074,7 +1074,7 @@ function renderBuilderDrafts() {
                     const date = new Date(draft.updatedAt || draft.createdAt);
                     const dateStr = date.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
                     const teamLabel = draft.teamFilter
-                        ? (DataStore.settings.teams?.[draft.teamFilter]?.name || draft.teamFilter)
+                        ? getTeamName(draft.teamFilter)
                         : 'Alle teams';
                     const draftGrid = draft.grid || {};
                     let weekLabel, empCount;
