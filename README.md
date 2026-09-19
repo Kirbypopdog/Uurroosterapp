@@ -157,6 +157,23 @@ open frontend/index.html
 
 Geversioneerd migratiesysteem via `runMigrations()` bij elke server startup — geen handmatige migraties nodig. Een verse database initialiseert zichzelf (basistabellen + standaardteams + admin-account), dus een nieuwe omgeving werkt na de eerste deploy zonder extra stappen.
 
+### Bewaartermijnen
+
+Persoonsgegevens worden niet langer bewaard dan nodig. `enforceRetentionPolicies()` in `backend/src/server.js` draait bij elke serverstart en is idempotent.
+
+| Gegevens | Termijn | Wat er gebeurt |
+|----------|---------|----------------|
+| `shifts` | 12 maanden | Gearchiveerd (`archived = true`), blijven leesbaar |
+| `shifts` | 5 jaar | Definitief verwijderd |
+| `availability` (verlof, ziekte, overuren) | 5 jaar | Definitief verwijderd |
+| `audit_log` | 2 jaar | Definitief verwijderd |
+| `shift_swap_requests` | 2 jaar | Alleen afgeronde verzoeken (goedgekeurd, afgewezen, geannuleerd, verlopen). Openstaande verzoeken blijven staan |
+| `settings.dismissedAlerts` | 45 dagen | Opgeruimd door de frontend bij elke nieuwe wegklik |
+
+`availability` bevat ziekmeldingen en valt daarmee onder de bijzondere categorie gezondheidsgegevens (AVG artikel 9). De termijn van vijf jaar volgt de bewaartermijn van de diensten waar ze bij horen.
+
+Deze tabel is de bron voor het interne verwerkingsregister. Wijzig je een termijn in de code, werk dan ook dit overzicht en het register bij.
+
 ---
 
 ## API
