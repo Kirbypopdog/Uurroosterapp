@@ -590,7 +590,7 @@ function renderHomeStats(user, role) {
 
     // Open ruilverzoeken
     const openSwaps = (DataStore.swapRequests || []).filter(r =>
-        ['pending', 'pending_lead'].includes(r.status)
+        r.status === 'pending'
     ).length;
 
     // Aandachtspunten (zelfde telling als de alerts-balk, gezet door renderHomeAlerts)
@@ -742,10 +742,11 @@ function renderHomeRequests(user) {
     // gericht is, plus de openstaande overnames van zijn team. Dat is dezelfde
     // regel als hieronder, dus die geldt nu voor iedereen.
     //
-    // De rest van de pending_lead-resten (de kolommen, de CHECK-constraint en
-    // de dode filters elders) staat in #315.
+    // #315: de dode pending_lead-filters zijn hier en elders weggehaald. De
+    // kolommen lead_approved, lead_response_notes en lead_responded_at en de
+    // waarde in de CHECK-constraint staan er nog; zie de toelichting bij #315.
     let pendingRequests = (DataStore.swapRequests || []).filter(r => {
-        if (r.status !== 'pending' && r.status !== 'pending_lead') return false;
+        if (r.status !== 'pending') return false;
         return r.requester_user_id === userId || r.target_user_id === userId ||
                (r.request_type === 'takeover' && r.requester_shift_team === userTeam);
     });

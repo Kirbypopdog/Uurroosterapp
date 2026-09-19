@@ -136,8 +136,14 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 ### Swap/Takeover
 - `POST /api/v1/swap-requests` - Ruilverzoek aanmaken
 - `POST /api/v1/shift-requests/takeover` - Overnameverzoek aanmaken
-- `PUT /api/v1/swap-requests/:id/approve` - Lead keurt goed
-- `PUT /api/v1/swap-requests/:id/reject` - Lead wijst af
+- `PUT /api/v1/swap-requests/:id/target-approve` - Doelpersoon accepteert de ruil
+- `PUT /api/v1/swap-requests/:id/target-reject` - Doelpersoon wijst de ruil af
+- `PUT /api/v1/shift-requests/:id/takeover-accept` - Collega neemt de dienst over
+
+Er is GEEN goedkeuringsstap door een lead: die is in #114 verwijderd. De
+doelpersoon handelt een ruil zelf af. De statuswaarde `pending_lead` en de
+kolommen `lead_approved`, `lead_response_notes` en `lead_responded_at` staan nog
+in het schema maar worden nergens geschreven (#315).
 
 ### Verlofplanning
 - `GET /api/v1/leave-rounds` - Alle verlofrondes (concepten enkel voor beheerders)

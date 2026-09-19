@@ -1,5 +1,17 @@
 // HET VLOT ROOSTERPLANNING - RUILVERZOEKEN EN OVERNAMES
 
+// #285: de mutatie is gelukt, alleen het opnieuw ophalen niet. Dat is geen
+// fout in wat de gebruiker deed, dus geen rode melding: zeggen dat het gelukt
+// is en dat het scherm even achterloopt.
+function meldNaMutatie(uitkomst, gelukteTekst) {
+    if (uitkomst && uitkomst.ververst === false) {
+        showToast(`${gelukteTekst} Het scherm kon niet bijgewerkt worden; herlaad de pagina om alles te zien.`, 'warning', 6000);
+        return false;
+    }
+    showToast(gelukteTekst, 'success');
+    return true;
+}
+
 // #348: "Van Carla Demo op vrijdag 12 september 2026, 14:00 tot 22:00."
 function beschrijfVerzoekDienst(verzoek) {
     if (!verzoek) return '';
@@ -549,9 +561,13 @@ function attachSwapActionListeners() {
                 'Ruil accepteren', '', 'Ruil accepteren');
             if (notes !== null) {
                 try {
-                    await targetApproveSwapRequest(swapId, notes);
-                    showToast('Ruil geaccepteerd. De diensten zijn omgewisseld.', 'success');
-                    switchView('planning'); // Go to planning to see the result
+                    const uitkomst = await targetApproveSwapRequest(swapId, notes);
+                    // Alleen doorklikken naar de planning als die ook klopt.
+                    if (meldNaMutatie(uitkomst, 'Ruil geaccepteerd. De diensten zijn omgewisseld.')) {
+                        switchView('planning');
+                    } else {
+                        renderSwaps();
+                    }
                 } catch (error) {
                     // #202: de backend controleert nu overlap en rusttijd. Een te
                     // korte rust mag doorgedrukt worden na bevestiging, zoals bij
@@ -588,8 +604,8 @@ function attachSwapActionListeners() {
             const notes = await showInputPrompt('Waarom wijs je dit ruilverzoek af? (verplicht)', 'Ruil afwijzen');
             if (notes && notes.trim() !== '') {
                 try {
-                    await targetRejectSwapRequest(swapId, notes);
-                    showToast('Ruil afgewezen', 'success');
+                    const uitkomst = await targetRejectSwapRequest(swapId, notes);
+                    meldNaMutatie(uitkomst, 'Ruil afgewezen.');
                     renderSwaps();
                 } catch (error) {
                     console.error('Error rejecting swap:', error);
@@ -607,8 +623,8 @@ function attachSwapActionListeners() {
             const swapId = parseInt(btn.dataset.swapId);
             if (await showConfirm('Weet je zeker dat je dit ruilverzoek wilt annuleren?')) {
                 try {
-                    await cancelSwapRequest(swapId);
-                    showToast('Ruilverzoek geannuleerd', 'success');
+                    const uitkomst = await cancelSwapRequest(swapId);
+                    meldNaMutatie(uitkomst, 'Ruilverzoek geannuleerd.');
                     renderSwaps();
                 } catch (error) {
                     console.error('Error cancelling swap:', error);
@@ -641,11 +657,17 @@ function attachSwapActionListeners() {
             if (notes !== null) {
                 if (await showConfirm('Weet je zeker dat je deze dienst wilt overnemen?')) {
                     try {
-                        await acceptTakeoverRequest(requestId, notes);
-                        // Refresh shifts and swap requests
-                        await Promise.all([refreshShifts(), getSwapRequests()]);
-                        showToast('Dienst overgenomen. Je ziet hem nu in je planning.', 'success');
-                        switchView('planning'); // Go to planning to see the new shift
+                        // #285: de tweede verversing die hier stond was dubbel
+                        // werk, en een fout erin belandde in de catch hieronder
+                        // met de tekst "Fout bij overnemen" terwijl de overname
+                        // al gelukt was. acceptTakeoverRequest ververst zelf en
+                        // meldt of dat lukte.
+                        const uitkomst = await acceptTakeoverRequest(requestId, notes);
+                        if (meldNaMutatie(uitkomst, 'Dienst overgenomen. Je ziet hem nu in je planning.')) {
+                            switchView('planning');
+                        } else {
+                            renderSwaps();
+                        }
                     } catch (error) {
                         // #202: zie de toelichting bij de ruilknop hierboven.
                         if (magRusttijdOverrulen(error)) {
@@ -655,10 +677,14 @@ function attachSwapActionListeners() {
                                 return;
                             }
                             try {
-                                await acceptTakeoverRequest(requestId, notes, true);
-                                await Promise.all([refreshShifts(), getSwapRequests()]);
-                                showToast('Dienst overgenomen, met minder dan 11 uur rust.', 'warning');
-                                switchView('planning');
+                                const tweedeUitkomst = await acceptTakeoverRequest(requestId, notes, true);
+                                if (tweedeUitkomst && tweedeUitkomst.ververst === false) {
+                                    showToast('Dienst overgenomen, met minder dan 11 uur rust. Het scherm kon niet bijgewerkt worden; herlaad de pagina.', 'warning', 6000);
+                                    renderSwaps();
+                                } else {
+                                    showToast('Dienst overgenomen, met minder dan 11 uur rust.', 'warning');
+                                    switchView('planning');
+                                }
                                 return;
                             } catch (tweede) {
                                 console.error('Error accepting takeover (force):', tweede);

@@ -2464,6 +2464,31 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
       });
     }
 
+    // #301: verandert de dienst van dag, tijd of eigenaar, dan wijst een
+    // openstaand verzoek daarna naar iets anders dan waar de collega mee
+    // instemde. Die keurde een zaterdagochtend goed en kreeg na goedkeuring
+    // een andere dienst toegewezen.
+    //
+    // Alleen de velden die de dienst bepálen tellen mee: een notitie
+    // bijwerken of het reservevinkje omzetten verandert niets aan de afspraak.
+    const bepalendGewijzigd = oldShift && (
+      (userId !== undefined && userId !== null && Number(userId) !== Number(oldShift.userId)) ||
+      (date && date !== oldShift.date) ||
+      (startTime && startTime !== oldShift.startTime) ||
+      (endTime && endTime !== oldShift.endTime)
+    );
+    let geannuleerd = [];
+    if (bepalendGewijzigd) {
+      const open = await pool.query(
+        `UPDATE shift_swap_requests SET status = 'cancelled'
+         WHERE (requester_shift_id = $1 OR target_shift_id = $1)
+           AND status = 'pending'
+         RETURNING id, requester_user_id, target_user_id`,
+        [id]
+      );
+      geannuleerd = open.rows;
+    }
+
     const result = await pool.query(`
       UPDATE shifts
       SET user_id = COALESCE($1, user_id),
@@ -2497,8 +2522,37 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
       blockedOrigin = await blockDayIfEmpty(pool, oldShift.userId, oldShift.date, req.user.id, 'manual_move');
     }
 
-    await logAudit(req, 'UPDATE', 'shift', id, { before: oldShift, after: nieuw, blockedOrigin });
-    res.json({ shift: nieuw, blockedOrigin });
+    await logAudit(req, 'UPDATE', 'shift', id, {
+      before: oldShift, after: nieuw, blockedOrigin,
+      ...(geannuleerd.length > 0 ? { geannuleerdeVerzoeken: geannuleerd.map(r => r.id) } : {})
+    });
+
+    // #301: de betrokkenen verwittigen dat hun verzoek niet meer geldt, met
+    // dezelfde mail als de gewone annulatieroute. Fire-and-forget na de
+    // wijziging, zodat een trage mailservice het opslaan niet ophoudt.
+    if (geannuleerd.length > 0) {
+      (async () => {
+        try {
+          const betrokkenen = [...new Set(geannuleerd
+            .flatMap(r => [r.requester_user_id, r.target_user_id])
+            .filter(uid => uid && uid !== req.user.id))];
+          if (betrokkenen.length === 0) return;
+          const mensen = await pool.query(
+            'SELECT id, name, email, email_notifications_enabled FROM users WHERE id = ANY($1::int[])',
+            [betrokkenen]
+          );
+          const wie = await pool.query('SELECT name FROM users WHERE id = $1', [req.user.id]);
+          emailService.notifyRequestCancelled(
+            mensen.rows, wie.rows[0]?.name || 'Een beheerder',
+            { date: oldShift.date, start_time: oldShift.startTime, end_time: oldShift.endTime, team: oldShift.team }
+          );
+        } catch (e) {
+          console.error('Verwittigen na een geannuleerd verzoek mislukt:', e.message);
+        }
+      })();
+    }
+
+    res.json({ shift: nieuw, blockedOrigin, geannuleerdeVerzoeken: geannuleerd.length });
   } catch (err) {
     console.error('PUT /shifts/:id error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -2550,9 +2604,39 @@ v1.delete('/shifts/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Je hebt geen rechten om diensten te verwijderen' });
     }
 
+    // #301 en #317: shift_swap_requests verwijst met ON DELETE CASCADE naar
+    // shifts, dus een openstaand ruil- of overnameverzoek verdween hier
+    // spoorloos mee. De aanvrager zag zijn verzoek weg zonder uitleg en dacht
+    // dat de collega niet reageerde; bij de doelpersoon verdween de kaart uit
+    // "Actie vereist".
+    //
+    // De opkuis zelf is correct, alleen mag ze niet stil gebeuren. De
+    // openstaande verzoeken worden nu eerst expliciet geannuleerd, zodat er een
+    // reden en een tijdstip vastliggen, en daarna wordt iedereen verwittigd met
+    // dezelfde mail als de gewone annulatieroute.
+    const openVerzoeken = await client.query(
+      `SELECT id, requester_user_id, target_user_id, request_type
+       FROM shift_swap_requests
+       WHERE (requester_shift_id = $1 OR target_shift_id = $1)
+         AND status = 'pending'`,
+      [id]
+    );
+    if (openVerzoeken.rows.length > 0) {
+      await client.query(
+        `UPDATE shift_swap_requests SET status = 'cancelled'
+         WHERE id = ANY($1::int[])`,
+        [openVerzoeken.rows.map(r => r.id)]
+      );
+    }
+
     // Delete the shift (CASCADE handles shift_activities with shift_id set)
     await client.query('DELETE FROM shifts WHERE id = $1', [id]);
-    await logAudit(req, 'DELETE', 'shift', id, { shift: { id: shift.id, user_id: shift.user_id, team: shift.team, date: shift.date, source: shift.source } });
+    await logAudit(req, 'DELETE', 'shift', id, {
+      shift: { id: shift.id, user_id: shift.user_id, team: shift.team, date: shift.date, source: shift.source },
+      ...(openVerzoeken.rows.length > 0
+        ? { geannuleerdeVerzoeken: openVerzoeken.rows.map(r => r.id) }
+        : {})
+    });
 
     // Een manuele verwijdering is een bewuste keuze om die cel leeg te laten.
     // We leggen dat vast als shift_block zodat het concept de dag bij een
@@ -2570,7 +2654,32 @@ v1.delete('/shifts/:id', requireAuth, async (req, res) => {
     }
 
     await client.query('COMMIT');
-    res.json({ ok: true });
+
+    // Na de commit, fire-and-forget: een haperende mailservice mag een
+    // geslaagde verwijdering niet alsnog laten mislukken.
+    if (openVerzoeken.rows.length > 0) {
+      (async () => {
+        try {
+          const betrokkenen = [...new Set(openVerzoeken.rows
+            .flatMap(r => [r.requester_user_id, r.target_user_id])
+            .filter(uid => uid && uid !== userId))];
+          if (betrokkenen.length === 0) return;
+          const mensen = await pool.query(
+            'SELECT id, name, email, email_notifications_enabled FROM users WHERE id = ANY($1::int[])',
+            [betrokkenen]
+          );
+          const wie = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+          emailService.notifyRequestCancelled(
+            mensen.rows, wie.rows[0]?.name || 'Een beheerder',
+            { date: shift.date, start_time: null, end_time: null, team: shift.team }
+          );
+        } catch (e) {
+          console.error('Verwittigen na een geannuleerd verzoek mislukt:', e.message);
+        }
+      })();
+    }
+
+    res.json({ ok: true, geannuleerdeVerzoeken: openVerzoeken.rows.length });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('ERROR in DELETE /shifts/:id:', err);
@@ -3247,13 +3356,24 @@ v1.get('/swap-requests', requireAuth, async (req, res) => {
 
   try {
     // Lazy expiry: auto-expire pending requests where the shift date has passed
+    //
+    // #316: dit keek alleen naar requester_shift_id. Bij een ruil kan de dienst
+    // van de DOELPERSOON eerder vallen dan die van de aanvrager. Zo'n verzoek
+    // bleef op pending staan, terwijl target-approve het weigert met "Shifts
+    // zijn al voorbij". De doelpersoon hield dus een kaart onder "Actie
+    // vereist" die bij elke klik een foutmelding gaf, en kon hem alleen
+    // wegkrijgen door af te wijzen met een verplichte reden.
+    //
+    // Is een van beide diensten voorbij, dan kan de ruil niet meer doorgaan.
     await pool.query(`
       UPDATE shift_swap_requests sr
       SET status = 'expired', responded_at = NOW()
-      FROM shifts s
-      WHERE sr.requester_shift_id = s.id
-        AND sr.status IN ('pending')
-        AND s.date < CURRENT_DATE
+      WHERE sr.status = 'pending'
+        AND EXISTS (
+          SELECT 1 FROM shifts s
+          WHERE s.id IN (sr.requester_shift_id, sr.target_shift_id)
+            AND s.date < CURRENT_DATE
+        )
     `);
 
     let query;
@@ -3458,10 +3578,24 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Alleen de doelpersoon kan dit ruilverzoek accepteren' });
     }
 
+    // #316: deze twee controles weigerden wel, maar lieten het verzoek op
+    // 'pending' staan. De doelpersoon hield dus een kaart onder "Actie vereist"
+    // die bij elke klik dezelfde fout gaf, en kon hem alleen wegkrijgen door af
+    // te wijzen met een verplichte reden. Zo'n verzoek kan nooit meer slagen,
+    // dus krijgt het meteen een eindstatus, net als het overnameverzoek dat na
+    // #188 al zo werkt.
+    const kanNooitMeer = async (melding) => {
+      await client.query(
+        `UPDATE shift_swap_requests SET status = 'expired', responded_at = NOW() WHERE id = $1`,
+        [swapId]
+      );
+      await client.query('COMMIT');
+      return res.status(400).json({ error: melding, expired: true });
+    };
+
     // Verify shift ownership hasn't changed since swap was created
     if (swap.requester_current_user !== swap.requester_user_id || swap.target_current_user !== swap.target_user_id) {
-      await client.query('ROLLBACK').catch(() => {});
-      return res.status(400).json({ error: 'Een van de diensten is inmiddels hertoegewezen. Dit ruilverzoek is niet meer geldig.' });
+      return await kanNooitMeer('Een van de diensten is inmiddels hertoegewezen. Dit ruilverzoek is niet meer geldig.');
     }
 
     // Verify shifts not in past
@@ -3471,8 +3605,7 @@ v1.put('/swap-requests/:id/target-approve', requireAuth, async (req, res) => {
     const targetDate = parseLocalDate(swap.target_date);
 
     if (requesterDate < now || targetDate < now) {
-      await client.query('ROLLBACK').catch(() => {});
-      return res.status(400).json({ error: 'Shifts zijn al voorbij' });
+      return await kanNooitMeer('Een van de diensten is al voorbij. Dit ruilverzoek kan niet meer doorgaan.');
     }
 
     // #202: een ruil ging tot nu toe volledig langs de roosterregels heen. De

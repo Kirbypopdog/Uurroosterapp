@@ -260,7 +260,7 @@ const DragHandler = {
         const swapRequests = DataStore.swapRequests || [];
         return swapRequests.some(
             req => (req.requester_shift_id === shiftId || req.target_shift_id === shiftId) &&
-                   ['pending', 'pending_lead'].includes(req.status)
+                   req.status === 'pending'
         );
     },
 

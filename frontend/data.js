@@ -1085,20 +1085,31 @@ async function createSwapRequest(requestData) {
     }
 }
 
+// #285: na een geslaagde mutatie halen deze functies de lijsten opnieuw op.
+// Dat gebeurde binnen dezelfde try, en de fout werd doorgegooid. Mislukte die
+// verversing, dan meldde de aanroeper "Fout bij overnemen" terwijl de overname
+// wél was doorgegaan, en bleef de gebruiker met verouderde gegevens zitten.
+//
+// De verversing is geen onderdeel van de mutatie. Ze mag dus niet gooien; de
+// aanroeper krijgt terug of ze gelukt is en kan daar iets zachters over zeggen.
+async function _ververNaMutatie(...taken) {
+    try {
+        await Promise.all(taken.map(t => t()));
+        return true;
+    } catch (fout) {
+        console.error('Verversen na een geslaagde mutatie mislukt:', fout);
+        return false;
+    }
+}
+
 async function cancelSwapRequest(id) {
     try {
-        await dataApiFetch(`/swap-requests/${id}`, {
-            method: 'DELETE'
-        });
-
-        // Refresh swap requests list
-        await getSwapRequests();
-
-        return true;
+        await dataApiFetch(`/swap-requests/${id}`, { method: 'DELETE' });
     } catch (error) {
         console.error('Fout bij annuleren swap request:', error);
         throw error;
     }
+    return { ok: true, ververst: await _ververNaMutatie(getSwapRequests) };
 }
 
 async function targetApproveSwapRequest(id, responseNotes, force = false) {
@@ -1107,12 +1118,9 @@ async function targetApproveSwapRequest(id, responseNotes, force = false) {
             method: 'PUT',
             body: JSON.stringify({ responseNotes, ...(force ? { force: true } : {}) })
         });
-
-        // Refresh swap requests + shifts (target approval executes the swap)
-        await getSwapRequests();
-        await refreshShifts();
-
-        return true;
+        // De ruil is doorgevoerd; de verversing hierna mag niet meer falen op
+        // een manier die dat ongedaan lijkt te maken.
+        return { ok: true, ververst: await _ververNaMutatie(getSwapRequests, refreshShifts) };
     } catch (error) {
         console.error('Fout bij target approve swap request:', error);
         throw error;
@@ -1125,11 +1133,7 @@ async function targetRejectSwapRequest(id, responseNotes) {
             method: 'PUT',
             body: JSON.stringify({ responseNotes })
         });
-
-        // Refresh swap requests list
-        await getSwapRequests();
-
-        return true;
+        return { ok: true, ververst: await _ververNaMutatie(getSwapRequests) };
     } catch (error) {
         console.error('Fout bij target reject swap request:', error);
         throw error;
@@ -1165,8 +1169,8 @@ async function acceptTakeoverRequest(id, responseNotes, force = false) {
             method: 'PUT',
             body: JSON.stringify({ responseNotes, ...(force ? { force: true } : {}) })
         });
-        await getSwapRequests();
-        return true;
+        // De dienst staat nu op jouw naam. Alles hierna is bijwerken.
+        return { ok: true, ververst: await _ververNaMutatie(getSwapRequests, refreshShifts) };
     } catch (error) {
         console.error('Fout bij accepteren takeover:', error);
         throw error;

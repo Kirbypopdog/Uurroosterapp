@@ -739,6 +739,7 @@ describe('PUT /shifts/:id', () => {
       .mockResolvedValueOnce({ rows: [oud] })       // oude dienst ophalen
       .mockResolvedValueOnce({ rows: [] })          // closedDates
       .mockResolvedValueOnce({ rows: [] })          // validateShiftRules
+      .mockResolvedValueOnce({ rows: [] })          // #301: openstaande verzoeken annuleren
       .mockResolvedValueOnce({ rows: [nieuw] })     // UPDATE RETURNING
       .mockResolvedValueOnce({ rows: [] })          // blockDayIfEmpty: staat er nog iets?
       .mockResolvedValue({ rows: [] });             // INSERT block, logAudit
@@ -770,6 +771,7 @@ describe('PUT /shifts/:id', () => {
     pool.query
       .mockResolvedValueOnce({ rows: [oud] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })          // #301: openstaande verzoeken annuleren
       .mockResolvedValueOnce({ rows: [nieuw] })
       .mockResolvedValue({ rows: [] });
 
@@ -799,6 +801,7 @@ describe('PUT /shifts/:id', () => {
     pool.query
       .mockResolvedValueOnce({ rows: [oud] })                // oude dienst
       .mockResolvedValueOnce({ rows: [] })                   // validateShiftRules
+      .mockResolvedValueOnce({ rows: [] })                   // #301: openstaande verzoeken annuleren
       .mockResolvedValueOnce({ rows: [nieuw] })              // UPDATE RETURNING
       .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })  // er staat nog een dienst
       .mockResolvedValue({ rows: [] });
@@ -825,6 +828,7 @@ describe('PUT /shifts/:id', () => {
     pool.query
       .mockResolvedValueOnce({ rows: [eigenDienst] })      // oude dienst ophalen
       .mockResolvedValueOnce({ rows: [] })                 // validateShiftRules: buurdiensten
+      .mockResolvedValueOnce({ rows: [] })                 // #301: openstaande verzoeken annuleren
       .mockResolvedValueOnce({ rows: [bijgewerkt] })       // UPDATE RETURNING
       .mockResolvedValue({ rows: [] });                    // logAudit
     const token = makeToken({ id: 6, role: 'medewerker', name: 'Bram', team_id: 'vlot1' });

@@ -410,7 +410,18 @@ async function handleShiftDelete(shiftId = null) {
         ? `de dienst van ${getEmployee(shift.employeeId)?.name || 'deze medewerker'} op ${formatDate(shift.date)}`
         : 'deze dienst';
 
-    if (await showConfirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?`, 'Dienst verwijderen', { danger: true, confirmText: 'Verwijderen' })) {
+    // #301: het slepen weigerde al bij een openstaand verzoek, het
+    // verwijderpad in het formulier controleerde niets. De backend annuleert
+    // het verzoek nu netjes en verwittigt iedereen, maar dat is niets wat je
+    // per ongeluk wil doen, dus het staat in de vraag.
+    const openVerzoeken = (DataStore.swapRequests || []).filter(r =>
+        (Number(r.requester_shift_id) === Number(idToDelete) || Number(r.target_shift_id) === Number(idToDelete))
+        && r.status === 'pending');
+    const verzoekWaarschuwing = openVerzoeken.length > 0
+        ? `\n\nLet op: er ${openVerzoeken.length === 1 ? 'staat nog een verzoek' : `staan nog ${openVerzoeken.length} verzoeken`} open op deze dienst. ${openVerzoeken.length === 1 ? 'Dat wordt' : 'Die worden'} geannuleerd en de betrokkenen krijgen bericht.`
+        : '';
+
+    if (await showConfirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?${verzoekWaarschuwing}`, 'Dienst verwijderen', { danger: true, confirmText: 'Verwijderen' })) {
         // #270: zonder try/catch verdween een mislukte verwijdering spoorloos.
         // De modal bleef openstaan zoals hij was, er kwam geen toast, geen
         // rode regel, geen spinner. De beheerder dacht dat zijn klik niet was
