@@ -1,5 +1,15 @@
 // HET VLOT ROOSTERPLANNING - RUILVERZOEKEN EN OVERNAMES
 
+// #348: "Van Carla Demo op vrijdag 12 september 2026, 14:00 tot 22:00."
+function beschrijfVerzoekDienst(verzoek) {
+    if (!verzoek) return '';
+    const wie = verzoek.requester_name ? `Van ${verzoek.requester_name}` : 'Deze dienst';
+    const datum = verzoek.requester_shift_date ? ` op ${formatDate(verzoek.requester_shift_date)}` : '';
+    const tijd = (verzoek.requester_shift_start && verzoek.requester_shift_end)
+        ? `, ${verzoek.requester_shift_start} tot ${verzoek.requester_shift_end}` : '';
+    return `${wie}${datum}${tijd}.`;
+}
+
 async function renderSwaps() {
     const swapsList = DOM.swapsView.querySelector('#swaps-list');
 
@@ -534,7 +544,9 @@ function attachSwapActionListeners() {
                     ruil?.requester_shift_date,
                     'Accepteer je de ruil toch, dan werk je die dag.')) return;
 
-            const notes = await showInputPrompt('Wil je een bericht toevoegen?', 'Ruil accepteren');
+            const notes = await showInputPrompt(
+                `${beschrijfVerzoekDienst(ruil)}\n\nWil je een bericht toevoegen? (optioneel)`,
+                'Ruil accepteren', '', 'Ruil accepteren');
             if (notes !== null) {
                 try {
                     await targetApproveSwapRequest(swapId, notes);
@@ -619,7 +631,12 @@ function attachSwapActionListeners() {
                     verzoek?.requester_shift_date,
                     'Neem je de dienst toch over, dan werk je die dag.')) return;
 
-            const notes = await showInputPrompt('Wil je een bericht toevoegen?', 'Dienst overnemen');
+            // #348: de vraag ging alleen over het optionele bericht, terwijl je
+            // met deze stap een dienst op je naam zet. De onderliggende kaart is
+            // op dat moment verduisterd, dus de gegevens moeten in de vraag zelf.
+            const notes = await showInputPrompt(
+                `${beschrijfVerzoekDienst(verzoek)}\n\nWil je een bericht toevoegen? (optioneel)`,
+                'Dienst overnemen', '', 'Dienst overnemen');
 
             if (notes !== null) {
                 if (await showConfirm('Weet je zeker dat je deze dienst wilt overnemen?')) {

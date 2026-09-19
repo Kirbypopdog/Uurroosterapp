@@ -239,7 +239,7 @@ function renderConceptCard(draft, newestActiveId) {
                 ${status ? `<span class="concept-card-badge badge-${statusCls}">${status.label}</span>` : '<span class="concept-card-badge badge-draft">Concept</span>'}
             </div>
             <div class="concept-card-meta">
-                <span>${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers${isVakantie && holidayPeriod ? ` &middot; ${escapeHtml(holidayPeriod.name)}` : ''}</span>
+                <span>${escapeHtml(teamLabel)} &middot; ${empCount} ${empCount === 1 ? 'medewerker' : 'medewerkers'}${isVakantie && holidayPeriod ? ` &middot; ${escapeHtml(holidayPeriod.name)}` : ''}</span>
                 ${periodHtml}
                 <span>Bewerkt: ${dateStr} om ${timeStr}</span>
                 <span>Door: ${escapeHtml(draft.updatedByName || draft.createdByName || 'Onbekend')}${createdStr && createdStr !== dateStr ? ` &middot; Aangemaakt: ${createdStr}` : ''}</span>
@@ -1098,7 +1098,7 @@ function renderBuilderDrafts() {
                                 <strong>${escapeHtml(draft.name)}</strong>
                                 ${status ? `<span class="builder-draft-badge draft-badge-${status.cls}">${status.label}</span>` : ''}
                                 ${isDraftLockActive(draft.lockedAt) && draft.lockedBy !== AppState.currentUser?.id ? `<span class="builder-draft-badge draft-badge-locked"><i data-lucide="lock" class="lucide-xs"></i> In bewerking door ${escapeHtml(draft.lockedByName || 'iemand')}</span>` : ''}
-                                <span class="builder-draft-meta">${weekLabel} &middot; ${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers</span>
+                                <span class="builder-draft-meta">${weekLabel} &middot; ${escapeHtml(teamLabel)} &middot; ${empCount} ${empCount === 1 ? 'medewerker' : 'medewerkers'}</span>
                                 ${dateRange}
                                 <span class="builder-draft-meta">${escapeHtml(draft.createdByName || 'Onbekend')} &middot; ${dateStr}</span>
                             </div>

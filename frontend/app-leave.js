@@ -296,7 +296,7 @@ function renderLeaveRoundCard(r) {
             <div class="leave-round-card-meta">
                 <span>${r.blockCount || 0} vakantie${r.blockCount === 1 ? '' : 's'}</span>
                 <span>${leaveDatumKort(r.startDate)} – ${leaveDatumKort(r.endDate)}</span>
-                ${r.deadline ? `<span>Indienen vóór ${leaveDatumKort(r.deadline)}</span>` : ''}
+                ${r.deadline ? `<span${leaveDeadlineVoorbij(r) ? ' class="leave-deadline-voorbij"' : ''}>Indienen vóór ${leaveDatumKort(r.deadline)}${leaveDeadlineVoorbij(r) ? ' · verstreken' : ''}</span>` : ''}
                 ${beheer ? `<span>${r.submittedCount || 0} ingediend</span>` : ''}
             </div>
             ${eigen ? `<div class="leave-round-card-foot">${eigen}</div>` : ''}
@@ -381,7 +381,7 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
         <div class="leave-landing-head">
             <div>
                 <h3>${escapeHtml(round.name)}</h3>
-                ${round.deadline ? `<p class="text-muted text-sm">Indienen vóór ${escapeHtml(round.deadline)}</p>` : ''}
+                ${round.deadline ? `<p class="text-muted text-sm">Indienen bij voorkeur vóór ${leaveDatumKort(round.deadline)}</p>` : ''}
             </div>
             <div class="leave-header-actions">
                 ${canManageLeave() ? `
@@ -469,6 +469,14 @@ function leaveBlockHerstel(block, serverMap) {
     });
 }
 
+// #298: de deadline wordt nergens afgedwongen, en dat is een bewuste keuze:
+// de sluitknop is de grens. Maar een open ronde waarvan de richtdatum voorbij
+// is, is wel iets wat de beheerder moet zien — anders blijft ze stil openstaan.
+function leaveDeadlineVoorbij(round) {
+    if (!round || !round.deadline || round.status !== 'open') return false;
+    return round.deadline < formatDateYYYYMMDD(new Date());
+}
+
 function leaveDatumKort(iso) {
     return parseDateOnly(iso).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
 }
@@ -527,7 +535,16 @@ function renderLeaveStatusBanner(round, mySub, alleKlaar) {
     // Na bijgewerkte gesloten dagen kan een ingediende invulling gaten
     // hebben. "Je hebt al ingediend" zou dan geruststellen zonder reden.
     if (mySub?.submittedAt && alleKlaar === false) return '<div class="leave-banner leave-banner-warn">De gesloten dagen zijn aangepast. Vul de ontbrekende weken opnieuw in en dien opnieuw in.</div>';
-    if (mySub?.submittedAt)           return '<div class="leave-banner leave-banner-ok">Je hebt al ingediend, maar je kan nog aanpassen tot de deadline.</div>';
+    // #298: hier stond "je kan nog aanpassen tot de deadline", ook wanneer er
+    // helemaal geen deadline was ingevuld. En de deadline wordt nergens
+    // afgedwongen: de sluitknop is de echte grens. De tekst zegt nu wat er
+    // klopt, en noemt de richtdatum alleen als die bestaat.
+    if (mySub?.submittedAt) {
+        const tot = round.deadline
+            ? ` Aanpassen kan zolang de ronde openstaat; het is de bedoeling dat je klaar bent vóór ${leaveDatumKort(round.deadline)}.`
+            : ' Aanpassen kan zolang de ronde openstaat.';
+        return `<div class="leave-banner leave-banner-ok">Je hebt al ingediend.${tot}</div>`;
+    }
     return '<div class="leave-banner leave-banner-warn">Je hebt nog niets ingediend.</div>';
 }
 

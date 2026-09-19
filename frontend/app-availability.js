@@ -697,7 +697,9 @@ async function handleAvailabilitySave() {
         }
     } catch (error) {
         console.error('Error saving availability:', error);
-        showToast('Er ging iets mis bij het opslaan: ' + error.message, 'error');
+        // #361: hier stond error.message, dus een kale Engelse backendtekst
+        // kwam ongefilterd in de toast. Elders gaat alles door de vertaler.
+        showToast('Er ging iets mis bij het opslaan: ' + getUserFriendlyError(error), 'error');
     } finally {
         hideSectionLoading('availability-view');
     }

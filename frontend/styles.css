@@ -14025,3 +14025,10 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
     font-weight: 700;
     color: var(--text-primary);
 }
+
+/* #298: een open verlofronde waarvan de richtdatum voorbij is. Geen fout, wel
+   iets wat de beheerder moet zien: de ronde blijft anders stil openstaan. */
+.leave-deadline-voorbij {
+    color: var(--warn-text);
+    font-weight: 600;
+}

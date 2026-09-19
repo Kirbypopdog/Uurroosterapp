@@ -403,8 +403,11 @@ async function handleShiftDelete(shiftId = null) {
 
     // Get shift details for confirmation message
     const shift = getShift(idToDelete);
+    // #343: hier stond shift.employeeName, een veld dat niet bestaat, dus las
+    // er altijd "de dienst van deze medewerker". En shift.date is een ruwe
+    // ISO-datum, terwijl de app overal formatDate gebruikt.
     const shiftDescription = shift
-        ? `de dienst van ${shift.employeeName || 'deze medewerker'} op ${shift.date}`
+        ? `de dienst van ${getEmployee(shift.employeeId)?.name || 'deze medewerker'} op ${formatDate(shift.date)}`
         : 'deze dienst';
 
     if (await showConfirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?`, 'Dienst verwijderen', { danger: true, confirmText: 'Verwijderen' })) {

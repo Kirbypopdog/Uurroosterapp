@@ -312,6 +312,13 @@ function getUserFriendlyError(err) {
         return 'Je hebt geen rechten voor deze actie. Alleen een beheerder kan dit.';
     }
     if (msg.includes('Onvoldoende rechten')) return msg;
+    // #360: de backend antwoordt bij een onverwachte fout met de kale tekst
+    // "Server error", die zo in de dienstmodal belandde. Onvertaald, en zonder
+    // te zeggen wat de gebruiker dan kan doen.
+    if (msg === 'Server error' || msg === 'Internal server error' || msg.includes('500')) {
+        return 'De server kon dit niet verwerken. Probeer het opnieuw; blijft het misgaan, meld het dan.';
+    }
+    if (msg.includes('Onverwacht antwoord')) return msg;
     if (msg.includes('network') || msg.includes('fetch') || msg.includes('Failed to fetch')) return 'Verbindingsfout. Controleer je internetverbinding.';
     if (msg.includes('Te veel verzoeken')) return msg;
     return msg;
@@ -430,7 +437,9 @@ function zetPromptTitel(titel) {
     el.classList.toggle('hidden', !titel);
 }
 
-function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
+// #348: okText erbij, zodat de knop de actie kan benoemen in plaats van "OK"
+// te blijven bij een venster dat een dienst op je naam zet.
+function showInputPrompt(message, title = 'Invoer', defaultValue = '', okText = '') {
     return new Promise((resolve) => {
         const modal = document.getElementById('input-prompt-modal');
         const messageEl = document.getElementById('input-prompt-message');
@@ -441,6 +450,7 @@ function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
         zetPromptTitel(title);
         messageEl.textContent = message;
         inputEl.value = defaultValue;
+        okBtn.textContent = okText || 'OK';
         modal.classList.remove('hidden');
         setTimeout(() => inputEl.focus(), 50);
 
@@ -448,6 +458,7 @@ function showInputPrompt(message, title = 'Invoer', defaultValue = '') {
         const handleCancel = () => { cleanup(); resolve(null); };
         const cleanup = () => {
             modal.classList.add('hidden');
+            okBtn.textContent = 'OK';
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);
             modal.removeEventListener('mousedown', handleBackdropClick);

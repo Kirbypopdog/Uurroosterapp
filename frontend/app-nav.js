@@ -393,17 +393,30 @@ function renderHomeAlerts(role) {
         }
     }
 
-    // 5. Ruilverzoeken ouder dan 48u
+    // 5. Openstaande verzoeken ouder dan 48u
+    //
+    // #321: de tekst zei "wacht op goedkeuring", maar er is helemaal geen
+    // leadgoedkeuringsstap: een ruil handelt de doelpersoon zelf af en een
+    // overname is een aanbod waar niemand op hoeft te beslissen. De filter nam
+    // bovendien álle pending verzoeken mee, dus ook die aanbiedingen. De
+    // melding klopt nu met wat er staat: er ligt iets open, en het ligt er lang.
     const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000);
-    const oldPending = (DataStore.swapRequests || []).filter(r =>
+    const oudOpen = (DataStore.swapRequests || []).filter(r =>
         r.status === 'pending' && new Date(r.createdAt || r.created_at) < cutoff48h
     );
-    if (oldPending.length > 0) {
+    if (oudOpen.length > 0) {
         const key = 'old-swaps';
         if (!dismissedKeys.has(key)) {
-            const count = oldPending.length;
+            const aantal = oudOpen.length;
+            const ruilen = oudOpen.filter(r => (r.request_type || r.requestType) === 'swap').length;
+            const overnames = aantal - ruilen;
+            // Benoemen wat het is, zodat duidelijk is waar je moet kijken.
+            const soorten = [
+                ruilen ? `${ruilen} ruilverzoek${ruilen !== 1 ? 'en' : ''}` : null,
+                overnames ? `${overnames} overnameverzoek${overnames !== 1 ? 'en' : ''}` : null
+            ].filter(Boolean).join(' en ');
             warnings.push({ level: 'info', key,
-                text: `${count} ruilverzoek${count !== 1 ? 'en' : ''} wacht${count === 1 ? '' : 'en'} al meer dan 48u op goedkeuring` });
+                text: `${soorten} ${aantal === 1 ? 'staat' : 'staan'} al meer dan 48u open` });
         }
     }
 
@@ -1338,6 +1351,11 @@ function changeViewMode(mode) {
 }
 
 function updatePeriodDisplay() {
+    // #289: de kop boven de planning stond vast op "Weekoverzicht", ook in de
+    // dagweergave. Hij hoort te zeggen waar je naar kijkt.
+    const kop = document.getElementById('planning-view-title');
+    if (kop) kop.textContent = AppState.viewMode === 'day' ? 'Dagoverzicht' : 'Weekoverzicht';
+
     if (AppState.viewMode === 'day') {
         // Day view: show "Week 6 · Maandag, 3 maart 2026"
         if (!AppState.currentWeekStart) {

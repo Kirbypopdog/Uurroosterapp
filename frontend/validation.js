@@ -73,7 +73,13 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
                 // hernoemd. 'code' is waar de code op mag testen.
                 code: 'rust',
                 rule: `${minHoursBetweenShifts}-uur regel`,
-                message: `${employeeName} heeft minder dan ${minHoursBetweenShifts} uur rust tussen diensten (${displayHours} uur tussen ${formatDate(existingShift.date)} en ${formatDate(newShift.date)})`,
+                // #346: hier stonden alleen twee datums. Bij twee diensten op
+                // dezelfde dag las dat als "tussen maandag 31 augustus en
+                // maandag 31 augustus", en door de volgorde waarin de
+                // kandidaten binnenkomen stonden ze bij een dagovergang vaak
+                // omgekeerd. De tijden erbij, en chronologisch gezet, maken
+                // meteen duidelijk om welke twee diensten het gaat.
+                message: `${employeeName} heeft minder dan ${minHoursBetweenShifts} uur rust tussen diensten (${displayHours} uur ${beschrijfRustPaar(existingShift, newShift)})`,
                 shift1: existingShift,
                 shift2: newShift
             });
@@ -81,6 +87,15 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
     });
 
     return { errors, warnings };
+}
+
+// #346: "tussen ma 31 aug 22:00-07:00 en di 1 sep 09:00-17:00". De vroegste
+// dienst komt eerst, ongeacht in welke volgorde de validatie ze aanbood.
+function beschrijfRustPaar(a, b) {
+    const sleutel = (sh) => `${sh.date} ${sh.startTime}`;
+    const [eerste, tweede] = sleutel(a) <= sleutel(b) ? [a, b] : [b, a];
+    const kort = (sh) => `${formatDate(sh.date)} ${sh.startTime}-${sh.endTime}`;
+    return `tussen ${kort(eerste)} en ${kort(tweede)}`;
 }
 
 // #257: beide regels hieronder haalden met DataStore.shifts.filter ALLE
@@ -720,5 +735,6 @@ console.log('Validation systeem geladen');
 // This does not affect browser behavior since `module` is not defined there.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { parseDateTime, getShiftEndDateTime, getHoursBetweenShifts, shiftsOverlap,
-                     _schuifDatum, dienstenRondDatum, VALIDATIE_MARGE_DAGEN };
+                     _schuifDatum, dienstenRondDatum, VALIDATIE_MARGE_DAGEN,
+                     beschrijfRustPaar };
 }
