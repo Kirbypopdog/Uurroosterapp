@@ -215,6 +215,18 @@ function showApp() {
             const draft = drafts.find(d => String(d.id) === savedDraftId);
             if (draft) {
                 doLoadDraft(draft); // restores AppState incl. meetings, calls renderBuilder()
+                // #304: na een herlading stond er wel een concept open maar nam
+                // niemand de vergrendeling opnieuw. Meestal staat ze nog op
+                // dezelfde gebruiker, maar na de vervaltermijn niet meer, en
+                // dan bewerken twee mensen hetzelfde concept zonder dat iemand
+                // iets ziet. Niet blokkerend: het scherm staat er al.
+                if (DataStore._draftsFromTable && typeof lockScheduleDraft === 'function') {
+                    lockScheduleDraft(draft.id, false).then(res => {
+                        if (!res.ok && res.status === 423) {
+                            showToast(`Dit concept wordt intussen bewerkt door ${res.lockedByName || 'iemand anders'}. Je wijzigingen worden niet bewaard zolang dat zo is.`, 'warning');
+                        }
+                    }).catch(fout => console.error('Vergrendeling na herladen mislukt:', fout));
+                }
                 return;
             }
         }

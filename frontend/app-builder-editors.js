@@ -261,13 +261,17 @@ function calculateBuilderShiftHours(assignment) {
     });
 }
 
+// #344: geeft null terug wanneer geen template past, niet de tijdreeks zelf.
+// Het blok in de bouwer toont daaronder al btb-time met precies diezelfde
+// tijden. Stond de tijdreeks ook boven, dan kreeg elke dienst die niet exact
+// een template is twee identieke regels in een cel van 55 pixels, waarvan de
+// bovenste afgekapt werd tot "09:00-17:...".
 function getTemplateNameForTimes(startTime, endTime) {
     const templates = DataStore.settings.shiftTemplates || {};
     const match = Object.entries(templates).find(([key, t]) =>
         t.start === startTime && t.end === endTime
     );
-    if (match) return match[1].name;
-    return `${startTime}-${endTime}`;
+    return match ? match[1].name : null;
 }
 
 function calcHoursBetweenTwoAssignments(shift1, shift2) {

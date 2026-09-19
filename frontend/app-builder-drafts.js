@@ -329,10 +329,35 @@ function showNewConceptTypeModal() {
     overlay.querySelector('#concept-type-cancel').addEventListener('click', () => overlay.remove());
     // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
     // en de muis buiten het kader loslaat.
-    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.addEventListener('mousedown', (e) => {
+        // #359: niet wegklikken terwijl het concept wordt aangemaakt, anders
+        // verdwijnt de dialoog alsnog voor de server geantwoord heeft.
+        if (e.target === overlay && !overlay.querySelector('#concept-type-confirm').disabled) overlay.remove();
+    });
 
-    overlay.querySelector('#concept-type-confirm').addEventListener('click', async () => {
+    // #359: de dialoog sloot vroeger meteen, nog voor de POST vertrok. Bij een
+    // trage aanmaak (een koude Render-instantie) gebeurde er zichtbaar niets,
+    // en bij een fout was de ingevulde naam weg. De dialoog blijft nu staan tot
+    // het concept er echt is. De fout komt in de dialoog zelf, niet als toast
+    // op een scherm waar de gebruiker niet meer is.
+    const bevestigKnop = overlay.querySelector('#concept-type-confirm');
+    const annuleerKnop = overlay.querySelector('#concept-type-cancel');
+    const sluitKnop = overlay.querySelector('.modal-close');
+    const foutVak = document.createElement('p');
+    foutVak.className = 'text-sm text-danger mt-md hidden';
+    foutVak.setAttribute('role', 'alert');
+    overlay.querySelector('.modal-body').appendChild(foutVak);
+
+    const zetBezig = (bezig) => {
+        bevestigKnop.disabled = bezig;
+        annuleerKnop.disabled = bezig;
+        sluitKnop.disabled = bezig;
+        bevestigKnop.textContent = bezig ? 'Aanmaken…' : 'Aanmaken';
+    };
+
+    bevestigKnop.addEventListener('click', async () => {
         if (blokkeerBijMislukteDraftLoad()) return;
+        if (bevestigKnop.disabled) return;
 
         const type = overlay.querySelector('input[name="concept-type"]:checked')?.value || 'basis';
         let holidayPeriodId = null;
@@ -348,19 +373,6 @@ function showNewConceptTypeModal() {
 
         const nameInputEl = overlay.querySelector('#concept-name-input');
         const conceptName = (nameInputEl?.value || '').trim() || (type === 'vakantie' ? 'Vakantieconcept' : 'Basisrooster');
-
-        overlay.remove();
-
-        // Initialize new concept in AppState
-        AppState.builderGrid = {};
-        AppState.builderGridByWeek = {};
-        AppState.builderStaffingRules = {};
-        AppState.builderStaffingRulesByWeek = {};
-        AppState.builderShowStaffingEditor = false;
-        AppState.builderShowMeetingsEditor = false;
-        AppState.builderMeetings = {};
-        AppState.builderLoadedDraftId = null;
-        AppState.builderLoadedDraftName = conceptName;
 
         // Determine cycle length: for vakantie concepts, calculate from period dates
         let initCycleLength = 1;
@@ -380,15 +392,11 @@ function showNewConceptTypeModal() {
         for (let w = 1; w <= initCycleLength; w++) {
             weeksInit[String(w)] = { closedDays: [], label: 'alle dagen open' };
         }
-        AppState.builderPattern = {
+        const nieuwPatroon = {
             cycleLength: initCycleLength,
             referenceDate: getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '',
             weeks: weeksInit
         };
-        AppState.builderIsDirty = false;
-        AppState.builderWeekNumber = 1;
-        AppState.builderConceptType = type;
-        AppState.builderHolidayPeriodId = holidayPeriodId;
 
         // Immediately save new empty concept to DB so auto-save has a valid ID
         const newDraftId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -397,20 +405,28 @@ function showNewConceptTypeModal() {
             name: conceptName,
             teamFilter: AppState.builderTeamFilter,
             weekNumber: 1,
-            grid: { _multiWeek: true, _pattern: AppState.builderPattern },
+            grid: { _multiWeek: true, _pattern: nieuwPatroon },
             validFrom: null,
             validUntil: null,
             type,
             holidayPeriodId: holidayPeriodId || null
         };
+
+        // #359: de AppState pas aanraken als het concept er is. Voorheen werd
+        // het raster al leeggemaakt voor de POST, dus een mislukte aanmaak liet
+        // de bouwer leeg achter met de naam van een concept dat niet bestaat.
+        let draftId = newDraftId;
+        let draftNaam = conceptName;
+        foutVak.classList.add('hidden');
+        zetBezig(true);
         try {
             if (DataStore._draftsFromTable) {
                 const apiResult = await createScheduleDraft(draftData);
                 const savedDraft = apiResult.draft;
                 if (!DataStore.settings.schedule_drafts) DataStore.settings.schedule_drafts = [];
                 DataStore.settings.schedule_drafts.push(savedDraft);
-                AppState.builderLoadedDraftId = savedDraft.id;
-                AppState.builderLoadedDraftName = savedDraft.name;
+                draftId = savedDraft.id;
+                draftNaam = savedDraft.name;
             } else {
                 draftData.createdBy = AppState.currentUser?.id;
                 draftData.createdByName = AppState.currentUser?.name || 'Onbekend';
@@ -419,13 +435,40 @@ function showNewConceptTypeModal() {
                 const drafts = [...(DataStore.settings.schedule_drafts || []), draftData];
                 await saveSettings('schedule_drafts', drafts);
                 DataStore.settings.schedule_drafts = drafts;
-                AppState.builderLoadedDraftId = newDraftId;
-                AppState.builderLoadedDraftName = conceptName;
             }
         } catch (err) {
             console.error('Error creating draft:', err);
-            showToast('Fout bij aanmaken concept', 'error');
+            zetBezig(false);
+            foutVak.textContent = `${getUserFriendlyError(err)} Je invulling blijft staan.`;
+            foutVak.classList.remove('hidden');
             return;
+        }
+
+        overlay.remove();
+
+        // Initialize new concept in AppState
+        AppState.builderGrid = {};
+        AppState.builderGridByWeek = {};
+        AppState.builderStaffingRules = {};
+        AppState.builderStaffingRulesByWeek = {};
+        AppState.builderShowStaffingEditor = false;
+        AppState.builderShowMeetingsEditor = false;
+        AppState.builderMeetings = {};
+        AppState.builderPattern = nieuwPatroon;
+        AppState.builderIsDirty = false;
+        AppState.builderWeekNumber = 1;
+        AppState.builderConceptType = type;
+        AppState.builderHolidayPeriodId = holidayPeriodId;
+        AppState.builderLoadedDraftId = draftId;
+        AppState.builderLoadedDraftName = draftNaam;
+
+        // #304: een nieuw concept nam de vergrendeling niet, terwijl elk concept
+        // dat je via de lijst opent dat wel doet. Zonder lock kan een tweede
+        // beheerder er meteen in, en ontbreekt de badge "In bewerking door X".
+        if (DataStore._draftsFromTable) {
+            lockScheduleDraft(draftId, false).catch(fout => {
+                console.error('Vergrendelen van het nieuwe concept mislukt:', fout);
+            });
         }
 
         AppState.builderScreen = 'editor';
@@ -496,20 +539,43 @@ function showDraftSaveModal() {
     });
 }
 
+// #332: elk vroeg-returnpad hieronder laat de bouwer staan waar hij stond.
+// De aanroepers zetten builderScreen niet meer vooraf op 'editor'; dat doet
+// doLoadDraft pas als het laden echt doorgaat. Anders bleef er een spookeditor
+// achter met de titel "Nieuw concept" en het raster van het vorige concept.
 async function loadBuilderDraft(draftId) {
     const drafts = DataStore.settings.schedule_drafts || [];
     const draft = drafts.find(d => d.id === draftId);
-    if (!draft) return;
+    if (!draft) {
+        showToast('Dit concept bestaat niet meer. Ververs de lijst.', 'error');
+        return;
+    }
 
     // Try to acquire lock
-    const lockResult = await lockScheduleDraft(draftId, false);
+    // #332: lockScheduleDraft gebruikt een kale fetch en gooit dus bij een
+    // netwerkfout. Zonder deze catch werd dat een stille onbehandelde rejection
+    // en gebeurde er op het scherm niets.
+    let lockResult;
+    try {
+        lockResult = await lockScheduleDraft(draftId, false);
+    } catch (fout) {
+        console.error('Vergrendelen van het concept mislukt:', fout);
+        showToast('Het concept kon niet vergrendeld worden. Controleer je verbinding en probeer opnieuw.', 'error');
+        return;
+    }
     if (!lockResult.ok && lockResult.status === 423) {
         const force = await showConfirm(
             `Dit concept wordt momenteel bewerkt door ${lockResult.lockedByName || 'iemand anders'}. Wil je het toch openen? De andere bewerker verliest dan zijn vergrendeling.`,
             'Concept in gebruik'
         );
         if (!force) return;
-        await lockScheduleDraft(draftId, true);
+        try {
+            await lockScheduleDraft(draftId, true);
+        } catch (fout) {
+            console.error('Vergrendeling overnemen mislukt:', fout);
+            showToast('De vergrendeling kon niet overgenomen worden. Controleer je verbinding en probeer opnieuw.', 'error');
+            return;
+        }
     }
 
     if (AppState.builderIsDirty) {
@@ -523,6 +589,10 @@ async function loadBuilderDraft(draftId) {
 }
 
 function doLoadDraft(draft) {
+    // #305: de bewaarstatus hoort bij het concept dat je verlaat, niet bij het
+    // concept dat je opent. Wissen vóór de render, anders toont de statusregel
+    // van B meteen "Bewaard om 14:30" van A.
+    startBuilderAutoSave();
     const grid = draft.grid || {};
     AppState.builderTeamFilter = draft.teamFilter || null;
     AppState.builderGridByWeek = {};

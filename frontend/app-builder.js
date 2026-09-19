@@ -763,7 +763,7 @@ function renderBuilderEmployeeRow(employee) {
             html += `<div class="builder-timeline-block ${teamColor}${pos.isOvernight ? ' nacht' : ''}${reserveClass}"
                 style="left:${pos.leftPct.toFixed(1)}%;width:${widthStyle}"
                 data-start="${assignment.startTime}" data-end="${assignment.endTime}">
-                ${reserveBadge}<span class="btb-label">${escapeHtml(templateName)}</span>
+                ${reserveBadge}${templateName ? `<span class="btb-label">${escapeHtml(templateName)}</span>` : ''}
                 <span class="btb-time">${assignment.startTime}-${assignment.endTime}</span>
             </div>`;
 
@@ -1385,7 +1385,14 @@ function scheduleBuilderAutoSave() {
     AppState.builderAutoSaveTimer = setTimeout(() => autoSaveBuilderDraft(), 3000);
 }
 
+// #305: ook builderSaveState wissen. renderBuilderSaveStatus leest die eerst
+// en valt pas daarna terug op builderIsDirty en builderAutoSavedAt. Bleef hij
+// staan, dan toonde een pas geopend concept "Bewaard om 14:30" van het vorige,
+// of een rood "Niet bewaard. Opnieuw proberen" voor een concept waar niets mis
+// mee is. Deze regel is het enige signaal of je werk veilig is, dus hij mag
+// nooit over het vorige concept gaan.
 function startBuilderAutoSave() {
+    AppState.builderSaveState = null;
     AppState.builderAutoSavedAt = null;
 }
 
@@ -1479,7 +1486,8 @@ function attachBuilderOverviewListeners(container) {
     container.querySelectorAll('.concept-card-load, .concept-card-edit, .concept-card-open').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            AppState.builderScreen = 'editor';
+            // #332: builderScreen niet hier zetten. doLoadDraft doet dat zelf,
+            // en alleen als het laden ook echt doorgaat.
             loadBuilderDraft(btn.dataset.draftId);
         });
     });
@@ -1490,7 +1498,6 @@ function attachBuilderOverviewListeners(container) {
     container.querySelectorAll('.builder-concept-card[data-draft-id]').forEach(kaart => {
         kaart.addEventListener('click', (e) => {
             if (e.target.closest('button, a, input, select')) return;
-            AppState.builderScreen = 'editor';
             loadBuilderDraft(kaart.dataset.draftId);
         });
     });

@@ -4379,6 +4379,10 @@ v1.post('/schedule-drafts', requireAuth, requireRole('admin', 'roosterverantwoor
   }
 });
 
+// Een vergrendeling die niemand vrijgeeft (een gesloten tabblad) moet vanzelf
+// vervallen. De PUT hieronder schuift ze op bij elke geslaagde autosave (#304).
+const DRAFT_LOCK_TTL_MS = 30 * 60 * 1000; // 30 minuten
+
 v1.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
   const { name, weekNumber, teamFilter, grid, lastAppliedAt, lastAppliedBy, validFrom, validUntil, type, holidayPeriodId } = req.body;
@@ -4389,15 +4393,26 @@ v1.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantw
       'SELECT locked_by, locked_by_name, locked_at FROM schedule_drafts WHERE id = $1',
       [id]
     );
+    let vernieuwLock = false;
     if (lockCheck.rows.length > 0) {
       const { locked_by, locked_by_name, locked_at } = lockCheck.rows[0];
-      const lockExpired = !locked_at || (Date.now() - new Date(locked_at).getTime()) > 30 * 60 * 1000;
+      const lockExpired = !locked_at || (Date.now() - new Date(locked_at).getTime()) > DRAFT_LOCK_TTL_MS;
       if (locked_by && locked_by !== req.user.id && !lockExpired) {
         return res.status(423).json({ error: `Concept is vergrendeld door ${locked_by_name}` });
       }
+      // #304: de hartslag. De frontend nam de vergrendeling één keer bij het
+      // openen en vernieuwde ze nooit, terwijl ze na DRAFT_LOCK_TTL_MS vervalt.
+      // Wie langer dan dat in een concept werkt, verloor zijn vergrendeling
+      // zonder het te weten, en een tweede beheerder kon het openen zonder de
+      // waarschuwing die hij een minuut eerder wel zou krijgen. Elke geslaagde
+      // autosave schuift ze nu op. Wie niets wijzigt houdt de vervaltermijn,
+      // en dat is precies de bedoeling: er is geen unlock bij het sluiten van
+      // een tabblad, dus de TTL is de ontsnapping voor achtergelaten locks.
+      vernieuwLock = locked_by === req.user.id;
     }
 
     const setClauses = ['updated_at = NOW()'];
+    if (vernieuwLock) setClauses.push('locked_at = NOW()');
     const params = [];
     let paramIndex = 1;
 
@@ -4456,8 +4471,6 @@ v1.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roostervera
 });
 
 // ===== LOCK / UNLOCK SCHEDULE DRAFT =====
-const DRAFT_LOCK_TTL_MS = 30 * 60 * 1000; // 30 minuten
-
 v1.post('/schedule-drafts/:id/lock', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
   const { force = false } = req.body || {};
