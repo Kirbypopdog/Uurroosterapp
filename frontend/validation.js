@@ -335,20 +335,23 @@ function validateMaxConsecutiveDays(employeeId, newShift, excludeShiftId = null)
     const targetStr = newShift.date;
     let consecutiveCount = 1;
 
+    // #296: ook hier formatDateYYYYMMDD. Het middaguur maskeerde de
+    // tijdzoneverschuiving alleen zolang de gebruiker dicht bij UTC zit; de
+    // lokale helper heeft die aanname niet nodig.
     // Count backwards
-    let checkDate = new Date(targetStr + 'T12:00:00');
+    let checkDate = parseDateOnly(targetStr);
     while (true) {
         checkDate.setDate(checkDate.getDate() - 1);
-        const dateStr = checkDate.toISOString().split('T')[0];
+        const dateStr = formatDateYYYYMMDD(checkDate);
         if (uniqueDates.includes(dateStr)) consecutiveCount++;
         else break;
     }
 
     // Count forwards
-    checkDate = new Date(targetStr + 'T12:00:00');
+    checkDate = parseDateOnly(targetStr);
     while (true) {
         checkDate.setDate(checkDate.getDate() + 1);
-        const dateStr = checkDate.toISOString().split('T')[0];
+        const dateStr = formatDateYYYYMMDD(checkDate);
         if (uniqueDates.includes(dateStr)) consecutiveCount++;
         else break;
     }
@@ -456,9 +459,15 @@ function generateSuggestions(error, shiftData) {
                 }
 
                 // Suggest the next day
+                // #296: formatDateYYYYMMDD, niet toISOString. parseDateOnly geeft
+                // lokale middernacht terug, en in Belgische tijd draait
+                // toISOString die dag weer een dag terug. De plus één en de min
+                // één hieven elkaar op, dus de knop "Verplaats naar" zette het
+                // datumveld op de dag waar de dienst al stond. Opslaan gaf dan
+                // exact dezelfde elf-uursfout, en de gebruiker draaide rondjes.
                 const nextDay = new Date(shiftDate);
                 nextDay.setDate(nextDay.getDate() + 1);
-                const nextDayStr = nextDay.toISOString().split('T')[0];
+                const nextDayStr = formatDateYYYYMMDD(nextDay);
                 suggestions.push({
                     label: `Verplaats naar ${formatDate(nextDayStr)}`,
                     field: 'date',

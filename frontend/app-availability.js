@@ -383,7 +383,15 @@ function updateAbsenceDateInfo() {
         const end = parseDateOnly(endDate);
 
         if (end >= start) {
-            const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+            const days = aantalDagenInclusief(start, end);
+            // #310: boven het plafond niet doorrekenen. De conflictscan loopt
+            // dag per dag door de volledige shiftlijst, dus bij een typfout van
+            // tweehonderd jaar bevriest het veld bij het verlaten ervan.
+            if (days > MAX_AFWEZIGHEIDSDAGEN) {
+                infoDiv.innerHTML = `<span class="error-text">${days} dagen geselecteerd. Dat is meer dan ${MAX_AFWEZIGHEIDSDAGEN}. Controleer de einddatum.</span>`;
+                infoDiv.classList.add('error');
+                return;
+            }
             infoDiv.innerHTML = `<span class="info-badge">${days} dag${days !== 1 ? 'en' : ''} geselecteerd</span>`;
             infoDiv.classList.remove('error');
 
@@ -481,6 +489,24 @@ function openAvailabilityModal(employeeId = null, date = null) {
 
     // Populate employee dropdown
     populateAbsenceEmployeeDropdown();
+
+    // #310: een venster rond vandaag op beide datumvelden. Zonder min en max
+    // kwam een typfout als 2206 in plaats van 2026 ongehinderd door, waarna
+    // updateAbsenceDateInfo ruim 65.000 dagen doorliep en per dag de volledige
+    // shiftlijst filterde. Ruim genomen, want een afwezigheid in het verleden
+    // corrigeren moet mogelijk blijven.
+    const venster = (verschuiving) => {
+        const d = new Date();
+        d.setFullYear(d.getFullYear() + verschuiving);
+        return formatDateYYYYMMDD(d);
+    };
+    const vroegst = venster(-5);
+    const laatst = venster(5);
+    [startDateInput, endDateInput].forEach(veld => {
+        if (!veld) return;
+        veld.min = vroegst;
+        veld.max = laatst;
+    });
 
     // Check if opening for specific employee/date or general
     if (employeeId && date) {
@@ -586,6 +612,23 @@ async function handleAvailabilitySave() {
     if (endDate < startDate) {
         showToast('Einddatum moet na startdatum liggen', 'warning');
         return;
+    }
+
+    // #310: hetzelfde plafond als de route, plus een vraag bij een bereik dat
+    // groot is maar niet onmogelijk. Een afwezigheid van meer dan twee maanden
+    // komt voor, een van tweehonderd jaar is altijd een typfout.
+    const aantalDagen = aantalDagenInclusief(startDate, endDate);
+    if (aantalDagen > MAX_AFWEZIGHEIDSDAGEN) {
+        showToast(`Dit bereik beslaat ${aantalDagen} dagen. Maximaal ${MAX_AFWEZIGHEIDSDAGEN} dagen per registratie. Controleer de einddatum.`, 'warning');
+        return;
+    }
+    if (aantalDagen > BEVESTIG_AFWEZIGHEIDSDAGEN) {
+        const door = await showConfirm(
+            `Je staat op het punt ${aantalDagen} dagen afwezigheid te registreren, van ${formatDate(startDate)} tot en met ${formatDate(endDate)}. Klopt dat?`,
+            'Groot datumbereik',
+            { confirmText: `Ja, ${aantalDagen} dagen registreren` }
+        );
+        if (!door) return;
     }
 
     try {
@@ -723,7 +766,7 @@ async function handleRemoveAbsence() {
         return;
     }
 
-    const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+    const days = aantalDagenInclusief(start, end);
 
     if (!await showConfirm(`Afwezigheid verwijderen voor ${days} dag${days !== 1 ? 'en' : ''}?`,
         'Afwezigheid verwijderen', { danger: true, confirmText: 'Afwezigheid verwijderen' })) {

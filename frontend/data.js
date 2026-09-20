@@ -23,6 +23,21 @@ function parseDateOnly(value) {
     return new Date(value);
 }
 
+// #313: (eind - start) / 86400000 klopt niet in de week waarin de zomertijd
+// eindigt. Die zondag duurt 25 uur, dus de deling komt net boven een heel
+// getal uit en Math.ceil telt er een dag bij. Voor 24 tot en met 26 oktober
+// 2026 gaf dat 4 in plaats van 3. Door beide datums naar UTC-middernacht te
+// vertalen verdwijnt de zomertijd uit de berekening: een UTC-dag duurt altijd
+// 24 uur. Inclusief beide uiteinden, want zo tellen de schermen die dit
+// gebruiken hun dagen.
+function aantalDagenInclusief(start, end) {
+    const a = parseDateOnly(start);
+    const b = parseDateOnly(end);
+    const msA = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
+    const msB = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
+    return Math.round((msB - msA) / 86400000) + 1;
+}
+
 function cloneSettings(settings) {
     if (typeof structuredClone === 'function') {
         return structuredClone(settings);

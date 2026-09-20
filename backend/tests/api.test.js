@@ -1245,6 +1245,91 @@ describe('POST /availability', () => {
   });
 });
 
+// ===== POST /availability/sick-with-takeover =====
+
+// Regressie #310: de lus liep van startDate tot endDate zonder bovengrens. Een
+// typfout als 2206 in plaats van 2026 schreef ruim 65.000 rijen weg in één
+// transactie, en elke rij met een gevuld type telt daarna als afwezigheid, dus
+// de shiftgeneratie bleef jarenlang geblokkeerd.
+describe('POST /availability/sick-with-takeover (#310)', () => {
+  test('weigert een bereik boven het maximum, zonder de database aan te raken', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    pool.query.mockClear();
+    const res = await request(app)
+      .post('/availability/sick-with-takeover')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, startDate: '2026-09-01', endDate: '2206-09-01', type: 'ziek' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('65744 dagen');
+    // geen BEGIN, geen INSERT: de grens ligt voor de transactie
+    const schrijfacties = pool.query.mock.calls.filter(
+      c => typeof c[0] === 'string' && /BEGIN|INSERT/i.test(c[0])
+    );
+    expect(schrijfacties).toHaveLength(0);
+  });
+
+  test('weigert een datum die niet bestaat', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/availability/sick-with-takeover')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, startDate: '2026-02-31', endDate: '2026-03-02', type: 'ziek' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Ongeldige datum');
+  });
+
+  test('weigert een einddatum die voor de startdatum ligt', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/availability/sick-with-takeover')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, startDate: '2026-09-10', endDate: '2026-09-01', type: 'ziek' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('einddatum ligt voor de startdatum');
+  });
+
+  test('laat precies het maximum door en schrijft de dagen in één opdracht weg', async () => {
+    mockActiveUser();
+    const client = {
+      query: jest.fn(),
+      release: jest.fn()
+    };
+    pool.connect.mockResolvedValueOnce(client);
+    const dagen = [];
+    for (let i = 0; i < 366; i++) {
+      const d = new Date(Date.UTC(2026, 0, 1 + i));
+      dagen.push({ id: i + 1, userId: 5, date: d.toISOString().slice(0, 10), type: 'verlof', reason: '' });
+    }
+    client.query
+      .mockResolvedValueOnce({ rows: [] })      // BEGIN
+      .mockResolvedValueOnce({ rows: [] })      // vorige registraties
+      .mockResolvedValueOnce({ rows: dagen })   // de upsert
+      .mockResolvedValueOnce({ rows: [] });     // COMMIT
+    pool.query.mockResolvedValue({ rows: [] }); // logAudit
+
+    const token = makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/availability/sick-with-takeover')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 5, startDate: '2026-01-01', endDate: '2027-01-01', type: 'verlof' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.availability).toHaveLength(366);
+    // één INSERT voor alle dagen samen, niet 366 losse
+    const inserts = client.query.mock.calls.filter(
+      c => typeof c[0] === 'string' && c[0].includes('INSERT INTO availability')
+    );
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0][1][1]).toHaveLength(366);
+  });
+});
+
 // ===== DELETE /availability =====
 
 describe('DELETE /availability', () => {

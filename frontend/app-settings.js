@@ -613,7 +613,12 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         `<option value="${u.id}">${escapeHtml(u.name)} (${escapeHtml(u.role)})</option>`
     ).join('');
 
-    const today = new Date().toISOString().split('T')[0];
+    // #299: formatDateYYYYMMDD, niet toISOString. Tussen middernacht en 01:00
+    // (winter) of 02:00 (zomer) geeft toISOString de datum van gisteren, en die
+    // waarde wordt hier zowel value als min van het veld. De formuliervalidatie
+    // blokkeert die te vroege datum dan niet, en er gaat een extra dag aan
+    // diensten mee over naar de nieuwe medewerker.
+    const today = formatDateYYYYMMDD(new Date());
 
     const modal = document.createElement('div');
     modal.className = 'modal';
@@ -866,7 +871,9 @@ function renderSettingsPlanning(container) {
 
     // Check if a holiday period is currently active or upcoming
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    // #299: idem. Rond middernacht toonde de banner "Vakantiewerking actief"
+    // anders de vakantieperiode van gisteren.
+    const todayStr = formatDateYYYYMMDD(today);
     const activeHoliday = getHolidayPeriod(todayStr);
     const upcomingHoliday = !activeHoliday ? (DataStore.settings.holidayPeriods || []).find(p => {
         const start = parseDateOnly(p.startDate);
@@ -2437,7 +2444,7 @@ function renderHolidayPeriods() {
     return sorted.map(period => {
         const start = parseDateOnly(period.startDate);
         const end = parseDateOnly(period.endDate);
-        const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+        const days = aantalDagenInclusief(start, end);
         const today = parseDateOnly(new Date());
         const isActive = today >= start && today <= end;
         const isPast = end < today;
@@ -2663,7 +2670,7 @@ function updateHolidayDateInfo() {
         const endDate = parseDateOnly(end);
 
         if (endDate >= startDate) {
-            const days = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+            const days = aantalDagenInclusief(startDate, endDate);
             infoDiv.innerHTML = `<span class="info-badge">${days} dagen geselecteerd</span>`;
         } else {
             infoDiv.innerHTML = '<span class="error-text">Einddatum moet na startdatum liggen</span>';

@@ -1040,6 +1040,22 @@ function isGeldigAfwezigheidstype(t) {
   return typeof t === 'string' && AFWEZIGHEIDSTYPES.includes(t);
 }
 
+// #310: een bulkregistratie liep van startDate tot endDate zonder bovengrens.
+// Een typfout als 2206 in plaats van 2026 schreef ruim 65.000 rijen weg in één
+// transactie, en elke rij met een gevuld type telt daarna als afwezigheid, dus
+// de shiftgeneratie bleef jarenlang geblokkeerd. Een jaar plus een schrikkeldag
+// is ruim genoeg voor elke echte afwezigheid.
+const MAX_AFWEZIGHEIDSDAGEN = 366;
+
+// Enkel de vorm controleren is niet genoeg: '2026-02-31' past in het patroon
+// maar bestaat niet, en new Date() maakt er stilzwijgend 3 maart van.
+function isGeldigeDatumString(v) {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const [y, m, d] = v.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
 function isValidTime(t) {
   // #246: het patroon alleen is niet genoeg. '24:00' en '99:99' kwamen er zo
   // doorheen en werden als tekst opgeslagen, waarna <input type="time"> in de
@@ -3086,6 +3102,23 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
   if (!isGeldigAfwezigheidstype(type)) {
     return res.status(400).json({ error: `Onbekend type afwezigheid. Geldig zijn: ${AFWEZIGHEIDSTYPES.join(', ')}.` });
   }
+  // #310: het bereik begrenzen vóór er iets gebeurt. De frontend houdt dit ook
+  // tegen, maar de route is de plek waar het moet staan: hij is rechtstreeks
+  // bereikbaar en de schade is blijvend.
+  if (!isGeldigeDatumString(startDate) || !isGeldigeDatumString(endDate)) {
+    return res.status(400).json({ error: 'Ongeldige datum. Gebruik JJJJ-MM-DD.' });
+  }
+  const aantalDagen = Math.round(
+    (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86400000
+  ) + 1;
+  if (aantalDagen < 1) {
+    return res.status(400).json({ error: 'De einddatum ligt voor de startdatum.' });
+  }
+  if (aantalDagen > MAX_AFWEZIGHEIDSDAGEN) {
+    return res.status(400).json({
+      error: `Dit bereik beslaat ${aantalDagen} dagen. Maximaal ${MAX_AFWEZIGHEIDSDAGEN} dagen per registratie. Controleer of de einddatum klopt.`
+    });
+  }
 
   // Permission check (same logic as POST /availability)
   const { role, team_id } = req.user;
@@ -3131,17 +3164,17 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
     );
 
     // 2. Upsert availability for each date
-    const availability = [];
-    for (const dateStr of dates) {
-      const result = await client.query(`
-        INSERT INTO availability (user_id, date, type, reason, updated_at)
-        VALUES ($1, $2, $3, $4, NOW())
-        ON CONFLICT (user_id, date)
-        DO UPDATE SET type = $3, reason = $4, updated_at = NOW()
-        RETURNING id, user_id as "userId", date::text as date, type, reason
-      `, [userId, dateStr, type, reason || '']);
-      availability.push(result.rows[0]);
-    }
+    // #310: één opdracht in plaats van een INSERT per dag. Bij het maximum van
+    // MAX_AFWEZIGHEIDSDAGEN scheelt dat honderden heen-en-weertjes met de
+    // database binnen dezelfde transactie.
+    const upsertResult = await client.query(`
+      INSERT INTO availability (user_id, date, type, reason, updated_at)
+      SELECT $1, d::date, $3, $4, NOW() FROM unnest($2::date[]) AS d
+      ON CONFLICT (user_id, date)
+      DO UPDATE SET type = EXCLUDED.type, reason = EXCLUDED.reason, updated_at = NOW()
+      RETURNING id, user_id as "userId", date::text as date, type, reason
+    `, [userId, dates, type, reason || '']);
+    const availability = upsertResult.rows.sort((a, b) => a.date.localeCompare(b.date));
 
     // 3. Optionally create takeover requests for conflicting shifts
     let takeoverCount = 0;

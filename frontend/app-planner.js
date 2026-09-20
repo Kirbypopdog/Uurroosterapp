@@ -33,11 +33,23 @@ function renderPlanning() {
         setCurrentWeek(new Date());
     }
 
-    // Lazy-fetch public holidays for visible year if not yet cached
+    // Lazy-fetch public holidays for the visible days if not yet cached
+    //
+    // #300: dit haalde alleen het jaar van de zichtbare maandag op. Een week
+    // kan over een jaarwissel lopen, en getPublicHoliday geeft null terug zodra
+    // het jaar van die dag niet in de cache zit. In de week van maandag
+    // 27 december stond 1 januari dus zonder feestdagmarkering, tot je één week
+    // verder bladerde en het jaar alsnog werd opgehaald. Nu worden beide jaren
+    // van het zichtbare bereik meegenomen.
     const visibleDate = AppState.currentWeekStart || new Date();
-    const visibleYear = visibleDate.getFullYear();
-    if (!DataStore._publicHolidaysCache[visibleYear] && !DataStore._publicHolidaysFetching.has(visibleYear)) {
-        fetchPublicHolidays(visibleYear).then(() => renderCalendar());
+    const laatsteZichtbare = new Date(visibleDate);
+    laatsteZichtbare.setDate(laatsteZichtbare.getDate() + 6);
+    const zichtbareJaren = [...new Set([visibleDate.getFullYear(), laatsteZichtbare.getFullYear()])];
+    const ontbrekendeJaren = zichtbareJaren.filter(
+        jaar => !DataStore._publicHolidaysCache[jaar] && !DataStore._publicHolidaysFetching.has(jaar)
+    );
+    if (ontbrekendeJaren.length > 0) {
+        Promise.all(ontbrekendeJaren.map(jaar => fetchPublicHolidays(jaar))).then(() => renderCalendar());
         return;
     }
 

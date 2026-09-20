@@ -235,6 +235,16 @@ const PERMISSIONS = {
     EXPORT_DATA: ['admin', 'roosterverantwoordelijke']
 };
 
+// ===== AFWEZIGHEID: GRENZEN =====
+// #310: het plafond op een bulkregistratie afwezigheid. Dezelfde waarde staat
+// in server.js als MAX_AFWEZIGHEIDSDAGEN; de route is de echte grens, dit is de
+// meting die de gebruiker al ziet voor hij opslaat. Een jaar plus een
+// schrikkeldag dekt elke echte afwezigheid.
+const MAX_AFWEZIGHEIDSDAGEN = 366;
+// Daarboven vragen we niets, daaronder vragen we het vanaf dit aantal na. Twee
+// maanden afwezigheid komt voor, maar zelden per ongeluk.
+const BEVESTIG_AFWEZIGHEIDSDAGEN = 60;
+
 // ===== ACTIVITY TYPE LABELS =====
 const ACTIVITY_TYPE_LABELS_SHORT = { oudergesprek: 'OG', vorming: 'Vorm', overleg: 'Overl', afspraak: 'Afsp', vergadering: 'Verg', andere: 'And' };
 const ACTIVITY_TYPE_LABELS_FULL = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', vergadering: 'Vergadering', andere: 'Andere' };
