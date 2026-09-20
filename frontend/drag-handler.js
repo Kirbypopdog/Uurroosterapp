@@ -405,20 +405,10 @@ const DragHandler = {
         // Permission check handled by canUserTransferShift() at drag start
 
         // Check if employee has availability/absence on this date - warn but allow override
-        const availability = getAvailability(targetEmployee.id, targetDate);
-        if (availability && availability.type) {
-            const absenceLabels = {
-                'verlof': 'verlof heeft',
-                'ziek': 'ziek is',
-                'overuren': 'overuren opneemt',
-                'vorming': 'vorming heeft',
-                'andere': 'afwezig is'
-            };
-            const reason = absenceLabels[availability.type] || 'afwezig is';
-            const confirmed = await showConfirm(
-                `${targetEmployee.name} ${reason} op ${formatDate(targetDate)}.\n\nToch dienst toewijzen?`,
-                'Medewerker afwezig'
-            );
+        const afwezigheidsVraag = this.afwezigheidsVraag(
+            getAvailability(targetEmployee.id, targetDate), targetEmployee.name, targetDate);
+        if (afwezigheidsVraag) {
+            const confirmed = await showConfirm(afwezigheidsVraag, 'Medewerker afwezig');
             if (!confirmed) return;
         }
 
@@ -853,6 +843,29 @@ const DragHandler = {
     },
 
     // Helper: Get day cell from mouse coordinates
+    // #314: dit waarschuwde bij elk gevuld type, dus ook bij 'vrij'. Dat is puur
+    // informatief en levert nergens anders in de app een conflict op;
+    // validateAvailability sluit het expliciet uit (#173). Bovendien stond
+    // 'vrij' niet in het eigen lijstje labels dat hier stond, dus de tekst viel
+    // terug op "afwezig is" en beweerde iets dat niet klopte.
+    //
+    // De labels komen nu uit ABSENCE_TYPES, zodat dit lijstje niet opnieuw
+    // achterop kan raken. Aparte functie zodat de beslissing los van een sleep
+    // na te rekenen is; completeTransferDrag is anders alleen met een echte
+    // muisbeweging te bereiken.
+    //
+    // Geeft de vraagtekst terug, of null wanneer er niets te vragen valt.
+    afwezigheidsVraag(availability, naam, datum) {
+        if (!availability || !availability.type) return null;
+        const telt = typeof teltAlsAfwezigheid === 'function'
+            ? teltAlsAfwezigheid(availability.type)
+            : true;
+        if (!telt) return null;
+        const reden = (typeof ABSENCE_TYPES !== 'undefined'
+            && ABSENCE_TYPES[availability.type]?.werkwoord) || 'afwezig is';
+        return `${naam} ${reden} op ${formatDate(datum)}.\n\nToch dienst toewijzen?`;
+    },
+
     getDayCellFromPoint(x, y) {
         const elements = document.elementsFromPoint(x, y);
         return elements.find(el => el.classList.contains('timeline-day-cell'));

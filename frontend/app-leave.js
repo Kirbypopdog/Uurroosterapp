@@ -1149,11 +1149,18 @@ async function saveLeaveVerdeling(data, blockId) {
     if (!bevestigd) return;
 
     try {
-        await metLeaveVoortgang('leave-verdeel-save', 'Verdeling vastleggen…', () =>
+        const verdeeluitkomst = await metLeaveVoortgang('leave-verdeel-save', 'Verdeling vastleggen…', () =>
             dataApiFetch(`/leave-rounds/${round.id}/blocks/${block.id}/entries`, {
                 method: 'PUT', body: JSON.stringify({ entries })
             }));
         showToast('Verdeling vastgelegd.\nJe kan het verlof nu toepassen.', 'success');
+        const overgeslagen = Number(verdeeluitkomst?.overgeslagen) || 0;
+        if (overgeslagen > 0) {
+            showToast(
+                `${overgeslagen} dag${overgeslagen !== 1 ? 'en' : ''} overgeslagen: die zijn gesloten.`,
+                'warning'
+            );
+        }
         AppState.leaveVerdeling = null;
         AppState.leaveScreen = 'overzicht';
         renderLeave();
@@ -1183,7 +1190,7 @@ async function saveLeaveDraft(round, ookIndienen, opties = {}) {
     }
 
     try {
-        await dataApiFetch(`/leave-rounds/${round.id}/entries`, {
+        const uitkomst = await dataApiFetch(`/leave-rounds/${round.id}/entries`, {
             method: 'PUT', body: JSON.stringify({ entries })
         });
         if (ookIndienen) {
@@ -1191,6 +1198,18 @@ async function saveLeaveDraft(round, ookIndienen, opties = {}) {
             showToast('Verlof ingediend', 'success');
         } else {
             showToast('Opgeslagen', 'success');
+        }
+        // #306: de server slaat invulling op dagen die intussen gesloten zijn
+        // stil over. Stil voor de database, maar niet voor de gebruiker: hij
+        // vulde die dagen in op een scherm dat toen nog klopte, en hij hoort te
+        // weten waarom ze straks leeg zijn.
+        const overgeslagen = Number(uitkomst?.overgeslagen) || 0;
+        if (overgeslagen > 0) {
+            showToast(
+                `${overgeslagen} dag${overgeslagen !== 1 ? 'en' : ''} niet bewaard: `
+                + 'die zijn intussen gesloten. Ververs de pagina om de nieuwe indeling te zien.',
+                'warning'
+            );
         }
         if (opties.terug) AppState.leaveScreen = 'landing';
         renderLeave();

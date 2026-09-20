@@ -72,10 +72,20 @@ describe('getShiftEndDateTime', () => {
     expect(end.getHours()).toBe(0);
   });
 
-  test('same start and end time → same day (no overnight detection)', () => {
+  // #295: deze test legde de fout vast in plaats van het gedrag. Bij gelijke
+  // start- en eindtijd gaf de frontend dezelfde dag terug (een dienst van nul
+  // uur) terwijl getShiftEndDT in backend/src/utils.js er een dag bij telt
+  // (vierentwintig uur). Twee antwoorden op dezelfde vraag. De backendvariant
+  // wint, want die levert nooit een dienst van nul uur op.
+  //
+  // In de praktijk hoort zo'n dienst er niet te zijn: POST en PUT /shifts
+  // weigeren gelijke tijden nu, net als het dienstvenster en de roosterbouwer.
+  // Dit blijft het vangnet voor wat er al in de database staat.
+  test('gelijke start- en eindtijd telt als een volle dag, net als in de backend (#295)', () => {
     const shift = { date: '2026-04-15', startTime: '08:00', endTime: '08:00' };
     const end = getShiftEndDateTime(shift);
-    expect(end.getDate()).toBe(15);
+    expect(end.getDate()).toBe(16);
+    expect(end.getHours()).toBe(8);
   });
 
   test('same hour but earlier minute → next day (edge case)', () => {

@@ -1072,6 +1072,13 @@ function normaliseerTijd(t) {
   return t === '24:00' ? '00:00' : t;
 }
 
+// #295: een dienst met gelijke start- en eindtijd is dubbelzinnig. getShiftEndDT
+// telt er een dag bij (vierentwintig uur), de frontend deed dat niet (nul uur).
+// Die grens is nu aan beide kanten gelijk, maar het beste antwoord is de invoer
+// weigeren: niemand bedoelt een dienst van precies nul of precies vierentwintig
+// uur, en wie dat wel wil kan 00:00 tot 23:59 zetten.
+const GELIJKE_TIJDEN_MELDING = 'Begintijd en eindtijd mogen niet gelijk zijn. Kies een eindtijd die verschilt van de begintijd.';
+
 /**
  * Controleert overlap en 11-uur rust voor een nieuwe/gewijzigde shift.
  * @param {object} db - pool (of mock in tests)
@@ -2390,13 +2397,21 @@ v1.get('/shifts', requireAuth, async (req, res) => {
 v1.post('/shifts', requireAuth, async (req, res) => {
   const { userId, team, date, notes, source, isReserve, force } = req.body || {};
   // #246: '24:00' is middernacht, maar geen geldige waarde voor een tijdveld.
-  const startTime = normaliseerTijd((req.body || {}).startTime);
-  const endTime = normaliseerTijd((req.body || {}).endTime);
+  // #295: de ruwe waarden apart houden. '24:00' wordt hieronder '00:00', en dan
+  // lijkt 00:00 tot 24:00 op gelijke tijden terwijl de gebruiker een volle dag
+  // bedoelde. Dat is geen tikfout, en isValidTime laat '24:00' bewust toe (#246).
+  const ruweStart = (req.body || {}).startTime;
+  const ruwEind = (req.body || {}).endTime;
+  const startTime = normaliseerTijd(ruweStart);
+  const endTime = normaliseerTijd(ruwEind);
   if (!userId || !date || !startTime || !endTime) {
     return res.status(400).json({ error: 'Verplichte velden ontbreken' });
   }
   if (!isValidTime(startTime) || !isValidTime(endTime)) {
     return res.status(400).json({ error: 'Tijdstip moet HH:MM zijn' });
+  }
+  if (ruweStart === ruwEind) {
+    return res.status(400).json({ error: GELIJKE_TIJDEN_MELDING });
   }
 
   // Permission check: medewerker can only create shifts for themselves
@@ -2486,8 +2501,12 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   const { userId, team, date, notes, source, isReserve, force } = req.body || {};
   // #246: zie POST /shifts. Middernacht heet '00:00', niet '24:00'.
-  const startTime = (req.body || {}).startTime === undefined ? undefined : normaliseerTijd(req.body.startTime);
-  const endTime = (req.body || {}).endTime === undefined ? undefined : normaliseerTijd(req.body.endTime);
+  // #295: zie POST /shifts. De vergelijking gaat op de ruwe waarden, zodat
+  // 00:00 tot 24:00 een volle dag blijft en niet als tikfout geweigerd wordt.
+  const ruweStart = (req.body || {}).startTime;
+  const ruwEind = (req.body || {}).endTime;
+  const startTime = ruweStart === undefined ? undefined : normaliseerTijd(ruweStart);
+  const endTime = ruwEind === undefined ? undefined : normaliseerTijd(ruwEind);
   if (!id) {
     return res.status(400).json({ error: 'ID is verplicht' });
   }
@@ -2550,6 +2569,19 @@ v1.put('/shifts/:id', requireAuth, async (req, res) => {
       start_time: startTime  || oldShift?.startTime,
       end_time:   endTime    || oldShift?.endTime
     };
+    // #295: pas hier, want een PUT kan één van beide tijden meesturen. De
+    // gelijkheid geldt voor wat er na de wijziging staat, niet voor wat er in
+    // het verzoek zit. Op de ruwe waarden vergelijken kan hier niet zonder de
+    // bestaande dienst erbij, dus dit kijkt naar de genormaliseerde tijden. Wie
+    // 00:00 tot 24:00 bedoelt, stuurt beide tijden mee en wordt hierboven al
+    // doorgelaten; alleen een PUT die één tijd gelijkmaakt aan de andere valt
+    // hier af, en dat is precies de tikfout.
+    const beideMeegestuurd = ruweStart !== undefined && ruwEind !== undefined;
+    const gelijkeRuweTijden = beideMeegestuurd && ruweStart === ruwEind;
+    const gelijkNaWijziging = updatedShift.start_time && updatedShift.start_time === updatedShift.end_time;
+    if (gelijkeRuweTijden || (!beideMeegestuurd && gelijkNaWijziging)) {
+      return res.status(400).json({ error: GELIJKE_TIJDEN_MELDING });
+    }
     if (updatedShift.date && updatedShift.start_time && updatedShift.end_time) {
       const targetUserId = userId || oldShift?.userId;
       const validation = await validateShiftRules(pool, targetUserId, updatedShift, id, !!force);
@@ -6079,7 +6111,8 @@ v1.put('/leave-rounds/:id/blocks/:blockId/entries', requireAuth, requireRole(...
   const client = await pool.connect();
   try {
     const blokRes = await client.query(
-      `SELECT b.id, b.name, b.start_date::text AS "startDate", b.end_date::text AS "endDate", r.status
+      `SELECT b.id, b.name, b.start_date::text AS "startDate", b.end_date::text AS "endDate",
+              b.closed_dates AS "closedDates", r.status
        FROM leave_round_blocks b JOIN leave_rounds r ON r.id = b.round_id
        WHERE b.id = $1 AND b.round_id = $2`,
       [req.params.blockId, req.params.id]
@@ -6117,6 +6150,14 @@ v1.put('/leave-rounds/:id/blocks/:blockId/entries', requireAuth, requireRole(...
       userIds.add(Number(e.userId));
     }
 
+    // #306: ook hier geen verlof op een dag waarop het huis dicht is. De
+    // verdeling wordt door een beheerder vastgelegd, dus dit is eerder een
+    // vergissing dan een verouderd scherm, maar het resultaat zou hetzelfde
+    // zijn: apply zet er verlof op en niemand ziet het.
+    const geslotenDagen = new Set(Array.isArray(blok.closedDates) ? blok.closedDates : []);
+    const teBewaren = entries.filter(e => !geslotenDagen.has(e.date));
+    const overgeslagen = entries.length - teBewaren.length;
+
     await client.query('BEGIN');
     if (userIds.size > 0) {
       // #377: de DELETE hieronder gooit de rijen weg en daarmee ook wat de
@@ -6140,7 +6181,7 @@ v1.put('/leave-rounds/:id/blocks/:blockId/entries', requireAuth, requireRole(...
          WHERE round_id = $1 AND user_id = ANY($2::int[]) AND date BETWEEN $3 AND $4`,
         [req.params.id, [...userIds], blok.startDate, blok.endDate]
       );
-      for (const e of entries) {
+      for (const e of teBewaren) {
         await client.query(
           `INSERT INTO leave_round_entries (round_id, user_id, date, status, requested_status)
            VALUES ($1, $2, $3, $4, $5)`,
@@ -6153,9 +6194,9 @@ v1.put('/leave-rounds/:id/blocks/:blockId/entries', requireAuth, requireRole(...
 
     await logAudit(req, 'UPDATE', 'settings', String(req.params.id), {
       type: 'leave_block_verdeling', blockId: blok.id,
-      medewerkers: userIds.size, dagen: entries.length
+      medewerkers: userIds.size, dagen: teBewaren.length, overgeslagen
     });
-    res.json({ ok: true, saved: entries.length, medewerkers: userIds.size });
+    res.json({ ok: true, saved: teBewaren.length, medewerkers: userIds.size, overgeslagen });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Error saving leave distribution:', err);
@@ -6216,10 +6257,21 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
     // Een dag moet dus binnen een van de vakantieblokken vallen, niet enkel
     // tussen de omhullende rondedatums.
     const blockRes = await client.query(
-      'SELECT start_date, end_date FROM leave_round_blocks WHERE round_id = $1', [req.params.id]);
+      'SELECT start_date, end_date, closed_dates AS "closedDates" FROM leave_round_blocks WHERE round_id = $1',
+      [req.params.id]);
     const blokken = blockRes.rows.length
       ? blockRes.rows.map(b => [new Date(b.start_date), new Date(b.end_date)])
       : [[new Date(round.start_date), new Date(round.end_date)]];
+
+    // #306: dit keek alleen of een datum binnen een blok viel, niet of die dag
+    // gesloten is. Dat botste met de resync, die invulling op nieuw gesloten
+    // dagen juist wél weghaalt "anders zet apply daar alsnog verlof op". Wie de
+    // verlofpagina open had staan toen een beheerder de gesloten dagen
+    // bijwerkte, stuurde die dagen bij de volgende opslag gewoon terug, en in
+    // de matrix was dat onzichtbaar omdat een gesloten cel apart getekend wordt.
+    const geslotenDagen = new Set(
+      blockRes.rows.flatMap(b => Array.isArray(b.closedDates) ? b.closedDates : [])
+    );
 
     for (const e of entries) {
       if (!e || !e.date || !valid.includes(e.status)) {
@@ -6230,6 +6282,12 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
         return res.status(400).json({ error: `Datum ${e.date} valt buiten de ronde` });
       }
     }
+
+    // Stil overslaan in plaats van weigeren: het verzoek komt van een scherm dat
+    // een paar minuten oud is, en de rest van die week hoort gewoon bewaard te
+    // worden. Het aantal gaat wel mee terug, zodat de app het kan melden.
+    const teBewaren = entries.filter(e => !geslotenDagen.has(e.date));
+    const overgeslagen = entries.length - teBewaren.length;
 
     await client.query('BEGIN');
 
@@ -6242,6 +6300,9 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
     // De vervanging blijft nu binnen het bereik dat in de aanvraag zit. Een
     // lege lijst raakt dus niets aan, wat ook de eerdere fix bewaart dat leeg
     // indienen de invulling niet mag wissen.
+    // #306: het bereik komt bewust uit ALLE aangeleverde datums, ook de gesloten.
+    // Staat er nog een oude rij op een dag die intussen dicht is, dan hoort die
+    // hier weg; hij wordt alleen niet opnieuw ingevoegd.
     const datums = entries.map(e => e.date).sort();
     if (datums.length > 0) {
       await client.query(
@@ -6251,7 +6312,7 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
       );
     }
 
-    for (const e of entries) {
+    for (const e of teBewaren) {
       // #377: hier wordt de wens uitgesproken, dus gevraagd en geldend zijn
       // hetzelfde. Alleen het verdeelendpoint laat ze daarna uiteenlopen.
       await client.query(
@@ -6277,7 +6338,7 @@ v1.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
       [req.params.id, targetUserId]
     );
     await client.query('COMMIT');
-    res.json({ ok: true, saved: entries.length });
+    res.json({ ok: true, saved: teBewaren.length, overgeslagen });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Error saving leave entries:', err);

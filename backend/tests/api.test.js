@@ -3483,6 +3483,57 @@ describe('PUT /users/:id en de foreign key op team_id (#221)', () => {
 
 // ===== #236: het type van een afwezigheid wordt gevalideerd =====
 
+// ===== Gelijke start- en eindtijd (#295) =====
+
+// Regressie #295: getShiftEndDateTime in de frontend rolde pas naar de volgende
+// dag bij `end < start`, getShiftEndDT in de backend bij `end <= start`. Bij
+// gelijke tijden zag de ene een dienst van nul uur en de andere een van
+// vierentwintig. De grens is nu gelijk, en de invoer wordt geweigerd.
+describe('een dienst met gelijke start- en eindtijd wordt geweigerd (#295)', () => {
+  test('POST /shifts geeft 400', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/shifts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 2, date: '2027-09-10', startTime: '09:00', endTime: '09:00' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/niet gelijk zijn/);
+  });
+
+  test('PUT /shifts/:id kijkt naar de tijden ná de wijziging, niet naar wat er meegestuurd wordt', async () => {
+    mockActiveUser();
+    // alleen endTime in het verzoek; startTime komt uit de bestaande dienst
+    pool.query.mockResolvedValueOnce({ rows: [{
+      id: 5, userId: 2, team: null, date: '2027-09-11',
+      startTime: '09:00', endTime: '17:00', notes: '', source: 'manual'
+    }] });
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/shifts/5')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ endTime: '09:00' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/niet gelijk zijn/);
+  });
+
+  // 24:00 wordt '00:00' bij het opslaan, dus na normalisatie lijkt dit op
+  // gelijke tijden. De gebruiker bedoelde een volle dag, en isValidTime laat
+  // '24:00' bewust toe (#246), dus de vergelijking gaat op de ruwe invoer.
+  test('00:00 tot 24:00 is een volle dag en wordt niet geweigerd', async () => {
+    mockActiveUser();
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/shifts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 2, date: '2027-09-10', startTime: '00:00', endTime: '24:00' });
+
+    expect(res.status).not.toBe(400);
+  });
+});
+
 // ===== GET /users: wat een medewerker te zien krijgt (#290) =====
 
 describe('GET /users beperkt het antwoord per rol (#290)', () => {

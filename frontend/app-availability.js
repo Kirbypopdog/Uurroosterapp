@@ -9,14 +9,30 @@
 // database een CHECK-constraint. Die drie kunnen zonder build-stap niet één
 // constante delen, dus ze moeten gelijk blijven: wie hier een type toevoegt,
 // voegt het ook daar toe.
+// `werkwoord` is de zin die de drag-handler gebruikt ("Anna verlof heeft op
+// woensdag"). Die stond daar als eigen lijstje, zonder 'vrij', waardoor de
+// tekst voor 'vrij' terugviel op "afwezig is" (#314).
+//
+// `teltAlsAfwezig` markeert of het type een echte afwezigheid is. 'vrij' is
+// puur informatief en levert nergens een conflict op (#173); validateAvailability
+// sloot het al uit, de drag-handler niet.
 const ABSENCE_TYPES = {
-    'verlof':   { label: 'Verlof',   keuze: 'Verlof' },
-    'ziek':     { label: 'Ziekte',   keuze: 'Ziekte' },
-    'overuren': { label: 'Overuren', keuze: 'Overuren opnemen' },
-    'vorming':  { label: 'Vorming',  keuze: 'Vorming' },
-    'andere':   { label: 'Andere',   keuze: 'Andere' },
-    'vrij':     { label: 'Vrij',     keuze: 'Vrij' }
+    'verlof':   { label: 'Verlof',   keuze: 'Verlof',           werkwoord: 'verlof heeft',    teltAlsAfwezig: true },
+    'ziek':     { label: 'Ziekte',   keuze: 'Ziekte',           werkwoord: 'ziek is',         teltAlsAfwezig: true },
+    'overuren': { label: 'Overuren', keuze: 'Overuren opnemen', werkwoord: 'overuren opneemt', teltAlsAfwezig: true },
+    'vorming':  { label: 'Vorming',  keuze: 'Vorming',          werkwoord: 'vorming heeft',   teltAlsAfwezig: true },
+    'andere':   { label: 'Andere',   keuze: 'Andere',           werkwoord: 'afwezig is',      teltAlsAfwezig: true },
+    'vrij':     { label: 'Vrij',     keuze: 'Vrij',             werkwoord: 'vrij is',         teltAlsAfwezig: false }
 };
+
+// Is dit type een echte afwezigheid, of alleen een markering? Onbekende types
+// tellen als afwezig, want dat is de veilige kant: dan komt er hooguit een
+// vraag te veel.
+function teltAlsAfwezigheid(type) {
+    if (!type) return false;
+    const t = ABSENCE_TYPES[type];
+    return t ? t.teltAlsAfwezig : true;
+}
 
 const ABSENCE_LABELS = Object.fromEntries(
     Object.entries(ABSENCE_TYPES).map(([sleutel, t]) => [sleutel, t.label])

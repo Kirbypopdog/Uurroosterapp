@@ -1211,6 +1211,13 @@ function openBuilderShiftModal(employeeId, dayIndex) {
             showToast('Vul start- en eindtijd in', 'warning');
             return;
         }
+        // #295: het dienstvenster weigert gelijke tijden al, de bouwer niet.
+        // Dat was de enige weg naar een dienst van 09:00 tot 09:00, die aan de
+        // ene kant nul uur telt en aan de andere kant vierentwintig.
+        if (start === end) {
+            showToast('Begintijd en eindtijd mogen niet gelijk zijn', 'warning');
+            return;
+        }
         if (!AppState.builderGrid[employeeId]) {
             AppState.builderGrid[employeeId] = {};
         }

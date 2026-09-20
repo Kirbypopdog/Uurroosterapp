@@ -21,7 +21,18 @@ function getShiftEndDateTime(shift) {
     const endDT = parseDateTime(shift.date, shift.endTime);
 
     // Als eindtijd vóór starttijd valt (ook bij zelfde uur maar vroeger minuut), eindigt de dienst de volgende dag
-    if (endDT < startDT) {
+    //
+    // #295: hier stond `<`, terwijl getShiftEndDT in backend/src/utils.js `<=`
+    // gebruikt. Bij gelijke start- en eindtijd zag de frontend dus een dienst
+    // van nul uur en de backend een van vierentwintig. Voor 2027-09-10 van
+    // 09:00 tot 09:00 berekende de frontend 10 september 09:00 en de backend
+    // 11 september 09:00. Die dienst telde in de urenoverzichten 0 uur en
+    // blokkeerde in de backendcontroles de hele volgende dag.
+    //
+    // De backendvariant is hier de juiste: ze levert nooit een dienst van nul
+    // uur op. Beide kanten weigeren zulke invoer nu bovendien, dus dit is het
+    // vangnet voor wat er al staat.
+    if (endDT <= startDT) {
         endDT.setDate(endDT.getDate() + 1);
     }
 
