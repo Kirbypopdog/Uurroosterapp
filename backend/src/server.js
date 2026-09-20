@@ -840,6 +840,32 @@ const MIGRATIONS = [
       await client.query(
         `UPDATE leave_round_entries SET requested_status = status WHERE requested_status IS NULL`);
     }
+  },
+  {
+    // #279: team_id en main_team moeten gelijk zijn (CLAUDE.md regel 2).
+    // team_id zit in het JWT en bepaalt welke openstaande overnameverzoeken
+    // iemand ziet; main_team bepaalt waar de app hem toont. Lopen ze uiteen,
+    // dan ziet die persoon de verzoeken van het verkeerde team en mist hij die
+    // van zijn eigen team, terwijl de planning hem ergens anders plaatst.
+    //
+    // Elke schrijfweg synchroniseert ze intussen: PUT /users/:id deed dat al,
+    // POST /import sinds #214. Wat overblijft is oude scheefstand van vóór die
+    // fixes. Die is hier niet op te sporen zonder ook recht te zetten, en
+    // main_team is de bedoelde waarde, dus team_id volgt.
+    //
+    // Het log noemt wie er aangepast is, zodat een onverwacht geval opvalt.
+    name: '044_team_id_gelijk_aan_main_team',
+    up: async (client) => {
+      const scheef = await client.query(
+        `SELECT id, name, team_id, main_team FROM users
+         WHERE main_team IS DISTINCT FROM team_id
+         ORDER BY id`);
+      if (scheef.rows.length === 0) return;
+      console.warn(`Migratie 044: ${scheef.rows.length} account(s) met team_id ongelijk aan main_team:`);
+      scheef.rows.forEach(r =>
+        console.warn(`  #${r.id} ${r.name}: team_id "${r.team_id}" -> main_team "${r.main_team}"`));
+      await client.query(`UPDATE users SET team_id = main_team WHERE main_team IS DISTINCT FROM team_id`);
+    }
   }
 ];
 

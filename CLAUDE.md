@@ -145,6 +145,24 @@ doelpersoon handelt een ruil zelf af. De statuswaarde `pending_lead` en de
 kolommen `lead_approved`, `lead_response_notes` en `lead_responded_at` staan nog
 in het schema maar worden nergens geschreven (#315).
 
+**Bereik van een overname (#281, #283)**: een openstaande overname blijft binnen
+het team van de DIENST. Drie plekken moeten daarover hetzelfde zeggen, anders
+ontstaat er een gat:
+
+| plek | voorwaarde |
+|------|-----------|
+| `GET /swap-requests` (wat een medewerker ziet) | `s1.team = <eigen team_id>` |
+| `PUT /shift-requests/:id/takeover-accept` | `request.team = <eigen team_id>` |
+| de mail bij een nieuw overnameverzoek | `users.main_team = <team van de dienst>` |
+
+Die drie vallen samen omdat `team_id` altijd gelijk is aan `main_team`
+(regel 2 hieronder). Admins en roosterverantwoordelijken mogen wél over teams
+heen aanvaarden; zij krijgen de mail alleen als hun eigen team klopt. Dat is
+bewust: hun ruimere bevoegdheid is geen reden om iedereen meer mail te sturen.
+
+Verbreden naar alle teams is een productkeuze die nog openstaat (#283). Ze hoort
+samen te gaan met een keuze over hoeveel mail mensen krijgen.
+
 ### Verlofplanning
 - `GET /api/v1/leave-rounds` - Alle verlofrondes (concepten enkel voor beheerders)
 - `GET /api/v1/leave-rounds/:id` - Ronde met volledige matrix + indienstatus

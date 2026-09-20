@@ -2463,7 +2463,7 @@ function renderHolidayPeriods() {
             <div class="holiday-period-info">
                 <span class="holiday-period-name">${escapeHtml(period.name)}</span>
                 <span class="holiday-period-dates">
-                    ${formatDateShort(period.startDate)} - ${formatDateShort(period.endDate)}
+                    ${formatDateShortMetJaar(period.startDate)} - ${formatDateShortMetJaar(period.endDate)}
                     <span class="holiday-period-days">(${days} dagen, ${totalWeeks} ${totalWeeks === 1 ? 'week' : 'weken'})</span>
                 </span>
             </div>
@@ -2472,7 +2472,13 @@ function renderHolidayPeriods() {
     }).join('');
 }
 
-function formatDateShort(date) {
+// #278 en #297: dit heette ook formatDateShort, net als de functie in
+// app-nav.js, en omdat dit bestand later laadt won deze. Daardoor stond er een
+// jaartal in de waarschuwingen op het startscherm, waar dat niet hoort. De twee
+// verschillen echt: die in app-nav.js verwacht een Date en laat het jaar weg,
+// deze verwacht een datumtekst en zet het jaar er wel bij. Een naam die zegt
+// wat hij doet, want in een vakantieperiodelijst is dat jaartal juist nuttig.
+function formatDateShortMetJaar(date) {
     const d = parseDateOnly(date);
     return d.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
 }

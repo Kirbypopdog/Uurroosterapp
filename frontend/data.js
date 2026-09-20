@@ -1250,25 +1250,17 @@ async function saveResponsibleRotationSettings() {
 
 // ===== UREN BEREKENING =====
 
-function parseDateTime(date, time) {
-    const [year, month, day] = date.split('-').map(Number);
-    const [hours, minutes] = time.split(':').map(Number);
-    return new Date(year, month - 1, day, hours, minutes, 0, 0);
-}
-
-function getShiftEndDateTime(shift) {
-    const startDT = parseDateTime(shift.date, shift.startTime);
-    const [endHours] = shift.endTime.split(':').map(Number);
-    const [startHours] = shift.startTime.split(':').map(Number);
-
-    const endDT = parseDateTime(shift.date, shift.endTime);
-
-    if (endHours < startHours) {
-        endDT.setDate(endDT.getDate() + 1);
-    }
-
-    return endDT;
-}
+// #297: hier stonden een tweede parseDateTime en een tweede
+// getShiftEndDateTime. De frontend laadt gewone scripts, dus elke
+// functiedeclaratie op het hoogste niveau komt op window terecht en de laatst
+// geladene wint. validation.js laadt ná dit bestand, dus deze twee draaiden
+// nooit: dode code die er levend uitzag. De valstrik zat in het verschil,
+// want deze versie keek alleen naar het UUR (`endHours < startHours`) terwijl
+// die in validation.js de volledige tijdstippen vergelijkt. Wie hier de
+// nachtdienstlogica aanpaste, zag geen enkel effect.
+//
+// De enige definities staan nu in validation.js, dat vóór alle app-bestanden
+// laadt. De functies hieronder gebruiken ze gewoon.
 
 function calculateShiftHours(shift) {
     const start = parseDateTime(shift.date, shift.startTime);

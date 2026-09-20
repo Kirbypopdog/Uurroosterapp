@@ -160,6 +160,12 @@ async function checkSession() {
         return;
     }
     AppState.authToken = savedToken;
+
+    // #284: hier stond één catch die álles met handleLogout() afhandelde. Een
+    // netwerkhapering, een 500, of een koude Render-instance die de eerste
+    // GET /me laat verlopen, leidde dus tot precies hetzelfde als een verlopen
+    // token: terug naar het loginscherm, zonder uitleg, terwijl het token nog
+    // geldig was.
     try {
         const data = await dataApiFetch('/me');
         AppState.currentUser = data.user;
@@ -170,9 +176,42 @@ async function checkSession() {
         updateShiftRefreshRange();
         applyTeamColors(); // Apply team colors after settings are loaded
         await syncEmployeeAccountLinks();
-        showApp();
     } catch (error) {
+        // Een 401 is wél een verlopen sessie. dataApiFetch heeft dan al
+        // opgeruimd en handleLogout('sessie') aangeroepen, inclusief de
+        // melding, dus hier valt niets meer te doen.
+        if (error?.status === 401) return;
+
+        // Alles daarbuiten: het token blijft staan. De gebruiker kiest zelf of
+        // hij het opnieuw probeert of zich afmeldt.
+        console.error('Opstarten mislukt:', error);
+        document.documentElement.classList.remove('session-restoring');
+        const opnieuw = await showConfirm(
+            `De app kon niet opstarten: ${getUserFriendlyError(error)}\n\n`
+            + 'Je bent nog steeds aangemeld. Dit gebeurt bijvoorbeeld wanneer de server nog aan het opstarten is.',
+            'Opstarten mislukt',
+            { confirmText: 'Opnieuw proberen', cancelText: 'Afmelden' }
+        );
+        if (opnieuw) return checkSession();
         handleLogout();
+        return;
+    }
+
+    // #284: showApp staat bewust BUITEN de try hierboven. Een synchrone fout in
+    // doLoadDraft, renderBuilder of applyRoleVisibility kwam anders in dezelfde
+    // catch terecht en verscheen als "uitgelogd" in plaats van als bug. Dat
+    // misleidt bij het zoeken naar de oorzaak. Zo'n fout is geen sessieprobleem,
+    // dus de sessie blijft hier gewoon staan.
+    try {
+        showApp();
+    } catch (fout) {
+        console.error('Het scherm kon niet opgebouwd worden:', fout);
+        document.documentElement.classList.remove('session-restoring');
+        showToast(
+            'Je bent aangemeld, maar het scherm kon niet opgebouwd worden. '
+            + 'Ververs de pagina; blijft het misgaan, meld het dan met de melding uit de console.',
+            'error'
+        );
     }
 }
 
