@@ -1701,6 +1701,37 @@ v1.delete('/teams/:id', requireAuth, requireRole('admin', 'roosterverantwoordeli
 // ===== USERS API (replaces employees) =====
 
 // Get all users (with schedule data) - for planning views
+// #290: GET /users stuurde voor iedere gebruiker de volledige rij naar elke
+// ingelogde gebruiker, inclusief e-mailadres en basisrooster. Het meeste
+// daarvan ziet een collega toch al in de planning, maar twee dingen niet.
+//
+// Het e-mailadres van het adminaccount hoort niet bij een medewerker terecht te
+// komen. Een medewerker krijgt daarom alleen zijn eigen adres; zijn profiel
+// haalt dat sowieso bij /me, dus er breekt niets.
+//
+// Het basisrooster van een collega gaat alleen naar wie het ook echt gebruikt.
+// Let op: dat zijn NIET alleen beheerders. De afwezigheidstab toont een
+// medewerker zijn eigen team, en die tabel leest per collega het basisrooster
+// om "werkt hier normaal" te kunnen tonen. Het issue stelde dat het nergens
+// voor een collega getoond wordt; dat klopt niet. Buiten het eigen team heeft
+// een medewerker het wél nergens voor nodig.
+function beperkGebruikerVoor(rij, kijker) {
+  const magAlles = kijker.role === 'admin' || kijker.role === 'roosterverantwoordelijke';
+  if (magAlles) return rij;
+
+  const isZelf = rij.id === kijker.id;
+  const zelfdeTeam = rij.mainTeam != null && rij.mainTeam === kijker.team_id;
+
+  const beperkt = { ...rij };
+  if (!isZelf) beperkt.email = null;
+  if (!isZelf && !zelfdeTeam) {
+    if ('weekScheduleWeek1' in beperkt) beperkt.weekScheduleWeek1 = null;
+    if ('weekScheduleWeek2' in beperkt) beperkt.weekScheduleWeek2 = null;
+    if ('weekSchedules' in beperkt) beperkt.weekSchedules = null;
+  }
+  return beperkt;
+}
+
 v1.get('/users', requireAuth, async (req, res) => {
   try {
     const { role, team_id } = req.user;
@@ -1730,7 +1761,7 @@ v1.get('/users', requireAuth, async (req, res) => {
       result = await pool.query(query);
     }
 
-    res.json({ users: result.rows });
+    res.json({ users: result.rows.map(rij => beperkGebruikerVoor(rij, req.user)) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -1755,7 +1786,9 @@ v1.get('/users/:id', requireAuth, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Gebruiker niet gevonden' });
     }
-    res.json({ user: result.rows[0] });
+    // #290: dezelfde beperking als in de lijst, anders is dit endpoint de
+    // achterdeur waarlangs het adres van het adminaccount alsnog binnenkomt.
+    res.json({ user: beperkGebruikerVoor(result.rows[0], req.user) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -4033,7 +4066,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
 v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
   const requestId = req.params.id;
   const { responseNotes, force } = req.body;
-  const { id: currentUserId, team_id: acceptorTeam } = req.user;
+  const { id: currentUserId, team_id: acceptorTeam, role } = req.user;
 
   const client = await pool.connect();
 
@@ -4073,6 +4106,19 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
     if (request.requester_user_id === currentUserId) {
       await client.query('ROLLBACK').catch(() => {});
       return res.status(403).json({ error: 'Je kunt je eigen verzoek niet accepteren' });
+    }
+
+    // #281: dezelfde teamvoorwaarde als in de lijst. GET /swap-requests toont
+    // een medewerker alleen open overnames van zijn eigen team, maar hier stond
+    // geen enkele teamcontrole, terwijl de verzoek-id's oplopende gehele
+    // getallen zijn. Een medewerker die zelf API-aanroepen opstelde kon dus een
+    // dienst overnemen uit een team waarvan hij het bestaan niet eens hoorde te
+    // kennen. acceptorTeam werd hierboven wel opgehaald maar nergens gebruikt.
+    // Beheerders houden hun ruimere blik, net als in de lijst.
+    const magOverTeamsHeen = role === 'admin' || role === 'roosterverantwoordelijke';
+    if (!magOverTeamsHeen && request.team !== acceptorTeam) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(403).json({ error: 'Deze dienst hoort bij een ander team' });
     }
 
     // #188: de dienst mag intussen niet aan iemand anders zijn toegewezen.

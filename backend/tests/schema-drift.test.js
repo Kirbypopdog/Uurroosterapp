@@ -55,6 +55,52 @@ describe('#329 schema.sql loopt niet achter op de migraties', () => {
     expect(ontbreekt).toEqual([]);
   });
 
+  // #311: migratie 042 zette een CHECK op availability.type, maar schema.sql
+  // kreeg die niet mee. Een verse database miste hem dus, en de drie tests
+  // hierboven zagen dat niet: ze kijken naar kolommen, indexen en tabellen.
+  //
+  // Een naam zoeken is hier niet genoeg. PostgreSQL noemt een naamloze CHECK
+  // zelf "<tabel>_<kolom>_check" en een naamloze verwijzing
+  // "<tabel>_<kolom>_fkey", dus schema.sql kan de constraint wel degelijk
+  // hebben zonder dat die naam ergens in het bestand staat. Daarom wordt de
+  // naam teruggerekend naar tabel en kolom, en kijken we of die kolomregel in
+  // schema.sql de bijhorende clausule draagt.
+  test('elke constraint die een migratie toevoegt staat ook in schema.sql', () => {
+    const tabelBlokken = new Map();
+    const tabelRegex = /create\s+table\s+(?:if\s+not\s+exists\s+)?(\w+)\s*\(([\s\S]*?)\n\);/gi;
+    let t;
+    while ((t = tabelRegex.exec(schemaSql)) !== null) {
+      tabelBlokken.set(t[1].toLowerCase(), t[2].toLowerCase());
+    }
+    const schema = genormaliseerd(schemaSql);
+
+    const dektSchemaDit = (naam) => {
+      if (schema.includes(naam)) return true; // expliciet zo genoemd
+      const soort = naam.endsWith('_check') ? 'check' : naam.endsWith('_fkey') ? 'references' : null;
+      if (!soort) return false;
+      const zonderSuffix = naam.replace(/_(check|fkey)$/, '');
+      // De langste tabelnaam die past, want tabelnamen bevatten zelf underscores
+      const tabel = [...tabelBlokken.keys()]
+        .filter(naamTabel => zonderSuffix.startsWith(naamTabel + '_'))
+        .sort((a, b) => b.length - a.length)[0];
+      if (!tabel) return false;
+      const kolom = zonderSuffix.slice(tabel.length + 1);
+      const kolomRegel = tabelBlokken.get(tabel)
+        .split('\n')
+        .find(regel => new RegExp(`^\\s*${kolom}\\s`).test(regel));
+      return !!kolomRegel && kolomRegel.includes(soort);
+    };
+
+    const regex = /add\s+constraint\s+(\w+)/gi;
+    const ontbreekt = [];
+    let m;
+    while ((m = regex.exec(migratieBlok)) !== null) {
+      const naam = m[1].toLowerCase();
+      if (!dektSchemaDit(naam)) ontbreekt.push(naam);
+    }
+    expect(ontbreekt).toEqual([]);
+  });
+
   test('elke tabel die een migratie aanmaakt staat ook in schema.sql', () => {
     const schema = genormaliseerd(schemaSql);
     const regex = /create\s+table\s+(?:if\s+not\s+exists\s+)?(\w+)/gi;

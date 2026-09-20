@@ -108,6 +108,12 @@ function handleLogout(reden) {
     AppState.authToken = null;
     sessionStorage.removeItem('hetvlot_user');
     sessionStorage.removeItem('hetvlot_token');
+    // #294: deze twee staan in localStorage, dus zonder dit erven ze over naar
+    // de volgende gebruiker op hetzelfde toestel. De toets in showApp vangt een
+    // verboden weergave nu wel af, maar iemand hoort ook niet te beginnen op
+    // het scherm waar zijn collega gebleven was.
+    localStorage.removeItem('hetvlot_activeView');
+    localStorage.removeItem('hetvlot_activeDraftId');
     sluitAlleVensters();
     showLogin();
     if (reden === 'sessie') {
@@ -203,8 +209,13 @@ function showApp() {
     populateUserMenu();
     applyRoleVisibility();
     // Restore saved view from localStorage, or use default
+    // #294: dezelfde toets als de navigatieknoppen. De vaste lijst hier bevatte
+    // 'employees', 'builder' en 'settings', dus een bewaarde weergave van een
+    // vorige gebruiker bracht een medewerker in een scherm waarvan de knop
+    // verborgen was. De sleutel staat bovendien in localStorage en niet in
+    // sessionStorage, dus hij overleeft het uitloggen.
     const savedView = localStorage.getItem('hetvlot_activeView');
-    if (savedView && ['home', 'planning', 'employees', 'profile', 'availability', 'builder', 'swaps', 'settings'].includes(savedView)) {
+    if (savedView && toegelatenWeergaven().has(savedView)) {
         AppState.currentView = savedView;
     }
     // If builder was active with a loaded draft, restore it (incl. meeting badges)
@@ -234,10 +245,40 @@ function showApp() {
     switchView(AppState.currentView);
 }
 
+// #294: de toegelaten weergaven stonden alleen in applyRoleVisibility, die ze
+// meteen gebruikte om knoppen te verbergen. showApp las daarna de bewaarde
+// weergave uit localStorage en overschreef AppState.currentView zonder opnieuw
+// te toetsen, en switchView ving alleen 'settings' af. Op een gedeeld toestel
+// kwam een medewerker zo rechtstreeks in de roosterbouwer terecht.
+//
+// Eén bron voor wie wat mag, zodat de drie plekken niet uiteen kunnen lopen.
+function toegelatenWeergaven() {
+    const role = getEffectiveRole();
+    const toegelaten = new Set(['home', 'planning', 'profile']);
+
+    // All roles get basic views
+    toegelaten.add('availability');
+    toegelaten.add('swaps');
+    toegelaten.add('leave');
+
+    // Employees tab: NOT for medewerker role (they manage their schedule via profile)
+    if (role !== 'medewerker') {
+        toegelaten.add('employees');
+    }
+
+    // Builder en instellingen: roosterverantwoordelijke en admin
+    if (['roosterverantwoordelijke', 'admin'].includes(role)) {
+        toegelaten.add('builder');
+        toegelaten.add('settings');
+    }
+
+    return toegelaten;
+}
+
 function applyRoleVisibility() {
     const role = getEffectiveRole();
     const isRealAdmin = AppState.currentUser?.role === 'admin';
-    const allowedViews = new Set(['home', 'planning', 'profile']);
+    const allowedViews = toegelatenWeergaven();
 
     // Show/hide role switcher for admin (only on localhost/dev)
     const roleSwitcher = document.getElementById('role-switcher');
@@ -253,26 +294,6 @@ function applyRoleVisibility() {
             roleSwitcher.classList.add('hidden');
             AppState.simulatedRole = null; // Clear any simulated role in production
         }
-    }
-
-    // All roles get basic views
-    allowedViews.add('availability');
-    allowedViews.add('swaps');
-    allowedViews.add('leave');
-
-    // Employees tab: NOT for medewerker role (they manage their schedule via profile)
-    if (role !== 'medewerker') {
-        allowedViews.add('employees');
-    }
-
-    // Builder tab: roosterverantwoordelijke and admin
-    if (['roosterverantwoordelijke', 'admin'].includes(role)) {
-        allowedViews.add('builder');
-    }
-
-    // Settings only for roosterverantwoordelijke and admin
-    if (['roosterverantwoordelijke', 'admin'].includes(role)) {
-        allowedViews.add('settings');
     }
 
     DOM.navButtons.forEach(btn => {

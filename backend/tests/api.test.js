@@ -3483,6 +3483,115 @@ describe('PUT /users/:id en de foreign key op team_id (#221)', () => {
 
 // ===== #236: het type van een afwezigheid wordt gevalideerd =====
 
+// ===== GET /users: wat een medewerker te zien krijgt (#290) =====
+
+describe('GET /users beperkt het antwoord per rol (#290)', () => {
+  const rijen = [
+    { id: 1, name: 'Admin', email: 'admin@hetvlot.be', role: 'admin', mainTeam: null, weekSchedules: [[{ dayOfWeek: 1 }]] },
+    { id: 2, name: 'Anna', email: 'anna@hetvlot.be', role: 'medewerker', mainTeam: 'vlot1', weekSchedules: [[{ dayOfWeek: 2 }]] },
+    { id: 3, name: 'Bram', email: 'bram@hetvlot.be', role: 'medewerker', mainTeam: 'vlot2', weekSchedules: [[{ dayOfWeek: 3 }]] }
+  ];
+
+  test('een medewerker krijgt geen adressen van anderen, wel zijn eigen', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: rijen });
+    const token = makeToken({ id: 2, role: 'medewerker', name: 'Anna', team_id: 'vlot1' });
+    const res = await request(app).get('/users').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const perNaam = Object.fromEntries(res.body.users.map(u => [u.name, u]));
+    expect(perNaam.Admin.email).toBeNull();
+    expect(perNaam.Bram.email).toBeNull();
+    expect(perNaam.Anna.email).toBe('anna@hetvlot.be');
+  });
+
+  test('het basisrooster blijft binnen het eigen team, want de afwezigheidstab leest het', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: rijen });
+    const token = makeToken({ id: 2, role: 'medewerker', name: 'Anna', team_id: 'vlot1' });
+    const res = await request(app).get('/users').set('Authorization', `Bearer ${token}`);
+
+    const perNaam = Object.fromEntries(res.body.users.map(u => [u.name, u]));
+    expect(perNaam.Anna.weekSchedules).toEqual([[{ dayOfWeek: 2 }]]); // zichzelf
+    expect(perNaam.Admin.weekSchedules).toBeNull();                   // ander team
+    expect(perNaam.Bram.weekSchedules).toBeNull();                    // ander team
+  });
+
+  test('een beheerder krijgt alles onveranderd', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: rijen });
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    const res = await request(app).get('/users').set('Authorization', `Bearer ${token}`);
+
+    const perNaam = Object.fromEntries(res.body.users.map(u => [u.name, u]));
+    expect(perNaam.Bram.email).toBe('bram@hetvlot.be');
+    expect(perNaam.Bram.weekSchedules).toEqual([[{ dayOfWeek: 3 }]]);
+  });
+});
+
+// ===== PUT /shift-requests/:id/takeover-accept: teamgrens (#281) =====
+
+// Regressie #281: GET /swap-requests toont een medewerker alleen open overnames
+// van zijn eigen team, maar takeover-accept had geen enkele teamcontrole. Met
+// oplopende verzoek-id's kon een medewerker een dienst overnemen uit een team
+// waarvan hij het bestaan niet eens hoorde te kennen.
+describe('takeover-accept bewaakt de teamgrens (#281)', () => {
+  function verzoekClient(team) {
+    return {
+      query: jest.fn((sql) => {
+        const tekst = typeof sql === 'string' ? sql : '';
+        if (/FROM shift_swap_requests sr/i.test(tekst) && /FOR UPDATE/i.test(tekst)) {
+          return Promise.resolve({ rows: [{
+            id: 1, request_type: 'takeover', status: 'pending',
+            requester_user_id: 3, requester_shift_id: 7,
+            current_shift_owner: 3, date: '2099-12-15',
+            start_time: '07:30', end_time: '16:00', team
+          }] });
+        }
+        return Promise.resolve({ rows: [] });
+      }),
+      release: jest.fn()
+    };
+  }
+
+  test('een medewerker kan geen dienst van een ander team overnemen', async () => {
+    mockActiveUser();
+    pool.connect.mockResolvedValueOnce(verzoekClient('vlot2'));
+    const token = makeToken({ id: 2, role: 'medewerker', name: 'Anna', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/shift-requests/1/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Deze dienst hoort bij een ander team');
+  });
+
+  test('binnen het eigen team komt hij wel voorbij de teamcontrole', async () => {
+    mockActiveUser();
+    pool.connect.mockResolvedValueOnce(verzoekClient('vlot1'));
+    const token = makeToken({ id: 2, role: 'medewerker', name: 'Anna', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/shift-requests/1/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).not.toBe(403);
+  });
+
+  test('een beheerder houdt zijn ruimere blik', async () => {
+    mockActiveUser();
+    pool.connect.mockResolvedValueOnce(verzoekClient('vlot2'));
+    const token = makeToken({ id: 1, role: 'roosterverantwoordelijke', name: 'Lead', team_id: 'vlot1' });
+    const res = await request(app)
+      .put('/shift-requests/1/takeover-accept')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).not.toBe(403);
+  });
+});
+
 describe('POST /availability type-validatie', () => {
   // De app biedt zes types aan, letterlijk de opties uit het keuzemenu in
   // index.html. Alles daarbuiten hoort geweigerd te worden: het kwam vroeger

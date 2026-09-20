@@ -1029,8 +1029,10 @@ function renderHomeNuAanHetWerk() {
 }
 
 async function switchView(viewName) {
-    // Prevent medewerker from accessing settings
-    if (viewName === 'settings' && getEffectiveRole() === 'medewerker') {
+    // #294: hier stond alleen een controle op 'settings'. De roosterbouwer en
+    // het medewerkerstabblad kwamen er zo doorheen, en dit is de plek waar elke
+    // weergavewissel langskomt. Dezelfde bron als de navigatieknoppen.
+    if (!toegelatenWeergaven().has(viewName)) {
         viewName = 'home';
     }
     // Warn about unsaved settings changes

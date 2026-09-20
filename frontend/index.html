@@ -574,14 +574,11 @@
 
                 <div class="form-group">
                     <label for="absence-type">Type afwezigheid *</label>
+                    <!-- #311: de keuzes worden opgebouwd uit ABSENCE_TYPES in
+                         app-availability.js, zodat deze lijst en de labels niet
+                         uiteen kunnen lopen. -->
                     <select id="absence-type" class="select-input" required>
                         <option value="">-- Selecteer type --</option>
-                        <option value="verlof">Verlof</option>
-                        <option value="ziek">Ziekte</option>
-                        <option value="overuren">Overuren opnemen</option>
-                        <option value="vorming">Vorming</option>
-                        <option value="andere">Andere</option>
-                        <option value="vrij">Vrij</option>
                     </select>
                 </div>
 

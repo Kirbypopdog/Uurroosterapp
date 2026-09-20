@@ -1,13 +1,36 @@
 // HET VLOT ROOSTERPLANNING - AFWEZIGHEID TAB EN MODAL
 
-const ABSENCE_LABELS = {
-    'verlof': 'Verlof',
-    'ziek': 'Ziekte',
-    'overuren': 'Overuren',
-    'vorming': 'Vorming',
-    'andere': 'Andere',
-    'vrij': 'Vrij'
+// #311: één lijst afwezigheidstypes in de frontend. De sleutels stonden op drie
+// plekken: hier als label, in het keuzemenu in index.html, en impliciet overal
+// waar op een type getoetst wordt. Het keuzemenu wordt nu hieruit opgebouwd,
+// zodat de HTML en de labels niet uiteen kunnen lopen.
+//
+// De backend heeft zijn eigen lijst (AFWEZIGHEIDSTYPES in server.js) en de
+// database een CHECK-constraint. Die drie kunnen zonder build-stap niet één
+// constante delen, dus ze moeten gelijk blijven: wie hier een type toevoegt,
+// voegt het ook daar toe.
+const ABSENCE_TYPES = {
+    'verlof':   { label: 'Verlof',   keuze: 'Verlof' },
+    'ziek':     { label: 'Ziekte',   keuze: 'Ziekte' },
+    'overuren': { label: 'Overuren', keuze: 'Overuren opnemen' },
+    'vorming':  { label: 'Vorming',  keuze: 'Vorming' },
+    'andere':   { label: 'Andere',   keuze: 'Andere' },
+    'vrij':     { label: 'Vrij',     keuze: 'Vrij' }
 };
+
+const ABSENCE_LABELS = Object.fromEntries(
+    Object.entries(ABSENCE_TYPES).map(([sleutel, t]) => [sleutel, t.label])
+);
+
+// Vult het keuzemenu in de afwezigheidsmodal vanuit ABSENCE_TYPES.
+function vulAfwezigheidstypes() {
+    const veld = document.getElementById('absence-type');
+    if (!veld) return;
+    veld.innerHTML = '<option value="">-- Selecteer type --</option>'
+        + Object.entries(ABSENCE_TYPES)
+            .map(([sleutel, t]) => `<option value="${escapeHtml(sleutel)}">${escapeHtml(t.keuze)}</option>`)
+            .join('');
+}
 
 function renderAvailability() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
@@ -489,6 +512,7 @@ function openAvailabilityModal(employeeId = null, date = null) {
 
     // Populate employee dropdown
     populateAbsenceEmployeeDropdown();
+    vulAfwezigheidstypes();
 
     // #310: een venster rond vandaag op beide datumvelden. Zonder min en max
     // kwam een typfout als 2206 in plaats van 2026 ongehinderd door, waarna

@@ -56,7 +56,12 @@ CREATE TABLE IF NOT EXISTS availability (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
   date DATE NOT NULL,
-  type TEXT NOT NULL,
+  -- #311: migratie 042 zet deze CHECK op een bestaande database. Hij hoort hier
+  -- ook te staan, anders levert een verse database iets anders op dan een
+  -- gemigreerde. Het is het vangnet bij een backup-import; de routes
+  -- controleren het type al via AFWEZIGHEIDSTYPES in server.js.
+  type TEXT NOT NULL CONSTRAINT availability_type_check
+    CHECK (type IN ('verlof', 'ziek', 'overuren', 'vorming', 'andere', 'vrij')),
   reason TEXT DEFAULT '',
   updated_at TIMESTAMP DEFAULT NOW(),
   UNIQUE(user_id, date)
