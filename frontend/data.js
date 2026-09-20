@@ -399,7 +399,7 @@ async function loadDataFromAPI() {
             fetchPublicHolidays(now.getFullYear() + 1)
         ]);
 
-        console.log('Data geladen van API:', {
+        if (DEBUG) console.log('Data geladen van API:', {
             users: DataStore.users.length,
             employees: DataStore.employees.length, // via getter
             shifts: DataStore.shifts.length,
@@ -1067,15 +1067,9 @@ async function getSwapRequests() {
     try {
         const data = await dataApiFetch('/swap-requests');
         DataStore.swapRequests = data.swapRequests || [];
-        console.log(`[getSwapRequests] Received ${DataStore.swapRequests.length} swap requests from backend`);
-        if (DataStore.swapRequests.length > 0) {
-            console.log('[getSwapRequests] First request:', {
-                id: DataStore.swapRequests[0].id,
-                request_type: DataStore.swapRequests[0].request_type,
-                status: DataStore.swapRequests[0].status,
-                requester_name: DataStore.swapRequests[0].requester_name
-            });
-        }
+        // #171 en #320: hier stond een telling plus de eerste rij mét
+        // requester_name. Namen van medewerkers horen niet in de logs, en de
+        // telling is er niet genoeg om dat te rechtvaardigen.
         return DataStore.swapRequests;
     } catch (error) {
         console.error('Fout bij ophalen swap requests:', error);
@@ -2027,24 +2021,34 @@ async function deleteScheduleDraft(id) {
     });
 }
 
+// #171: deze twee gebruikten een kale fetch, tegen CLAUDE.md regel 9 in. De
+// reden was de 423 bij een vergrendeld concept: die is geen fout maar een
+// antwoord, en dataApiFetch gooit op alles wat niet ok is.
+//
+// Dat kan nu gewoon, want de fout uit dataApiFetch draagt sinds #268 zowel
+// status als het volledige antwoordlichaam. De vorm die de aanroepers kennen,
+// { ok, status, ...data }, blijft daardoor ongewijzigd; alleen komt de
+// Authorization-header, de tijdslimiet en de 401-afhandeling er nu bij.
 async function lockScheduleDraft(id, force = false) {
-    const token = sessionStorage.getItem('hetvlot_token');
-    const response = await fetch(`${window.API_BASE}/schedule-drafts/${id}/lock`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ force })
-    });
-    const data = await response.json().catch(() => ({}));
-    return { ok: response.ok, status: response.status, ...data };
+    try {
+        const data = await dataApiFetch(`/schedule-drafts/${id}/lock`, {
+            method: 'POST',
+            body: JSON.stringify({ force })
+        });
+        return { ok: true, status: 200, ...data };
+    } catch (fout) {
+        // Zonder status is het geen antwoord van de server maar een netwerkfout,
+        // en die hoort door te gaan naar de aanroeper (#332).
+        if (!fout.status) throw fout;
+        return { ok: false, status: fout.status, ...(fout.data || {}) };
+    }
 }
 
 async function unlockScheduleDraft(id) {
     if (!id) return;
-    const token = sessionStorage.getItem('hetvlot_token');
-    await fetch(`${window.API_BASE}/schedule-drafts/${id}/unlock`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
-    }).catch(() => {});
+    // Best effort: het ontgrendelen mag nooit de handeling erboven laten falen.
+    // De vervaltermijn van dertig minuten vangt een mislukking op (#304).
+    await dataApiFetch(`/schedule-drafts/${id}/unlock`, { method: 'POST' }).catch(() => {});
 }
 
 async function applyScheduleDraft(draftId, { clearBlocks = true, applyStartDate = null, applyEndDate = null, confirmOverlap = false, confirmOverwrite = null } = {}) {

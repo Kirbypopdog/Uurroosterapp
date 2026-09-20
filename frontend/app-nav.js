@@ -549,9 +549,9 @@ function renderHomeOnboarding() {
 async function dismissOnboardingChecklist(btn) {
     btn.closest('.onboarding-checklist').remove();
     try {
-        await fetch(`${window.API_BASE}/me/onboarding-flags`, {
+        // #171: zie app-settings.js, dezelfde reden.
+        await dataApiFetch('/me/onboarding-flags', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionStorage.getItem('hetvlot_token')}` },
             body: JSON.stringify({ checklist_dismissed: true })
         });
         if (AppState.currentUser) AppState.currentUser.onboardingFlags = { ...AppState.currentUser.onboardingFlags, checklist_dismissed: true };
@@ -571,6 +571,11 @@ function renderHomeWelcome(user, role) {
     `;
 }
 
+// #182: deze functie wordt nergens aangeroepen, en AppState._homeAlertCount
+// voedt alleen hem. Bewust NIET verwijderd: hij is het begin van de
+// stat-kaarten uit feature-issue #166, en dat issue staat nog open. Wordt #166
+// afgevoerd, dan mag deze functie mee, samen met _homeAlertCount in
+// renderHomeAlerts.
 function renderHomeStats(user, role) {
     if (!['admin', 'roosterverantwoordelijke'].includes(role)) return '';
 

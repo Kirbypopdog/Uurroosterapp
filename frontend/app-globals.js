@@ -335,12 +335,6 @@ const IconHelper = {
     }
 };
 
-// Demo users (niet gebruikt in productie)
-const USERS = [
-    { username: 'admin', password: 'admin', role: 'admin', name: 'Administrator' },
-    { username: 'medewerker', password: 'medewerker', role: 'employee', name: 'Medewerker' }
-];
-
 // DOM Elements cache (gevuld door initDOM in app-init.js)
 const DOM = {};
 // API_BASE is set by config/settings.js (loaded before app.js)

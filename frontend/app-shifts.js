@@ -795,7 +795,6 @@ function handleShiftTemplateChange() {
 
 async function handleShiftSubmit(e) {
     e.preventDefault();
-    console.log('Shift submit clicked');
 
     // Check required fields
     if (!DOM.shiftEmployee.value) {

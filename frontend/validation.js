@@ -749,7 +749,6 @@ function validateSwapRequest(swapData) {
     return result;
 }
 
-console.log('Validation systeem geladen');
 
 // Allow pure utility functions to be imported in Node.js (for unit tests)
 // This does not affect browser behavior since `module` is not defined there.

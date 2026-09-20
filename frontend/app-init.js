@@ -24,7 +24,8 @@ function initDOM() {
     DOM.nextWeekBtn = document.getElementById('next-week');
     DOM.todayBtn = document.getElementById('today-btn');
     DOM.currentPeriod = document.getElementById('current-period-text');
-    DOM.currentWeekLabel = document.getElementById('current-week-label');
+    // #182: DOM.currentWeekLabel stond hier, maar #current-week-label bestaat
+    // niet in de markup. Hij was dus altijd null en werd nergens gelezen.
     DOM.viewToggleBtns = document.querySelectorAll('.view-toggle-btn');
     DOM.rosterCalendar = document.getElementById('roster-calendar');
     DOM.validationAlerts = document.getElementById('validation-alerts');
@@ -74,24 +75,18 @@ function initDOM() {
 
 function init() {
     try {
-        console.log('Het Vlot Roosterplanning start...');
-        console.log('Data loaded:', DataStore);
         initDOM();
         initModalFocusTrap();
         applyTeamColors();
-        console.log('DOM initialized');
         document.body.setAttribute('data-view-mode', AppState.viewMode);
         setCurrentWeek(new Date());
         // Set initial mobile day to today's day of the week
         const today = new Date();
         const dayOfWeek = today.getDay();
         AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        console.log('Current week set');
         setupEventListeners();
         setupAvailabilityModal();
-        console.log('Event listeners set up');
         checkSession();
-        console.log('Session checked');
     } catch (error) {
         console.error('Error during initialization:', error);
         showToast('Er is een fout opgetreden bij het starten van de applicatie. Probeer de pagina te herladen.', 'error');
@@ -115,7 +110,7 @@ function setupEventListeners() {
             switchView('planning');
             // Re-render current view
             renderPlanning();
-            console.log(`[Test Mode] Nu werkend als: ${newRole}`);
+            if (DEBUG) console.log(`[Test Mode] Nu werkend als: ${newRole}`);
         });
     }
 
@@ -536,5 +531,4 @@ document.addEventListener('DOMContentLoaded', () => {
     // index.html, dus hier hoeft niets meer bijgezet te worden. Deze lus liep
     // ook maar een keer, bij het laden, en raakte de vensters die later door
     // JavaScript worden opgebouwd dus sowieso niet.
-    console.log('Het Vlot Roosterplanning is gestart!');
 });

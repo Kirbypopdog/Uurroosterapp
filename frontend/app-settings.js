@@ -52,11 +52,12 @@ async function switchSettingsTab(tabName) {
 
     // Track onboarding: mark planning tab as visited
     if (tabName === 'planning' && AppState.currentUser && !AppState.currentUser.onboardingFlags?.planning_visited) {
-        fetch(`${window.API_BASE}/me/onboarding-flags`, {
+        // #171: via dataApiFetch, zoals CLAUDE.md regel 9 voorschrijft. Die
+        // zet de Authorization-header, de tijdslimiet en de 401-afhandeling zelf.
+        dataApiFetch('/me/onboarding-flags', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionStorage.getItem('hetvlot_token')}` },
             body: JSON.stringify({ planning_visited: true })
-        }).catch(e => console.error('Failed to save onboarding flag:', e));
+        }).catch(e => console.error('Onboardingvlag opslaan mislukt:', e));
         if (!AppState.currentUser.onboardingFlags) AppState.currentUser.onboardingFlags = {};
         AppState.currentUser.onboardingFlags.planning_visited = true;
     }
@@ -980,56 +981,9 @@ function renderSettingsPlanning(container) {
 }
 
 // ===== SETTINGS TAB: ROOSTER =====
-async function saveSchedulePattern() {
-    const cycleLengthInput = document.getElementById('schedule-cycle-length');
-    const refDateInput = document.getElementById('schedule-reference-date');
-
-    const cycleLength = Math.max(1, Math.min(8, parseInt(cycleLengthInput?.value) || 2));
-    const referenceDate = refDateInput?.value;
-
-    if (!referenceDate) {
-        showToast('Selecteer een referentiedatum', 'warning');
-        return;
-    }
-
-    // Check if it's a Monday
-    const date = parseDateOnly(referenceDate);
-    if (date.getDay() !== 1) {
-        showToast('De referentiedatum moet een maandag zijn', 'warning');
-        return;
-    }
-
-    // Collect closed days per week
-    const weeks = {};
-    for (let w = 1; w <= cycleLength; w++) {
-        const closedDays = [];
-        document.querySelectorAll(`.pattern-closed-day[data-week="${w}"]`).forEach(cb => {
-            if (cb.checked) {
-                closedDays.push(parseInt(cb.dataset.day));
-            }
-        });
-        const label = closedDays.length > 0 ? formatClosedDays(closedDays) : 'alle dagen open';
-        weeks[String(w)] = { closedDays, label };
-    }
-
-    const newPattern = { cycleLength, referenceDate, weeks };
-
-    // Save to backend
-    try {
-        await saveSettings('schedule_pattern', newPattern);
-
-        // Update local state
-        DataStore.settings.schedulePattern = newPattern;
-        // Backward compat: sync biWeeklyReferenceDate
-        DataStore.settings.biWeeklyReferenceDate = referenceDate;
-
-        renderPlanning();
-        showToast('Roosterpatroon opgeslagen', 'success');
-    } catch (err) {
-        console.error('Error saving schedule pattern:', err);
-        showToast('Fout bij opslaan van roosterpatroon', 'error');
-    }
-}
+// #182: saveSchedulePattern is hier verwijderd. Hij werd nergens aangeroepen
+// en las #schedule-cycle-length en #schedule-reference-date, twee velden die
+// niet bestaan. Het roosterpatroon wordt nu via de roosterbouwer gezet.
 
 // ===== SETTINGS TAB: TEAMS =====
 function renderSettingsTeams(container) {
@@ -2237,22 +2191,9 @@ async function saveRules() {
     }
 }
 
-async function handleSaveSchoolYear() {
-    const input = document.getElementById('school-year-start-input');
-    const date = input.value;
-    if (!date) {
-        showToast('Selecteer een startdatum', 'warning');
-        return;
-    }
-    try {
-        await saveSchoolYearStart(date);
-        markSettingsSaved();
-        showToast('Schooljaar startdatum opgeslagen', 'success');
-    } catch (error) {
-        console.error('Fout bij opslaan schooljaar:', error);
-        showToast('Fout bij opslaan schooljaar', 'error');
-    }
-}
+// #182: handleSaveSchoolYear is hier verwijderd. Hij werd nergens
+// aangeroepen en las #school-year-start-input, een veld dat niet bestaat,
+// dus hij zou meteen zijn gestruikeld als iemand hem ooit had gebruikt.
 
 
 function openAddTemplateModal() {

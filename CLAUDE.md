@@ -28,29 +28,36 @@ open ../frontend/index.html
 ## Bestandsoverzicht
 
 ### Frontend (`frontend/`)
-| Bestand | Regels | Doel |
-|---------|--------|------|
-| `app-globals.js` | ~311 | AppState, constanten, UndoManager, DOM object, IconHelper |
-| `app-permissions.js` | ~77 | Rol-checks en permissiefuncties |
-| `app-ui.js` | ~479 | Toast, modals, FocusTrap, tooltips, overlays |
-| `app-auth.js` | ~231 | Login, logout, sessiecheck, rolevisibility |
-| `app-nav.js` | ~890 | Navigatie, switchView, renderHome, week/maand/dag helpers |
-| `app-planner.js` | ~1330 | renderPlanning, timeline, maand, heatmap, validatiemeldingen, uren-per-naam |
-| `app-shifts.js` | ~1105 | Shift modals, swap modals, shift CRUD, activiteiten |
-| `app-swaps.js` | ~512 | renderSwaps, swap- en overnamekaartenrendering |
-| `app-leave.js` | ~700 | Verlofplanning: rondes, invullen (week/dag), matrix, goedkeuren, export |
-| `app-employees.js` | ~1010 | renderEmployees, profiel, medewerker CRUD, weekrooster |
-| `app-availability.js` | ~640 | renderAvailability, afwezigheidsmodal |
-| `app-builder.js` | ~3065 | Roosterbouwer: grid, concepten, vergaderingen, staffing |
-| `app-settings.js` | ~2697 | renderSettings, alle instellingstabs |
-| `app-admin.js` | ~380 | Export/import, debug, migratie, sanitize |
-| `app-init.js` | ~472 | initDOM, setupEventListeners, init(), DOMContentLoaded entry |
-| `data.js` | ~1.840 | DataStore, API fetch wrappers, data loading |
-| `validation.js` | ~593 | Business rules: 11-uur regel, overlap, min bezetting |
-| `drag-handler.js` | ~1.201 | Drag & drop shifts tussen medewerkers |
-| `styles.css` | ~11.250 | Alle CSS inclusief responsive, themas |
-| `index.html` | ~800 | HTML markup: modals, formulieren, planning grid |
-| `config/settings.js` | ~62 | API URL auto-detect, shift templates, team kleuren |
+
+De regelaantallen stonden hier vroeger bij, maar die verouderden per week en
+zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
+
+| Bestand | Doel |
+|---------|------|
+| `app-globals.js` | AppState, constanten, UndoManager, DOM object, IconHelper |
+| `app-permissions.js` | Rol-checks en permissiefuncties |
+| `app-ui.js` | Toast, modals, FocusTrap, tooltips, overlays |
+| `app-auth.js` | Login, logout, sessiecheck, rolevisibility |
+| `app-nav.js` | Navigatie, switchView, renderHome, week/maand/dag helpers |
+| `app-planner.js` | renderPlanning, timeline, heatmap, validatiemeldingen, uren-per-naam |
+| `app-shifts.js` | Shift modals, swap modals, shift CRUD, activiteiten |
+| `app-swaps.js` | renderSwaps, swap- en overnamekaartenrendering |
+| `app-leave.js` | Verlofplanning: rondes, invullen, matrix, goedkeuren, verdelen, export |
+| `app-employees.js` | renderEmployees, profiel, medewerker CRUD, weekrooster |
+| `app-availability.js` | renderAvailability, afwezigheidsmodal, ABSENCE_TYPES |
+| `app-builder.js` | Roosterbouwer: grid, rendering, bewaarstatus, vergaderingen, staffing |
+| `app-builder-drafts.js` | Concepten: aanmaken, laden, vergrendelen, toepassen, diff, import/export |
+| `app-builder-editors.js` | Bouwer-deelschermen: staffing, vergaderingen, waarschuwingen, urenberekening |
+| `app-settings.js` | renderSettings, alle instellingstabs |
+| `app-admin.js` | Export/import, debug, migratie, sanitize |
+| `app-init.js` | initDOM, setupEventListeners, init(), DOMContentLoaded entry |
+| `data.js` | DataStore, API fetch wrappers, data loading |
+| `validation.js` | Business rules: 11-uur regel, overlap, min bezetting, datumhelpers |
+| `drag-handler.js` | Drag & drop shifts tussen medewerkers |
+| `styles.css` | Alle CSS inclusief responsive, themas |
+| `vlot.css` | Kleine losse stijlset, grotendeels ongebruikt (zie #182) |
+| `index.html` | HTML markup: modals, formulieren, planning grid |
+| `config/settings.js` | API URL auto-detect, shift templates, team kleuren |
 
 ### Backend (`backend/`)
 | Bestand | Doel |
@@ -67,10 +74,17 @@ open ../frontend/index.html
 ### Tests (`backend/tests/`)
 | Bestand | Doel |
 |---------|------|
-| `utils.test.js` | Unit tests voor `src/utils.js` (33 tests) |
-| `email.test.js` | Unit tests voor email helpers: `escapeHtml`, `formatDate`, `formatTime`, `shiftDetailBox`, `baseTemplate` (31 tests) |
-| `api.test.js` | Integratietests voor API-endpoints — auth, shifts, teams, settings, swap-requests (46 tests) |
-| `validation.test.js` | Unit tests voor frontend pure functies in `validation.js` (15 tests) |
+| `api.test.js` | Integratietests voor de API-endpoints, met een volledig gemockte database |
+| `utils.test.js` | Unit tests voor `src/utils.js` |
+| `validation.test.js` | Unit tests voor de pure functies uit `frontend/validation.js` |
+| `email.test.js` | Unit tests voor de e-mailhelpers (`escapeHtml`, `formatDate`, `shiftDetailBox`, …) |
+| `email-batch.test.js` | Bulkverzending via `resend.batch.send`, inclusief de seriële terugval |
+| `email-verzending.test.js` | Wat er wel en niet verstuurd wordt, en naar wie |
+| `schooljaar.test.js` | Schooljaar- en periodeberekeningen |
+| `schema-drift.test.js` | Bewaakt dat `sql/schema.sql` niet achterloopt op de migraties (#329, #311) |
+
+Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
+sneller dan dit bestand (#291).
 
 ## Database Schema
 
@@ -99,7 +113,7 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 3. **ALTIJD** parameterized queries gebruiken (nooit string concatenation in SQL)
 4. **Backend retourneert BEIDE** `userId` EN `employeeId` (backward compatibility alias)
 5. **Permissions** checken in ZOWEL frontend ALS backend
-6. **Migraties**: geversioneerd via de `MIGRATIONS`-array + `runMigrations()` in server.js (draait bij elke startup, elke migratie exact één keer). Voeg nieuwe schema changes toe als nieuwe migratie-entry **én werk `sql/schema.sql` bij**, zodat beide wegen dezelfde database opleveren. `backend/tests/schema-drift.test.js` bewaakt dat: een kolom, index of tabel die alleen in een migratie staat laat die test falen. Migratie `000_base_schema` draait `schema.sql` idempotent, dus een verse database (bv. staging) initialiseert zichzelf; `ensureBootstrapData()` maakt standaardteams + admin-account aan zonder bestaande data te overschrijven
+6. **Migraties**: geversioneerd via de `MIGRATIONS`-array + `runMigrations()` in server.js (draait bij elke startup, elke migratie exact één keer). Voeg nieuwe schema changes toe als nieuwe migratie-entry **én werk `sql/schema.sql` bij**, zodat beide wegen dezelfde database opleveren. `backend/tests/schema-drift.test.js` bewaakt dat: een kolom, index, tabel of constraint die alleen in een migratie staat laat die test falen. Migratie `000_base_schema` draait `schema.sql` idempotent, dus een verse database (bv. staging) initialiseert zichzelf; `ensureBootstrapData()` maakt standaardteams + admin-account aan zonder bestaande data te overschrijven
 7. **shift_blocks**: Bij shift delete wordt block aangemaakt (voorkomt auto-regeneratie). Manual shift create verwijdert block.
 8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging
 9. **Fetch wrapper**: Gebruik uitsluitend `dataApiFetch()` uit `data.js`. `apiFetch()` is verwijderd (issue #26 opgelost). Uitzondering: `fetchPublicHolidays()` gebruikt plain `fetch()` want `/public-holidays` vereist geen auth.
@@ -130,7 +144,6 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - `CRUD /api/v1/shift-activities` - Activiteiten binnen shifts
 - `CRUD /api/v1/schedule-drafts` - Roosterconcepten
 - `POST /api/v1/schedule-drafts/:id/apply` - Concept toepassen op datumbereik
-- `POST /api/v1/users/:id/apply-schedule` - Basisrooster toepassen (atomisch)
 - `POST /api/v1/availability/sick-with-takeover` - Bulk ziekmelding + auto-takeover
 
 ### Swap/Takeover
@@ -247,19 +260,15 @@ Zie `DEPLOY.md` voor deployment instructies en `STAGING.md` voor de eenmalige se
 
 ```bash
 cd backend
-npm test           # Alle tests uitvoeren (249 tests, ~6 seconden)
+npm test           # Alle tests uitvoeren, in enkele seconden
 ```
 
-Testbestanden in `backend/tests/`:
+Acht testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
+voor wat elk bestand dekt. Tests gebruiken Jest + Supertest en de database wordt
+volledig gemockt, dus er is geen echte databank nodig.
 
-| Bestand | Dekking |
-|---------|---------|
-| `utils.test.js` | `getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`, `getEasterDate`, `getBelgianPublicHolidays` |
-| `email.test.js` | `escapeHtml`, `formatDate`, `formatTime`, `shiftDetailBox`, `baseTemplate` |
-| `api.test.js` | API-endpoints: auth, shifts, teams, settings, swap-requests |
-| `validation.test.js` | Frontend tijdfuncties: `parseDateTime`, `getShiftEndDateTime`, `getHoursBetweenShifts`, `shiftsOverlap` |
-
-Tests gebruiken Jest + Supertest. De database wordt volledig gemockt — geen echte DB vereist.
+Een nieuwe test hoort bij elke bugfix die een gedragsverandering oplevert, en
+die test moet falen tegen de oude code. Anders meet hij niets.
 
 ## GitHub Issues — Workflow
 

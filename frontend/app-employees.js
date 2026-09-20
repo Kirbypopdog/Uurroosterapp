@@ -566,7 +566,15 @@ function openProfileEditModal() {
 
     const form = document.getElementById('profile-edit-form');
     const message = document.getElementById('profile-message');
+    // #182: de Escape-luisteraar hing aan document en verwijderde zichzelf
+    // alleen bij Escape. Sluiten via het kruisje of de achtergrond liet hem
+    // staan, en elke heropening stapelde er een bij. Na vijf keer openen en
+    // sluiten sloot één druk op Escape dus vijf keer een venster dat er niet
+    // meer is. Het opruimen hoort bij het sluiten, niet bij één van de manieren
+    // waarop je kan sluiten.
+    const escHandler = (e) => { if (e.key === 'Escape') closeModal(); };
     const closeModal = () => {
+        document.removeEventListener('keydown', escHandler);
         overlay.classList.remove('active');
         setTimeout(() => overlay.remove(), 200);
     };
@@ -582,9 +590,7 @@ function openProfileEditModal() {
     // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
     // en de muis buiten het kader loslaat.
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeModal(); });
-    document.addEventListener('keydown', function escHandler(e) {
-        if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', escHandler); }
-    });
+    document.addEventListener('keydown', escHandler);
 
     // Focus first field
     document.getElementById('profile-name')?.focus();

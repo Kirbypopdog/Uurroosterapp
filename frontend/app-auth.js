@@ -11,7 +11,7 @@ async function handleLogin(e) {
 
     // Prevent concurrent authentication attempts
     if (AppState.isAuthenticating) {
-        console.log('Authentication already in progress');
+        if (DEBUG) console.log('Authentication already in progress');
         return;
     }
 
@@ -150,7 +150,7 @@ function sluitAlleVensters() {
 async function checkSession() {
     // Don't check session if login is in progress
     if (AppState.isAuthenticating) {
-        console.log('Skipping checkSession - authentication in progress');
+        if (DEBUG) console.log('Skipping checkSession - authentication in progress');
         return;
     }
 

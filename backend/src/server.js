@@ -5478,12 +5478,32 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
       const shiftIdExists = shiftIdCheck.rows.length > 0;
 
       // Find all auto-shifts just created in this range
-      const newShiftsResult = await client.query(
+      //
+      // #334: dit haalde élke automatische dienst in het bereik op, ook de
+      // dagen waarop geen enkel team vergadert. Bij een volledig schooljaar
+      // zijn dat er duizenden waarvan de lus er de meeste meteen weer weggooit.
+      // De weekdagen waarop wél een vergadering staat zijn hier al bekend, dus
+      // die filter hoort in de query.
+      //
+      // teamMeetings gebruikt dayIndex met 0 = maandag; EXTRACT(DOW) van
+      // Postgres gebruikt 0 = zondag. Vandaar de omrekening.
+      const vergaderDagen = [...new Set(
+        Object.values(teamMeetings).flat().map(m => (Number(m.day) + 1) % 7)
+      )].filter(d => Number.isInteger(d));
+
+      const newShiftsResult = vergaderDagen.length === 0 ? { rows: [] } : await client.query(
         `SELECT s.id, s.user_id, s.date::text as date, s.start_time, s.end_time, u.main_team
          FROM shifts s JOIN users u ON s.user_id = u.id
-         WHERE s.source = 'auto' AND s.date >= $1::date AND s.date <= $2::date`,
-        [effectiveStartDate, effectiveEndDate]
+         WHERE s.source = 'auto' AND s.date >= $1::date AND s.date <= $2::date
+           AND EXTRACT(DOW FROM s.date)::int = ANY($3::int[])`,
+        [effectiveStartDate, effectiveEndDate, vergaderDagen]
       );
+
+      // #334: de activiteiten werden per dienst rij voor rij ingevoegd, binnen
+      // een transactie die honderden regels lang openstaat en intussen een
+      // schrijfslot op die diensten houdt. Ze worden nu eerst verzameld en
+      // daarna in één opdracht weggeschreven.
+      const teSchrijvenActiviteiten = [];
 
       for (const shift of newShiftsResult.rows) {
         const meetings = teamMeetings[shift.main_team] || [];
@@ -5524,20 +5544,44 @@ v1.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'rooster
             // draft_id legt vast dat deze vergadering uit dit concept komt,
             // zodat de opruiming hierboven hem later kan onderscheiden van een
             // handmatig ingevoerde (#376).
-            if (shiftIdExists) {
-              await client.query(
-                `INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description, draft_id)
-                 VALUES ($1, $2, $3, $4, $5, 'vergadering', 'Teamvergadering', $6)`,
-                [shift.user_id, shift.id, shift.date, fromTime, toTime, draftId]
-              );
-            } else {
-              await client.query(
-                `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description, draft_id)
-                 VALUES ($1, $2, $3, $4, 'vergadering', 'Teamvergadering', $5)`,
-                [shift.user_id, shift.date, fromTime, toTime, draftId]
-              );
-            }
+            teSchrijvenActiviteiten.push({
+              userId: shift.user_id, shiftId: shift.id, date: shift.date,
+              from: fromTime, to: toTime
+            });
           }
+        }
+      }
+
+      if (teSchrijvenActiviteiten.length > 0) {
+        // shift_id bestaat pas na migratie 020; zonder die kolom valt de
+        // koppeling weg en blijft alleen de dag over.
+        if (shiftIdExists) {
+          await client.query(
+            `INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description, draft_id)
+             SELECT u, sid, d::date, f, t, 'vergadering', 'Teamvergadering', $6
+             FROM unnest($1::int[], $2::int[], $3::date[], $4::text[], $5::text[]) AS x(u, sid, d, f, t)`,
+            [
+              teSchrijvenActiviteiten.map(a => a.userId),
+              teSchrijvenActiviteiten.map(a => a.shiftId),
+              teSchrijvenActiviteiten.map(a => a.date),
+              teSchrijvenActiviteiten.map(a => a.from),
+              teSchrijvenActiviteiten.map(a => a.to),
+              draftId
+            ]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO shift_activities (user_id, date, start_time, end_time, type, description, draft_id)
+             SELECT u, d::date, f, t, 'vergadering', 'Teamvergadering', $5
+             FROM unnest($1::int[], $2::date[], $3::text[], $4::text[]) AS x(u, d, f, t)`,
+            [
+              teSchrijvenActiviteiten.map(a => a.userId),
+              teSchrijvenActiviteiten.map(a => a.date),
+              teSchrijvenActiviteiten.map(a => a.from),
+              teSchrijvenActiviteiten.map(a => a.to),
+              draftId
+            ]
+          );
         }
       }
     }
@@ -6207,12 +6251,22 @@ v1.put('/leave-rounds/:id/blocks/:blockId/entries', requireAuth, requireRole(...
          WHERE round_id = $1 AND user_id = ANY($2::int[]) AND date BETWEEN $3 AND $4`,
         [req.params.id, [...userIds], blok.startDate, blok.endDate]
       );
-      for (const e of teBewaren) {
+      // #334: dit was één INSERT per medewerker per dag. Bij 40 medewerkers
+      // maal circa 62 zomerdagen zijn dat ruim 2.400 losse opdrachten, en op
+      // Render komt daar per stuk retourtijd bij. Nu één opdracht, met unnest
+      // om onder de bindparameterlimiet te blijven (zie apply hieronder).
+      if (teBewaren.length > 0) {
         await client.query(
           `INSERT INTO leave_round_entries (round_id, user_id, date, status, requested_status)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [req.params.id, Number(e.userId), e.date, e.status,
-           gevraagd.get(`${Number(e.userId)}|${e.date}`) ?? null]
+           SELECT $1, u, d::date, st, rs
+           FROM unnest($2::int[], $3::date[], $4::text[], $5::text[]) AS t(u, d, st, rs)`,
+          [
+            req.params.id,
+            teBewaren.map(e => Number(e.userId)),
+            teBewaren.map(e => e.date),
+            teBewaren.map(e => e.status),
+            teBewaren.map(e => gevraagd.get(`${Number(e.userId)}|${e.date}`) ?? null)
+          ]
         );
       }
     }
@@ -6477,16 +6531,24 @@ v1.post('/leave-rounds/:id/apply', requireAuth, requireRole(...LEAVE_MANAGER_ROL
     );
 
     await client.query('BEGIN');
-    let applied = 0;
-    for (const r of rows.rows) {
+    // #334: dit schreef rij voor rij weg, bij een volledige zomerronde zo'n
+    // 1.200 losse INSERTs binnen één transactie. Nu één opdracht.
+    //
+    // Bewust met unnest en niet met een VALUES-lijst van duizend rijen: een
+    // VALUES-lijst bindt twee parameters per rij en loopt bij een groot
+    // schooljaar tegen de Postgres-limiet van 65.535 bindparameters aan. Met
+    // unnest zijn het er altijd drie, hoeveel dagen het ook zijn, en is
+    // chunking dus niet nodig.
+    const applied = rows.rows.length;
+    if (applied > 0) {
       await client.query(
         `INSERT INTO availability (user_id, date, type, reason, updated_at)
-         VALUES ($1, $2, 'verlof', $3, NOW())
+         SELECT u, d::date, 'verlof', $3, NOW()
+         FROM unnest($1::int[], $2::date[]) AS t(u, d)
          ON CONFLICT (user_id, date)
-         DO UPDATE SET type = 'verlof', reason = $3, updated_at = NOW()`,
-        [r.user_id, r.date, `Verlofplanning: ${roundName}`]
+         DO UPDATE SET type = 'verlof', reason = EXCLUDED.reason, updated_at = NOW()`,
+        [rows.rows.map(r => r.user_id), rows.rows.map(r => r.date), `Verlofplanning: ${roundName}`]
       );
-      applied++;
     }
     await client.query(`UPDATE leave_rounds SET status = 'toegepast', updated_at = NOW() WHERE id = $1`, [req.params.id]);
     await client.query('COMMIT');

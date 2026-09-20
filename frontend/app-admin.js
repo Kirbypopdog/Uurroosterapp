@@ -120,8 +120,8 @@ async function showDebugInfo() {
             message += `  weekScheduleWeek2: type=${w2?.type || typeof w2}, isArray=${w2?.isArray || Array.isArray(w2)}, length=${w2?.length || 0}\n`;
         });
 
-        console.log(message);
-        console.log('Full debug result:', result);
+        if (DEBUG) console.log(message);
+        if (DEBUG) console.log('Full debug result:', result);
         showToast(message.length > 200 ? 'Debug info getoond in console (F12)' : message, 'info');
     } catch (error) {
         showToast('Debug info ophalen mislukt: ' + error.message, 'error');
@@ -326,22 +326,22 @@ function sanitizeImportedData(rawData) {
 async function importData(event) {
     const file = event.target.files[0];
     if (!file) {
-        console.log('Geen bestand geselecteerd');
+        if (DEBUG) console.log('Geen bestand geselecteerd');
         return;
     }
 
-    console.log('Bestand geselecteerd:', file.name);
+    if (DEBUG) console.log('Bestand geselecteerd:', file.name);
 
     const reader = new FileReader();
     reader.onload = async (e) => {
         try {
-            console.log('Bestand gelezen, parsing JSON...');
+            if (DEBUG) console.log('Bestand gelezen, parsing JSON...');
             const data = JSON.parse(e.target.result);
-            console.log('Data parsed:', data);
+            if (DEBUG) console.log('Data parsed:', data);
 
             // Support both old (employees) and new (users) format
             const usersToImport = data.users || data.employees || [];
-            console.log('Gevonden gebruikers/medewerkers:', usersToImport.length);
+            if (DEBUG) console.log('Gevonden gebruikers/medewerkers:', usersToImport.length);
 
             if (usersToImport.length === 0) {
                 showToast('Geen medewerkers gevonden in het back-upbestand', 'warning');

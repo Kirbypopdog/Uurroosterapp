@@ -28,7 +28,7 @@ const DragHandler = {
 
     // Initialize drag handlers on timeline
     init() {
-        console.log('[DragHandler] Initializing drag & drop handlers');
+        if (DEBUG) console.log('[DragHandler] Initializing drag & drop handlers');
 
         // Clean up existing listeners first
         this.cleanup();
@@ -59,14 +59,14 @@ const DragHandler = {
         this.state.timeline = timeline;
         this.state.initialized = true;
 
-        console.log('[DragHandler] Initialized successfully');
+        if (DEBUG) console.log('[DragHandler] Initialized successfully');
     },
 
     // Clean up event listeners
     cleanup() {
         if (!this.state.initialized) return;
 
-        console.log('[DragHandler] Cleaning up event listeners');
+        if (DEBUG) console.log('[DragHandler] Cleaning up event listeners');
 
         const timeline = this.state.timeline;
         if (timeline && this._boundMouseDown) {
@@ -102,7 +102,7 @@ const DragHandler = {
 
             // Check permissions
             if (!canUserEditShift(shift)) {
-                console.log('[DragHandler] User cannot edit this shift');
+                if (DEBUG) console.log('[DragHandler] User cannot edit this shift');
                 showToast('Je hebt geen rechten om deze dienst te bewerken', 'warning');
                 return;
             }
@@ -170,7 +170,7 @@ const DragHandler = {
             if (this.state.dragType === 'transfer') {
                 const shift = getShift(this.state.shiftId);
                 if (shift && !canUserTransferShift(shift)) {
-                    console.log('[DragHandler] User cannot transfer shifts - cancelling drag');
+                    if (DEBUG) console.log('[DragHandler] User cannot transfer shifts - cancelling drag');
                     showToast('Je kunt alleen de tijden van je eigen dienst aanpassen, niet naar anderen verplaatsen. Gebruik "Dienst afstaan" om je dienst over te dragen.', 'warning');
                     // #212: hier stond cleanup(), en die verwijdert ALLE
                     // listeners, ook die voor gewone klikken. De tijdlijn
@@ -238,7 +238,7 @@ const DragHandler = {
     // Handle keyboard events
     handleKeyDown(e) {
         if (e.key === 'Escape' && this.state.isDragging) {
-            console.log('[DragHandler] Drag cancelled by user (Escape key)');
+            if (DEBUG) console.log('[DragHandler] Drag cancelled by user (Escape key)');
             this.cancelDrag();
         }
     },
@@ -266,7 +266,7 @@ const DragHandler = {
 
     // Start transfer drag operation
     startTransferDrag() {
-        console.log('[DragHandler] Starting transfer drag for shift', this.state.shiftId);
+        if (DEBUG) console.log('[DragHandler] Starting transfer drag for shift', this.state.shiftId);
         this.state.isDragging = true;
 
         // Capture original dimensions and position BEFORE making it position:fixed
@@ -385,19 +385,19 @@ const DragHandler = {
 
         // 3. Validate using captured data
         if (!dayCell) {
-            console.log('[DragHandler] Invalid drop target - cancelling');
+            if (DEBUG) console.log('[DragHandler] Invalid drop target - cancelling');
             showToast('Ongeldige locatie. Sleep de dienst naar een dag in de planner.', 'warning');
             return;
         }
 
         if (dayCell.classList.contains('closed')) {
-            console.log('[DragHandler] Drop target is closed day');
+            if (DEBUG) console.log('[DragHandler] Drop target is closed day');
             showToast('Deze dag is gesloten. Je kunt hier geen dienst toewijzen.', 'warning');
             return;
         }
 
         if (!targetEmployee || !targetDate) {
-            console.log('[DragHandler] Could not determine target employee/date');
+            if (DEBUG) console.log('[DragHandler] Could not determine target employee/date');
             showToast('Kon de medewerker of datum niet bepalen. Probeer opnieuw.', 'warning');
             return;
         }
@@ -423,7 +423,7 @@ const DragHandler = {
         if (!uitkomst.doorgaan) return;
         const forceerRust = uitkomst.force;
 
-        console.log(`[DragHandler] Transferring shift ${shiftId} to ${targetEmployee.name} on ${targetDate}`);
+        if (DEBUG) console.log(`[DragHandler] Transferring shift ${shiftId} to ${targetEmployee.name} on ${targetDate}`);
 
         // 4. Update shift via API (using captured data, not this.state)
         showSectionLoading('planning-view', 'Dienst verplaatsen...');
@@ -490,7 +490,7 @@ const DragHandler = {
 
     // Start resize drag operation
     startResizeDrag() {
-        console.log('[DragHandler] Starting resize drag (type:', this.state.dragType + ')');
+        if (DEBUG) console.log('[DragHandler] Starting resize drag (type:', this.state.dragType + ')');
         this.state.isDragging = true;
 
         // Store original styles to restore on cancel
@@ -643,7 +643,7 @@ const DragHandler = {
         if (!uitkomstResize.doorgaan) return;
         const forceerRustResize = uitkomstResize.force;
 
-        console.log(`[DragHandler] Resizing shift ${shiftId} to ${newStartTime} - ${newEndTime}`);
+        if (DEBUG) console.log(`[DragHandler] Resizing shift ${shiftId} to ${newStartTime} - ${newEndTime}`);
 
         // 3. Update shift via API (using captured data, not this.state)
         try {
@@ -723,7 +723,7 @@ const DragHandler = {
 
     // Handle cell click (create shift)
     handleCellClick(dayCell) {
-        console.log('[DragHandler] Cell clicked - opening shift creation modal');
+        if (DEBUG) console.log('[DragHandler] Cell clicked - opening shift creation modal');
 
         // Get employee and date from cell
         const employee = this.getEmployeeFromRow(dayCell);
@@ -782,7 +782,7 @@ const DragHandler = {
 
     // Cancel drag operation
     cancelDrag() {
-        console.log('[DragHandler] Cancelling drag');
+        if (DEBUG) console.log('[DragHandler] Cancelling drag');
 
         // Remove visual feedback
         if (this.state.targetElement) {
