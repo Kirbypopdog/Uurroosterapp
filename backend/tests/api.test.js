@@ -1245,6 +1245,120 @@ describe('POST /availability', () => {
   });
 });
 
+// ===== POST /shifts/bulk =====
+
+// Regressie #293: bij overwriteExisting werden eerst alle bestaande diensten
+// van elk paar medewerker+datum verwijderd, en pas daarna gevalideerd. Wat de
+// validatie niet haalde belandde in `skipped`, maar de verwijdering bleef
+// staan. De bestaande dienst was weg en er kwam niets voor in de plaats.
+describe('POST /shifts/bulk met overwriteExisting (#293)', () => {
+  function bulkClient(validatieAntwoorden) {
+    const gesteld = [];
+    const client = {
+      query: jest.fn((sql, params) => {
+        gesteld.push(typeof sql === 'string' ? sql.trim() : '');
+        const tekst = typeof sql === 'string' ? sql : '';
+        if (/closedDates/.test(tekst)) return Promise.resolve({ rows: [{ value: [] }] });
+        if (/minHoursBetweenShifts|FROM settings/i.test(tekst)) return Promise.resolve({ rows: [] });
+        if (/FROM shifts/i.test(tekst) && /SELECT/i.test(tekst)) {
+          return Promise.resolve({ rows: validatieAntwoorden.shift() || [] });
+        }
+        if (/INSERT INTO shifts/i.test(tekst)) {
+          return Promise.resolve({ rows: [{ id: 99, userId: params[0], date: params[2] }] });
+        }
+        return Promise.resolve({ rows: [] });
+      }),
+      release: jest.fn()
+    };
+    return { client, gesteld };
+  }
+
+  test('draait het verwijderen terug wanneer er voor dat paar niets geplaatst wordt', async () => {
+    mockActiveUser();
+    // één buurdienst die de rustregel breekt, zodat de nieuwe dienst sneuvelt
+    const { client, gesteld } = bulkClient([
+      [{ id: 1, date: '2026-11-01', start_time: '16:00', end_time: '23:00' }]
+    ]);
+    pool.connect.mockResolvedValueOnce(client);
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/shifts/bulk')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        overwriteExisting: true,
+        shifts: [{ userId: 2, date: '2026-11-02', startTime: '07:30', endTime: '16:00' }]
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.count).toBe(0);
+    expect(res.body.skipped).toHaveLength(1);
+
+    // het verwijderen moet zijn teruggedraaid, niet stilzwijgend blijven staan
+    expect(gesteld.some(q => /^SAVEPOINT /.test(q))).toBe(true);
+    expect(gesteld.some(q => /^ROLLBACK TO SAVEPOINT /.test(q))).toBe(true);
+    expect(gesteld.some(q => /^COMMIT/.test(q))).toBe(true);
+  });
+
+  test('houdt het verwijderen wanneer de nieuwe dienst er wel komt', async () => {
+    mockActiveUser();
+    const { client, gesteld } = bulkClient([[]]); // geen buurdiensten, dus geldig
+    pool.connect.mockResolvedValueOnce(client);
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/shifts/bulk')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        overwriteExisting: true,
+        shifts: [{ userId: 2, date: '2026-11-02', startTime: '12:00', endTime: '20:00' }]
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.count).toBe(1);
+    expect(gesteld.some(q => /^ROLLBACK TO SAVEPOINT /.test(q))).toBe(false);
+    expect(gesteld.some(q => /^RELEASE SAVEPOINT /.test(q))).toBe(true);
+  });
+});
+
+// ===== ASYNC FOUTOPVANG OP DE ROUTER (#380) =====
+
+// Regressie #380: pool.connect() staat op 23 plekken buiten de try. Mislukt het
+// verbinden, dan gooit de async handler een rejection die Express 4 niet
+// opvangt, en het verzoek krijgt GEEN antwoord. De browser blijft wachten tot
+// hij zelf afbreekt.
+describe('async foutopvang op de router (#380)', () => {
+  test('een mislukte pool.connect() geeft 500 in plaats van een hangend verzoek', async () => {
+    mockActiveUser();
+    const standaardClient = pool.connect.getMockImplementation
+      ? pool.connect.getMockImplementation()
+      : null;
+    pool.connect.mockRejectedValueOnce(new Error('connect timeout'));
+
+    const token = makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: 'vlot1' });
+    const res = await request(app)
+      .post('/shifts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: 1, date: '2026-05-01', startTime: '09:00', endTime: '17:00' });
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('Server error');
+
+    // de standaardmock terugzetten voor de volgende tests
+    pool.connect.mockResolvedValue({
+      query: jest.fn((...args) => {
+        const sql = typeof args[0] === 'string' ? args[0] : '';
+        if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(sql) || /pg_advisory/i.test(sql)) {
+          return Promise.resolve({ rows: [] });
+        }
+        return pool.query(...args);
+      }),
+      release: jest.fn()
+    });
+    if (standaardClient) pool.connect.mockImplementation(standaardClient);
+  });
+});
+
 // ===== POST /availability/sick-with-takeover =====
 
 // Regressie #310: de lus liep van startDate tot endDate zonder bovengrens. Een

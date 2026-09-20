@@ -1186,6 +1186,51 @@ async function validateShiftRules(db, userId, newShift, excludeId = null, skipRe
 // ===== API ROUTER =====
 const v1 = express.Router();
 
+// #380: Express 4 kent geen opvang voor een async handler die afwijst. Een
+// rejection vóór de try van een route, zoals een mislukte pool.connect(),
+// kwam daardoor nergens terecht: het verzoek kreeg GEEN antwoord en de browser
+// bleef wachten tot hij zelf afbrak. Een knop die eindeloos draait is
+// onaangenamer dan een 500, want de gebruiker weet niet of zijn wijziging is
+// doorgegaan.
+//
+// Dit hangt de opvang één keer op de router in plaats van 23 routes apart aan
+// te passen, en het dekt meteen elke route die er later bijkomt. De rejection
+// gaat naar next(err) en daarmee naar de foutmiddleware onderaan dit bestand,
+// die een 500 stuurt tenzij de route zelf al geantwoord heeft.
+//
+// Alleen async handlers worden omwikkeld: een gewone handler die gooit vangt
+// Express zelf al op, en middleware met vier parameters is een foutafhandelaar
+// en mag niet van vorm veranderen.
+function vangAsyncFouten(handler) {
+  if (typeof handler !== 'function' || handler.length >= 4) return handler;
+  const omwikkeld = function (req, res, next) {
+    let uitkomst;
+    try {
+      uitkomst = handler.call(this, req, res, next);
+    } catch (fout) {
+      return next(fout);
+    }
+    if (uitkomst && typeof uitkomst.then === 'function') {
+      uitkomst.catch(next);
+    }
+    return uitkomst;
+  };
+  // De naam meenemen, anders heet elke route in een stacktrace 'omwikkeld'.
+  Object.defineProperty(omwikkeld, 'name', { value: handler.name || 'route' });
+  return omwikkeld;
+}
+
+for (const methode of ['get', 'post', 'put', 'patch', 'delete', 'all', 'use']) {
+  const origineel = v1[methode].bind(v1);
+  v1[methode] = (...argumenten) => {
+    const [eerste, ...rest] = argumenten;
+    if (typeof eerste === 'string' || eerste instanceof RegExp || Array.isArray(eerste)) {
+      return origineel(eerste, ...rest.map(vangAsyncFouten));
+    }
+    return origineel(...argumenten.map(vangAsyncFouten));
+  };
+}
+
 v1.get('/health', (req, res) => {
   res.json({ status: 'ok', ts: new Date().toISOString() });
 });
@@ -2351,7 +2396,10 @@ v1.post('/shifts', requireAuth, async (req, res) => {
     const closedDatesResult = await client.query("SELECT value FROM settings WHERE key = 'closedDates'");
     const closedDates = (closedDatesResult.rows[0]?.value || []).map(d => d.date);
     if (closedDates.includes(date)) {
-      await client.query('ROLLBACK');
+      // #312: .catch erop, zoals overal elders in dit bestand. Valt de
+      // verbinding weg, dan faalt ook de ROLLBACK, en dan hoort de gebruiker
+      // de melding te krijgen die hier klaarstaat in plaats van een kale 500.
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(400).json({ error: 'Deze dag is manueel gesloten' });
     }
 
@@ -2362,7 +2410,7 @@ v1.post('/shifts', requireAuth, async (req, res) => {
     // Ze bood daardoor bij allebei "Toch opslaan" aan, terwijl force enkel de
     // rustcontrole overslaat. De ruilendpoints gaven dit al mee.
     if (!validation.valid) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       return res.status(422).json({
         error: validation.message,
         rule: validation.rule,
@@ -2756,44 +2804,81 @@ v1.post('/shifts/bulk', requireAuth, requireRole('admin', 'roosterverantwoordeli
     const createdShifts = [];
     const skipped = [];
 
-    if (overwriteExisting) {
-      // Delete existing shifts for each unique user_id + date pair
-      const pairSet = new Set(shiftsToCreate.map(s => `${s.userId}|${s.date}`));
-      for (const pair of pairSet) {
-        const [userId, date] = pair.split('|');
-        await client.query('DELETE FROM shifts WHERE user_id = $1 AND date = $2', [userId, date]);
-      }
-    }
-
+    // #293: hiervoor werden bij overwriteExisting éérst alle bestaande diensten
+    // van elk paar medewerker+datum verwijderd, en pas daarna per dienst
+    // gecontroleerd op gesloten dagen en op de overlap- en rustregel. Wat de
+    // controle niet haalde belandde in `skipped`, maar de verwijdering bleef
+    // staan: de bestaande dienst was weg en er kwam niets voor in de plaats.
+    // Wie alleen naar het aantal 'aangemaakt' keek, zag dat niet.
+    //
+    // Het verwijderen kan niet zomaar ná de validatie, want de bestaande dienst
+    // is precies wat de overlapcontrole zou afkeuren. Daarom nu per paar, met
+    // een savepoint eromheen: verwijderen, invoegen, en als er voor dat paar
+    // uiteindelijk niets is ingevoegd, het verwijderen terugdraaien. Een dag
+    // wordt dus alleen leeggemaakt als er ook echt iets voor in de plaats komt.
+    const paren = new Map();
     for (const shift of shiftsToCreate) {
       if (!shift.userId || !shift.date || !shift.startTime || !shift.endTime) continue;
+      const sleutel = `${shift.userId}|${shift.date}`;
+      if (!paren.has(sleutel)) paren.set(sleutel, []);
+      paren.get(sleutel).push(shift);
+    }
 
-      // Skip manually closed dates
-      if (closedDates.has(shift.date)) {
-        skipped.push({ date: shift.date, reason: 'closed' });
+    let savepointTeller = 0;
+    for (const [sleutel, diensten] of paren) {
+      const [paarUserId, paarDatum] = sleutel.split('|');
+
+      // Een gesloten dag nooit leegmaken: daar hoort sowieso niets te staan,
+      // dus verwijderen zou puur verlies zijn.
+      if (closedDates.has(paarDatum)) {
+        for (const shift of diensten) skipped.push({ date: shift.date, reason: 'closed' });
         continue;
       }
 
-      // Validate rusttijd en overlap
-      const validation = await validateShiftRules(client, shift.userId, {
-        date: shift.date, start_time: shift.startTime, end_time: shift.endTime
-      }, null, false, minRustUren);
-      if (!validation.valid) {
-        skipped.push({ date: shift.date, userId: shift.userId, reason: validation.message });
-        continue;
+      const savepoint = `paar_${savepointTeller++}`;
+      if (overwriteExisting) {
+        await client.query(`SAVEPOINT ${savepoint}`);
+        await client.query('DELETE FROM shifts WHERE user_id = $1 AND date = $2', [paarUserId, paarDatum]);
       }
 
-      const result = await client.query(`
-        INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
-        VALUES ($1, $2, $3, $4, $5, $6, 'manual')
-        RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as date,
-                  start_time as "startTime", end_time as "endTime", notes, source, created_at as "createdAt"
-      `, [shift.userId, shift.team || null, shift.date, shift.startTime, shift.endTime, shift.notes || '']);
+      let geplaatstVoorDitPaar = 0;
+      const overgeslagenVoorDitPaar = [];
 
-      createdShifts.push(result.rows[0]);
+      for (const shift of diensten) {
+        // Validate rusttijd en overlap
+        const validation = await validateShiftRules(client, shift.userId, {
+          date: shift.date, start_time: shift.startTime, end_time: shift.endTime
+        }, null, false, minRustUren);
+        if (!validation.valid) {
+          overgeslagenVoorDitPaar.push({ date: shift.date, userId: shift.userId, reason: validation.message });
+          continue;
+        }
 
-      // Remove shift block (manual shift overrides blocks)
-      await client.query('DELETE FROM shift_blocks WHERE user_id = $1 AND date = $2', [shift.userId, shift.date]);
+        const result = await client.query(`
+          INSERT INTO shifts (user_id, team, date, start_time, end_time, notes, source)
+          VALUES ($1, $2, $3, $4, $5, $6, 'manual')
+          RETURNING id, user_id as "userId", user_id as "employeeId", team, date::text as date,
+                    start_time as "startTime", end_time as "endTime", notes, source, created_at as "createdAt"
+        `, [shift.userId, shift.team || null, shift.date, shift.startTime, shift.endTime, shift.notes || '']);
+
+        createdShifts.push(result.rows[0]);
+        geplaatstVoorDitPaar++;
+
+        // Remove shift block (manual shift overrides blocks)
+        await client.query('DELETE FROM shift_blocks WHERE user_id = $1 AND date = $2', [shift.userId, shift.date]);
+      }
+
+      if (overwriteExisting) {
+        if (geplaatstVoorDitPaar === 0) {
+          // Niets geplaatst: het verwijderen terugdraaien, inclusief de
+          // ingevoegde rijen die er toch niet zijn. De bestaande dienst blijft
+          // dus gewoon staan.
+          await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`).catch(() => {});
+        }
+        await client.query(`RELEASE SAVEPOINT ${savepoint}`).catch(() => {});
+      }
+
+      skipped.push(...overgeslagenVoorDitPaar);
     }
 
     await client.query('COMMIT');

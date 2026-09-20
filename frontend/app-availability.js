@@ -712,6 +712,17 @@ async function handleAvailabilitySave() {
             }
         }
 
+        // #282: wijzigt het type naar iets dat geen overname meer rechtvaardigt,
+        // dan blijft de dienst anders openstaan terwijl de medewerker gewoon
+        // komt werken. Alleen 'ziek' en 'verlof' bieden diensten aan; bij elk
+        // ander type horen openstaande verzoeken dus weg. Blijft het type wél
+        // ziek of verlof, dan raken we niets aan: wie eerder bewust een dienst
+        // aanbood, wil die aanbieding niet kwijt door een reden bij te werken.
+        let overnames = null;
+        if (absenceType !== 'ziek' && absenceType !== 'verlof') {
+            overnames = await annuleerOvernamesVoorPeriode(employeeId, startDate, endDate);
+        }
+
         closeAvailabilityModal();
         await refreshAvailability();
         renderAvailability();
@@ -732,6 +743,8 @@ async function handleAvailabilitySave() {
             msg += `, ${result.takeoverRequests} dienst${result.takeoverRequests !== 1 ? 'en' : ''} aangeboden voor overname`;
         }
         showToast(msg, 'success');
+
+        meldOvernameAnnulaties(overnames);
 
         if (absenceType === 'ziek') {
             showToast('Vergeet niet de personeelsdienst te verwittigen', 'info');
@@ -811,11 +824,16 @@ async function handleRemoveAbsence() {
             return;
         }
 
-        await verwijderAutoCancelTakeovers(employeeId, start, end);
+        // #282: de uitkomst wordt nu gemeld. Mislukt het annuleren, dan staat
+        // de dienst nog open voor overname terwijl de medewerker niet meer
+        // afwezig is, en dat hoort de gebruiker te weten.
+        const overnames = await annuleerOvernamesVoorPeriode(employeeId, startDate, endDate);
 
         closeAvailabilityModal();
         renderAvailability();
         renderPlanning(); // Update planning view
+        showToast(`Afwezigheid verwijderd voor ${days} dag${days !== 1 ? 'en' : ''}.`, 'success');
+        meldOvernameAnnulaties(overnames);
     } catch (error) {
         console.error('Fout bij verwijderen afwezigheid:', error);
         showToast('Verwijderen mislukt: ' + getUserFriendlyError(error), 'error');
@@ -825,82 +843,84 @@ async function handleRemoveAbsence() {
 }
 
 /**
- * Annuleert openstaande overnameverzoeken voor diensten in de verwijderde
- * periode. Losstaand van handleRemoveAbsence gehouden (#226) zodat een fout
- * hierin niet de hoofdafhandeling (en dus hideSectionLoading) kan overslaan —
- * die had al zijn eigen try/catch, maar leefde vroeger in dezelfde functie
- * zonder omhullende bescherming.
+ * Annuleert openstaande overnameverzoeken voor diensten in een periode waarin
+ * de medewerker niet langer afwezig is. Losstaand van handleRemoveAbsence
+ * gehouden (#226) zodat een fout hierin niet de hoofdafhandeling kan overslaan.
+ *
+ * #282: drie dingen veranderd.
+ *
+ * De betrokken diensten kwamen uit DataStore.shifts, en dat bevat alleen het
+ * geladen venster. Een overnameverzoek voor een dienst daarbuiten werd dus
+ * niet geannuleerd. Het verzoek zelf draagt al requester_shift_date mee uit
+ * de database, dus de datum van de dienst komt nu daarvandaan en de cache
+ * speelt geen rol meer.
+ *
+ * Mislukte annuleringen verdwenen in de console. Ze worden nu geteld en
+ * teruggegeven, zodat de aanroeper ze kan tonen.
+ *
+ * Deze functie sluit de modal en hertekent niet meer. Dat deed de aanroeper
+ * ook al, dus alles gebeurde twee keer.
+ *
+ * Geeft terug: { geprobeerd, gelukt, mislukteDatums }.
  */
-async function verwijderAutoCancelTakeovers(employeeId, start, end) {
-    // Cancel any pending takeover requests for shifts on these dates
+async function annuleerOvernamesVoorPeriode(employeeId, startDatumStr, eindDatumStr) {
+    const uitkomst = { geprobeerd: 0, gelukt: 0, mislukteDatums: [] };
     try {
-        console.log('[Auto-cancel] Starting auto-cancel for removed absence');
-        console.log('[Auto-cancel] Employee ID:', employeeId);
-        console.log('[Auto-cancel] Date range:', formatDateYYYYMMDD(start), 'to', formatDateYYYYMMDD(end));
+        await getSwapRequests(); // verse lijst uit de database
 
-        await getSwapRequests(); // Refresh swap requests
-        console.log('[Auto-cancel] Total swap requests in DataStore:', DataStore.swapRequests.length);
-
-        const affectedShifts = [];
-
-        // Find all shifts for this employee in the date range
-        let checkDate = parseDateOnly(start);
-        while (checkDate <= end) {
-            const dateStr = formatDateYYYYMMDD(checkDate);
-            const shifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
-            console.log(`[Auto-cancel] Date ${dateStr}: Found ${shifts.length} shift(s)`, shifts.map(s => ({ id: s.id, userId: s.userId })));
-            affectedShifts.push(...shifts);
-            checkDate.setDate(checkDate.getDate() + 1);
-        }
-
-        console.log('[Auto-cancel] Total affected shifts:', affectedShifts.length, affectedShifts.map(s => s.id));
-
-        // Debug: Show all takeover requests for this employee
-        const employeeTakeoverRequests = DataStore.swapRequests.filter(sr =>
-            sr.requester_user_id === employeeId &&
-            sr.request_type === 'takeover' &&
-            sr.status === 'pending'
-        );
-        console.log('[Auto-cancel] All pending takeover requests for employee:', employeeTakeoverRequests.map(sr => ({
-            id: sr.id,
-            requester_shift_id: sr.requester_shift_id,
-            status: sr.status
-        })));
-
-        // Find and cancel pending takeover requests for these shifts
-        const requestsToCancel = DataStore.swapRequests.filter(sr =>
+        const teAnnuleren = (DataStore.swapRequests || []).filter(sr =>
             sr.request_type === 'takeover' &&
             sr.status === 'pending' &&
-            sr.requester_user_id === employeeId &&
-            affectedShifts.some(shift => shift.id === sr.requester_shift_id)
+            Number(sr.requester_user_id) === Number(employeeId) &&
+            sr.requester_shift_date >= startDatumStr &&
+            sr.requester_shift_date <= eindDatumStr
         );
 
-        console.log('[Auto-cancel] Pending takeover requests for this employee:', DataStore.swapRequests.filter(sr => sr.requester_user_id === employeeId && sr.request_type === 'takeover').length);
-        console.log('[Auto-cancel] Requests to cancel:', requestsToCancel.length, requestsToCancel.map(sr => ({ id: sr.id, shiftId: sr.requester_shift_id })));
+        uitkomst.geprobeerd = teAnnuleren.length;
+        if (teAnnuleren.length === 0) return uitkomst;
 
-        if (requestsToCancel.length > 0) {
-            const cancelPromises = requestsToCancel.map(sr => {
-                console.log(`[Auto-cancel] Cancelling request ${sr.id} for shift ${sr.requester_shift_id}...`);
-                return cancelSwapRequest(sr.id)
-                    .then(() => console.log(`[Auto-cancel] ✓ Cancelled request ${sr.id}`))
-                    .catch(err => {
-                        console.error(`[Auto-cancel] ✗ Failed to cancel request ${sr.id}:`, err);
-                    });
-            });
-            await Promise.all(cancelPromises);
-
-            console.log(`[Auto-cancel] Complete: ${requestsToCancel.length} takeover request(s) cancelled`);
-        } else {
-            console.log('[Auto-cancel] No requests to cancel');
-        }
-    } catch (error) {
-        console.error('[Auto-cancel] Error cancelling takeover requests:', error);
-        // Don't block the flow if cancellation fails
+        const resultaten = await Promise.allSettled(
+            teAnnuleren.map(sr => cancelSwapRequest(sr.id))
+        );
+        resultaten.forEach((r, i) => {
+            if (r.status === 'fulfilled') {
+                uitkomst.gelukt++;
+            } else {
+                console.error('Annuleren overnameverzoek mislukt:', teAnnuleren[i].id, r.reason);
+                uitkomst.mislukteDatums.push(teAnnuleren[i].requester_shift_date);
+            }
+        });
+    } catch (fout) {
+        console.error('Overnameverzoeken annuleren mislukt:', fout);
+        // Bewust niet doorgooien: het intrekken van de afwezigheid zelf is al
+        // gelukt, en dat mag niet alsnog als mislukt overkomen.
+        uitkomst.mislukteDatums.push('onbekend');
     }
+    return uitkomst;
+}
 
-    closeAvailabilityModal();
-    renderAvailability();
-    renderPlanning(); // Update planning view
-    hideSectionLoading('availability-view');
+/**
+ * Toont wat annuleerOvernamesVoorPeriode heeft opgeleverd. Zwijgt wanneer er
+ * niets te annuleren viel, want dan is er niets te melden.
+ */
+function meldOvernameAnnulaties(uitkomst) {
+    if (!uitkomst || uitkomst.geprobeerd === 0) return;
+    if (uitkomst.mislukteDatums.length === 0) {
+        const n = uitkomst.gelukt;
+        showToast(`${n} openstaand${n !== 1 ? 'e' : ''} overnameverzoek${n !== 1 ? 'en' : ''} ingetrokken.`, 'success');
+        return;
+    }
+    const datums = uitkomst.mislukteDatums
+        .filter(d => d !== 'onbekend')
+        .map(d => formatDate(d));
+    const staart = datums.length > 0
+        ? ` voor ${datums.join(', ')}`
+        : '';
+    const meervoud = uitkomst.mislukteDatums.length !== 1;
+    showToast(
+        `De dienst${meervoud ? 'en' : ''}${staart} ${meervoud ? 'staan' : 'staat'} nog open voor overname. `
+        + `Trek ${meervoud ? 'de verzoeken' : 'het verzoek'} zelf in via Ruilen.`,
+        'warning'
+    );
 }
 
