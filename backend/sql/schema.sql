@@ -100,15 +100,14 @@ CREATE TABLE IF NOT EXISTS shift_swap_requests (
   target_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
   target_shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
   request_type TEXT NOT NULL DEFAULT 'swap' CHECK (request_type IN ('swap', 'takeover')),
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead', 'expired')),
+  -- #315: 'pending_lead' is hier weg. De leadgoedkeuring is in #114 geschrapt
+  -- en migratie 045 heeft de bijhorende kolommen gedropt.
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'expired')),
   message TEXT,
   response_notes TEXT,
   target_approved BOOLEAN DEFAULT NULL,
   target_response_notes TEXT,
   target_responded_at TIMESTAMP,
-  lead_approved BOOLEAN DEFAULT NULL,
-  lead_response_notes TEXT,
-  lead_responded_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW(),
   responded_at TIMESTAMP,
   responded_by INTEGER REFERENCES users(id) ON DELETE SET NULL

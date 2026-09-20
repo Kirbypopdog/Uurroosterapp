@@ -3580,13 +3580,18 @@ describe('GET /users beperkt het antwoord per rol (#290)', () => {
   });
 });
 
-// ===== PUT /shift-requests/:id/takeover-accept: teamgrens (#281) =====
+// ===== PUT /shift-requests/:id/takeover-accept: wie mag overnemen (#281, #283) =====
 
-// Regressie #281: GET /swap-requests toont een medewerker alleen open overnames
-// van zijn eigen team, maar takeover-accept had geen enkele teamcontrole. Met
-// oplopende verzoek-id's kon een medewerker een dienst overnemen uit een team
-// waarvan hij het bestaan niet eens hoorde te kennen.
-describe('takeover-accept bewaakt de teamgrens (#281)', () => {
+// #281 legde een gat bloot: GET /swap-requests toonde een medewerker alleen
+// open overnames van zijn eigen team, maar takeover-accept had geen enkele
+// teamcontrole. Dat gat kan langs twee kanten dicht.
+//
+// Eerst is het dichtgezet met een teamcontrole in takeover-accept. Daarna is in
+// #283 de andere kant gekozen: een openstaande dienst wordt aan iedereen
+// aangeboden en iedereen mag hem overnemen. Deze tests legden eerst het smalle
+// gedrag vast en leggen nu het ruime vast. Wat blijft is dat de lijst, de mail
+// en het aanvaarden hetzelfde zeggen.
+describe('takeover-accept: iedereen mag overnemen (#283)', () => {
   function verzoekClient(team) {
     return {
       query: jest.fn((sql) => {
@@ -3605,7 +3610,7 @@ describe('takeover-accept bewaakt de teamgrens (#281)', () => {
     };
   }
 
-  test('een medewerker kan geen dienst van een ander team overnemen', async () => {
+  test('een medewerker mag een dienst van een ander team overnemen', async () => {
     mockActiveUser();
     pool.connect.mockResolvedValueOnce(verzoekClient('vlot2'));
     const token = makeToken({ id: 2, role: 'medewerker', name: 'Anna', team_id: 'vlot1' });
@@ -3614,11 +3619,10 @@ describe('takeover-accept bewaakt de teamgrens (#281)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({});
 
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe('Deze dienst hoort bij een ander team');
+    expect(res.status).not.toBe(403);
   });
 
-  test('binnen het eigen team komt hij wel voorbij de teamcontrole', async () => {
+  test('binnen het eigen team uiteraard ook', async () => {
     mockActiveUser();
     pool.connect.mockResolvedValueOnce(verzoekClient('vlot1'));
     const token = makeToken({ id: 2, role: 'medewerker', name: 'Anna', team_id: 'vlot1' });
@@ -3630,16 +3634,19 @@ describe('takeover-accept bewaakt de teamgrens (#281)', () => {
     expect(res.status).not.toBe(403);
   });
 
-  test('een beheerder houdt zijn ruimere blik', async () => {
+  // De grens die wél blijft: je eigen aanbod terugnemen doe je met annuleren,
+  // niet door het te aanvaarden.
+  test('de aanvrager kan zijn eigen verzoek niet aanvaarden', async () => {
     mockActiveUser();
     pool.connect.mockResolvedValueOnce(verzoekClient('vlot2'));
-    const token = makeToken({ id: 1, role: 'roosterverantwoordelijke', name: 'Lead', team_id: 'vlot1' });
+    const token = makeToken({ id: 3, role: 'medewerker', name: 'Bram', team_id: 'vlot2' });
     const res = await request(app)
       .put('/shift-requests/1/takeover-accept')
       .set('Authorization', `Bearer ${token}`)
       .send({});
 
-    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Je kunt je eigen verzoek niet accepteren');
   });
 });
 

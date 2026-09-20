@@ -866,6 +866,52 @@ const MIGRATIONS = [
         console.warn(`  #${r.id} ${r.name}: team_id "${r.team_id}" -> main_team "${r.main_team}"`));
       await client.query(`UPDATE users SET team_id = main_team WHERE main_team IS DISTINCT FROM team_id`);
     }
+  },
+  {
+    // #315: de resten van de leadgoedkeuring, die in #114 verdwenen is. Niets
+    // schrijft ze en sinds #315 leest ook niets ze meer, maar zolang ze in het
+    // schema staan denkt iedereen die het leest dat die stap nog bestaat.
+    //
+    // Victor heeft het droppen bevestigd. Wat erin stond wordt eerst geteld en
+    // gelogd: het verdwijnt onomkeerbaar, dus er hoort een spoor te zijn van
+    // hoeveel het was. De laatste backup bevat de kolommen sowieso nog.
+    name: '045_lead_kolommen_droppen',
+    up: async (client) => {
+      const telling = await client.query(`
+        SELECT count(*) FILTER (WHERE lead_approved IS NOT NULL)::int      AS met_goedkeuring,
+               count(*) FILTER (WHERE lead_response_notes IS NOT NULL)::int AS met_notitie,
+               count(*) FILTER (WHERE lead_responded_at IS NOT NULL)::int   AS met_tijdstip,
+               count(*) FILTER (WHERE status = 'pending_lead')::int         AS op_pending_lead
+        FROM shift_swap_requests`);
+      const t = telling.rows[0];
+      const iets = t.met_goedkeuring || t.met_notitie || t.met_tijdstip || t.op_pending_lead;
+      if (iets) {
+        console.warn('Migratie 045: er stond nog iets in de leadkolommen, dit verdwijnt nu:');
+        console.warn(`  lead_approved gevuld: ${t.met_goedkeuring}`);
+        console.warn(`  lead_response_notes gevuld: ${t.met_notitie}`);
+        console.warn(`  lead_responded_at gevuld: ${t.met_tijdstip}`);
+        console.warn(`  status = 'pending_lead': ${t.op_pending_lead}`);
+      } else {
+        console.log('Migratie 045: de leadkolommen waren leeg.');
+      }
+
+      // Een verzoek dat nog op pending_lead staat kan door niemand meer
+      // afgehandeld worden, want die route bestaat niet. Het hoort dus op een
+      // eindstatus, niet op een waarde die straks niet meer bestaat.
+      if (t.op_pending_lead > 0) {
+        await client.query(
+          `UPDATE shift_swap_requests SET status = 'expired', responded_at = COALESCE(responded_at, NOW())
+           WHERE status = 'pending_lead'`);
+      }
+
+      await client.query(`ALTER TABLE shift_swap_requests DROP CONSTRAINT IF EXISTS shift_swap_requests_status_check`);
+      await client.query(
+        `ALTER TABLE shift_swap_requests ADD CONSTRAINT shift_swap_requests_status_check
+         CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'expired'))`);
+      await client.query(`ALTER TABLE shift_swap_requests DROP COLUMN IF EXISTS lead_approved`);
+      await client.query(`ALTER TABLE shift_swap_requests DROP COLUMN IF EXISTS lead_response_notes`);
+      await client.query(`ALTER TABLE shift_swap_requests DROP COLUMN IF EXISTS lead_responded_at`);
+    }
   }
 ];
 
@@ -3425,12 +3471,12 @@ v1.post('/availability/sick-with-takeover', requireAuth, async (req, res) => {
     if (aangebodenShifts.length > 0) {
       (async () => {
         try {
-          const teams = [...new Set(aangebodenShifts.map(sh => sh.team).filter(Boolean))];
-          const teamLeden = teams.length > 0
-            ? await pool.query(
-                `SELECT id, name, email, email_notifications_enabled FROM users
-                 WHERE active = true AND main_team = ANY($1::text[])`, [teams])
-            : { rows: [] };
+          // #283: zie POST /shift-requests/takeover. Ook de samenvattende mail
+          // bij een ziekmelding gaat nu naar iedereen.
+          const teamLeden = await pool.query(
+            `SELECT id, name, email, email_notifications_enabled FROM users
+             WHERE active = true AND role != 'admin'`
+          );
           const melder = await pool.query('SELECT id, name, email FROM users WHERE id = $1', [userId]);
           if (melder.rows[0] && teamLeden.rows.length > 0) {
             emailService.notifyTakeoverBatchAvailable(
@@ -3638,10 +3684,10 @@ v1.get('/swap-requests', requireAuth, async (req, res) => {
         LEFT JOIN shifts s2 ON sr.target_shift_id = s2.id
         LEFT JOIN users resp ON sr.responded_by = resp.id
         WHERE sr.requester_user_id = $1 OR sr.target_user_id = $1
-              OR (sr.request_type = 'takeover' AND sr.status = 'pending' AND s1.team = $2)
+              OR (sr.request_type = 'takeover' AND sr.status = 'pending')
         ORDER BY sr.created_at DESC
       `;
-      params = [currentUserId, team_id];
+      params = [currentUserId];
     }
 
     const result = await pool.query(query, params);
@@ -4095,11 +4141,13 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
     // Email notification to team members (fire-and-forget)
     (async () => {
       try {
-        const shiftTeam = shift.team;
+        // #283: dit ging alleen naar het team van de dienst. Nu naar iedereen,
+        // want iedereen mag de dienst ook overnemen. verstuurReeks laat de
+        // aanvrager zelf weg en respecteert email_notifications_enabled, dus
+        // wie geen mail wil krijgt er ook geen.
         const teamMembers = await pool.query(
           `SELECT id, name, email, email_notifications_enabled FROM users
-           WHERE active = true AND main_team = $1`,
-          [shiftTeam]
+           WHERE active = true AND role != 'admin'`
         );
         const requester = await pool.query(
           'SELECT id, name, email FROM users WHERE id = $1', [shift.user_id]
@@ -4124,7 +4172,7 @@ v1.post('/shift-requests/takeover', requireAuth, async (req, res) => {
 v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
   const requestId = req.params.id;
   const { responseNotes, force } = req.body;
-  const { id: currentUserId, team_id: acceptorTeam, role } = req.user;
+  const { id: currentUserId } = req.user;
 
   const client = await pool.connect();
 
@@ -4166,18 +4214,16 @@ v1.put('/shift-requests/:id/takeover-accept', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Je kunt je eigen verzoek niet accepteren' });
     }
 
-    // #281: dezelfde teamvoorwaarde als in de lijst. GET /swap-requests toont
-    // een medewerker alleen open overnames van zijn eigen team, maar hier stond
-    // geen enkele teamcontrole, terwijl de verzoek-id's oplopende gehele
-    // getallen zijn. Een medewerker die zelf API-aanroepen opstelde kon dus een
-    // dienst overnemen uit een team waarvan hij het bestaan niet eens hoorde te
-    // kennen. acceptorTeam werd hierboven wel opgehaald maar nergens gebruikt.
-    // Beheerders houden hun ruimere blik, net als in de lijst.
-    const magOverTeamsHeen = role === 'admin' || role === 'roosterverantwoordelijke';
-    if (!magOverTeamsHeen && request.team !== acceptorTeam) {
-      await client.query('ROLLBACK').catch(() => {});
-      return res.status(403).json({ error: 'Deze dienst hoort bij een ander team' });
-    }
+    // #283: hier stond sinds #281 een teamcontrole. Die is er bewust weer uit.
+    //
+    // #281 ging over een gat: de lijst toonde alleen het eigen team maar
+    // aanvaarden kon over teams heen. Dat gat kan langs twee kanten dicht, en
+    // Victor heeft gekozen voor de ruime kant: een openstaande dienst wordt aan
+    // iedereen aangeboden en iedereen mag hem overnemen. De lijst en de mail
+    // hieronder zijn mee verbreed, dus de drie plekken zeggen weer hetzelfde.
+    //
+    // Gevolg dat hierbij hoort: iemand kan een dienst van een ander team
+    // overnemen. De dienst houdt zijn eigen team, alleen de persoon verandert.
 
     // #188: de dienst mag intussen niet aan iemand anders zijn toegewezen.
     // current_shift_owner werd hierboven wel geselecteerd maar nergens gebruikt.

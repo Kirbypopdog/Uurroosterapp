@@ -155,26 +155,32 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 
 Er is GEEN goedkeuringsstap door een lead: die is in #114 verwijderd. De
 doelpersoon handelt een ruil zelf af. De statuswaarde `pending_lead` en de
-kolommen `lead_approved`, `lead_response_notes` en `lead_responded_at` staan nog
-in het schema maar worden nergens geschreven (#315).
+kolommen `lead_approved`, `lead_response_notes` en `lead_responded_at` zijn in
+migratie 045 uit het schema gehaald (#315).
 
-**Bereik van een overname (#281, #283)**: een openstaande overname blijft binnen
-het team van de DIENST. Drie plekken moeten daarover hetzelfde zeggen, anders
+**Bereik van een overname (#281, #283)**: een openstaande overname gaat naar
+IEDEREEN, ongeacht team. Drie plekken moeten daarover hetzelfde zeggen, anders
 ontstaat er een gat:
 
 | plek | voorwaarde |
 |------|-----------|
-| `GET /swap-requests` (wat een medewerker ziet) | `s1.team = <eigen team_id>` |
-| `PUT /shift-requests/:id/takeover-accept` | `request.team = <eigen team_id>` |
-| de mail bij een nieuw overnameverzoek | `users.main_team = <team van de dienst>` |
+| `GET /swap-requests` (wat een medewerker ziet) | elke openstaande overname |
+| `PUT /shift-requests/:id/takeover-accept` | geen teamvoorwaarde |
+| de mail bij een nieuw overnameverzoek | alle actieve niet-adminaccounts |
 
-Die drie vallen samen omdat `team_id` altijd gelijk is aan `main_team`
-(regel 2 hieronder). Admins en roosterverantwoordelijken mogen wél over teams
-heen aanvaarden; zij krijgen de mail alleen als hun eigen team klopt. Dat is
-bewust: hun ruimere bevoegdheid is geen reden om iedereen meer mail te sturen.
+Dit is een bewuste keuze van Victor (#283). #281 stelde vast dat de lijst en het
+aanvaarden niet hetzelfde zeiden; dat gat is eerst met een teamcontrole gedicht
+en daarna langs de ruime kant opgelost. Een dienst houdt zijn eigen team, alleen
+de persoon verandert.
 
-Verbreden naar alle teams is een productkeuze die nog openstaat (#283). Ze hoort
-samen te gaan met een keuze over hoeveel mail mensen krijgen.
+De enige grens die overblijft: je eigen aanbod aanvaarden kan niet. Daarvoor is
+annuleren.
+
+Wie geen overnamemail wil, zet die uit via `PUT /me/email-preferences`;
+`verstuurReeks` in `email.js` filtert daarop en laat de aanvrager zelf weg.
+Blijkt de hoeveelheid mail in de praktijk te veel, dan zijn de twee versmallingen
+uit #283 nog beschikbaar: alleen verbreden bij een dienst binnen 48 uur, of één
+dagelijkse samenvatting naast de directe mail aan het eigen team.
 
 ### Verlofplanning
 - `GET /api/v1/leave-rounds` - Alle verlofrondes (concepten enkel voor beheerders)

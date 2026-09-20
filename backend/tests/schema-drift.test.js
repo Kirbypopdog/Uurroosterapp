@@ -27,20 +27,51 @@ function genormaliseerd(tekst) {
   return tekst.toLowerCase().replace(/\s+/g, ' ');
 }
 
+// #315: een kolom die een migratie toevoegt en een latere migratie weer dropt,
+// hoort juist NIET in schema.sql te staan. Zonder deze uitzondering meldt de
+// test die als drift, terwijl het net goed zit.
+function gedropteKolommen(blok) {
+  const weg = new Set();
+  const regex = /alter\s+table\s+(\w+)\s+drop\s+column\s+(?:if\s+exists\s+)?(\w+)/gi;
+  let m;
+  while ((m = regex.exec(blok)) !== null) weg.add(`${m[1].toLowerCase()}.${m[2].toLowerCase()}`);
+  return weg;
+}
+
 describe('#329 schema.sql loopt niet achter op de migraties', () => {
   test('elke kolom die een migratie toevoegt staat ook in schema.sql', () => {
     const schema = genormaliseerd(schemaSql);
+    const gedropt = gedropteKolommen(migratieBlok);
     const regex = /alter\s+table\s+(\w+)\s+add\s+column\s+(?:if\s+not\s+exists\s+)?(\w+)/gi;
     const ontbreekt = [];
     let m;
     while ((m = regex.exec(migratieBlok)) !== null) {
       const tabel = m[1].toLowerCase();
       const kolom = m[2].toLowerCase();
+      if (gedropt.has(`${tabel}.${kolom}`)) continue;
       // De kolomnaam moet ergens in schema.sql staan. Dat is grof, maar een
       // kolom die nergens in het bestand voorkomt is zeker drift.
       if (!new RegExp(`\\b${kolom}\\b`).test(schema)) ontbreekt.push(`${tabel}.${kolom}`);
     }
     expect(ontbreekt).toEqual([]);
+  });
+
+  // De andere kant op: een kolom die een migratie dropt mag niet blijven staan
+  // in schema.sql, anders levert een verse database hem alsnog op.
+  test('een kolom die een migratie dropt staat niet meer in schema.sql', () => {
+    const blijftStaan = [];
+    for (const naam of gedropteKolommen(migratieBlok)) {
+      const [tabel, kolom] = naam.split('.');
+      const blok = new RegExp(
+        `create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?${tabel}\\s*\\(([\\s\\S]*?)\\n\\);`, 'i'
+      ).exec(schemaSql);
+      if (!blok) continue;
+      const heeftKolom = blok[1].split('\n')
+        .filter(r => !r.trim().startsWith('--'))
+        .some(r => new RegExp(`^\\s*${kolom}\\s`, 'i').test(r));
+      if (heeftKolom) blijftStaan.push(naam);
+    }
+    expect(blijftStaan).toEqual([]);
   });
 
   test('elke index die een migratie aanmaakt staat ook in schema.sql', () => {
