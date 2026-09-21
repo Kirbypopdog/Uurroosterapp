@@ -21,7 +21,7 @@
 
     // De DSN van een browser-SDK is niet geheim: hij staat per ontwerp in de
     // pagina en kan alleen gebeurtenissen INsturen. Leeg laten schakelt alles uit.
-    const DSN = '';
+    const DSN = 'https://e56bf5bd2022f80869f9bd4730640b41@o4512123996798976.ingest.de.sentry.io/4512124095627344';
 
     window.MONITORING_DSN = DSN;
     // Altijd aanwezig, ook als de monitoring uitstaat, zodat app-auth.js hem
