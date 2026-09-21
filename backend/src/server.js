@@ -6261,6 +6261,35 @@ v1.put('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), as
     return res.status(400).json({ error: 'Ongeldige status' });
   }
   try {
+    // #386: hier werd alleen getoetst of de nieuwe status bestond, niet of de
+    // overgang zinnig was. Een toegepaste ronde kon terug open, waarna iemand
+    // zijn invulling wijzigde terwijl zijn verlof al in de planning stond. De
+    // afstemming uit #384 draait alleen bij apply, en die wordt dan nooit meer
+    // aangeroepen: er was geen enkel pad dat dit vanzelf rechttrok.
+    //
+    // Alleen wég van 'toegepast' is verboden. Een ronde die per ongeluk
+    // gesloten is terug openen blijft gewoon mogelijk, en een fout in een
+    // toegepaste ronde herstel je zonder heropenen: het verdeelendpoint werkt
+    // bij 'toegepast' (#201) en apply stemt af (#384).
+    const huidige = await pool.query('SELECT status, id FROM leave_rounds WHERE id = $1', [req.params.id]);
+    if (huidige.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+    if (huidige.rows[0].status === 'toegepast' && status && status !== 'toegepast') {
+      return res.status(409).json({
+        error: 'Deze ronde is al toegepast. Het verlof staat in de planning, dus heropenen zou de ronde en de planning uit elkaar laten lopen. Pas de verdeling aan en pas opnieuw toe.',
+        status: 'toegepast'
+      });
+    }
+
+    // #386: de omhullende datums zijn afgeleid, geen invoer. Bij het aanmaken
+    // worden ze berekend uit de blokken; via deze PUT konden ze losgemaakt
+    // worden van diezelfde blokken. Ze volgen nu altijd de blokken, en alleen
+    // een ronde zonder blokken valt terug op wat de aanvraag meestuurt.
+    const omhullend = await pool.query(
+      `SELECT MIN(start_date)::text AS "startDate", MAX(end_date)::text AS "endDate"
+         FROM leave_round_blocks WHERE round_id = $1`, [req.params.id]);
+    const afgeleid = omhullend.rows[0] || {};
+    const nieuweStart = afgeleid.startDate || startDate || null;
+    const nieuwEind   = afgeleid.endDate   || endDate   || null;
     // #280: deadline stond hier als enige veld zonder COALESCE, dus elke PUT
     // zonder deadline in de body zette de kolom op NULL. Het sluiten van een
     // ronde stuurt enkel {status:'gesloten'} en wiste zo de indiendatum,
@@ -6275,7 +6304,7 @@ v1.put('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), as
          holiday_period_id = COALESCE($8, holiday_period_id),
          rules = COALESCE($9::jsonb, rules), updated_at = NOW()
        WHERE id = $1 RETURNING ${ROUND_SELECT}`,
-      [req.params.id, name || null, mode || null, startDate || null, endDate || null,
+      [req.params.id, name || null, mode || null, nieuweStart, nieuwEind,
        deadline || null, status || null, holidayPeriodId || null,
        rules ? JSON.stringify(rules) : null, clearDeadline === true]
     );

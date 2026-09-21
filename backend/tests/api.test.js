@@ -2884,9 +2884,28 @@ describe('Verlofrondes', () => {
   // #280: `deadline` stond als enige veld zonder COALESCE in de UPDATE, dus
   // een body zonder deadline zette de kolom op NULL. Het sluiten van een ronde
   // stuurt enkel {status:'gesloten'} mee, en wiste daarmee de indiendatum.
-  test('PUT /leave-rounds behoudt de deadline als de body er geen meestuurt', async () => {
+  // De mock beantwoordt op inhoud en niet op volgorde: #386 heeft er twee
+  // queries vóór de UPDATE bij gezet, en een reeks mockResolvedValueOnce zou
+  // daar elke keer opnieuw op stukvallen.
+  const arrangeDeadlinePut = () => {
     mockActiveUser();
-    pool.query.mockResolvedValueOnce({ rows: [{ id: 3, deadline: '2026-11-15' }] });
+    pool.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.includes('SELECT status, id FROM leave_rounds')) {
+        return Promise.resolve({ rows: [{ status: 'open', id: 3 }] });
+      }
+      if (sql.includes('MIN(start_date)')) {
+        return Promise.resolve({ rows: [{ startDate: '2026-12-21', endDate: '2027-01-03' }] });
+      }
+      if (sql.includes('UPDATE leave_rounds SET')) {
+        return Promise.resolve({ rows: [{ id: 3 }] });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+  };
+
+  test('PUT /leave-rounds behoudt de deadline als de body er geen meestuurt', async () => {
+    arrangeDeadlinePut();
     const res = await request(app)
       .put('/api/v1/leave-rounds/3')
       .set('Authorization', `Bearer ${makeToken(beheerder)}`)
@@ -2899,8 +2918,7 @@ describe('Verlofrondes', () => {
   });
 
   test('PUT /leave-rounds schrijft een nieuwe deadline wel weg', async () => {
-    mockActiveUser();
-    pool.query.mockResolvedValueOnce({ rows: [{ id: 3, deadline: '2026-12-01' }] });
+    arrangeDeadlinePut();
     const res = await request(app)
       .put('/api/v1/leave-rounds/3')
       .set('Authorization', `Bearer ${makeToken(beheerder)}`)
@@ -2912,8 +2930,7 @@ describe('Verlofrondes', () => {
   });
 
   test('PUT /leave-rounds wist de deadline enkel op uitdrukkelijk verzoek', async () => {
-    mockActiveUser();
-    pool.query.mockResolvedValueOnce({ rows: [{ id: 3, deadline: null }] });
+    arrangeDeadlinePut();
     const res = await request(app)
       .put('/api/v1/leave-rounds/3')
       .set('Authorization', `Bearer ${makeToken(beheerder)}`)
@@ -3364,6 +3381,100 @@ describe('Verlofrondes', () => {
       .send({ entries: [{ userId: 2, date: '2027-07-05', status: 'verlof' }] });
 
     expect(res.status).toBe(200);
+  });
+
+  // ===== #386: een toegepaste ronde blijft toegepast =====
+
+  const arrangeRondePut = (huidigeStatus, blokken = [{ startDate: '2027-12-20', endDate: '2027-12-26' }]) => {
+    mockActiveUser();
+    pool.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.includes('SELECT status, id FROM leave_rounds')) {
+        return Promise.resolve({ rows: [{ status: huidigeStatus, id: 6 }] });
+      }
+      if (sql.includes('MIN(start_date)')) {
+        return Promise.resolve({ rows: blokken.length
+          ? [{ startDate: blokken[0].startDate, endDate: blokken[0].endDate }]
+          : [{ startDate: null, endDate: null }] });
+      }
+      if (sql.includes('UPDATE leave_rounds SET')) {
+        return Promise.resolve({ rows: [{ id: 6, status: huidigeStatus }] });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+  };
+
+  test.each(['open', 'gesloten', 'concept'])(
+    'PUT /leave-rounds weigert een toegepaste ronde naar %s te zetten (#386)', async (doel) => {
+      arrangeRondePut('toegepast');
+      const res = await request(app)
+        .put('/api/v1/leave-rounds/6')
+        .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+        .send({ status: doel });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/al toegepast/i);
+      const upd = pool.query.mock.calls.find(
+        c => typeof c[0] === 'string' && c[0].includes('UPDATE leave_rounds SET'));
+      expect(upd).toBeUndefined();
+    });
+
+  // Een ronde die per ongeluk gesloten is, moet gewoon terug open kunnen.
+  test.each([
+    ['gesloten', 'open'],
+    ['open', 'gesloten'],
+    ['concept', 'open'],
+  ])('PUT /leave-rounds laat %s naar %s gewoon toe (#386)', async (van, naar) => {
+    arrangeRondePut(van);
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/6')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ status: naar });
+
+    expect(res.status).toBe(200);
+    const upd = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE leave_rounds SET'));
+    expect(upd[1][6]).toBe(naar);
+  });
+
+  // De omhullende datums zijn afgeleid uit de blokken, geen invoer.
+  test('PUT /leave-rounds negeert datums die de blokken tegenspreken (#386)', async () => {
+    arrangeRondePut('open');
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/6')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ startDate: '2030-01-01', endDate: '2030-01-02' });
+
+    expect(res.status).toBe(200);
+    const upd = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE leave_rounds SET'));
+    expect(upd[1][3]).toBe('2027-12-20');   // uit het blok, niet uit de body
+    expect(upd[1][4]).toBe('2027-12-26');
+  });
+
+  // Zonder blokken is er niets om uit af te leiden; dan telt wat de aanvraag zegt.
+  test('PUT /leave-rounds valt zonder blokken terug op de meegestuurde datums (#386)', async () => {
+    arrangeRondePut('open', []);
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/6')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ startDate: '2030-01-01', endDate: '2030-01-02' });
+
+    expect(res.status).toBe(200);
+    const upd = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE leave_rounds SET'));
+    expect(upd[1][3]).toBe('2030-01-01');
+    expect(upd[1][4]).toBe('2030-01-02');
+  });
+
+  test('PUT /leave-rounds geeft 404 voor een ronde die niet bestaat (#386)', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValue({ rows: [] });
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/999')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ status: 'gesloten' });
+    expect(res.status).toBe(404);
   });
 
   // ===== #385: toepassen op een ronde die nog openstaat =====
