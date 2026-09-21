@@ -2794,6 +2794,49 @@ describe('Verlofrondes', () => {
     expect(insert[1][7]).toBeNull();
   });
 
+  // #280: `deadline` stond als enige veld zonder COALESCE in de UPDATE, dus
+  // een body zonder deadline zette de kolom op NULL. Het sluiten van een ronde
+  // stuurt enkel {status:'gesloten'} mee, en wiste daarmee de indiendatum.
+  test('PUT /leave-rounds behoudt de deadline als de body er geen meestuurt', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 3, deadline: '2026-11-15' }] });
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/3')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ status: 'gesloten' });
+    expect(res.status).toBe(200);
+    const update = pool.query.mock.calls.find(c => /UPDATE leave_rounds/i.test(c[0]));
+    expect(update[0]).toMatch(/COALESCE\(\$6, deadline\)/);
+    expect(update[1][5]).toBeNull();      // geen deadline in de body
+    expect(update[1][9]).toBe(false);     // en ook geen opdracht om te wissen
+  });
+
+  test('PUT /leave-rounds schrijft een nieuwe deadline wel weg', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 3, deadline: '2026-12-01' }] });
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/3')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ deadline: '2026-12-01' });
+    expect(res.status).toBe(200);
+    const update = pool.query.mock.calls.find(c => /UPDATE leave_rounds/i.test(c[0]));
+    expect(update[1][5]).toBe('2026-12-01');
+    expect(update[1][9]).toBe(false);
+  });
+
+  test('PUT /leave-rounds wist de deadline enkel op uitdrukkelijk verzoek', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 3, deadline: null }] });
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/3')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ clearDeadline: true });
+    expect(res.status).toBe(200);
+    const update = pool.query.mock.calls.find(c => /UPDATE leave_rounds/i.test(c[0]));
+    expect(update[0]).toMatch(/CASE WHEN \$10 THEN NULL/);
+    expect(update[1][9]).toBe(true);
+  });
+
   test('PUT blocks weigert een medewerker', async () => {
     mockActiveUser();
     const res = await request(app)

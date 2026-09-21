@@ -6173,22 +6173,29 @@ v1.post('/leave-rounds', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async
 });
 
 v1.put('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
-  const { name, mode, startDate, endDate, deadline, status, holidayPeriodId, rules } = req.body || {};
+  const { name, mode, startDate, endDate, deadline, status, holidayPeriodId, rules,
+          clearDeadline } = req.body || {};
   if (status && !['concept', 'open', 'gesloten', 'toegepast'].includes(status)) {
     return res.status(400).json({ error: 'Ongeldige status' });
   }
   try {
+    // #280: deadline stond hier als enige veld zonder COALESCE, dus elke PUT
+    // zonder deadline in de body zette de kolom op NULL. Het sluiten van een
+    // ronde stuurt enkel {status:'gesloten'} en wiste zo de indiendatum,
+    // precies op het moment dat je hem nodig hebt om na te gaan wie te laat
+    // was. Leegmaken kan nog wel, maar dan expliciet via clearDeadline.
     const result = await pool.query(
       `UPDATE leave_rounds SET
          name = COALESCE($2, name), mode = COALESCE($3, mode),
          start_date = COALESCE($4, start_date), end_date = COALESCE($5, end_date),
-         deadline = $6, status = COALESCE($7, status),
+         deadline = CASE WHEN $10 THEN NULL ELSE COALESCE($6, deadline) END,
+         status = COALESCE($7, status),
          holiday_period_id = COALESCE($8, holiday_period_id),
          rules = COALESCE($9::jsonb, rules), updated_at = NOW()
        WHERE id = $1 RETURNING ${ROUND_SELECT}`,
       [req.params.id, name || null, mode || null, startDate || null, endDate || null,
-       deadline === undefined ? null : deadline, status || null, holidayPeriodId || null,
-       rules ? JSON.stringify(rules) : null]
+       deadline || null, status || null, holidayPeriodId || null,
+       rules ? JSON.stringify(rules) : null, clearDeadline === true]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
     await logAudit(req, 'UPDATE', 'settings', req.params.id, { type: 'leave_round', status });

@@ -1590,8 +1590,7 @@ function attachBuilderEventListeners(container) {
                 }
             }
             await unlockScheduleDraft(AppState.builderLoadedDraftId);
-            AppState.builderLoadedDraftId = null;
-            AppState.builderLoadedDraftName = null;
+            vergeetActiefConcept();
             AppState.builderScreen = 'overview';
             renderBuilder();
         });
@@ -1817,8 +1816,7 @@ function attachBuilderEventListeners(container) {
             AppState.builderStaffingRules = {};
             AppState.builderStaffingRulesByWeek = {};
             AppState.builderMeetings = {};
-            AppState.builderLoadedDraftId = null;
-            AppState.builderLoadedDraftName = null;
+            vergeetActiefConcept();
             AppState.builderPattern = {
                 cycleLength: 1,
                 referenceDate: getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '',

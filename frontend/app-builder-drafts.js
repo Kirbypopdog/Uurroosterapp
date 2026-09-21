@@ -14,6 +14,30 @@ function blokkeerBijMislukteDraftLoad() {
     return true;
 }
 
+// #383: welk concept openstaat woonde op twee plekken die los van elkaar
+// bijgewerkt werden: AppState (wat het scherm toont) en localStorage (wat een
+// herlading terugzet). Het aanmaken van een nieuw concept schreef alleen het
+// eerste, het sluiten van een concept wiste alleen het eerste. Daardoor kon je
+// na een herlading in het overzicht belanden terwijl je in een concept zat, of
+// omgekeerd terug in een concept dat je net gesloten had. Deze twee functies
+// zijn sindsdien de enige plek waar dat paar verandert, zodat het niet meer
+// uiteen kan lopen.
+function onthoudActiefConcept(id, naam) {
+    AppState.builderLoadedDraftId = id;
+    AppState.builderLoadedDraftName = naam;
+    try {
+        localStorage.setItem('hetvlot_activeDraftId', String(id));
+    } catch (e) { /* privémodus of volle opslag: het scherm klopt nog wel */ }
+}
+
+function vergeetActiefConcept() {
+    AppState.builderLoadedDraftId = null;
+    AppState.builderLoadedDraftName = null;
+    try {
+        localStorage.removeItem('hetvlot_activeDraftId');
+    } catch (e) { /* zie hierboven */ }
+}
+
 // Een concept is meer dan zijn diensten: gesloten dagen, bezettingsregels en
 // vergaderingen tellen evengoed. Deze ene bron bepaalt zowel of de
 // opslaanknoppen aan staan als of opslaan zin heeft — anders raken die twee
@@ -143,8 +167,7 @@ async function saveBuilderDraft() {
             const apiResult = await createScheduleDraft(draftData);
             DataStore.settings.schedule_drafts.push(apiResult.draft);
             // Track as loaded draft
-            AppState.builderLoadedDraftId = apiResult.draft.id;
-            AppState.builderLoadedDraftName = apiResult.draft.name;
+            onthoudActiefConcept(apiResult.draft.id, apiResult.draft.name);
         } else {
             const drafts = [...(DataStore.settings.schedule_drafts || [])];
             draftData.createdBy = AppState.currentUser?.id;
@@ -154,8 +177,7 @@ async function saveBuilderDraft() {
             drafts.push(draftData);
             await saveSettings('schedule_drafts', drafts);
             DataStore.settings.schedule_drafts = drafts;
-            AppState.builderLoadedDraftId = draftData.id;
-            AppState.builderLoadedDraftName = draftData.name;
+            onthoudActiefConcept(draftData.id, draftData.name);
         }
     } catch (err) {
         console.error('Error saving draft:', err);
@@ -213,8 +235,7 @@ async function saveBuilderDraftAs() {
         if (DataStore._draftsFromTable) {
             const apiResult = await createScheduleDraft(draftData);
             DataStore.settings.schedule_drafts.push(apiResult.draft);
-            AppState.builderLoadedDraftId = apiResult.draft.id;
-            AppState.builderLoadedDraftName = apiResult.draft.name;
+            onthoudActiefConcept(apiResult.draft.id, apiResult.draft.name);
         } else {
             const drafts = [...(DataStore.settings.schedule_drafts || [])];
             draftData.createdBy = AppState.currentUser?.id;
@@ -224,8 +245,7 @@ async function saveBuilderDraftAs() {
             drafts.push(draftData);
             await saveSettings('schedule_drafts', drafts);
             DataStore.settings.schedule_drafts = drafts;
-            AppState.builderLoadedDraftId = draftData.id;
-            AppState.builderLoadedDraftName = draftData.name;
+            onthoudActiefConcept(draftData.id, draftData.name);
         }
     } catch (err) {
         console.error('Error saving draft as:', err);
@@ -459,8 +479,7 @@ function showNewConceptTypeModal() {
         AppState.builderWeekNumber = 1;
         AppState.builderConceptType = type;
         AppState.builderHolidayPeriodId = holidayPeriodId;
-        AppState.builderLoadedDraftId = draftId;
-        AppState.builderLoadedDraftName = draftNaam;
+        onthoudActiefConcept(draftId, draftNaam);
 
         // #304: een nieuw concept nam de vergrendeling niet, terwijl elk concept
         // dat je via de lijst opent dat wel doet. Zonder lock kan een tweede
@@ -635,9 +654,7 @@ function doLoadDraft(draft) {
     AppState.builderMeetings = grid._teamMeetings ? JSON.parse(JSON.stringify(grid._teamMeetings)) : {};
     AppState.builderShowMeetingsEditor = false;
 
-    AppState.builderLoadedDraftId = draft.id;
-    AppState.builderLoadedDraftName = draft.name;
-    localStorage.setItem('hetvlot_activeDraftId', String(draft.id));
+    onthoudActiefConcept(draft.id, draft.name);
     AppState.builderConceptType = draft.type || 'basis';
     AppState.builderHolidayPeriodId = draft.holidayPeriodId || null;
     AppState.builderIsDirty = false;

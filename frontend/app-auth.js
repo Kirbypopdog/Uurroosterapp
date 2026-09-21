@@ -113,7 +113,10 @@ function handleLogout(reden) {
     // verboden weergave nu wel af, maar iemand hoort ook niet te beginnen op
     // het scherm waar zijn collega gebleven was.
     localStorage.removeItem('hetvlot_activeView');
-    localStorage.removeItem('hetvlot_activeDraftId');
+    // #383: ook de AppState leegmaken, niet enkel de localStorage. Logt iemand
+    // anders in dezelfde tab weer in, dan hield de bouwer anders het concept
+    // van zijn voorganger vast zonder dat er iets openstond.
+    vergeetActiefConcept();
     // #156: het id loskoppelen, anders hangt het aan fouten van de volgende
     // gebruiker op hetzelfde toestel.
     if (typeof monitoringZetGebruiker === 'function') monitoringZetGebruiker();

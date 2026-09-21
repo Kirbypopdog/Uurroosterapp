@@ -1042,8 +1042,7 @@ async function switchView(viewName) {
         // Reset builder state so returning shows overview
         AppState.builderScreen = 'overview';
         AppState.builderIsDirty = false;
-        AppState.builderLoadedDraftId = null;
-        AppState.builderLoadedDraftName = null;
+        vergeetActiefConcept();
         AppState.builderPattern = null;
         AppState.builderConceptType = 'basis';
         AppState.builderHolidayPeriodId = null;
@@ -1055,8 +1054,7 @@ async function switchView(viewName) {
     } else if (AppState.currentView === 'builder' && viewName !== 'builder') {
         stopBuilderAutoSave();
         await unlockScheduleDraft(AppState.builderLoadedDraftId);
-        AppState.builderLoadedDraftId = null;
-        AppState.builderLoadedDraftName = null;
+        vergeetActiefConcept();
         // Also reset when leaving builder without unsaved changes
         AppState.builderScreen = 'overview';
         AppState.builderPattern = null;
@@ -1067,7 +1065,6 @@ async function switchView(viewName) {
         AppState.builderShowStaffingEditor = false;
         AppState.builderShowMeetingsEditor = false;
         AppState.builderMeetings = {};
-        localStorage.removeItem('hetvlot_activeDraftId');
     }
     // Clear undo history when switching views
     UndoManager.clear();
