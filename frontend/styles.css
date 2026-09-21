@@ -144,6 +144,12 @@
     --alert-info-bg:        #eaf0f6;
     --alert-info-border:    #c5d3e2;
     --alert-info-text:      #3d5775;
+    /* #119: de vierde soort ontbrak. .leave-banner-ok viel terug op --ok-bg en
+       zette rand en tekst op dezelfde --ok, terwijl de andere drie elk een
+       eigen rand- en tekstkleur hebben. */
+    --alert-ok-bg:          #e9f1ed;
+    --alert-ok-border:      #b4cfc6;
+    --alert-ok-text:        #2f5a4e;
 
     /* Status tokens (redesign) */
     --warn: #c6803a; --warn-bg: #fbf0e2;
@@ -199,6 +205,7 @@ body.dark-mode {
     --alert-warning-bg:     #2a1a08; --alert-warning-border: #5a380e; --alert-warning-text: #e8a83a;
     --alert-error-bg:       #2a0d0a; --alert-error-border:   #5a1f1a; --alert-error-text:   #e8706a;
     --alert-info-bg:        #0a1520; --alert-info-border:    #1a2d40; --alert-info-text:    #7aa5c5;
+    --alert-ok-bg:          #0d1a15; --alert-ok-border:      #1e3a30; --alert-ok-text:      #7ab89f;
     --warn-bg:              #2a1a08;
     --danger-bg:            #2a0d0a; --danger-warm-bg: #2a0d0a;
     --info-bg:              #0a1520;
@@ -1140,13 +1147,92 @@ body.dark-mode .role-switcher select {
 }
 
 /* Info/hint box */
-.info-box {
-    margin-top: var(--space-md);
-    padding: 0.75rem;
-    background: var(--color-warning-light);
-    border-radius: var(--radius-sm);
-    font-size: var(--text-sm);
+/* ===== MELDINGEN (#119) =====
+   Eén component voor elke melding in de app, met vier soorten. De kleuren
+   komen uit de --alert-* tokens, die per thema omslaan, dus een melding werkt
+   automatisch in donkere modus.
+
+     fout        rood     blokkeert de actie
+     waarschuwing oranje  actie kan wel, maar er is risico
+     info        blauw    neutraal, informatief
+     gelukt      groen    bevestiging
+
+   De oudere klassenamen hieronder delen deze declaraties in plaats van ze te
+   herhalen. Dat is bewust: de namen staan op tientallen plekken in de JS, en
+   die allemaal hernoemen verandert niets aan wat je ziet maar wel aan wat er
+   kan breken. Eén definitie, meerdere namen. */
+.alert,
+.info-box,
+.warning-banner,
+.validation-warning,
+.builder-11h-warnings,
+.leave-banner {
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    font-size: 13px;
+    line-height: 1.55;
 }
+
+/* .alert draagt een pictogram naast de tekst, vandaar de flex. De andere
+   namen hierboven zijn gewone blokken en mogen dat niet krijgen: hun <p>'s
+   zouden dan naast elkaar komen te staan. */
+.alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+.alert svg { flex-shrink: 0; margin-top: 1px; }
+
+.alert-error,
+.alert-danger,
+.info-box.info-box-danger {
+    background: var(--alert-error-bg);
+    border-color: var(--alert-error-border);
+    color: var(--alert-error-text);
+}
+
+.alert-warning,
+.warning-banner,
+.validation-warning,
+.builder-11h-warnings,
+.leave-banner-warn {
+    background: var(--alert-warning-bg);
+    border-color: var(--alert-warning-border);
+    color: var(--alert-warning-text);
+}
+
+/* #119: een kale .info-box was amber, ook wanneer het om een tip ging. De
+   lamp bij "zodra iemand je dienst accepteert" stond daardoor in de kleur die
+   de rest van de app voor een waarschuwing gebruikt. */
+.alert-info,
+.info-box,
+.info-box.info,
+.leave-banner-info {
+    background: var(--alert-info-bg);
+    border-color: var(--alert-info-border);
+    color: var(--alert-info-text);
+}
+
+.alert-ok,
+.leave-banner-ok {
+    background: var(--alert-ok-bg);
+    border-color: var(--alert-ok-border);
+    color: var(--alert-ok-text);
+}
+
+.alert-neutral,
+.info-box.neutral {
+    background: var(--surface-2);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.alert > :first-child,
+.info-box > :first-child { margin-top: 0; }
+.alert > :last-child,
+.info-box > :last-child { margin-bottom: 0; }
 
 /* Modal intro text */
 .modal-intro-text {
@@ -1159,11 +1245,12 @@ body.dark-mode .role-switcher select {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    padding: var(--space-sm) 12px;
-    background: rgba(245, 158, 11, 0.1);
-    border-radius: var(--radius-md);
     margin-bottom: 12px;
-    border-left: 3px solid var(--color-warning);
+    /* #119: de achtergrond stond op rgba(245,158,11,.1), een oude Tailwind-amber
+       zonder tegenhanger in donkere modus. Kleur en rand komen nu van het
+       meldingscomponent; alleen de streep links en de uitlijning staan hier. */
+    border-left-width: 3px;
+    border-left-color: var(--alert-warning-border);
 }
 
 /* Code/pre block */
@@ -3299,32 +3386,11 @@ body[data-view-mode="day"] .timeline-header {
 }
 .issue-entry-dismiss:hover { opacity: 1; color: var(--text-secondary); }
 
-.alert {
-    padding: 12px 16px;
-    border-radius: var(--radius-md);
-    margin-bottom: 8px;
-    display: flex;
-    align-items: start;
-    gap: 12px;
-}
-
-.alert-warning {
-    background: var(--color-warning-light);
-    color: var(--warn-text);
-    border-left: 4px solid var(--warning-color);
-}
-
-.alert-danger {
-    background: var(--color-danger-bg);
-    color: var(--danger-text);
-    border-left: 4px solid var(--danger-color);
-}
-
-.alert-info {
-    background: #dbeafe;
-    color: var(--accent-blue);
-    border-left: 4px solid var(--primary-color);
-}
+/* #119: hier stond een tweede, half afgebouwd .alert-component met .alert-warning,
+   .alert-danger en .alert-info in oude Tailwind-kleuren (#dbeafe) en zonder
+   donkere tegenhanger. Het is opgegaan in het meldingscomponent bovenaan.
+   .alert-danger had nergens een gebruiker; .alert-error is de naam geworden,
+   met .alert-danger als alias voor het geval er ooit een opduikt. */
 
 /* ===== CALENDAR ===== */
 .calendar-container {
@@ -5886,11 +5952,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .validation-warning {
-    background: var(--alert-warning-bg);
-    border: 1px solid var(--alert-warning-border);
-    border-radius: var(--radius-md);
-    padding: 12px;
-    margin-bottom: 12px;
+    margin-bottom: 12px;   /* kleur en rand: zie het meldingscomponent (#119) */
 }
 
 .validation-warning strong {
@@ -6570,11 +6632,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 /* Info boxes */
 .info-box {
-    padding: 14px 16px;
-    border-radius: var(--radius-md);
-    margin-bottom: 16px;
-    font-size: 13px;
-    line-height: 1.6;
+    margin-bottom: 16px;   /* kleur, rand en padding: zie het meldingscomponent (#119) */
 }
 
 .info-box p {
@@ -6585,22 +6643,10 @@ body[data-view-mode="day"] .timeline-day-cell {
     margin-bottom: 0;
 }
 
-.info-box.info {
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: var(--info-text);
-}
-
-.info-box.neutral {
-    background: #f6f4ef;
-    border: 1px solid #e6e2d8;
-    color: #5e5b52;
-}
-
-.info-box.info-box-danger {
-    background: rgba(239, 68, 68, 0.06);
-    border-color: rgba(239, 68, 68, 0.2);
-}
+/* #119: .info-box.info, .neutral en .info-box-danger stonden hier met harde
+   hexwaarden uit het oude Tailwind-palet (#eff6ff, rgba(239,68,68,...)) en
+   hadden daardoor geen donkere tegenhanger. Ze krijgen hun kleur nu van het
+   meldingscomponent. */
 
 .validation-hint {
     margin-top: 0.5rem;
@@ -11270,11 +11316,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 /* 11-hour rule warnings */
 .builder-11h-warnings {
-    margin: 12px 0;
-    padding: 12px 16px;
-    background: var(--alert-warning-bg);
-    border: 1px solid var(--alert-warning-border);
-    border-radius: var(--radius-md);
+    margin: 12px 0;   /* kleur en rand: zie het meldingscomponent (#119) */
 }
 .builder-11h-warnings-title {
     font-weight: 600;
@@ -12981,15 +13023,8 @@ button.concept-card-name {
 .leave-round-select { max-width: 230px; }
 
 .leave-banner {
-    margin-top: 12px;
-    padding: 9px 12px;
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    border: 1px solid transparent;
+    margin-top: 12px;   /* kleur en rand: zie het meldingscomponent (#119) */
 }
-.leave-banner-ok   { background: var(--alert-success-bg, var(--ok-bg)); color: var(--ok); border-color: var(--ok); }
-.leave-banner-warn { background: var(--alert-warning-bg); color: var(--alert-warning-text); border-color: var(--alert-warning-border); }
-.leave-banner-info { background: var(--alert-info-bg); color: var(--alert-info-text); border-color: var(--alert-info-border); }
 
 .leave-rules {
     margin: 12px 0 0;
