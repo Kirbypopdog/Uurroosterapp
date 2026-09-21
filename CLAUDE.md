@@ -81,6 +81,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `email-verzending.test.js` | Wat er wel en niet verstuurd wordt, en naar wie |
 | `schooljaar.test.js` | Schooljaar- en periodeberekeningen |
 | `schema-drift.test.js` | Bewaakt dat `sql/schema.sql` niet achterloopt op de migraties (#329, #311) |
+| `monitoring.test.js` | Wat de foutmonitoring wegfiltert, op sleutelnaam én op waarde (#156) |
 
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
 sneller dan dit bestand (#291).
@@ -299,7 +300,7 @@ cd backend
 npm test           # Alle tests uitvoeren, in enkele seconden
 ```
 
-Acht testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
+Negen testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
 voor wat elk bestand dekt. Tests gebruiken Jest + Supertest en de database wordt
 volledig gemockt, dus er is geen echte databank nodig.
 
@@ -361,7 +362,10 @@ Controleer de open issues voor context bij het werken aan deze gebieden:
 
 | Issue | Beschrijving |
 |-------|--------------|
-| — | Geen kritieke of hoge-prioriteit problemen open |
+| #150 | `prioriteit:hoog`. Verwerkersovereenkomsten met Render, Resend en Sentry, plus het interne verwerkingsregister. Geen code: dit staat op Victor. |
+
+Geen `prioriteit:kritiek` open. Dit tabelletje veroudert; de bron is
+`gh issue list --repo Kirbypopdog/Uurroosterapp --label "prioriteit:hoog" --state open`.
 
 ## Agent Aanbevelingen
 
