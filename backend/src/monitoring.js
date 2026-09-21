@@ -176,8 +176,24 @@ function initMonitoring() {
   return true;
 }
 
+/**
+ * Eén regel in het log die zegt of de monitoring aanstaat. Zonder dit is er na
+ * een deploy geen enkele manier om dat te zien zonder een fout te veroorzaken,
+ * en dan sta je te gissen of de variabele wel goed staat.
+ */
+function meldMonitoringStatus(aan) {
+  if (aan) {
+    const dsn = process.env.SENTRY_DSN || '';
+    // Alleen de regio en het projectnummer, nooit de sleutel ervoor.
+    const staart = dsn.split('@')[1] || '(onbekend)';
+    console.log(`[monitoring] Foutmonitoring actief -> ${staart}`);
+  } else {
+    console.log('[monitoring] Foutmonitoring uit: SENTRY_DSN is niet gezet.');
+  }
+}
+
 module.exports = {
-  initMonitoring, schoonEvent, schoonDiep, isVerboden, Sentry,
+  initMonitoring, meldMonitoringStatus, schoonEvent, schoonDiep, isVerboden, Sentry,
   // voor de tests
   GEVOELIGE_WAARDEN
 };

@@ -4,8 +4,9 @@
 // bekend; config() overschrijft niets wat al in de omgeving staat, dus de
 // tweede aanroep in db.js blijft onschadelijk.
 require('dotenv').config();
-const { initMonitoring, Sentry } = require('./monitoring');
+const { initMonitoring, meldMonitoringStatus, Sentry } = require('./monitoring');
 const MONITORING_AAN = initMonitoring();
+meldMonitoringStatus(MONITORING_AAN);
 
 const express = require('express');
 const cors = require('cors');
@@ -2423,6 +2424,42 @@ v1.get('/admin/email-status', requireAuth, requireRole('admin', 'roosterverantwo
   const from = process.env.EMAIL_FROM || 'Het Vlot Rooster <onboarding@resend.dev>';
   res.json({ configured, from });
 });
+
+// #156: een opzettelijke fout, om na te gaan of de foutmonitoring echt werkt.
+//
+// Alleen geregistreerd als de monitoring aanstaat, en alleen voor een admin.
+// Zonder zo'n knop is de enige manier om het te controleren wachten tot er
+// vanzelf iets misgaat, en dan weet je nog steeds niet of het aan de monitoring
+// lag of dat er gewoon niets kapot was.
+//
+// De fout draagt bewust NEP-gegevens mee die op echte lijken: een e-mailadres,
+// een naam, en een afwezigheid met type 'ziek' en een reden. Komt de melding
+// aan in Sentry met die velden op [weggelaten], dan is bewezen dat de filtering
+// ook in productie draait en niet alleen in de tests.
+if (MONITORING_AAN) {
+  v1.post('/admin/monitoring-test', requireAuth, requireRole('admin'), async (req, res) => {
+    const fout = new Error('Testfout voor de foutmonitoring (#156), opzettelijk veroorzaakt');
+    Sentry.captureException(fout, {
+      extra: {
+        toelichting: 'Dit is een test. Alle gegevens hieronder zijn verzonnen.',
+        nepPayload: {
+          userId: 999,
+          date: '2099-01-01',
+          type: 'ziek',
+          reason: 'VERZONNEN REDEN, hoort niet in Sentry te staan'
+        },
+        nepEmail: 'verzonnen@voorbeeld.be',
+        nepNaam: 'Verzonnen Persoon'
+      },
+      tags: { testfout: 'ja' }
+    });
+    await Sentry.flush(3000);
+    res.json({
+      ok: true,
+      melding: 'Testfout verstuurd. Kijk in Sentry of hij aankomt, en of de verzonnen gegevens er als [weggelaten] in staan.'
+    });
+  });
+}
 
 v1.post('/admin/test-email', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   try {
