@@ -357,4 +357,39 @@ JWT_SECRET=...                    # JWT signing secret
 ADMIN_EMAIL=admin@hetvlot.be     # Initieel admin account
 ADMIN_PASSWORD=...                # Admin wachtwoord
 DEFAULT_RESET_PASSWORD=...                # Reset wachtwoord voor nieuwe users (zie Render dashboard)
+SENTRY_DSN=https://...            # Foutmonitoring (#156). Leeg = uit.
 ```
+
+## Foutmonitoring (#156)
+
+Sentry, in de **EU-regio (Duitsland)**. Uit zolang `SENTRY_DSN` leeg is: de
+backend start dan geen SDK en de frontend haalt niets van een CDN.
+
+| kant | bestand | hoe |
+|------|---------|-----|
+| backend | `src/monitoring.js` | `@sentry/node`, geladen vóór express in `server.js` |
+| frontend | `config/monitoring.js` | SDK van een CDN, dus geen bouwstap (regel 1) |
+
+**Het belangrijkste aan deze code is wat er NIET vertrekt.** De app houdt
+ziekmeldingen bij, en gezondheidsgegevens zijn een bijzondere categorie onder de
+AVG (#152). De standaardinstellingen van de SDK zijn ruim: cookies, headers,
+verzoekinhoud en queryparameters gaan standaard mee. Die staan allemaal uit, en
+`schoonEvent` is het tweede net.
+
+Er wordt op twee manieren gefilterd, en dat onderscheid is belangrijk:
+
+- **Op sleutelnaam**, voor dingen als `reason`, `email`, `authorization`.
+- **Op waarde**, voor `ziek`, `verlof`, `zeker_niet` en de andere afwezigheids-
+  en verlofwaarden. Dat moet wel: de sleutel heet `type`, en die kan niet blind
+  verboden worden omdat Sentry hem zelf gebruikt voor de soort fout ("Error").
+
+Van de gebruiker gaat alleen het **id** mee, nooit naam of e-mail.
+`monitoringZetGebruiker()` wordt aangeroepen vanuit `showApp()` en
+`handleLogout()` in `app-auth.js`.
+
+De filtering in de frontend is een kopie van die in de backend. **Die twee horen
+gelijk te blijven**; `backend/tests/monitoring.test.js` bewaakt de backendkant.
+
+Let op bij het lezen van een melding: Sentry hangt **broncontext** aan de
+stacktrace, dus regels uit de eigen bestanden komen mee. Dat is nuttig bij het
+opsporen en bevat geen persoonsgegevens, want het is de broncode uit de repo.

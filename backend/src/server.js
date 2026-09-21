@@ -1,3 +1,12 @@
+// #156: dit moet bovenaan staan, vóór express. De monitoring haakt zich in de
+// http-laag, en dat kan alleen als ze eerder geladen is dan wat ze moet
+// observeren. dotenv staat er daarom ook vóór, anders is SENTRY_DSN nog niet
+// bekend; config() overschrijft niets wat al in de omgeving staat, dus de
+// tweede aanroep in db.js blijft onschadelijk.
+require('dotenv').config();
+const { initMonitoring, Sentry } = require('./monitoring');
+const MONITORING_AAN = initMonitoring();
+
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
@@ -6918,10 +6927,20 @@ app.use('/', v1);
 // enkel verzoek faalt dan, in plaats van iedereen tegelijk.
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason);
+  // #156: ook melden. Dit zijn juist de fouten die anders alleen in een
+  // weggerolde Render-log staan.
+  if (MONITORING_AAN) Sentry.captureException(reason);
 });
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+  if (MONITORING_AAN) Sentry.captureException(err);
 });
+
+// #156: Sentry ziet de fout eerst, en geeft hem daarna door aan de middleware
+// hieronder die het antwoord stuurt. Deze volgorde is verplicht: staat de
+// eigen afhandelaar eerst, dan is de fout al opgeslokt en meldt Sentry niets.
+// Zonder SENTRY_DSN gebeurt hier niets.
+if (MONITORING_AAN) Sentry.setupExpressErrorHandler(app);
 
 // Express-foutmiddleware. Moet ná alle routes staan en vier parameters hebben,
 // anders herkent Express hem niet als foutafhandelaar.

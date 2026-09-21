@@ -114,6 +114,9 @@ function handleLogout(reden) {
     // het scherm waar zijn collega gebleven was.
     localStorage.removeItem('hetvlot_activeView');
     localStorage.removeItem('hetvlot_activeDraftId');
+    // #156: het id loskoppelen, anders hangt het aan fouten van de volgende
+    // gebruiker op hetzelfde toestel.
+    if (typeof monitoringZetGebruiker === 'function') monitoringZetGebruiker();
     sluitAlleVensters();
     showLogin();
     if (reden === 'sessie') {
@@ -242,6 +245,10 @@ function populateUserMenu() {
 }
 
 function showApp() {
+    // #156: het gebruiker-id aan de foutmonitoring koppelen, zodat een melding
+    // te herleiden is naar wie hem kreeg. Alleen het id; naam en e-mail gaan
+    // nooit mee. Doet niets als de monitoring uitstaat.
+    if (typeof monitoringZetGebruiker === 'function') monitoringZetGebruiker();
     DOM.loginContainer.classList.add('hidden');
     DOM.appContainer.classList.remove('hidden');
     IconHelper.init(document.getElementById('current-period'));
