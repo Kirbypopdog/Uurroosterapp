@@ -2048,6 +2048,93 @@ describe('POST /admin/users', () => {
   });
 });
 
+// ===== #154: levensloop van de agendalink =====
+
+describe('#154 agendalink (iCal-feed)', () => {
+  const beheerderToken = () => makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+  // Eigen token: de `medewerker` van verderop in dit bestand staat in een
+  // andere describe-scope en is hier niet zichtbaar.
+  const medewerkerToken = () => makeToken({ id: 3, role: 'medewerker', name: 'Eva', team_id: 'vlot2' });
+
+  test('een beheerdersreset trekt de agendalink in', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ hadLink: true }] })                     // UPDATE
+      .mockResolvedValueOnce({ rows: [] })                                      // logAudit
+      .mockResolvedValueOnce({ rows: [{ name: 'Jan', email: 'jan@test.be' }] }); // user fetch
+
+    const res = await request(app)
+      .post('/api/v1/admin/users/5/reset-password')
+      .set('Authorization', `Bearer ${beheerderToken()}`);
+
+    expect(res.status).toBe(200);
+    const upd = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('SET password_hash'));
+    expect(upd[0]).toMatch(/ical_feed_token = NULL/);
+    expect(upd[0]).toMatch(/ical_token_created = NULL/);
+    expect(upd[0]).toMatch(/ical_last_access = NULL/);
+    expect(res.body.agendalinkIngetrokken).toBe(true);
+  });
+
+  test('zonder agendalink meldt de reset niets over een link', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ hadLink: false }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ name: 'Jan', email: null }] });
+
+    const res = await request(app)
+      .post('/api/v1/admin/users/5/reset-password')
+      .set('Authorization', `Bearer ${beheerderToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.agendalinkIngetrokken).toBe(false);
+  });
+
+  // Een nieuwe link mag het gebruik van de oude niet meedragen, anders zegt het
+  // profiel "vorige week opgehaald" over iets wat net gemaakt is.
+  test('een nieuwe link begint met een schone lei', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ icalTokenCreated: '2026-09-21T10:00:00Z' }] })
+      .mockResolvedValueOnce({ rows: [] }); // logAudit
+
+    const res = await request(app)
+      .post('/api/v1/me/ical-token')
+      .set('Authorization', `Bearer ${medewerkerToken()}`);
+
+    expect(res.status).toBe(200);
+    const upd = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('SET ical_feed_token = $1'));
+    expect(upd[0]).toMatch(/ical_token_created = NOW\(\)/);
+    expect(upd[0]).toMatch(/ical_last_access = NULL/);
+    expect(res.body.token).toBeTruthy();
+    expect(res.body.icalLastAccess).toBeNull();
+  });
+
+  test('het ophalen van de feed noteert het tijdstip, en verder niets', async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 2, name: 'Anna' }] }); // UPDATE ... RETURNING
+
+    const res = await request(app).get('/api/v1/calendar/abc-123.ics');
+
+    expect(res.status).toBe(200);
+    const upd = pool.query.mock.calls[0];
+    expect(upd[0]).toMatch(/UPDATE users SET ical_last_access = NOW\(\)/);
+    expect(upd[0]).toMatch(/WHERE ical_feed_token = \$1 AND active = true/);
+    // Alleen het tijdstip: geen IP, geen user-agent, geen aparte tabel
+    const logs = pool.query.mock.calls.filter(
+      c => typeof c[0] === 'string' && /INSERT INTO (audit_log|ical)/i.test(c[0]));
+    expect(logs).toHaveLength(0);
+  });
+
+  test('een onbekend token geeft 404 en schrijft niets', async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+    const res = await request(app).get('/api/v1/calendar/bestaat-niet.ics');
+    expect(res.status).toBe(404);
+  });
+});
+
 // ===== POST /admin/users/:id/reset-password =====
 
 describe('POST /admin/users/:id/reset-password', () => {

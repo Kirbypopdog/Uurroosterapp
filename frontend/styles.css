@@ -6520,6 +6520,23 @@ body[data-view-mode="day"] .timeline-day-cell {
 .profile-ical-help { font-size: 12px; color: var(--text-secondary); }
 .profile-ical-reset { opacity: 0.6; }
 .profile-ical-reset:hover { opacity: 1; }
+/* #154: de link is een geheim, dus de waarschuwing mag niet wegvallen tussen de
+   hulptekst. Dezelfde tinten als de andere waarschuwingen in de app. */
+.profile-ical-waarschuwing {
+    display: flex;
+    gap: 6px;
+    align-items: flex-start;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-primary);
+    background: var(--warn-bg, #fdf6e7);
+    border-left: 3px solid var(--warn, #b8860b);
+    border-radius: 4px;
+    padding: 8px 10px;
+    max-width: 520px;
+}
+.profile-ical-waarschuwing svg { flex-shrink: 0; margin-top: 2px; }
+.profile-ical-gebruik { font-size: 12px; color: var(--text-secondary); }
 
 .form-actions {
     margin-top: 12px;

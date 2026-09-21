@@ -147,6 +147,38 @@ function renderEmployees() {
     });
 }
 
+// De drie velden horen bij elkaar: een nieuw token betekent een nieuwe
+// aanmaakdatum en een leeg gebruik. Ze los bijwerken liet het scherm eerder
+// "vorige week opgehaald" tonen over een link die net gemaakt was.
+function onthoudAgendalink(data) {
+    AppState.currentUser.icalFeedToken = data.token;
+    AppState.currentUser.icalTokenCreated = data.icalTokenCreated || null;
+    AppState.currentUser.icalLastAccess = data.icalLastAccess || null;
+    sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+}
+
+// #154: een agendalink blijft geldig tot iemand hem intrekt. De medewerker kan
+// dat alleen beoordelen als hij ziet wat ermee gebeurt. Vandaar twee feiten en
+// geen geschiedenis: sinds wanneer de link bestaat, en wanneer hij voor het
+// laatst opgehaald is. Wie zijn agendakoppeling maanden geleden verwijderd
+// heeft en hier toch "vandaag opgehaald" ziet staan, weet genoeg.
+function icalGebruikTekst(user) {
+    const gemaakt = user.icalTokenCreated ? new Date(user.icalTokenCreated) : null;
+    const laatst = user.icalLastAccess ? new Date(user.icalLastAccess) : null;
+    const kort = d => d.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    const delen = [];
+    if (gemaakt && !isNaN(gemaakt)) delen.push(`Aangemaakt op ${kort(gemaakt)}.`);
+    if (laatst && !isNaN(laatst)) {
+        delen.push(`Voor het laatst opgehaald op ${kort(laatst)}.`);
+    } else {
+        // Hier hoort de opruimregel bij: een link die nooit opgehaald wordt,
+        // vervalt na 60 dagen. Dat mag geen verrassing zijn.
+        delen.push('Nog nooit opgehaald. Een link die twee maanden ongebruikt blijft, vervalt vanzelf.');
+    }
+    return escapeHtml(delen.join(' '));
+}
+
 function renderProfile() {
     const user = AppState.currentUser;
     if (!user) return;
@@ -389,6 +421,11 @@ function renderProfile() {
                                     </button>
                                 </div>
                                 <div class="profile-ical-help">Plak deze URL in Google Calendar, Apple Agenda of Outlook als "Abonneren op agenda".</div>
+                                <div class="profile-ical-waarschuwing">
+                                    ${IconHelper.html('lock', 'xs')}
+                                    Deel deze link met niemand. Wie hem heeft, ziet je diensten van het voorbije jaar en het komende jaar, zonder in te loggen. Deel je hem per ongeluk, genereer dan hieronder een nieuwe.
+                                </div>
+                                <div class="profile-ical-gebruik">${icalGebruikTekst(user)}</div>
                                 <button type="button" class="btn btn-ghost btn-xs profile-ical-reset" id="profile-ical-reset">
                                     ${IconHelper.html('refresh-cw', 'xs')} Nieuwe link genereren
                                 </button>
@@ -396,7 +433,7 @@ function renderProfile() {
                                 <button type="button" class="btn btn-secondary btn-xs" id="profile-ical-activate">
                                     ${IconHelper.html('calendar-plus', 'xs')} Agenda koppeling activeren
                                 </button>
-                                <div class="profile-ical-help">Synchroniseer je diensten naar Google Agenda, Apple Agenda of Outlook.</div>
+                                <div class="profile-ical-help">Synchroniseer je diensten naar Google Agenda, Apple Agenda of Outlook. Je krijgt een persoonlijke link die je niet mag delen.</div>
                             `}
                         </span>
                     </div>
@@ -440,8 +477,7 @@ function renderProfile() {
             icalActivateBtn.disabled = true;
             try {
                 const data = await dataApiFetch('/me/ical-token', { method: 'POST' });
-                AppState.currentUser.icalFeedToken = data.token;
-                sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+                onthoudAgendalink(data);
                 renderProfile();
                 showToast('Agenda koppeling geactiveerd', 'success');
             } catch (e) {
@@ -467,8 +503,7 @@ function renderProfile() {
             icalResetBtn.disabled = true;
             try {
                 const data = await dataApiFetch('/me/ical-token', { method: 'POST' });
-                AppState.currentUser.icalFeedToken = data.token;
-                sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+                onthoudAgendalink(data);
                 renderProfile();
                 showToast('Nieuwe link gegenereerd', 'success');
             } catch (e) {

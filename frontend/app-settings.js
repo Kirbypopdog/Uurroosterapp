@@ -558,8 +558,14 @@ function showEditAccountModal(user, teams, onSave) {
                 const mailregel = result.emailSent
                     ? 'De medewerker krijgt een bericht dat het wachtwoord gereset is. Dat bericht bevat het wachtwoord niet, dus geef het hieronder persoonlijk door.'
                     : 'Er vertrekt geen bericht, dus geef het wachtwoord hieronder persoonlijk door.';
+                // #154: een reset trekt ook de agendalink in. De medewerker
+                // merkt dat anders pas als zijn agenda stilletjes achterloopt,
+                // dus de beheerder hoort het te weten en te kunnen zeggen.
+                const agendaregel = result.agendalinkIngetrokken
+                    ? '\n\nZijn agendalink is uit voorzorg ingetrokken. Hij moet de koppeling opnieuw activeren via zijn profiel.'
+                    : '';
                 await showConfirm(
-                    `Wachtwoord gereset.\n\n${mailregel}\n\nNieuw wachtwoord:\n\n${result.newPassword}`,
+                    `Wachtwoord gereset.\n\n${mailregel}${agendaregel}\n\nNieuw wachtwoord:\n\n${result.newPassword}`,
                     'Wachtwoord gereset',
                     { confirmText: 'Begrepen', hideCancel: true }
                 );

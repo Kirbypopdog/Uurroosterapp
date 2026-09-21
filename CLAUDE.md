@@ -197,6 +197,37 @@ dagelijkse samenvatting naast de directe mail aan het eigen team.
 - `POST /api/v1/admin/users/:id/replace` - Medewerker vervangen
 - `PUT /api/v1/me/email-preferences` - Email notificatie voorkeur
 
+### Agendakoppeling (iCal)
+- `POST /api/v1/me/ical-token` - Persoonlijke feedlink aanmaken of vervangen
+- `GET /api/v1/calendar/:token.ics` - De feed zelf (geen auth, het token ís de auth)
+
+De feed geeft dertien maanden rooster (30 dagen terug, een jaar vooruit) plus de
+naam van de medewerker en de notities per dienst, aan iedereen die de URL heeft.
+Het token is dus een geheim, en daar hangen vier regels aan (#154):
+
+| wanneer | wat er gebeurt |
+|---------|----------------|
+| eigen wachtwoord wijzigen (`PUT /users/:id`) | het token roteert |
+| beheerdersreset (`POST /admin/users/:id/reset-password`) | het token wordt **gewist**, niet vervangen |
+| elke ophaling van de feed | `ical_last_access` wordt bijgewerkt |
+| 60 dagen aangemaakt zonder één ophaling | `enforceRetentionPolicies()` trekt het in |
+
+Die laatste is met opzet géén rotatie op tijd. Een link die iemand werkelijk
+gebruikt ongeldig maken breekt zijn agenda zonder dat hij begrijpt waarom, en
+hij merkt het pas als hij een dienst mist. Een link die nooit opgehaald is, kan
+per definitie niets breken.
+
+Bij een beheerdersreset wordt het token gewist en niet vervangen: een nieuwe
+link heeft geen zin als niemand hem te zien krijgt. De medewerker activeert zelf
+opnieuw. Het antwoord draagt `agendalinkIngetrokken`, en zowel het venster bij
+de beheerder als de resetmail zegt het, anders merkt de medewerker alleen dat
+zijn agenda stilletjes achterloopt.
+
+**Geen toegangstabel.** `ical_last_access` is één tijdstempel op de gebruiker,
+geen rij per ophaling. Een agenda-app haalt elk kwartier op, dus dat zou een
+eindeloos groeiende tabel met verbindingsgegevens van medewerkers zijn: meer
+persoonsgegevens aanmaken om persoonsgegevens te beschermen.
+
 ## Frontend Patronen
 
 - **DataStore** (`data.js`): Centrale data cache, alle API calls gaan hierdoor

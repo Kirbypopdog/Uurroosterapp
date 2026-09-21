@@ -426,14 +426,21 @@ async function notifyWelcome(newUser) {
  */
 // #322: geeft nu terug of er effectief een mail de deur uit is gegaan, zodat de
 // route en de melding in de app niets beloven wat niet gebeurt.
-async function notifyPasswordReset(user) {
+async function notifyPasswordReset(user, opties = {}) {
   if (!user || !user.email) return false;
   if (!await isTypeEnabled('password_reset')) return false;
+  // #154: bij een reset wordt ook de agendalink ingetrokken. De medewerker
+  // staat er op dat moment niet bij, dus zonder deze zin merkt hij alleen dat
+  // zijn agenda stilletjes niet meer bijwerkt, zonder te weten waarom.
+  const agendaZin = opties.agendalinkIngetrokken
+    ? '<p>Je persoonlijke agendalink is uit voorzorg ingetrokken. Je diensten lopen daardoor niet meer door naar je agenda-app. Activeer de koppeling opnieuw via je profiel wanneer je ze weer nodig hebt.</p>'
+    : '';
   const html = baseTemplate('Wachtwoord gereset', `
     <h2>Wachtwoord gereset</h2>
     <p>Hallo ${escapeHtml(user.name)},</p>
     <p>Je wachtwoord is gereset door een administrator.</p>
     <p>De administrator deelt je tijdelijk wachtwoord persoonlijk mee. Wijzig het daarna via je profiel.</p>
+    ${agendaZin}
   `);
   sendEmailAsync(user.email, 'Wachtwoord gereset — Het Vlot Rooster', html);
   return true;

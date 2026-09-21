@@ -922,6 +922,32 @@ const MIGRATIONS = [
       await client.query(`ALTER TABLE shift_swap_requests DROP COLUMN IF EXISTS lead_response_notes`);
       await client.query(`ALTER TABLE shift_swap_requests DROP COLUMN IF EXISTS lead_responded_at`);
     }
+  },
+  {
+    // #154: de agendafeed hangt aan één token dat eeuwig geldig blijft. Deze
+    // twee kolommen maken zichtbaar wat er met zo'n link gebeurt: wanneer hij
+    // gemaakt is, en wanneer hij voor het laatst opgehaald werd.
+    //
+    // Bewust géén aparte toegangstabel met tijdstippen en IP-adressen. Een
+    // agenda-app haalt de feed elk kwartier op, dus dat zou een tabel zijn die
+    // eindeloos groeit, gevuld met verbindingsgegevens van medewerkers. Dat is
+    // meer persoonsgegevens aanmaken om persoonsgegevens te beschermen. Twee
+    // tijdstempels op de gebruiker geven hetzelfde signaal zonder die prijs.
+    name: '046_ical_token_levensloop',
+    up: async (client) => {
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ical_token_created TIMESTAMPTZ`);
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ical_last_access TIMESTAMPTZ`);
+      // Bestaande tokens hebben geen aanmaakdatum. Die op NOW() zetten is
+      // eerlijker dan NULL laten: de opruiming hieronder mag een link die al
+      // maanden in iemands agenda staat niet als "nooit gebruikt" aanzien
+      // alleen omdat wij pas vandaag begonnen met meten.
+      const r = await client.query(
+        `UPDATE users SET ical_token_created = NOW()
+          WHERE ical_feed_token IS NOT NULL AND ical_token_created IS NULL`);
+      if (r.rowCount > 0) {
+        console.log(`Migratie 046: ${r.rowCount} bestaande agendalink(s) gedateerd op vandaag.`);
+      }
+    }
   }
 ];
 
@@ -1029,6 +1055,26 @@ async function enforceRetentionPolicies() {
       sql: `DELETE FROM shift_swap_requests
             WHERE status IN ('approved','rejected','cancelled','expired')
               AND created_at < NOW() - INTERVAL '2 years'`,
+    },
+    {
+      // #154 vroeg om automatische rotatie na X maanden. Dat doe ik bewust
+      // niet: een agendalink die iemand werkelijk gebruikt zomaar ongeldig
+      // maken breekt zijn agenda zonder dat hij begrijpt waarom, en hij hoort
+      // het pas als hij een dienst mist. De winst weegt daar niet tegenop,
+      // want het token is een willekeurige UUID die nergens gepubliceerd staat.
+      //
+      // Wat wél weg mag zonder iets te breken: een link die aangemaakt is en
+      // daarna nooit opgehaald. Iemand heeft toen op de knop gedrukt en is er
+      // niet mee verder gegaan. Die URL staat misschien nog in een
+      // browsergeschiedenis of een plakbord, geeft dertien maanden rooster, en
+      // niemand mist hem. Per definitie breekt dit geen enkele werkende
+      // koppeling: er is nooit een opvraging geweest.
+      label: 'trek nooit gebruikte agendalinks in (>60 dagen)',
+      sql: `UPDATE users
+               SET ical_feed_token = NULL, ical_token_created = NULL
+             WHERE ical_feed_token IS NOT NULL
+               AND ical_last_access IS NULL
+               AND ical_token_created < NOW() - INTERVAL '60 days'`,
     },
   ];
   for (const step of steps) {
@@ -1445,7 +1491,9 @@ v1.get('/me', requireAuth, async (req, res) => {
                 week_schedules as "weekSchedules",
                 email_notifications_enabled as "emailNotificationsEnabled",
                 onboarding_flags as "onboardingFlags",
-                ical_feed_token as "icalFeedToken"
+                ical_feed_token as "icalFeedToken",
+                ical_token_created as "icalTokenCreated",
+                ical_last_access as "icalLastAccess"
          FROM users WHERE id = $1`,
         [req.user.id]
       );
@@ -1542,9 +1590,16 @@ v1.put('/me/email-preferences', requireAuth, async (req, res) => {
 v1.post('/me/ical-token', requireAuth, async (req, res) => {
   try {
     const token = crypto.randomUUID();
-    await pool.query('UPDATE users SET ical_feed_token = $1 WHERE id = $2', [token, req.user.id]);
+    // #154: de nieuwe link begint met een schone lei. ical_last_access moet
+    // terug op NULL, anders draagt de nieuwe link het gebruik van de oude mee
+    // en zegt het scherm "vorige week opgehaald" over een link die nog nooit
+    // gebruikt is.
+    const r = await pool.query(
+      `UPDATE users SET ical_feed_token = $1, ical_token_created = NOW(), ical_last_access = NULL
+        WHERE id = $2 RETURNING ical_token_created AS "icalTokenCreated"`,
+      [token, req.user.id]);
     await logAudit(req, 'UPDATE', 'user', req.user.id, { action: 'ical_token_reset' });
-    res.json({ token });
+    res.json({ token, icalTokenCreated: r.rows[0].icalTokenCreated, icalLastAccess: null });
   } catch (err) {
     console.error('POST /me/ical-token error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -1554,8 +1609,14 @@ v1.post('/me/ical-token', requireAuth, async (req, res) => {
 // GET /calendar/:token.ics - Publieke iCal feed (token = auth)
 v1.get('/calendar/:token.ics', async (req, res) => {
   try {
+    // #154: het ophalen wordt meteen genoteerd. Dat is wat de medewerker op
+    // zijn profiel te zien krijgt, zodat een link die hij niet meer gebruikt
+    // maar wél opgehaald wordt, opvalt. Alleen het tijdstip, geen IP-adres en
+    // geen geschiedenis: zie migratie 046.
     const userResult = await pool.query(
-      `SELECT id, name FROM users WHERE ical_feed_token = $1 AND active = true`,
+      `UPDATE users SET ical_last_access = NOW()
+        WHERE ical_feed_token = $1 AND active = true
+        RETURNING id, name`,
       [req.params.token]
     );
     if (!userResult.rows.length) return res.status(404).send('Not found');
@@ -2212,10 +2273,28 @@ v1.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req
   }
   try {
     const passwordHash = await bcrypt.hash(DEFAULT_RESET_PASSWORD, 12);
-    await pool.query(
-      'UPDATE users SET password_hash = $1 WHERE id = $2',
+    // #154: een zelfgekozen wachtwoordwijziging roteerde de agendalink al
+    // (zie PUT /users/:id), een beheerdersreset niet. Net het geval waarin je
+    // het het hardst wil: er wordt gereset ómdat er iets mis is met dat
+    // account. De oude feed-URL bleef dan gewoon werken.
+    //
+    // De link wordt hier niet vervangen maar gewist. Een nieuwe aanmaken heeft
+    // geen zin als niemand hem te zien krijgt; de medewerker activeert zelf
+    // opnieuw vanuit zijn profiel wanneer hij hem weer nodig heeft.
+    //
+    // De CTE leest de oude waarde vóór de UPDATE, zodat we weten of er
+    // werkelijk een link ingetrokken is. Een subquery rechtstreeks in RETURNING
+    // zou hier op de snapshot leunen en dat leest te subtiel.
+    const reset = await pool.query(
+      `WITH oud AS (SELECT ical_feed_token FROM users WHERE id = $2)
+       UPDATE users
+          SET password_hash = $1,
+              ical_feed_token = NULL, ical_token_created = NULL, ical_last_access = NULL
+        WHERE id = $2
+        RETURNING (SELECT ical_feed_token FROM oud) IS NOT NULL AS "hadLink"`,
       [passwordHash, userId]
     );
+    const agendalinkIngetrokken = reset.rows[0]?.hadLink === true;
     await logAudit(req, 'UPDATE', 'user', userId, { action: 'password_reset' });
     const userResult = await pool.query('SELECT name, email FROM users WHERE id = $1', [userId]);
     const targetUser = userResult.rows[0];
@@ -2229,9 +2308,12 @@ v1.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req
     //
     // emailSent zegt of er effectief een mail vertrekt. Zonder adres, of met
     // het mailtype uit, is dat niet zo, en dan mag de app dat ook niet beweren.
-    const emailSent = await emailService.notifyPasswordReset(targetUser);
+    const emailSent = await emailService.notifyPasswordReset(targetUser, { agendalinkIngetrokken });
 
-    res.json({ ok: true, newPassword: DEFAULT_RESET_PASSWORD, emailSent: !!emailSent });
+    res.json({
+      ok: true, newPassword: DEFAULT_RESET_PASSWORD, emailSent: !!emailSent,
+      agendalinkIngetrokken
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });

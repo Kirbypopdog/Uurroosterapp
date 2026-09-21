@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS users (
   email_notifications_enabled BOOLEAN DEFAULT true,
   onboarding_flags JSONB DEFAULT '{}',
   ical_feed_token TEXT UNIQUE,
+  -- #154: wanneer de agendalink gemaakt is en wanneer hij voor het laatst
+  -- opgehaald werd. Zie migratie 046 voor waarom dit twee kolommen zijn en
+  -- geen toegangstabel.
+  ical_token_created TIMESTAMPTZ,
+  ical_last_access TIMESTAMPTZ,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
