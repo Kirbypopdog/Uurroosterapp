@@ -7,7 +7,7 @@
 // niet naar de EU-regio van Sentry. Dit bestand legt vast wat er gefilterd
 // wordt; gaat dat ooit stuk, dan lekt er iets zonder dat iemand het ziet.
 
-const { schoonEvent, schoonDiep, isVerboden, initMonitoring } = require('../src/monitoring');
+const { schoonEvent, schoonDiep, isVerboden, initMonitoring, bepaalOmgeving } = require('../src/monitoring');
 
 describe('isVerboden herkent gevoelige sleutels', () => {
   test.each([
@@ -161,6 +161,42 @@ describe('schoonDiep blijft overeind bij rare invoer', () => {
     const uit = schoonDiep([{ reason: 'ziek' }, { date: '2026-01-01' }]);
     expect(uit[0].reason).toBe('[weggelaten]');
     expect(uit[1].date).toBe('2026-01-01');
+  });
+});
+
+// Gevonden bij de eerste echte testfout: die kwam binnen met
+// environment=production terwijl hij van de stagingserver kwam. Render zet
+// NODE_ENV op 'production' bij elke service, ook bij staging.
+describe('de omgeving komt van de branch, niet van NODE_ENV (#156)', () => {
+  const oudeTak = process.env.RENDER_GIT_BRANCH;
+  const oudeEnv = process.env.NODE_ENV;
+  afterEach(() => {
+    if (oudeTak === undefined) delete process.env.RENDER_GIT_BRANCH;
+    else process.env.RENDER_GIT_BRANCH = oudeTak;
+    process.env.NODE_ENV = oudeEnv;
+  });
+
+  test('branch main heet production', () => {
+    process.env.RENDER_GIT_BRANCH = 'main';
+    expect(bepaalOmgeving()).toBe('production');
+  });
+
+  test('branch staging heet staging, ook al staat NODE_ENV op production', () => {
+    process.env.RENDER_GIT_BRANCH = 'staging';
+    process.env.NODE_ENV = 'production';
+    expect(bepaalOmgeving()).toBe('staging');
+  });
+
+  test('zonder branch valt hij terug op NODE_ENV', () => {
+    delete process.env.RENDER_GIT_BRANCH;
+    process.env.NODE_ENV = 'production';
+    expect(bepaalOmgeving()).toBe('production');
+  });
+
+  test('en zonder allebei is het development', () => {
+    delete process.env.RENDER_GIT_BRANCH;
+    delete process.env.NODE_ENV;
+    expect(bepaalOmgeving()).toBe('development');
   });
 });
 

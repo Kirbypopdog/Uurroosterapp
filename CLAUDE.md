@@ -393,3 +393,14 @@ gelijk te blijven**; `backend/tests/monitoring.test.js` bewaakt de backendkant.
 Let op bij het lezen van een melding: Sentry hangt **broncontext** aan de
 stacktrace, dus regels uit de eigen bestanden komen mee. Dat is nuttig bij het
 opsporen en bevat geen persoonsgegevens, want het is de broncode uit de repo.
+
+**De omgeving komt van `RENDER_GIT_BRANCH`, niet van `NODE_ENV`.** Render zet
+`NODE_ENV` op `production` bij élke service, dus ook bij staging. De eerste
+echte testfout kwam daardoor binnen met `environment=production` terwijl hij van
+de stagingserver kwam. `bepaalOmgeving()` vertaalt de branch: `main` wordt
+`production`, elke andere tak houdt zijn eigen naam.
+
+**Controleren of het werkt:** `POST /admin/monitoring-test` stuurt opzettelijk
+een fout, met nepgegevens erin die op echte lijken. Komt die aan met de velden
+op `[weggelaten]`, dan draait de filtering ook echt op de server. Het endpoint
+bestaat alleen als de monitoring aanstaat, en alleen voor een admin.

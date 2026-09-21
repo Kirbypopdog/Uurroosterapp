@@ -146,13 +146,30 @@ function schoonEvent(event) {
   return event;
 }
 
+/**
+ * Welke omgeving een melding komt uit.
+ *
+ * NIET NODE_ENV, want Render zet die op 'production' bij ELKE service, ook bij
+ * staging. De eerste testfout kwam daardoor binnen met environment=production
+ * terwijl hij van de stagingserver kwam. Dan kun je in Sentry niet zien of
+ * iets echte gebruikers raakt of alleen een test.
+ *
+ * RENDER_GIT_BRANCH zet Render zelf en die verschilt wél per omgeving.
+ */
+function bepaalOmgeving() {
+  const tak = process.env.RENDER_GIT_BRANCH;
+  if (tak === 'main') return 'production';
+  if (tak) return tak;                       // 'staging', of een andere tak
+  return process.env.NODE_ENV || 'development';
+}
+
 function initMonitoring() {
   const dsn = process.env.SENTRY_DSN;
   if (!dsn) return false;
 
   Sentry.init({
     dsn,
-    environment: process.env.NODE_ENV || 'development',
+    environment: bepaalOmgeving(),
     // Geen prestatiemetingen: dit gaat over fouten, en traces vullen de gratis
     // bundel van 5.000 gebeurtenissen per maand zonder dat iemand ernaar kijkt.
     tracesSampleRate: 0,
@@ -193,7 +210,7 @@ function meldMonitoringStatus(aan) {
 }
 
 module.exports = {
-  initMonitoring, meldMonitoringStatus, schoonEvent, schoonDiep, isVerboden, Sentry,
+  initMonitoring, meldMonitoringStatus, bepaalOmgeving, schoonEvent, schoonDiep, isVerboden, Sentry,
   // voor de tests
   GEVOELIGE_WAARDEN
 };
