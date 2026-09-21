@@ -3228,7 +3228,11 @@ describe('Verlofrondes', () => {
     pool.query.mockResolvedValue({ rows: [] });
     mockClient.query.mockImplementation((sql) => {
       if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
-      if (sql.includes('SELECT name FROM leave_rounds')) return Promise.resolve({ rows: [{ name: 'Schooljaar' }] });
+      // #385: apply leest nu ook de status, want een open ronde mag niet
+      // toegepast worden. Deze test gaat over een gesloten ronde.
+      if (sql.includes('SELECT name, status FROM leave_rounds')) {
+        return Promise.resolve({ rows: [{ name: 'Schooljaar', status: 'gesloten' }] });
+      }
       if (sql.includes("b.mode = 'voorkeur'")) {
         return Promise.resolve({ rows: [{ id: 11, name: 'Zomervakantie' }] });
       }
@@ -3273,6 +3277,96 @@ describe('Verlofrondes', () => {
       .send({ entries: [{ userId: 2, date: '2027-07-05', status: 'verlof' }] });
 
     expect(res.status).toBe(200);
+  });
+
+  // ===== #385: toepassen op een ronde die nog openstaat =====
+
+  // Een ronde met een binair blok komt niet langs de onverdeeld-controle van
+  // #201, dus zonder statusbewaking kon een openstaande ronde toegepast worden.
+  const arrangeApply = (roundStatus, verlofRijen = []) => {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] });
+    pool.query.mockResolvedValue({ rows: [] });
+    mockClient.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.includes('SELECT name, status FROM leave_rounds')) {
+        return Promise.resolve({ rows: [{ name: 'Schooljaar', status: roundStatus }] });
+      }
+      if (sql.includes("b.mode = 'voorkeur'")) return Promise.resolve({ rows: [] });
+      if (sql.includes('FROM leave_round_entries e')) return Promise.resolve({ rows: verlofRijen });
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+    return mockClient;
+  };
+
+  test.each(['open', 'concept'])('POST /apply weigert een ronde met status %s (#385)', async (status) => {
+    const mockClient = arrangeApply(status);
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/apply')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/Sluit de ronde eerst/i);
+    // Niets geschreven: geen afwezigheid, geen statuswissel
+    const geschreven = mockClient.query.mock.calls.filter(c => typeof c[0] === 'string'
+      && (c[0].includes('INSERT INTO availability') || c[0].includes("status = 'toegepast'")));
+    expect(geschreven).toHaveLength(0);
+  });
+
+  test.each(['gesloten', 'toegepast'])('POST /apply blijft werken bij status %s (#385)', async (status) => {
+    arrangeApply(status, [{ user_id: 2, date: '2027-07-05' }]);
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/apply')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.applied).toBe(1);
+  });
+
+  // ===== #384: een herziene verdeling trekt het oude verlof in =====
+
+  test('POST /apply ruimt verlof op dat deze ronde niet meer toekent (#384)', async () => {
+    const mockClient = arrangeApply('toegepast', [{ user_id: 3, date: '2027-07-05' }]);
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/apply')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(200);
+    const del = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('DELETE FROM availability'));
+    expect(del).toBeTruthy();
+    // Alleen binnen de blokken van déze ronde
+    expect(del[0]).toMatch(/b\.round_id = \$1/);
+    expect(del[0]).toMatch(/a\.date BETWEEN b\.start_date AND b\.end_date/);
+    // En alleen rijen die deze ronde zelf geschreven heeft: een ziekmelding of
+    // een handmatige afwezigheid draagt een andere reden en blijft dus staan.
+    expect(del[0]).toMatch(/a\.type = 'verlof'/);
+    expect(del[0]).toMatch(/a\.reason = \$2/);
+    expect(del[1][1]).toBe('Verlofplanning: Schooljaar');
+    // Wat net toegepast is, wordt uitgezonderd
+    expect(del[0]).toMatch(/NOT EXISTS/);
+    expect(del[1][2]).toEqual([3]);
+    expect(del[1][3]).toEqual(['2027-07-05']);
+    expect(res.body).toHaveProperty('removed');
+  });
+
+  // Zonder deze volgorde zou de opruiming de rijen wegnemen die de INSERT er
+  // net heeft gezet, of omgekeerd; de uitzondering in de DELETE hangt ervan af.
+  test('POST /apply zet eerst en ruimt daarna op, binnen één transactie (#384)', async () => {
+    const mockClient = arrangeApply('gesloten', [{ user_id: 2, date: '2027-07-05' }]);
+    await request(app)
+      .post('/api/v1/leave-rounds/6/apply')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    const volgorde = mockClient.query.mock.calls
+      .map(c => typeof c[0] === 'string' ? c[0] : '')
+      .map(sql => sql.includes('BEGIN') ? 'BEGIN'
+        : sql.includes('INSERT INTO availability') ? 'INSERT'
+        : sql.includes('DELETE FROM availability') ? 'DELETE'
+        : sql.includes('COMMIT') ? 'COMMIT' : null)
+      .filter(Boolean);
+    expect(volgorde).toEqual(['BEGIN', 'INSERT', 'DELETE', 'COMMIT']);
   });
 });
 

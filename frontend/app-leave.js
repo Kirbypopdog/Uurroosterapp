@@ -1300,7 +1300,13 @@ async function applyLeaveRound(round) {
     try {
         await metLeaveVoortgang('leave-apply', 'Verlof toepassen…', async () => {
             const res = await dataApiFetch(`/leave-rounds/${round.id}/apply`, { method: 'POST' });
-            showToast(`${res.applied} verlofdagen toegepast`, 'success');
+            // #384: bij een herziene verdeling worden er ook dagen ingetrokken.
+            // Dat hoort in de melding, anders lijkt het alsof toepassen enkel
+            // bijzet en ziet de beheerder niet dat zijn correctie is doorgekomen.
+            const ingetrokken = res.removed
+                ? `, ${res.removed} ingetrokken`
+                : '';
+            showToast(`${res.applied} verlofdagen toegepast${ingetrokken}`, 'success');
             if (typeof refreshAvailability === 'function') await refreshAvailability();
         });
         renderLeave();

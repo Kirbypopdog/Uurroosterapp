@@ -6584,9 +6584,26 @@ v1.put('/leave-rounds/:id/submissions/:userId', requireAuth, requireRole(...LEAV
 v1.post('/leave-rounds/:id/apply', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
   const client = await pool.connect();
   try {
-    const roundRes = await client.query('SELECT name FROM leave_rounds WHERE id = $1', [req.params.id]);
+    const roundRes = await client.query('SELECT name, status FROM leave_rounds WHERE id = $1', [req.params.id]);
     if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
     const roundName = roundRes.rows[0].name;
+
+    // #385: de status werd hier nergens getoetst. Een ronde die nog openstaat
+    // kon dus toegepast worden: half ingevulde voorkeuren werden echte
+    // afwezigheden, en de sprong naar 'toegepast' sloot iedereen buiten die
+    // nog bezig was. De knop verschijnt alleen bij 'gesloten' en 'toegepast',
+    // dus via het scherm kwam je er niet, maar de controle hoort aan beide
+    // kanten te staan. Bij een voorkeurronde ving de onverdeeld-controle
+    // hieronder dit toevallig op; bij een binaire ronde ving niets het op.
+    //
+    // 'toegepast' hoort er bewust bij: opnieuw toepassen na een herziene
+    // verdeling is precies wat #384 mogelijk moet houden.
+    if (roundRes.rows[0].status !== 'gesloten' && roundRes.rows[0].status !== 'toegepast') {
+      return res.status(409).json({
+        error: 'Sluit de ronde eerst. Zolang ze openstaat is iedereen nog aan het invullen.',
+        status: roundRes.rows[0].status
+      });
+    }
 
     // #201: apply neemt alleen dagen met status 'verlof' over, maar in een
     // voorkeurblok staat op dat moment uitsluitend werken, liever_niet of
@@ -6629,6 +6646,8 @@ v1.post('/leave-rounds/:id/apply', requireAuth, requireRole(...LEAVE_MANAGER_ROL
       [req.params.id]
     );
 
+    const reden = `Verlofplanning: ${roundName}`;
+
     await client.query('BEGIN');
     // #334: dit schreef rij voor rij weg, bij een volledige zomerronde zo'n
     // 1.200 losse INSERTs binnen één transactie. Nu één opdracht.
@@ -6646,14 +6665,49 @@ v1.post('/leave-rounds/:id/apply', requireAuth, requireRole(...LEAVE_MANAGER_ROL
          FROM unnest($1::int[], $2::date[]) AS t(u, d)
          ON CONFLICT (user_id, date)
          DO UPDATE SET type = 'verlof', reason = EXCLUDED.reason, updated_at = NOW()`,
-        [rows.rows.map(r => r.user_id), rows.rows.map(r => r.date), `Verlofplanning: ${roundName}`]
+        [rows.rows.map(r => r.user_id), rows.rows.map(r => r.date), reden]
       );
     }
+
+    // #384: apply voegde alleen toe en haalde nooit iets weg. Wie een
+    // verdeling herzag en opnieuw toepaste, hield het oude verlof ernaast
+    // staan: de ronde zei dat alleen Bram vrij was, de planning zette Anna én
+    // Bram vrij. Het verlofscherm toonde intussen de juiste toestand, dus er
+    // was geen enkel signaal dat er iets fout zat.
+    //
+    // We ruimen dus op binnen de blokken van deze ronde. Drie voorwaarden
+    // bakenen af wat van ons is:
+    //  - `reason = reden`, en die tekst wordt op precies één plek geschreven,
+    //    namelijk de INSERT hierboven. Zet iemand die dag op ziek, dan
+    //    verandert de reden mee en blijft de rij dus staan.
+    //  - binnen een blok van deze ronde, zodat een andere vakantie niet
+    //    geraakt wordt.
+    //  - niet in de lijst die we net toegepast hebben.
+    //
+    // Bekende grens: wordt de ronde tussen twee keer toepassen hernoemd, dan
+    // wijst `reden` naar de nieuwe naam en blijven de oude rijen staan. Dat is
+    // het gedrag van vóór deze fix, dus geen achteruitgang. Waterdicht zou een
+    // kolom source_round_id op availability zijn, en dat is een migratie waard.
+    const opgeruimd = await client.query(
+      `DELETE FROM availability a
+        USING leave_round_blocks b
+        WHERE b.round_id = $1
+          AND a.date BETWEEN b.start_date AND b.end_date
+          AND a.type = 'verlof'
+          AND a.reason = $2
+          AND NOT EXISTS (
+            SELECT 1 FROM unnest($3::int[], $4::date[]) AS t(u, d)
+             WHERE t.u = a.user_id AND t.d = a.date
+          )`,
+      [req.params.id, reden, rows.rows.map(r => r.user_id), rows.rows.map(r => r.date)]
+    );
+
     await client.query(`UPDATE leave_rounds SET status = 'toegepast', updated_at = NOW() WHERE id = $1`, [req.params.id]);
     await client.query('COMMIT');
 
-    await logAudit(req, 'UPDATE', 'settings', req.params.id, { type: 'leave_round_apply', applied });
-    res.json({ ok: true, applied });
+    await logAudit(req, 'UPDATE', 'settings', req.params.id,
+      { type: 'leave_round_apply', applied, opgeruimd: opgeruimd.rowCount });
+    res.json({ ok: true, applied, removed: opgeruimd.rowCount });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Error applying leave round:', err);
