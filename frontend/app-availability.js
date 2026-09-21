@@ -154,6 +154,24 @@ function renderAvailability() {
         </div>`;
     }
 
+    // #349, tweede geval: er zijn wel teams maar nergens een medewerker. Dat
+    // gebeurt op een verse installatie. Eerder bewust overgeslagen omdat je op
+    // dat moment zelf accounts aan het aanmaken bent, maar Planning en Ruilen
+    // zeggen in dezelfde situatie wél iets, en een tabel met enkel een koprij
+    // oogt kapot in plaats van leeg.
+    const geenEnkeleRij = !zonderTeam
+        && geenTeamLeden.length === 0
+        && teamOrder.every(t => !(employeesByTeam[t] || []).length);
+    if (geenEnkeleRij) {
+        const magAccountsBeheren = role === 'admin' || role === 'roosterverantwoordelijke';
+        html += `<div class="no-items-text availability-leeg">
+            Nog geen medewerkers om afwezigheden voor te tonen.
+            ${magAccountsBeheren
+                ? 'Voeg ze toe bij Instellingen, Accounts.'
+                : 'Vraag je roosterverantwoordelijke om accounts aan te maken.'}
+        </div>`;
+    }
+
     // Rows grouped by team. De bak "Geen team" hangt er als laatste achter.
     const teamVolgorde = geenTeamLeden.length > 0 ? [...teamOrder, '_no_team'] : teamOrder;
     teamVolgorde.forEach(teamId => {

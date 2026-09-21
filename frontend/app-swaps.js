@@ -239,14 +239,44 @@ async function renderSwaps() {
     }
 }
 
+// #160: "In behandeling" zegt niet wie er aan zet is, en "Verlopen" niet
+// waarom. Een medewerker die zijn ruilverzoek bekijkt, wil weten of hij nog
+// iets moet doen of dat hij moet wachten.
+//
+// De statuswaarde 'pending_lead' uit het oorspronkelijke voorstel bestaat niet
+// meer: de leadgoedkeuring is in #114 geschrapt en de kolommen zijn in #315
+// uit het schema gehaald.
+function swapStatusTekst(verzoek, mode) {
+    const doel = verzoek.target_name;
+    switch (verzoek.status) {
+        case 'pending':
+            // Ben je zelf de doelpersoon, dan is "wacht op reactie van jou"
+            // een rare manier om te zeggen dat je iets moet doen.
+            if (mode === 'target') return 'Jij bent aan zet';
+            return doel ? `Wacht op reactie van ${doel}` : 'Wacht op reactie';
+        case 'approved':  return 'Goedgekeurd';
+        case 'rejected':  return doel ? `Afgewezen door ${doel}` : 'Afgewezen';
+        case 'cancelled': return 'Ingetrokken';
+        case 'expired':   return 'Verlopen, de dienst is al geweest';
+        default:          return verzoek.status;
+    }
+}
+
+function takeoverStatusTekst(verzoek) {
+    switch (verzoek.status) {
+        case 'pending':   return 'Beschikbaar';
+        case 'approved':
+            return verzoek.responded_by_name
+                ? `Overgenomen door ${verzoek.responded_by_name}`
+                : 'Overgenomen';
+        case 'rejected':  return 'Afgewezen';
+        case 'cancelled': return 'Ingetrokken';
+        case 'expired':   return 'Verlopen, de dienst is al geweest';
+        default:          return verzoek.status;
+    }
+}
+
 function renderSwapRequestCard(swapRequest, mode) {
-    const statusLabels = {
-        'pending': 'In behandeling',
-        'approved': 'Goedgekeurd',
-        'rejected': 'Afgewezen',
-        'cancelled': 'Geannuleerd',
-        'expired': 'Verlopen'
-    };
 
     const createdDate = new Date(swapRequest.created_at).toLocaleDateString('nl-NL', {
         day: 'numeric',
@@ -324,7 +354,7 @@ function renderSwapRequestCard(swapRequest, mode) {
                     <span class="swap-person"><span class="emp-avatar" style="background:${tgtColor};color:${getContrastColor(tgtColor)}">${tgtInitials}</span>${escapeHtml(swapRequest.target_name)}</span>
                 </div>
                 <span class="swap-status-badge status-${swapRequest.status}">
-                    ${statusLabels[swapRequest.status] || swapRequest.status}
+                    ${escapeHtml(swapStatusTekst(swapRequest, mode))}
                 </span>
             </div>
             <div class="swap-request-body">
@@ -354,14 +384,6 @@ function renderSwapRequestCard(swapRequest, mode) {
 }
 
 function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
-    const statusLabels = {
-        'pending': 'Beschikbaar',
-        'approved': 'Overgenomen',
-        'expired': 'Verlopen',
-        'rejected': 'Afgewezen',
-        'cancelled': 'Geannuleerd'
-    };
-
     const createdDate = new Date(takeoverRequest.created_at).toLocaleDateString('nl-NL', {
         day: 'numeric',
         month: 'short',
@@ -423,7 +445,7 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
 
     // Status badge
     const statusClass = takeoverRequest.status === 'pending' ? 'status-available' : `status-${takeoverRequest.status}`;
-    const statusLabel = statusLabels[takeoverRequest.status] || takeoverRequest.status;
+    const statusLabel = takeoverStatusTekst(takeoverRequest);
 
     // Team color voor avatar + accent
     const takeoverColor = (shift.team && DataStore.settings.teams?.[shift.team]?.color) || '#8d897c';
@@ -438,7 +460,7 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
         <div class="swap-request-card takeover-card">
             <div class="swap-request-header">
                 <div class="swap-people">${titleHtml}</div>
-                <span class="swap-status-badge ${statusClass}">${statusLabel}</span>
+                <span class="swap-status-badge ${statusClass}">${escapeHtml(statusLabel)}</span>
             </div>
             <div class="swap-request-body">
                 <div class="takeover-shift-info" style="border-left:3px solid ${takeoverColor}">

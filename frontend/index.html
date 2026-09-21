@@ -37,6 +37,29 @@
     </script>
 </head>
 <body>
+    <script>
+        // #340: het thema vóór de eerste paint zetten, en de systeemvoorkeur
+        // volgen zolang de gebruiker zelf niets gekozen heeft.
+        //
+        // Dit stond in app-init.js, dus pas nadat alle scripts geladen waren.
+        // Wie zijn telefoon op donker heeft, kreeg eerst een fel wit
+        // inlogscherm. Bij avonddiensten is dat net het scherm dat het vaakst
+        // opengaat.
+        //
+        // Hier en niet in <head>, want de klasse hoort op <body> en die bestaat
+        // daar nog niet. 308 CSS-regels hangen aan body.dark-mode; die
+        // verhuizen zou een veel grotere ingreep zijn voor hetzelfde resultaat.
+        (function () {
+            try {
+                var gekozen = localStorage.getItem('darkMode');
+                var donker = gekozen === null
+                    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+                    : gekozen === 'true';
+                if (donker) document.body.classList.add('dark-mode');
+            } catch (e) { /* localStorage geblokkeerd, dan gewoon licht */ }
+        })();
+    </script>
+
     <!-- Login Scherm -->
     <div id="login-container">
         <div class="login-brandside">

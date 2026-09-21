@@ -157,22 +157,47 @@ function setupEventListeners() {
     }
 
     // Dark mode toggle
+    //
+    // #340: het TOEPASSEN van het thema gebeurt niet meer hier maar in een
+    // klein script direct na <body> in index.html, vóór de eerste paint.
+    // Hier bleef het onzichtbaar tot alle scripts geladen waren, en dat is
+    // precies de flits die we wilden weghalen. Wat hier overblijft is de knop
+    // en het pictogram.
     const darkBtn = document.getElementById('dark-mode-btn');
     if (darkBtn) {
-        if (localStorage.getItem('darkMode') === 'true') {
-            document.body.classList.add('dark-mode');
+        const zetPictogram = (isDark) => {
             const icon = darkBtn.querySelector('[data-lucide]');
-            if (icon) icon.setAttribute('data-lucide', 'sun');
-        }
+            if (!icon) return;
+            icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+            IconHelper.init(darkBtn);
+        };
+        // De klasse staat er al; het pictogram moet daar alleen bij kloppen.
+        zetPictogram(document.body.classList.contains('dark-mode'));
+
         darkBtn.addEventListener('click', () => {
             const isDark = document.body.classList.toggle('dark-mode');
+            // Pas hier wordt de keuze vastgelegd. Zolang dat niet gebeurd is,
+            // volgt de app de systeemvoorkeur; daarna is de gebruiker leidend.
             localStorage.setItem('darkMode', isDark);
-            const icon = darkBtn.querySelector('[data-lucide]');
+            zetPictogram(isDark);
+        });
+    }
+
+    // #340: de systeemvoorkeur blijven volgen zolang de gebruiker zelf niets
+    // koos. Wie 's avonds zijn telefoon op donker zet, ziet de app meeschakelen
+    // zonder de app te hoeven heropenen.
+    if (window.matchMedia) {
+        const donkerVraag = window.matchMedia('(prefers-color-scheme: dark)');
+        const volgSysteem = (e) => {
+            if (localStorage.getItem('darkMode') !== null) return;  // eigen keuze wint
+            document.body.classList.toggle('dark-mode', e.matches);
+            const icon = darkBtn?.querySelector('[data-lucide]');
             if (icon) {
-                icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+                icon.setAttribute('data-lucide', e.matches ? 'sun' : 'moon');
                 IconHelper.init(darkBtn);
             }
-        });
+        };
+        if (donkerVraag.addEventListener) donkerVraag.addEventListener('change', volgSysteem);
     }
 
     // Avatar trigger → navigeer direct naar profiel
