@@ -332,7 +332,7 @@ function showAddUserModal(teams) {
                     </div>
                     <div class="form-group">
                         <label for="new-user-password">Wachtwoord</label>
-                        <input type="password" id="new-user-password" class="form-input" placeholder="Laat leeg voor standaard wachtwoord" minlength="6" />
+                        <input type="password" id="new-user-password" class="form-input" placeholder="Laat leeg om er een te laten genereren" minlength="6" />
                     </div>
                     <div class="form-group">
                         <label for="new-user-password-confirm">Bevestig wachtwoord</label>
@@ -407,9 +407,21 @@ function showAddUserModal(teams) {
                 DataStore.users.push(response.user);
             }
             modal.remove();
-            showToast('Gebruiker aangemaakt', 'success');
             // Refresh accounts list
             renderSettingsAccounts(document.querySelector('#settings-tab-content'));
+            // #379: liet je het wachtwoordveld leeg, dan heeft de server er een
+            // gemaakt. De welkomstmail bevat geen wachtwoord, dus dit venster is
+            // de enige plek waar je het te zien krijgt. Een toast verdwijnt na
+            // een paar seconden en is daar dus de verkeerde vorm voor.
+            if (response.newPassword) {
+                await showConfirm(
+                    `Account aangemaakt voor ${name}.\n\nGeef dit wachtwoord persoonlijk door. Het is nergens anders terug te vinden en de welkomstmail bevat het niet.\n\nWachtwoord:\n\n${response.newPassword}`,
+                    'Gebruiker aangemaakt',
+                    { confirmText: 'Begrepen', hideCancel: true }
+                );
+            } else {
+                showToast('Gebruiker aangemaakt', 'success');
+            }
         } catch (err) {
             showToast('Fout bij aanmaken: ' + (err.message || 'Onbekende fout'), 'error');
         }
@@ -544,7 +556,11 @@ function showEditAccountModal(user, teams, onSave) {
 
     // Reset password button
     modal.querySelector('#edit-account-reset-btn').addEventListener('click', async () => {
-        if (!await showConfirm('Wachtwoord resetten naar standaard?')) return;
+        // #379: "naar standaard" klopt niet meer; er wordt een nieuw
+        // wachtwoord gemaakt dat alleen voor dit account geldt.
+        if (!await showConfirm(
+            'Er wordt een nieuw wachtwoord gemaakt voor deze medewerker. Zijn huidige wachtwoord werkt daarna niet meer.',
+            'Wachtwoord resetten')) return;
         try {
             const result = await dataApiFetch(`/admin/users/${user.id}/reset-password`, {
                 method: 'POST'

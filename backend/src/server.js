@@ -75,6 +75,26 @@ app.use(globalLimiter);
 const crypto = require('crypto');
 const { getMonday, formatDateYYYYMMDD, parseLocalDate, getBelgianPublicHolidays, shiftsOverlapCheck, hoursBetweenShifts, formatICalDateTime } = require('./utils');
 
+// #379: elk gereset of nieuw aangemaakt account kreeg DEFAULT_RESET_PASSWORD,
+// één vaste waarde uit de omgeving. Die is voor iedereen dezelfde en blijft
+// dezelfde tot iemand haar in het Render-dashboard wijzigt, dus elke collega
+// die ooit een reset of een nieuw account kreeg, kent het wachtwoord waarmee
+// élk volgend account begint. Er is bovendien niets dat iemand ooit van die
+// waarde af duwt: een account waarvan de eigenaar zijn wachtwoord nooit
+// veranderde, staat er permanent op.
+//
+// De beheerder leest dit hardop voor aan een collega, of schrijft het over.
+// Vandaar geen base64: geen hoofdletter-o naast een nul, geen kleine L naast
+// een één, en groepjes van vier die je kan uitspreken zonder je plaats kwijt
+// te raken. 3 x 4 tekens uit een alfabet van 30 is ruim 58 bits, en dit
+// wachtwoord leeft maar tot de medewerker zelf iets kiest.
+const WACHTWOORD_ALFABET = 'abcdefghjkmnpqrstuvwxyz23456789';
+function genereerWachtwoord() {
+  const groep = () => Array.from({ length: 4 },
+    () => WACHTWOORD_ALFABET[crypto.randomInt(0, WACHTWOORD_ALFABET.length)]).join('');
+  return `${groep()}-${groep()}-${groep()}`;
+}
+
 // ===== VERSIONED MIGRATIONS =====
 // Each entry runs exactly once, tracked in the `migrations` table.
 // All DDL uses IF NOT EXISTS so migrations are safe to re-run on existing DBs.
@@ -1982,8 +2002,14 @@ v1.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
       }
     }
 
-    // Gebruik opgegeven wachtwoord of val terug op DEFAULT_RESET_PASSWORD
-    const userPassword = (password && password.trim()) ? password : DEFAULT_RESET_PASSWORD;
+    // #379: liet de beheerder het wachtwoordveld leeg, dan kreeg dit account
+    // DEFAULT_RESET_PASSWORD. Dat is het bredere lek, want dat veld leeg laten
+    // is de weg van de minste weerstand: er staat letterlijk "Laat leeg voor
+    // standaard wachtwoord" bij. Nu krijgt zo'n account een eigen willekeurig
+    // wachtwoord, dat één keer in het antwoord meegaat zodat de beheerder het
+    // kan doorgeven. Koos de beheerder zelf een wachtwoord, dan blijft dat.
+    const gegenereerd = (password && password.trim()) ? null : genereerWachtwoord();
+    const userPassword = gegenereerd || password;
     const passwordHash = await bcrypt.hash(userPassword, 12);
     const week1Json = JSON.stringify(weekScheduleWeek1 || []);
     const week2Json = JSON.stringify(weekScheduleWeek2 || []);
@@ -2021,7 +2047,11 @@ v1.post('/admin/users', requireAuth, requireAdmin, async (req, res) => {
       emailService.notifyWelcome({ name, email: normalizedEmail });
     }
 
-    res.status(201).json({ user: result.rows[0] });
+    // #379: alleen wanneer wij het wachtwoord gekozen hebben. Koos de
+    // beheerder er zelf een, dan kent hij het al en hoeft het niet terug over
+    // de lijn. De welkomstmail bevat geen wachtwoord, dus dit venster is de
+    // enige plek waar het te zien is.
+    res.status(201).json({ user: result.rows[0], newPassword: gegenereerd || undefined });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -2272,7 +2302,8 @@ v1.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req
     return res.status(400).json({ error: 'Missing user id' });
   }
   try {
-    const passwordHash = await bcrypt.hash(DEFAULT_RESET_PASSWORD, 12);
+    const nieuwWachtwoord = genereerWachtwoord();
+    const passwordHash = await bcrypt.hash(nieuwWachtwoord, 12);
     // #154: een zelfgekozen wachtwoordwijziging roteerde de agendalink al
     // (zie PUT /users/:id), een beheerdersreset niet. Net het geval waarin je
     // het het hardst wil: er wordt gereset ómdat er iets mis is met dat
@@ -2311,7 +2342,7 @@ v1.post('/admin/users/:id/reset-password', requireAuth, requireAdmin, async (req
     const emailSent = await emailService.notifyPasswordReset(targetUser, { agendalinkIngetrokken });
 
     res.json({
-      ok: true, newPassword: DEFAULT_RESET_PASSWORD, emailSent: !!emailSent,
+      ok: true, newPassword: nieuwWachtwoord, emailSent: !!emailSent,
       agendalinkIngetrokken
     });
   } catch (err) {

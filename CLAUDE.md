@@ -119,6 +119,7 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 9. **Fetch wrapper**: Gebruik uitsluitend `dataApiFetch()` uit `data.js`. `apiFetch()` is verwijderd (issue #26 opgelost). Uitzondering: `fetchPublicHolidays()` gebruikt plain `fetch()` want `/public-holidays` vereist geen auth.
 10. **console.log**: Nooit toevoegen zonder debug-guard — `DEBUG` variabele staat bovenaan app.js en onderdrukt logs in productie automatisch
 11. **Email optioneel**: Accounts kunnen zonder e-mail worden aangemaakt. Welkomstmail wordt automatisch verstuurd zodra een e-mail voor het eerst wordt ingesteld via PATCH /admin/users of PUT /users/:id
+12. **Wachtwoorden zijn per account** (#379): `genereerWachtwoord()` maakt bij elke reset én bij elk nieuw account zonder opgegeven wachtwoord een eigen waarde. Die gaat één keer mee in het antwoord (`newPassword`) en wordt door de beheerder persoonlijk doorgegeven; geen enkele mail bevat een wachtwoord en het staat niet in de audit log. Het alfabet mijdt tekens die je bij het voorlezen verwart (geen `o`/`0`, geen `l`/`1`). `DEFAULT_RESET_PASSWORD` is daarmee teruggebracht tot de bulkimport en de oude migratiescripts, waar niemand veertig losse wachtwoorden kan uitdelen
 
 ## API Endpoints (belangrijk)
 
@@ -391,7 +392,7 @@ DATABASE_URL=postgresql://...     # PostgreSQL connection string
 JWT_SECRET=...                    # JWT signing secret
 ADMIN_EMAIL=admin@hetvlot.be     # Initieel admin account
 ADMIN_PASSWORD=...                # Admin wachtwoord
-DEFAULT_RESET_PASSWORD=...                # Reset wachtwoord voor nieuwe users (zie Render dashboard)
+DEFAULT_RESET_PASSWORD=...                # Alleen nog voor bulkimport en de oude migratiescripts (#379)
 SENTRY_DSN=https://...            # Foutmonitoring (#156). Leeg = uit.
 ```
 

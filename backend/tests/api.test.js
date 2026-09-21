@@ -2135,6 +2135,113 @@ describe('#154 agendalink (iCal-feed)', () => {
   });
 });
 
+// ===== #379: geen gedeeld wachtwoord meer =====
+
+describe('#379 elk wachtwoord is van één account', () => {
+  const adminToken = () => makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+
+  const arrangeReset = () => {
+    mockActiveUser();
+    pool.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.includes('SET password_hash')) return Promise.resolve({ rows: [{ hadLink: false }] });
+      if (sql.includes('SELECT name, email FROM users')) {
+        return Promise.resolve({ rows: [{ name: 'Jan', email: 'jan@test.be' }] });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+  };
+
+  const doeReset = () => request(app)
+    .post('/api/v1/admin/users/5/reset-password')
+    .set('Authorization', `Bearer ${adminToken()}`);
+
+  test('twee resets na elkaar leveren twee verschillende wachtwoorden op', async () => {
+    arrangeReset();
+    const een = await doeReset();
+    pool.query.mockReset();
+    arrangeReset();
+    const twee = await doeReset();
+
+    expect(een.status).toBe(200);
+    expect(twee.status).toBe(200);
+    expect(een.body.newPassword).toBeTruthy();
+    expect(twee.body.newPassword).toBeTruthy();
+    expect(een.body.newPassword).not.toBe(twee.body.newPassword);
+    // En al zeker niet de oude vaste waarde uit de omgeving
+    expect(een.body.newPassword).not.toBe(process.env.DEFAULT_RESET_PASSWORD);
+  });
+
+  // De beheerder leest dit voor of schrijft het over, dus geen tekens die je
+  // kan verwarren: geen hoofdletter-o naast een nul, geen kleine L naast een één.
+  test('het wachtwoord is voor te lezen en te noteren', async () => {
+    arrangeReset();
+    const res = await doeReset();
+    expect(res.body.newPassword).toMatch(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/);
+    expect(res.body.newPassword).not.toMatch(/[oil01]/);
+  });
+
+  test('het wachtwoord belandt niet in de audit log en niet in de logs', async () => {
+    arrangeReset();
+    const res = await doeReset();
+    const ww = res.body.newPassword;
+    expect(ww).toBeTruthy();
+
+    const alleSql = pool.query.mock.calls
+      .map(c => JSON.stringify(c))
+      .join(' ');
+    expect(alleSql).not.toContain(ww);
+
+    const alleLogs = []
+      .concat(console.log.mock ? console.log.mock.calls : [])
+      .concat(console.error.mock ? console.error.mock.calls : [])
+      .concat(console.warn.mock ? console.warn.mock.calls : [])
+      .map(c => JSON.stringify(c)).join(' ');
+    expect(alleLogs).not.toContain(ww);
+  });
+
+  // Het bredere lek: dit veld leeg laten was de weg van de minste weerstand,
+  // en gaf elk nieuw account dezelfde waarde.
+  test('een nieuw account zonder opgegeven wachtwoord krijgt een eigen wachtwoord', async () => {
+    mockActiveUser();
+    pool.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.includes('INSERT INTO users')) {
+        return Promise.resolve({ rows: [{ id: 9, name: 'Nieuw', email: null }] });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+
+    const res = await request(app)
+      .post('/api/v1/admin/users')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ name: 'Nieuw', role: 'medewerker' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.newPassword).toMatch(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/);
+    expect(res.body.newPassword).not.toBe(process.env.DEFAULT_RESET_PASSWORD);
+  });
+
+  test('koos de beheerder zelf een wachtwoord, dan komt het niet terug over de lijn', async () => {
+    mockActiveUser();
+    pool.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.includes('INSERT INTO users')) {
+        return Promise.resolve({ rows: [{ id: 9, name: 'Nieuw', email: null }] });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+
+    const res = await request(app)
+      .post('/api/v1/admin/users')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ name: 'Nieuw', role: 'medewerker', password: 'ZelfGekozen123' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.newPassword).toBeUndefined();
+  });
+});
+
 // ===== POST /admin/users/:id/reset-password =====
 
 describe('POST /admin/users/:id/reset-password', () => {
