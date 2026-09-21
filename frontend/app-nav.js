@@ -1,30 +1,11 @@
 // HET VLOT ROOSTERPLANNING - NAVIGATIE, HOME DASHBOARD EN DATUMNAVIGATIE
 
 
-function renderTeamToggles() {
-    const container = document.getElementById('team-toggles');
-    if (!container) return;
-    const teams = DataStore.settings.teams || {};
-    container.innerHTML = '';
-    getTeamOrder().forEach(teamId => {
-        const team = teams[teamId];
-        const isActive = AppState.visibleTeams.includes(teamId);
-        const btn = document.createElement('button');
-        btn.className = `team-toggle ${isActive ? 'active' : ''}`;
-        btn.dataset.team = teamId;
-        btn.textContent = team?.name || teamId;
-        btn.addEventListener('click', () => {
-            btn.classList.toggle('active');
-            if (btn.classList.contains('active')) {
-                if (!AppState.visibleTeams.includes(teamId)) AppState.visibleTeams.push(teamId);
-            } else {
-                AppState.visibleTeams = AppState.visibleTeams.filter(t => t !== teamId);
-            }
-            renderCalendar();
-        });
-        container.appendChild(btn);
-    });
-}
+// #182: renderTeamToggles is hier verwijderd. Zijn container #team-toggles is
+// uit de markup gehaald toen de planningsfilters werden herzien, dus de functie
+// keerde meteen terug en deed niets. De filterrij van de planning heeft nu de
+// bezettingsheatmap en "verberg lege rijen"; de teamfilter voor het
+// medewerkersscherm (#employee-team-toggles) is een andere functie en blijft.
 
 function renderEmployeeTeamToggles() {
     const container = document.getElementById('employee-team-toggles');

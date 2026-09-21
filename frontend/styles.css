@@ -1658,32 +1658,6 @@ textarea:focus-visible {
 }
 
 /* ===== MAIN NAVIGATION ===== */
-.main-nav {
-    background: var(--surface-color);
-    border-bottom: 1px solid var(--border-color);
-    padding: 16px 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-lg);
-    box-shadow: var(--shadow-sm);
-    position: relative;
-    z-index: 100;
-}
-
-.app-title {
-    font-size: var(--text-lg);
-    color: var(--primary-color);
-    white-space: nowrap;
-}
-
-.nav-center {
-    display: flex;
-    gap: var(--space-xs);
-    flex: 1;
-    justify-content: center;
-    align-items: center;
-}
 
 .nav-btn {
     padding: 8px 16px;
@@ -1711,12 +1685,6 @@ textarea:focus-visible {
 .nav-btn.active {
     background: var(--primary-color);
     color: white;
-}
-
-.nav-right {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
 }
 
 /* Role Switcher for Testing */
@@ -1823,18 +1791,6 @@ textarea:focus-visible {
     text-overflow: ellipsis;
 }
 
-.user-menu-chevron {
-    width: 14px;
-    height: 14px;
-    color: var(--text-secondary);
-    transition: transform 0.2s;
-    flex-shrink: 0;
-}
-
-.user-menu.open .user-menu-chevron {
-    transform: rotate(180deg);
-}
-
 .user-menu-dropdown {
     display: none;
     position: absolute;
@@ -1934,11 +1890,6 @@ textarea:focus-visible {
 
 .nav-group-admin {
     gap: 6px;
-}
-
-/* Legacy .user-badge (kept for backward compat but hidden) */
-.user-badge {
-    display: none;
 }
 
 /* ===== VIEWS ===== */
@@ -2974,40 +2925,6 @@ textarea:focus-visible {
     padding: 4px;
     border-radius: var(--radius-md);
     box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
-}
-
-.calendar-view-btn {
-    padding: 8px 16px;
-    border: none;
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    border-radius: var(--radius-sm);
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.calendar-view-btn:hover {
-    background: rgba(37, 99, 235, 0.1);
-    color: var(--primary-color);
-}
-
-.calendar-view-btn.active {
-    background: var(--primary-color);
-    color: white;
-    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
-}
-
-.calendar-view-btn .btn-icon {
-    font-size: var(--text-md);
-}
-
-.calendar-view-btn .btn-text {
-    font-size: 13px;
 }
 
 /* Team toggle buttons */
@@ -7618,36 +7535,6 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* ===== AVAILABILITY VIEW ===== */
-.availability-controls {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-md);
-    margin-bottom: 20px;
-    padding: 16px 20px;
-    background: var(--surface-color);
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-color);
-    box-shadow: var(--shadow-sm);
-}
-
-.availability-controls .date-navigation {
-    display: flex;
-    gap: var(--space-sm);
-}
-
-.availability-controls .period-display {
-    font-weight: 600;
-    font-size: var(--text-md);
-    color: var(--text-primary);
-}
-
-.availability-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-}
 
 .availability-legend-inline {
     display: flex;
@@ -8086,16 +7973,6 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 1024px) {
-    .main-nav {
-        flex-wrap: wrap;
-    }
-
-    .nav-center {
-        order: 3;
-        flex-basis: 100%;
-        justify-content: flex-start;
-        overflow-x: auto;
-    }
 
     .calendar-grid {
         grid-template-columns: 80px repeat(7, minmax(100px, 1fr));
@@ -8608,9 +8485,6 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 @media (max-width: 640px) {
-    .app-title {
-        font-size: var(--text-md);
-    }
 
     .nav-btn {
         font-size: 12px;
@@ -8626,67 +8500,6 @@ body[data-view-mode="day"] .timeline-day-cell {
         padding: 8px;
         font-size: 12px;
     }
-}
-
-/* ===== SIDEBAR TOGGLE (CSS-only) ===== */
-.sidebar-toggle-input {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-    pointer-events: none;
-}
-
-.sidebar-toggle-label {
-    display: none;
-    cursor: pointer;
-    width: 36px;
-    height: 36px;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-md);
-    transition: background 0.2s;
-    flex-shrink: 0;
-}
-
-.sidebar-toggle-label:hover {
-    background: var(--bg-color);
-}
-
-.sidebar-toggle-icon {
-    display: block;
-    width: 18px;
-    height: 2px;
-    background: var(--text-secondary);
-    position: relative;
-    transition: all 0.3s;
-}
-
-.sidebar-toggle-icon::before,
-.sidebar-toggle-icon::after {
-    content: '';
-    position: absolute;
-    width: 18px;
-    height: 2px;
-    background: var(--text-secondary);
-    left: 0;
-    transition: all 0.3s;
-}
-
-.sidebar-toggle-icon::before { top: -6px; }
-.sidebar-toggle-icon::after { top: 6px; }
-
-/* Rotate icon when sidebar is collapsed */
-.sidebar-toggle-input:checked ~ .main-nav .sidebar-toggle-icon {
-    background: transparent;
-}
-.sidebar-toggle-input:checked ~ .main-nav .sidebar-toggle-icon::before {
-    top: 0;
-    transform: rotate(45deg);
-}
-.sidebar-toggle-input:checked ~ .main-nav .sidebar-toggle-icon::after {
-    top: 0;
-    transform: rotate(-45deg);
 }
 
 /* ===== DESKTOP SIDEBAR LAYOUT ===== */
@@ -8939,8 +8752,7 @@ body[data-view-mode="day"] .timeline-day-cell {
         overscroll-behavior-x: none !important;
     }
 
-    .container, #app-container, .view, main, #planning-view,
-    .main-nav, .view-header, .header-actions, .planning-controls {
+    .container, #app-container, .view, main, #planning-view, .view-header, .header-actions, .planning-controls {
         overflow-x: visible !important; /* Allow sticky positioning */
         max-width: 100% !important;
         width: 100% !important;
@@ -8952,46 +8764,11 @@ body[data-view-mode="day"] .timeline-day-cell {
         box-sizing: border-box !important;
     }
 
-    .main-nav {
-        padding: 6px 8px;
-        max-width: 100vw !important;
-        overflow: hidden !important;
-        box-sizing: border-box !important;
-        display: flex !important;
-        flex-wrap: wrap !important;
-        justify-content: space-between !important;
-        align-items: center !important;
-    }
-
-    .nav-left {
-        display: flex !important;
-        align-items: center !important;
-        gap: 6px !important;
-        flex: 0 1 auto !important;
-        order: 1 !important;
-    }
-
-    .nav-left .app-title {
-        font-size: 12px;
-        max-width: 100px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .nav-right {
-        display: flex !important;
-        align-items: center !important;
-        flex: 0 0 auto !important;
-        order: 2 !important;
-    }
-
     .user-menu-trigger {
         padding: 2px !important;
     }
 
-    .user-menu-name,
-    .user-menu-chevron {
+    .user-menu-name {
         display: none !important;
     }
 
@@ -8999,11 +8776,6 @@ body[data-view-mode="day"] .timeline-day-cell {
         width: 28px !important;
         height: 28px !important;
         font-size: 11px !important;
-    }
-
-    .nav-center {
-        order: 3 !important;
-        width: 100% !important;
     }
 
     /* Compacter op mobiel: kop + 24px marge + een losse knoppenrij stapelden
@@ -9074,7 +8846,7 @@ body[data-view-mode="day"] .timeline-day-cell {
         overflow-x: visible !important;
     }
 
-    #team-toggles, #employee-team-toggles {
+    #employee-team-toggles {
         overflow-x: auto !important;
         -webkit-overflow-scrolling: touch;
         max-width: 100% !important;
@@ -9176,10 +8948,6 @@ body[data-view-mode="day"] .timeline-day-cell {
         margin-left: 0 !important;
         flex-wrap: wrap !important;
         gap: 8px !important;
-    }
-
-    #planning-filters-row #team-toggles {
-        width: 100% !important;
     }
 
     /* ===== MOBILE DAY VIEW FOR PLANNING ===== */
@@ -9343,7 +9111,7 @@ body[data-view-mode="day"] .timeline-day-cell {
     }
 
     /* Team toggles compact */
-    #team-toggles, #employee-team-toggles {
+    #employee-team-toggles {
         flex-wrap: wrap;
         gap: var(--space-xs);
     }
@@ -9527,12 +9295,6 @@ body[data-view-mode="day"] .timeline-day-cell {
     .availability-legend-inline span {
         font-size: 10px;
         padding: 4px 8px;
-    }
-
-    .availability-actions {
-        flex-direction: column;
-        gap: var(--space-sm);
-        align-items: center;
     }
 
     .btn-add-absence {
@@ -11915,13 +11677,6 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* Sidebar toggle label hover */
-.sidebar-toggle-label {
-    transition: background 0.2s ease, transform 0.2s ease;
-}
-
-.sidebar-toggle-label:hover {
-    transform: scale(1.05);
-}
 
 /* Checkbox group label hover enhancement */
 .checkbox-group label {

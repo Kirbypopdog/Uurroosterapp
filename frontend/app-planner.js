@@ -59,7 +59,6 @@ function renderPlanning() {
 
     updatePeriodDisplay();
     updateMobileDayDisplay();
-    renderTeamToggles();
     renderValidationAlerts();
     renderCalendar();
     // Set mobile day attribute after calendar is rendered

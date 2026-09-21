@@ -213,12 +213,11 @@ const UndoManager = {
         this.updateUI();
     },
 
-    updateUI() {
-        const undoBtn = document.getElementById('undo-btn');
-        const redoBtn = document.getElementById('redo-btn');
-        if (undoBtn) undoBtn.disabled = !this.canUndo();
-        if (redoBtn) redoBtn.disabled = !this.canRedo();
-    }
+    // #182: hier stonden #undo-btn en #redo-btn, die niet meer in de markup
+    // staan. Ongedaan maken loopt via Ctrl+Z en Ctrl+Y, en dat werkt gewoon.
+    // De functie blijft bestaan omdat _executeReverse en de undo-stapel hem
+    // aanroepen; hij heeft alleen geen knoppen meer om bij te werken.
+    updateUI() {}
 };
 
 // ===== PERMISSIONS SYSTEM =====

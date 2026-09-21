@@ -55,7 +55,6 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `validation.js` | Business rules: 11-uur regel, overlap, min bezetting, datumhelpers |
 | `drag-handler.js` | Drag & drop shifts tussen medewerkers |
 | `styles.css` | Alle CSS inclusief responsive, themas |
-| `vlot.css` | Kleine losse stijlset, grotendeels ongebruikt (zie #182) |
 | `index.html` | HTML markup: modals, formulieren, planning grid |
 | `config/settings.js` | API URL auto-detect, shift templates, team kleuren |
 

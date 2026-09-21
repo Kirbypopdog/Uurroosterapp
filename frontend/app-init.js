@@ -276,8 +276,6 @@ function setupEventListeners() {
         btn.addEventListener('click', () => changeViewMode(btn.dataset.mode));
     });
 
-    // Team toggle buttons for planning view — attached dynamically via renderTeamToggles()
-
     // Team toggle buttons for employees view — attached dynamically via renderEmployeeTeamToggles()
 
     DOM.addEmployeeBtn.addEventListener('click', openAddEmployeeModal);
@@ -441,9 +439,8 @@ function setupEventListeners() {
     document.getElementById('draft-diff-modal')?.addEventListener('click', (e) => { if (e.target.id === 'draft-diff-modal') closeDiff(); });
     document.getElementById('draft-diff-run')?.addEventListener('click', runDraftDiff);
 
-    // Undo/Redo buttons
-    document.getElementById('undo-btn')?.addEventListener('click', () => UndoManager.undo());
-    document.getElementById('redo-btn')?.addEventListener('click', () => UndoManager.redo());
+    // #182: de luisteraars op #undo-btn en #redo-btn zijn weg. Die knoppen
+    // staan niet meer in de markup, dus ze hingen nergens aan.
 
     // Undo/Redo keyboard shortcuts
     document.addEventListener('keydown', (e) => {
