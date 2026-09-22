@@ -102,7 +102,22 @@
     --team-jobstudent-dark: #a3545a;
     --team-jobstudent-darker: #8a464b;
 
-    /* Sidebar */
+    /* Sidebar (#162)
+       De zijbalk is het enige dat altijd in beeld staat, en hij had dezelfde
+       kleur als de achtergrond. Nu een diep teal vlak, zodat hij zich van de
+       inhoud afscheidt.
+
+       De dekkingen zijn geen smaak maar gemeten: wit op .72 haalt 8,1 contrast
+       en het groepslabel op .55 haalt 5,4. Dat laatste stond in het voorstel op
+       .45 en haalde 4,11, onder de eis van 4,5, en juist voor kleine tekst van
+       elf pixels (zie #181 en #364). */
+    --sidebar-bg: #1a2f2b;
+    --sidebar-text: rgba(255, 255, 255, .72);
+    --sidebar-text-active: #ffffff;
+    --sidebar-label: rgba(255, 255, 255, .55);
+    --sidebar-active-bg: rgba(255, 255, 255, .12);
+    --sidebar-hover-bg: rgba(255, 255, 255, .07);
+    --sidebar-line: rgba(255, 255, 255, .12);
     --sidebar-width: 240px;
     --sidebar-collapsed-width: 64px;
 
@@ -175,6 +190,10 @@
 
 /* ===== DARK MODE ===== */
 body.dark-mode {
+    /* #162: de inhoud is hier bijna zwart (#17150f). Dezelfde zijbalkkleur als
+       in lichte modus zou lichter ogen dan de pagina en de verhouding omkeren.
+       Iets dieper dus; de contrasten stijgen mee (tekst 9,0, label 5,9). */
+    --sidebar-bg:    #152220;
     --bg-color:      #17150f;
     --surface-color: #1e1b14;
     --surface-2:     #252119;
@@ -913,15 +932,9 @@ body.dark-mode .heatmap-yellow { background: var(--alert-warning-bg); color: var
 body.dark-mode .heatmap-closed { background: var(--surface-2);        color: var(--ink-3); }
 
 /* --- Rol-switcher (testwidget) — gele vlek in beide modi, nu ingetogen --- */
-body.dark-mode .role-switcher {
-    background: var(--surface-2);
-    border-color: var(--line);
-}
-body.dark-mode .role-switcher select {
-    background: var(--surface);
-    color: var(--ink);
-    border-color: var(--line);
-}
+/* #162: deze twee zetten de rolwisselaar op de vlakken van de PAGINA, maar hij
+   staat in de zijbalk en die is nu in beide thema's donker. De basisregels
+   gebruiken de --sidebar-tokens en kloppen dus al; dit zou ze juist breken. */
 
 /* ===== SIDEBAR COLLAPSED STATE (desktop only) =====
    Ondergrens is 901px, niet 861px: onder 900px is de zijbalk een off-canvas
@@ -941,7 +954,8 @@ body.dark-mode .role-switcher select {
     body.nav-collapsed .role-switcher,
     body.nav-collapsed .nav-label {
         display: none !important;
-    }
+    color: var(--sidebar-text-active);   /* #162 */
+}
     body.nav-collapsed .sidebar-brand {
         justify-content: center;
         padding: 6px 4px 14px;
@@ -996,14 +1010,14 @@ body.dark-mode .role-switcher select {
     border: none;
     border-radius: 9px;
     background: transparent;
-    color: var(--ink-3);
+    color: var(--sidebar-text);   /* #162: staat op het donkere zijbalkvlak */
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
     flex-shrink: 0;
 }
 .sidebar-icon-btn:hover {
-    background: var(--surface-2);
-    color: var(--ink);
+    background: var(--sidebar-hover-bg);
+    color: var(--sidebar-text-active);
 }
 
 /* ===== LUCIDE ICON SIZING ===== */
@@ -1418,8 +1432,8 @@ html.session-restoring #login-container {
 
 /* ===== APP SHELL (sidebar + main) ===== */
 .app-sidebar {
-    background: var(--surface-color);
-    border-right: 1px solid var(--border-color);
+    background: var(--sidebar-bg);
+    border-right: none;
     display: flex;
     flex-direction: column;
     padding: 18px 14px;
@@ -1442,29 +1456,33 @@ html.session-restoring #login-container {
     flex: none;
 }
 .sidebar-brand-mark.sm { width: 28px; height: 28px; font-size: 13px; border-radius: 8px; }
-.sidebar-brand-name { font-weight: 800; font-size: 15.5px; letter-spacing: -.01em; color: var(--text-primary); }
+.sidebar-brand-name { font-weight: 800; font-size: 15.5px; letter-spacing: -.01em; color: var(--sidebar-text-active); }
 .sidebar-nav { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 .sidebar-nav-label {
     font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
-    color: var(--ink-3); font-weight: 700; padding: 14px 10px 6px;
+    color: var(--sidebar-label); font-weight: 700; padding: 14px 10px 6px;
 }
+/* #162: deze knoppen staan op het donkere zijbalkvlak, ongeacht het thema, en
+   volgen dus de --sidebar-tokens en niet de tekstkleuren van de pagina. */
 .app-sidebar .nav-btn {
     display: flex; align-items: center; gap: 11px;
     padding: 9px 11px; border-radius: 10px;
-    color: var(--text-secondary); font-weight: 600; font-size: 14px;
+    color: var(--sidebar-text); font-weight: 600; font-size: 14px;
     border: none; background: transparent; cursor: pointer;
     transition: background .15s, color .15s;
     text-align: left; width: 100%; font-family: inherit;
 }
 .app-sidebar .nav-btn .nav-icon { width: 18px; height: 18px; flex: none; }
-.app-sidebar .nav-btn:hover { background: var(--surface-2); color: var(--text-primary); }
+.app-sidebar .nav-btn:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-active); }
+/* Bewust geen sage meer: dat groen verdwijnt bijna in het teal van de zijbalk.
+   Een lichte sluier leest duidelijker als "hier sta je". */
 .app-sidebar .nav-btn.active {
-    background: color-mix(in oklab, var(--sage) 14%, transparent);
-    color: var(--sage-700); font-weight: 700;
+    background: var(--sidebar-active-bg);
+    color: var(--sidebar-text-active); font-weight: 700;
 }
 .sidebar-foot {
     margin-top: auto;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--sidebar-line);   /* #162 */
     padding-top: 12px;
     display: flex; flex-direction: column; gap: 10px;
 }
@@ -1801,13 +1819,17 @@ textarea:focus-visible {
 
 /* Role Switcher for Testing */
 /* #180: zelfde amberen verloop uit het oude palet. */
+/* #162: deze staat in de zijbalk, dus op het donkere vlak. Het amberen
+   waarschuwingsvlak schreeuwde daar; een doorschijnende variant valt nog
+   steeds op als "dit is een testhulpmiddel" zonder het beeld te breken. */
 .role-switcher {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
     padding: 4px 8px;
-    background: var(--alert-warning-bg);
-    border: 2px solid var(--alert-warning-border);
+    background: var(--sidebar-hover-bg);
+    border: 2px solid var(--sidebar-line);
+    color: var(--sidebar-text-active);
     border-radius: var(--radius-md);
 }
 
@@ -1819,12 +1841,14 @@ textarea:focus-visible {
 
 .role-switcher select {
     padding: 4px 8px;
-    border: 1px solid #f59e0b;
+    /* #162: stond op #f59e0b en #fffdf9, allebei bedoeld voor het amberen vlak
+       dat hier vroeger stond. Op de donkere zijbalk was dat een fel wit blokje. */
+    border: 1px solid var(--sidebar-line);
     border-radius: var(--radius-sm);
-    background: #fffdf9;
+    background: rgba(255, 255, 255, .06);
     font-size: 12px;
     font-weight: 500;
-    color: var(--text-primary);
+    color: var(--sidebar-text-active);
     cursor: pointer;
 }
 
@@ -1852,14 +1876,16 @@ textarea:focus-visible {
     background: transparent;
     border-radius: var(--radius-md);
     cursor: pointer;
-    color: var(--text-secondary);
+    color: var(--sidebar-text);   /* #162 */
     transition: all 0.2s;
     flex-shrink: 0;
 }
 
+/* #162: het rood van --color-danger is te donker voor dit vlak. Een lichtere
+   tint houdt de betekenis en blijft leesbaar. */
 .nav-logout-btn:hover {
-    background: var(--bg-color);
-    color: var(--color-danger, #ef4444);
+    background: var(--sidebar-hover-bg);
+    color: #e8706a;
 }
 
 .user-menu-trigger {
@@ -1875,8 +1901,8 @@ textarea:focus-visible {
 }
 
 .user-menu-trigger:hover {
-    background: var(--bg-color);
-    border-color: var(--border-color);
+    background: var(--sidebar-hover-bg);
+    border-color: var(--sidebar-line);
 }
 
 .avatar-circle {
@@ -1897,7 +1923,7 @@ textarea:focus-visible {
 .user-menu-name {
     font-size: 14px;
     font-weight: 500;
-    color: var(--text-primary);
+    color: var(--sidebar-text-active);   /* #162 */
     white-space: nowrap;
     max-width: 140px;
     overflow: hidden;
@@ -8650,7 +8676,7 @@ body[data-view-mode="day"] .timeline-day-cell {
 .app-sidebar .user-menu-name {
     font-weight: 700;
     font-size: 13.5px;
-    color: var(--text-primary);
+    color: var(--sidebar-text-active);   /* #162 */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -13551,7 +13577,8 @@ body.dark-mode .shift-block-notice {
    andere. */
 
 /* De actieve knop in de zijbalk, en de naam in de begroeting op het startscherm */
-body.dark-mode .app-sidebar .nav-btn.active { color: var(--ok-text); }
+/* #162: deze zette de actieve knop op --ok-text. De zijbalk is nu in beide
+   thema's donker, dus de basisregel klopt al en dit zou hem juist breken. */
 body.dark-mode .home-hi em { color: var(--ok-text); }
 
 /* Statuschips met een groene of rode achtergrond */
