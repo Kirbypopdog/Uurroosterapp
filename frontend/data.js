@@ -179,6 +179,19 @@ const DataStore = {
 
 // ===== API HELPER =====
 
+// #388: zie de toelichting in dataApiFetch.
+//
+// MELD_TRAAG_MS is bewust veel korter dan de pogingen. Een wakkere server
+// antwoordt in milliseconden; lokaal gemeten op 3 ms, en over het internet
+// naar Frankfurt hooguit een paar honderd. Blijft het na drieënhalve seconde
+// stil, dan is er iets aan de hand en hoort de gebruiker dat te horen in
+// plaats van naar een leeg scherm te kijken. Dat wachten hangt dus NIET aan
+// het aflopen van de eerste poging: dan zou de melding pas na twintig seconden
+// komen, en dat is precies de stilte waarin je denkt dat de app stuk is.
+const MELD_TRAAG_MS = 3500;
+const WACHT_KORT_MS = 20000;
+const WACHT_LANG_MS = 55000;
+
 async function dataApiFetch(path, options = {}) {
     const token = sessionStorage.getItem('hetvlot_token');
     const headers = {
@@ -196,26 +209,55 @@ async function dataApiFetch(path, options = {}) {
     //
     // Een aanroeper die zelf al een signal meegeeft (bv. om zelf te kunnen
     // annuleren) houdt voorrang; dan bemoeien we ons er niet mee.
+    // #388: de server draait op een plan dat hem slapend legt na een kwartier
+    // stilte. De eerstvolgende bezoeker wekt hem, en dat duurt langer dan de
+    // twintig seconden die hier stonden. Op één werkdag startte productie
+    // twaalf keer koud op; elk van die keren kreeg iemand een foutmelding.
+    //
+    // Twee pogingen dus. De eerste is kort, want een server die draait
+    // antwoordt in een oogwenk en dan willen we niet lang blijven hangen als
+    // er werkelijk iets mis is. Blijft die eerste poging stil, dan is de meest
+    // waarschijnlijke verklaring dat de server aan het opstarten is, en krijgt
+    // de tweede poging ruim de tijd.
+    //
+    // Een aanroeper die zelf een signal meegeeft (bv. om te kunnen annuleren)
+    // houdt voorrang; daar bemoeien we ons niet mee, en die krijgt ook geen
+    // tweede poging want hij bepaalt zelf wanneer het genoeg is.
     const eigenSignal = !!options.signal;
-    const controller = eigenSignal ? null : new AbortController();
-    const timeoutId = controller ? setTimeout(() => controller.abort(), 20000) : null;
+    const POGINGEN = eigenSignal ? [null] : [WACHT_KORT_MS, WACHT_LANG_MS];
+
+    // Los van de pogingen: zeg na een paar seconden stilte wat er gebeurt.
+    const meldTimer = eigenSignal ? null : setTimeout(() => {
+        if (typeof toonServerWaktOp === 'function') toonServerWaktOp();
+    }, MELD_TRAAG_MS);
 
     let response;
     try {
-        response = await fetch(`${window.API_BASE}${path}`, {
-            ...options,
-            headers: { ...headers, ...(options.headers || {}) },
-            signal: options.signal || controller.signal
-        });
-    } catch (err) {
-        if (!eigenSignal && err.name === 'AbortError') {
-            const fout = new Error('Geen antwoord van de server binnen 20 seconden. Controleer je verbinding en probeer opnieuw.');
+    for (let i = 0; i < POGINGEN.length; i++) {
+        const laatste = i === POGINGEN.length - 1;
+        const controller = eigenSignal ? null : new AbortController();
+        const timeoutId = controller ? setTimeout(() => controller.abort(), POGINGEN[i]) : null;
+        try {
+            response = await fetch(`${window.API_BASE}${path}`, {
+                ...options,
+                headers: { ...headers, ...(options.headers || {}) },
+                signal: options.signal || controller.signal
+            });
+            break;
+        } catch (err) {
+            if (eigenSignal || err.name !== 'AbortError') throw err;
+            if (!laatste) continue;
+            const seconden = Math.round((WACHT_KORT_MS + WACHT_LANG_MS) / 1000);
+            const fout = new Error(
+                `De server antwoordde niet binnen ${seconden} seconden. Hij was waarschijnlijk in slaap en start nog op. Probeer het zo nog eens.`);
             fout.status = 0;
             throw fout;
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
         }
-        throw err;
+    }
     } finally {
-        if (timeoutId) clearTimeout(timeoutId);
+        if (meldTimer) clearTimeout(meldTimer);
     }
 
     if (!response.ok) {

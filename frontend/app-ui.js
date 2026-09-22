@@ -293,6 +293,23 @@ const ToastManager = {
 };
 
 // Global helper function
+/**
+ * #388: de server slaapt na een kwartier stilte en de eerstvolgende bezoeker
+ * wekt hem. Dat duurt tientallen seconden. Zonder dit bericht lijkt de app in
+ * die tijd vast te zitten, en de oude foutmelding wees naar de verbinding van
+ * de gebruiker terwijl daar niets mis mee is.
+ *
+ * Eén keer tonen per wachtmoment: dataApiFetch doet meerdere verzoeken tegelijk
+ * bij het opstarten, en vijf keer dezelfde toast is lawaai.
+ */
+let _serverWaktOpGetoond = 0;
+function toonServerWaktOp() {
+    const nu = Date.now();
+    if (nu - _serverWaktOpGetoond < 30000) return;
+    _serverWaktOpGetoond = nu;
+    showToast('De server was in slaap en start op. Dit duurt een halve minuut; je hoeft niets te doen.', 'info', 30000);
+}
+
 function showToast(message, type = 'info', duration = null) {
     return ToastManager.show(message, type, duration);
 }
