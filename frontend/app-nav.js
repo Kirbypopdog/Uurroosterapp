@@ -146,6 +146,7 @@ function renderHome() {
 
     container.innerHTML = html;
     IconHelper.init(container);
+    meetMeldingenStart();
 
     // Attach quick action click handlers
     container.querySelectorAll('.home-action-btn').forEach(btn => {
@@ -471,15 +472,11 @@ function renderHomeAlerts(role) {
         }
     }
 
-    return `
-        <div class="home-alerts home-alerts--collapsed mb-md">
-            <button class="home-alerts-header" onclick="const b=this.closest('.home-alerts');this.setAttribute('aria-expanded', String(!b.classList.toggle('home-alerts--collapsed')))" aria-expanded="false">
-                <i data-lucide="bell" class="lucide-sm"></i>
-                <strong>Meldingen</strong>
-                <span class="home-alerts-count">${warnings.length}</span>
-                <i data-lucide="chevron-down" class="lucide-sm home-alerts-chevron"></i>
-            </button>
-            <div class="home-alerts-body">${bodyHtml}</div>
+    // Geen eigen kop meer. De kaart "aandachtspunten" in renderHomeStats is de
+    // kop: die toonde toch al exact hetzelfde getal, want beide lezen
+    // AppState._homeAlertCount. Twee koppen boven één lijst is er een te veel.
+    return `<div id="home-meldingen" class="home-meldingen">
+            <div class="home-meldingen-doos"><div class="home-meldingen-lijst">${bodyHtml}</div></div>
         </div>`;
 }
 
@@ -633,26 +630,73 @@ function _uren(u) {
  * Zonder doel blijft het een div, want een knop die nergens heen gaat is een
  * leugen tegen wie op Tab drukt.
  */
-function statKaart(inhoud, actie, titel) {
-    if (!actie) return `<div class="stat-card">${inhoud}</div>`;
-    return `<button type="button" class="stat-card" onclick="${actie}" title="${escapeHtml(titel || '')}">${inhoud}</button>`;
+function statKaart(inhoud, actie, titel, extraKlasse, attrs) {
+    const klasse = `stat-card${extraKlasse ? ' ' + extraKlasse : ''}`;
+    if (!actie) return `<div class="${klasse}">${inhoud}</div>`;
+    return `<button type="button" class="${klasse}"${attrs ? ' ' + attrs : ''} onclick="${actie}" title="${escapeHtml(titel || '')}">${inhoud}</button>`;
 }
 
 /**
- * De kaart "aandachtspunten" en de balk "Meldingen" tonen hetzelfde getal: ze
- * lezen allebei AppState._homeAlertCount, gezet door renderHomeAlerts. Dat is
- * geen fout maar een taakverdeling. De kaart zegt HOEVEEL, de balk bevat WELKE.
- * Klikken op de kaart vouwt die lijst open en brengt je erheen, zodat het geen
- * twee losse dingen meer zijn die toevallig hetzelfde cijfer tonen.
+ * De kaart "aandachtspunten" is de kop van de meldingenlijst. Ze toont HOEVEEL,
+ * het paneel eronder bevat WELKE. Er stond hier eerst een aparte balk met
+ * dezelfde kop en hetzelfde getal; die is weg.
+ *
+ * Het paneel groeit uit de kaart in de vorm van een liggende L: eerst naar
+ * onder over de breedte van de kaart, daarna naar links over de volle rij.
+ * Sluiten gaat in omgekeerde volgorde. De volgorde zit in de CSS, in twee
+ * transition-regels; hier wordt alleen het beginpunt doorgegeven, want de
+ * breedte van een kaart hangt af van hoeveel er naast elkaar passen.
  */
-function openHomeMeldingen() {
-    const balk = document.querySelector('#home-content .home-alerts');
-    if (!balk) return;
-    balk.classList.remove('home-alerts--collapsed');
-    const kop = balk.querySelector('.home-alerts-header');
-    if (kop) kop.setAttribute('aria-expanded', 'true');
-    const zacht = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    balk.scrollIntoView({ behavior: zacht ? 'smooth' : 'auto', block: 'start' });
+/**
+ * De L vertrekt vanaf de kaart, dus het paneel begint even breed als zij en
+ * eindigt daar weer bij het sluiten. Die breedte kan niet in de CSS staan:
+ * hoeveel kaarten er naast elkaar passen hangt af van de breedte van het
+ * scherm. Ze wordt daarom bij het renderen gemeten en in --meldingen-start
+ * gezet, NIET bij het klikken: een breedte die in dezelfde tel verandert als
+ * de klasse omslaat, komt te laat om het vertrekpunt van de animatie te zijn.
+ */
+function meetMeldingenStart() {
+    if (AppState._meldingenMeter) AppState._meldingenMeter.disconnect();
+    AppState._meldingenMeter = null;
+    const paneel = document.getElementById('home-meldingen');
+    const kaart = document.querySelector('.stat-card--meldingen');
+    if (!paneel || !kaart) return;
+    const zet = () => paneel.style.setProperty('--meldingen-start', `${kaart.offsetWidth}px`);
+    zet();
+    // De kaart wordt smaller of breder als het venster of de zijbalk verandert,
+    // en dan klopt het vertrekpunt niet meer.
+    if (typeof ResizeObserver === 'function') {
+        AppState._meldingenMeter = new ResizeObserver(zet);
+        AppState._meldingenMeter.observe(kaart);
+    }
+}
+
+function toggleHomeMeldingen(knop) {
+    const paneel = document.getElementById('home-meldingen');
+    if (!paneel) return;
+    const doos = paneel.firstElementChild;
+    const open = !paneel.classList.contains('home-meldingen--open');
+    clearTimeout(AppState._meldingenTimer);
+
+    // max-height moet de ECHTE hoogte van de lijst zijn. Met een ruime vaste
+    // bovengrens staat de lijst er na een paar milliseconden al, want de
+    // animatie is dan grotendeels lege ruimte, en bij meer meldingen dan die
+    // grens wordt de onderste afgeknipt.
+    if (open) {
+        paneel.style.maxHeight = `${doos.offsetHeight}px`;
+        paneel.classList.add('home-meldingen--open');
+        // Daarna de grens loslaten: een melding die je uitklapt maakt de lijst
+        // langer en mag niet tegen die hoogte aanlopen.
+        AppState._meldingenTimer = setTimeout(() => { paneel.style.maxHeight = 'none'; }, 280);
+    } else {
+        // Vanaf 'none' valt niets te animeren, dus eerst de hoogte vastzetten.
+        paneel.style.maxHeight = `${doos.offsetHeight}px`;
+        void paneel.offsetHeight;
+        paneel.classList.remove('home-meldingen--open');
+        paneel.style.maxHeight = '';
+    }
+    knop.classList.toggle('stat-card--open', open);
+    knop.setAttribute('aria-expanded', String(open));
 }
 
 function renderHomeStats(user, role) {
@@ -692,7 +736,16 @@ function renderHomeStats(user, role) {
             ${stat('calendar-days', 'var(--ok-bg)', 'var(--sage-700)', shiftsThisWeek, 'diensten deze week', "switchView('planning')", 'Naar de planning')}
             ${stat('users', 'var(--info-bg)', 'var(--info)', activeEmployees, 'medewerkers actief', "switchView('employees')", 'Naar de medewerkers')}
             ${stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken', "switchView('swaps')", 'Naar de ruilverzoeken')}
-            ${stat('alert-triangle', 'var(--danger-bg)', 'var(--danger-color)', alertCount, 'aandachtspunten', alertCount ? 'openHomeMeldingen()' : '', 'Toon de meldingen')}
+            ${statKaart(`
+                <div class="stat-card-ic" style="background:var(--danger-bg);color:var(--danger-color)">${IconHelper.html('alert-triangle', 'md')}</div>
+                <div>
+                    <div class="stat-card-v">${alertCount}</div>
+                    <div class="stat-card-k">aandachtspunten</div>
+                </div>
+                ${alertCount ? '<i data-lucide="chevron-down" class="lucide-sm stat-card-chevron"></i>' : ''}`,
+                alertCount ? 'toggleHomeMeldingen(this)' : '',
+                'Toon de meldingen', 'stat-card--meldingen',
+                'aria-expanded="false" aria-controls="home-meldingen"')}
         </div>
     `;
 }

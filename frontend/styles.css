@@ -386,10 +386,8 @@ body.dark-mode .profile-meta-value.role-medewerker   { background: #0d2018; colo
 /* Validation bar chip count (rgba(0,0,0,0.1) is onzichtbaar in dark) */
 body.dark-mode .validation-chip-count { background: rgba(255,255,255,.12); }
 
-/* Home melding-bar header + categorie-headers (--bg-secondary heeft geen dark fallback) */
-body.dark-mode .home-alerts-header,
+/* Categorie-headers in de meldingen (--bg-secondary heeft geen dark fallback) */
 body.dark-mode .alert-group-header       { background: var(--surface-2); }
-body.dark-mode .home-alerts-header:hover,
 body.dark-mode .alert-group-header:hover { background: var(--raise); }
 body.dark-mode .alert-item-detail        { background: rgba(255,255,255,.04); }
 body.dark-mode .alert-action-goto        { background: rgba(255,255,255,.10); }
@@ -2294,49 +2292,85 @@ button.stat-card:focus-visible {
     .stat-balk span { transition: none; }
 }
 
-/* ── Meldingen container ──────────────────────────────────────────────── */
-.home-alerts {
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-color);
-    border-top: 3px solid var(--color-warning, #f59e0b);
-    overflow: hidden;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
-    margin-top: 20px;
-}
-.home-alerts-header {
-    width: 100%;
-    padding: 11px 16px;
-    font-size: 13px;
-    font-weight: 600;
-    background: var(--bg-secondary, #f6f4ef);
-    border-bottom: 1px solid var(--border-color);
-    color: var(--text-primary, #2b2a26);
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    cursor: pointer;
-    border: none;
-    text-align: left;
-    transition: background 0.15s;
-}
-.home-alerts-header:hover { background: var(--bg-hover, #f1efe8); }
-.home-alerts-count {
+/* ── Meldingen paneel ─────────────────────────────────────────────────────
+   #166: hier stond een balk met een eigen kop "Meldingen" en een telbadge.
+   Die kop toonde exact hetzelfde getal als de kaart "aandachtspunten" erboven,
+   want allebei lezen ze AppState._homeAlertCount. De kaart is nu de kop.
+
+   Het paneel groeit uit die kaart in de vorm van een liggende L: eerst naar
+   onder over de breedte van de kaart, daarna naar links over de volle rij.
+   Dat zit in de volgorde van de twee transition-regels hieronder, en die staan
+   er niet voor de sier: zonder de vertraging op width schuift het paneel
+   diagonaal open en lijkt het van nergens te komen.
+
+   --meldingen-start is de breedte van de kaart, in JS gezet bij het klikken.
+   Een vaste waarde kan niet: hoeveel kaarten er naast elkaar passen hangt af
+   van de breedte van het scherm. */
+.home-meldingen {
+    width: var(--meldingen-start, 260px);
     margin-left: auto;
-    background: var(--color-warning, #f59e0b);
-    color: #fff;
-    font-size: 11px;
-    font-weight: 700;
-    border-radius: 10px;
-    padding: 1px 8px;
-    min-width: 20px;
-    text-align: center;
-    line-height: 1.6;
+    max-height: 0;
+    opacity: 0;
+    visibility: hidden;
+    overflow: hidden;
+    /* sluiten: eerst naar rechts, dan omhoog */
+    transition: width .2s ease,
+                max-height .2s ease .18s,
+                opacity .12s ease .26s,
+                visibility 0s linear .38s;
 }
-.home-alerts-chevron { transition: transform 0.2s; flex-shrink: 0; }
-.home-alerts--collapsed .home-alerts-chevron { transform: rotate(-90deg); }
-.home-alerts--collapsed .home-alerts-body { display: none; }
-.home-alerts--collapsed .home-alerts-header { border-bottom: none; }
-.home-alerts-body { display: flex; flex-direction: column; }
+.home-meldingen--open {
+    width: 100%;
+    opacity: 1;
+    visibility: visible;
+    /* openen: eerst naar onder, dan naar links */
+    transition: max-height .2s ease,
+                opacity .12s ease,
+                width .2s ease .18s,
+                visibility 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+    .home-meldingen, .home-meldingen--open { transition: none; }
+}
+/* De rand staat op een binnendoos en niet op het paneel zelf. Anders houdt het
+   paneel dichtgeklapt nog 4 pixels rand over, want max-height nul knipt de
+   inhoud weg maar niet de rand eromheen. */
+.home-meldingen-doos {
+    border-radius: var(--radius-lg);
+    /* Rechtsboven sluit de doos aan op de kaart, dus daar geen ronding: samen
+       vormen ze de liggende L. Linksonder en rechtsonder wel, dat is het einde
+       van de vorm. */
+    border-top-right-radius: 0;
+    border: 1px solid var(--color-warning);
+    border-top-width: 0;
+    background: var(--surface-color);
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+    overflow: hidden;
+}
+.home-meldingen-lijst { display: flex; flex-direction: column; }
+
+/* De kaart die het paneel opent hoort er bovenop te staan en niet ernaast:
+   onderaan vierkant, want daar gaat de lijst verder. */
+.stat-card--meldingen .stat-card-chevron {
+    margin-left: auto;
+    flex: none;
+    transition: transform .2s ease;
+    color: var(--ink-3);
+}
+.stat-card--open .stat-card-chevron { transform: rotate(180deg); }
+/* button ervoor gezet, anders wint de hoverrand van button.stat-card:hover. */
+button.stat-card--open,
+button.stat-card--open:hover {
+    border-color: var(--color-warning);
+    border-bottom-color: transparent;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    transform: none;
+    box-shadow: var(--shadow-sm);
+}
+@media (prefers-reduced-motion: reduce) {
+    .stat-card--meldingen .stat-card-chevron { transition: none; }
+}
 
 /* ── Alert item (expandable) ─────────────────────────────────────────── */
 .alert-item {
