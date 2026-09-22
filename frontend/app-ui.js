@@ -294,20 +294,38 @@ const ToastManager = {
 
 // Global helper function
 /**
- * #388: de server slaapt na een kwartier stilte en de eerstvolgende bezoeker
- * wekt hem. Dat duurt tientallen seconden. Zonder dit bericht lijkt de app in
- * die tijd vast te zitten, en de oude foutmelding wees naar de verbinding van
- * de gebruiker terwijl daar niets mis mee is.
+ * #388: twee berichten voor één wachtmoment, en het verschil ertussen is wat we
+ * op dat moment werkelijk WETEN.
  *
- * Eén keer tonen per wachtmoment: dataApiFetch doet meerdere verzoeken tegelijk
- * bij het opstarten, en vijf keer dezelfde toast is lawaai.
+ * Na acht seconden stilte weten we alleen dat het lang duurt. Dat kan de server
+ * zijn, dat kan de verbinding van de gebruiker zijn. Het eerste bericht noemt
+ * dus geen oorzaak. Zou het dat wel doen, dan maakten we dezelfde fout als de
+ * melding die dit vervangt, alleen andersom: die wees naar de verbinding zonder
+ * dat te weten.
+ *
+ * Is de eerste poging na twintig seconden helemaal afgelopen zonder één byte,
+ * dan is een slapende server wél de waarschijnlijke verklaring, en pas dan
+ * zeggen we dat.
+ *
+ * Allebei hoogstens één keer per halve minuut: bij het opstarten lopen er
+ * meerdere verzoeken tegelijk en vijf keer dezelfde toast is lawaai.
  */
-let _serverWaktOpGetoond = 0;
-function toonServerWaktOp() {
+let _wachtBerichtGetoond = 0;
+function _wachtBericht(tekst) {
     const nu = Date.now();
-    if (nu - _serverWaktOpGetoond < 30000) return;
-    _serverWaktOpGetoond = nu;
-    showToast('De server was in slaap en start op. Dit duurt een halve minuut; je hoeft niets te doen.', 'info', 30000);
+    if (nu - _wachtBerichtGetoond < 30000) return;
+    _wachtBerichtGetoond = nu;
+    showToast(tekst, 'info', 30000);
+}
+
+function toonDuurtLang() {
+    _wachtBericht('Dit duurt langer dan gewoonlijk. Even geduld, je hoeft niets te doen.');
+}
+
+function toonServerWaktOp() {
+    // Deze mag de vorige wel overrulen: hij weet meer.
+    _wachtBerichtGetoond = 0;
+    _wachtBericht('De server lag stil en start op. Dat duurt tot een halve minuut; je hoeft niets te doen.');
 }
 
 function showToast(message, type = 'info', duration = null) {

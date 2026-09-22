@@ -181,14 +181,23 @@ const DataStore = {
 
 // #388: zie de toelichting in dataApiFetch.
 //
-// MELD_TRAAG_MS is bewust veel korter dan de pogingen. Een wakkere server
-// antwoordt in milliseconden; lokaal gemeten op 3 ms, en over het internet
-// naar Frankfurt hooguit een paar honderd. Blijft het na drieënhalve seconde
-// stil, dan is er iets aan de hand en hoort de gebruiker dat te horen in
-// plaats van naar een leeg scherm te kijken. Dat wachten hangt dus NIET aan
-// het aflopen van de eerste poging: dan zou de melding pas na twintig seconden
-// komen, en dat is precies de stilte waarin je denkt dat de app stuk is.
-const MELD_TRAAG_MS = 3500;
+// MELD_TRAAG_MS is bewust veel korter dan de pogingen: wie wacht hoort te horen
+// dát er gewacht wordt, in plaats van naar een leeg scherm te kijken.
+//
+// Acht seconden en niet drieënhalf. Een wakkere server antwoordt in
+// milliseconden (lokaal gemeten: 3 ms), maar de verbinding van de gebruiker
+// telt ook mee, en op een zwakke mobiele verbinding zijn een paar seconden
+// niets bijzonders. Onder de acht seconden zou deze melding dus geregeld
+// verschijnen terwijl er niets aan de hand is.
+//
+// Even belangrijk: op dit moment WETEN we niet waarom het traag is. Het kan de
+// server zijn, het kan de verbinding zijn. De eerste melding zegt daarom alleen
+// dát het lang duurt. Pas als de eerste poging helemaal is afgelopen zonder één
+// byte, na twintig seconden, is een slapende server de waarschijnlijke
+// verklaring, en pas dan noemen we die. Anders maken we dezelfde fout als de
+// melding die we hier vervangen, alleen in spiegelbeeld: die wees naar de
+// verbinding van de gebruiker zonder dat te weten.
+const MELD_TRAAG_MS = 8000;
 const WACHT_KORT_MS = 20000;
 const WACHT_LANG_MS = 55000;
 
@@ -226,9 +235,9 @@ async function dataApiFetch(path, options = {}) {
     const eigenSignal = !!options.signal;
     const POGINGEN = eigenSignal ? [null] : [WACHT_KORT_MS, WACHT_LANG_MS];
 
-    // Los van de pogingen: zeg na een paar seconden stilte wat er gebeurt.
+    // Los van de pogingen: zeg na een paar seconden stilte dát het lang duurt.
     const meldTimer = eigenSignal ? null : setTimeout(() => {
-        if (typeof toonServerWaktOp === 'function') toonServerWaktOp();
+        if (typeof toonDuurtLang === 'function') toonDuurtLang();
     }, MELD_TRAAG_MS);
 
     let response;
@@ -246,7 +255,13 @@ async function dataApiFetch(path, options = {}) {
             break;
         } catch (err) {
             if (eigenSignal || err.name !== 'AbortError') throw err;
-            if (!laatste) continue;
+            if (!laatste) {
+                // Twintig seconden lang geen enkele byte. Nu pas is een
+                // slapende server de waarschijnlijke verklaring, en nu pas
+                // mogen we die noemen.
+                if (typeof toonServerWaktOp === 'function') toonServerWaktOp();
+                continue;
+            }
             const seconden = Math.round((WACHT_KORT_MS + WACHT_LANG_MS) / 1000);
             const fout = new Error(
                 `De server antwoordde niet binnen ${seconden} seconden. Hij was waarschijnlijk in slaap en start nog op. Probeer het zo nog eens.`);
