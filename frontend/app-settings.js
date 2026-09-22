@@ -389,6 +389,12 @@ function showAddUserModal(teams) {
             return;
         }
 
+        // #387: zelfde verhaal als bij de reset. Hier wordt óók gehasht, dus ook
+        // hier zat een stille wachttijd voor een venster dat je maar één keer
+        // ziet.
+        const verzendKnop = form.querySelector('button[type="submit"]');
+        if (verzendKnop) verzendKnop.disabled = true;
+        showDataLoading('Account aanmaken...');
         try {
             const response = await dataApiFetch('/admin/users', {
                 method: 'POST',
@@ -414,16 +420,20 @@ function showAddUserModal(teams) {
             // de enige plek waar je het te zien krijgt. Een toast verdwijnt na
             // een paar seconden en is daar dus de verkeerde vorm voor.
             if (response.newPassword) {
-                await showConfirm(
-                    `Account aangemaakt voor ${name}.\n\nGeef dit wachtwoord persoonlijk door. Het is nergens anders terug te vinden en de welkomstmail bevat het niet.\n\nWachtwoord:\n\n${response.newPassword}`,
+                hideDataLoading();
+                await toonNieuwWachtwoord(
+                    response.newPassword,
                     'Gebruiker aangemaakt',
-                    { confirmText: 'Begrepen', hideCancel: true }
+                    `Account aangemaakt voor ${name}. Geef dit wachtwoord persoonlijk door; de welkomstmail bevat het niet.`
                 );
             } else {
                 showToast('Gebruiker aangemaakt', 'success');
             }
         } catch (err) {
             showToast('Fout bij aanmaken: ' + (err.message || 'Onbekende fout'), 'error');
+        } finally {
+            hideDataLoading();
+            if (verzendKnop) verzendKnop.disabled = false;
         }
     });
 }
@@ -561,6 +571,13 @@ function showEditAccountModal(user, teams, onSave) {
         if (!await showConfirm(
             'Er wordt een nieuw wachtwoord gemaakt voor deze medewerker. Zijn huidige wachtwoord werkt daarna niet meer.',
             'Wachtwoord resetten')) return;
+        // #387: hier gebeurde er vier à vijf seconden zichtbaar niets. De hashing
+        // kost tijd, zeker op een trage server, en die tijd hoort zichtbaar te
+        // zijn. De overlay dekt bovendien het scherm af, zodat je niet in die
+        // stilte wegklikt en het wachtwoord kwijtspeelt.
+        const knop = modal.querySelector('#edit-account-reset-btn');
+        if (knop) knop.disabled = true;
+        showDataLoading('Nieuw wachtwoord aanmaken...');
         try {
             const result = await dataApiFetch(`/admin/users/${user.id}/reset-password`, {
                 method: 'POST'
@@ -580,16 +597,20 @@ function showEditAccountModal(user, teams, onSave) {
                 const agendaregel = result.agendalinkIngetrokken
                     ? '\n\nZijn agendalink is uit voorzorg ingetrokken. Hij moet de koppeling opnieuw activeren via zijn profiel.'
                     : '';
-                await showConfirm(
-                    `Wachtwoord gereset.\n\n${mailregel}${agendaregel}\n\nNieuw wachtwoord:\n\n${result.newPassword}`,
+                hideDataLoading();
+                await toonNieuwWachtwoord(
+                    result.newPassword,
                     'Wachtwoord gereset',
-                    { confirmText: 'Begrepen', hideCancel: true }
+                    `${mailregel}${agendaregel}`
                 );
             } else {
                 showToast('Wachtwoord gereset.', 'success');
             }
         } catch (error) {
             showToast(`Reset mislukt: ${error.message}`, 'error');
+        } finally {
+            hideDataLoading();
+            if (knop) knop.disabled = false;
         }
     });
 

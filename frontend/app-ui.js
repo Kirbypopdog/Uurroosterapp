@@ -439,6 +439,75 @@ function zetPromptTitel(titel) {
 
 // #348: okText erbij, zodat de knop de actie kan benoemen in plaats van "OK"
 // te blijven bij een venster dat een dienst op je naam zet.
+/**
+ * #387: een gegenereerd wachtwoord één keer tonen, en wel zo dat je het niet
+ * per ongeluk kwijtraakt.
+ *
+ * showConfirm kan alleen platte tekst, dus daar paste geen kopieerknop in. En
+ * zonder kopieerknop moet je twaalf tekens overtypen, precies het moment waarop
+ * een typfout onzichtbaar blijft tot de medewerker niet binnen raakt.
+ *
+ * Escape sluit dit venster wél, net als elk ander venster in de app. #191 ging
+ * er precies over dat een toetsenbordgebruiker overal uit moet kunnen; daar een
+ * uitzondering op maken omdat de waarde kostbaar is, zou dat terugdraaien. De
+ * bescherming zit in de kopieerknop en in de zin dat opnieuw resetten volstaat.
+ *
+ * De sluitknop draagt daarom class modal-close: de FocusTrap zoekt die op bij
+ * Escape en klikt hem aan, zodat de belofte hoe dan ook afgehandeld wordt in
+ * plaats van het venster stil te verbergen.
+ *
+ * @param {string} wachtwoord  wat er te zien moet zijn
+ * @param {string} titel       kop van het venster
+ * @param {string} uitleg      zin erboven, over wat er gebeurd is
+ */
+function toonNieuwWachtwoord(wachtwoord, titel, uitleg) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal';
+        overlay.innerHTML = `
+            <div class="modal-content modal-content--sm">
+                <div class="modal-header">
+                    <h2>${escapeHtml(titel)}</h2>
+                    <button type="button" class="modal-close" id="ww-toon-sluit" aria-label="Sluiten">
+                        <i data-lucide="x"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>${escapeHtml(uitleg)}</p>
+                    <div class="ww-toon-rij">
+                        <input type="text" readonly class="form-input ww-toon-veld" id="ww-toon-veld" value="${escapeHtml(wachtwoord)}">
+                        <button type="button" class="btn btn-secondary btn-sm" id="ww-toon-kopieer">Kopieer</button>
+                    </div>
+                    <div class="alert alert-info">
+                        Dit wachtwoord is hierna nergens meer terug te vinden, ook niet in een mail of in de logs.
+                        Raak je het kwijt, reset dan gewoon opnieuw; dan krijg je een nieuw wachtwoord.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" id="ww-toon-ok">Ik heb het genoteerd</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const veld = overlay.querySelector('#ww-toon-veld');
+        overlay.querySelector('#ww-toon-kopieer').addEventListener('click', () => {
+            navigator.clipboard.writeText(wachtwoord)
+                .then(() => showToast('Wachtwoord gekopieerd', 'success'))
+                .catch(() => { veld.select(); document.execCommand('copy'); showToast('Wachtwoord gekopieerd', 'success'); });
+        });
+        const sluit = () => {
+            if (typeof FocusTrap !== 'undefined') FocusTrap.deactivate();
+            overlay.remove();
+            resolve();
+        };
+        overlay.querySelector('#ww-toon-ok').addEventListener('click', sluit);
+        overlay.querySelector('#ww-toon-sluit').addEventListener('click', sluit);
+        if (typeof IconHelper !== 'undefined' && window.lucide) lucide.createIcons();
+        if (typeof FocusTrap !== 'undefined') FocusTrap.activate(overlay);
+        overlay.querySelector('#ww-toon-ok').focus();
+    });
+}
+
 function showInputPrompt(message, title = 'Invoer', defaultValue = '', okText = '') {
     return new Promise((resolve) => {
         const modal = document.getElementById('input-prompt-modal');

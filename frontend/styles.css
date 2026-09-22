@@ -6600,6 +6600,21 @@ body[data-view-mode="day"] .timeline-day-cell {
 .profile-ical-waarschuwing svg { flex-shrink: 0; margin-top: 2px; }
 .profile-ical-gebruik { font-size: 12px; color: var(--text-secondary); }
 
+/* #387: het venster dat een gegenereerd wachtwoord één keer toont. Groot en
+   in een vaste letterbreedte, want dit wordt overgetypt of voorgelezen. */
+.ww-toon-rij {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 14px 0;
+}
+.ww-toon-veld {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 18px;
+    letter-spacing: 0.06em;
+    text-align: center;
+}
+
 .form-actions {
     margin-top: 12px;
 }
