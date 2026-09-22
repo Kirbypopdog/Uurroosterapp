@@ -170,6 +170,47 @@ function _bezetting() {
     return _bezettingIndex;
 }
 
+/**
+ * #163: de activiteiten stonden als tekstchips in het dienstblok, afgekort tot
+ * vijf letters op zeven pixels. Nagemeten paste daar niets groters in: met twee
+ * activiteiten in een dienst van acht uur hebben de chips op 8px al 61 pixels
+ * nodig terwijl het blok er 59 geeft.
+ *
+ * Ze vochten dus om breedte die er niet is. Een balkje onderaan gebruikt de
+ * breedte die er WEL is, en vertelt bovendien iets wat de chips niet vertelden:
+ * WANNEER de activiteit valt. Het wat staat in de tooltip en in de dienst zelf.
+ *
+ * @param {Array}  activiteiten  de activiteiten van deze dienst
+ * @param {number} blokStart     eerste uur dat het blok toont, in decimale uren
+ * @param {number} blokUren      breedte van het blok in uren
+ */
+function activiteitenBalk(activiteiten, blokStart, blokUren) {
+    if (!activiteiten || !activiteiten.length || !(blokUren > 0)) return '';
+    const naUren = (t) => {
+        const [u, m] = String(t || '').split(':').map(Number);
+        return (u || 0) + (m || 0) / 60;
+    };
+    const stukken = activiteiten.map(act => {
+        let van = naUren(act.startTime);
+        let tot = naUren(act.endTime);
+        // Een activiteit over middernacht telt door op de volgende dag, net als
+        // de nachtdienst waar ze in zit.
+        if (tot <= van) tot += 24;
+        // Binnen het blok houden: een activiteit die buiten het zichtbare deel
+        // valt hoort geen balkje te krijgen dat aan de rand blijft plakken.
+        const links = Math.max(0, (van - blokStart) / blokUren) * 100;
+        const rechts = Math.min(1, (tot - blokStart) / blokUren) * 100;
+        if (!(rechts > links)) return '';
+        const lbl = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
+        const t = `${String(act.startTime).substring(0, 5)}-${String(act.endTime).substring(0, 5)}`;
+        const titel = escapeHtml(`${lbl} ${t}${act.description ? ' — ' + act.description : ''}`);
+        return `<span class="activity-chip activity-seg activity-type-${escapeHtml(act.type)}"`
+             + ` data-activity-id="${act.id}" title="${titel}"`
+             + ` style="left:${links.toFixed(2)}%;width:${(rechts - links).toFixed(2)}%"></span>`;
+    }).join('');
+    return stukken ? `<div class="activity-bar">${stukken}</div>` : '';
+}
+
 function calcPlanningHourlyHeadcount(date, hour) {
     const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
     const index = _bezetting();
@@ -1047,14 +1088,11 @@ function renderTimelineView() {
                             if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
                             else if (zichtbaarUren < 6) blockClass += ' timeline-block--sm';
 
-                            // Render activity chips inside the block
+                            // #163: activiteiten als balkje onderaan, op de uren waar ze
+                            // vallen, in plaats van als tekstchips die om breedte vochten.
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            let actChips = '';
-                            shiftActivities.forEach(act => {
-                                const lbl = ACTIVITY_TYPE_LABELS_SHORT[act.type] || act.type;
-                                const t = `${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}`;
-                                actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
-                            });
+                            const actChips = activiteitenBalk(
+                                shiftActivities, Math.max(startFrac, START_HOUR), breedteUren);
 
                             // Show only start time when block is too narrow for full range (#147)
                             // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
@@ -1096,7 +1134,7 @@ function renderTimelineView() {
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 <span class="block-time">${timeLabel}</span>
-                                ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
+                                ${actChips}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -1296,14 +1334,11 @@ function renderTimelineView() {
                             if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
                             else if (zichtbaarUren < 6) blockClass += ' timeline-block--sm';
 
-                            // Render activity chips inside the block
+                            // #163: activiteiten als balkje onderaan, op de uren waar ze
+                            // vallen, in plaats van als tekstchips die om breedte vochten.
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            let actChips = '';
-                            shiftActivities.forEach(act => {
-                                const lbl = ACTIVITY_TYPE_LABELS_SHORT[act.type] || act.type;
-                                const t = `${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}`;
-                                actChips += `<span class="activity-chip activity-type-${escapeHtml(act.type)}" data-activity-id="${act.id}" title="${escapeHtml(act.description || lbl)} (${t})">${escapeHtml(lbl)}</span>`;
-                            });
+                            const actChips = activiteitenBalk(
+                                shiftActivities, Math.max(startFrac, START_HOUR), breedteUren);
 
                             // Show only start time when block is too narrow for full range (#147)
                             // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
@@ -1345,7 +1380,7 @@ function renderTimelineView() {
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 <span class="block-time">${timeLabel}</span>
-                                ${actChips ? `<div class="activity-chips-row">${actChips}</div>` : ''}
+                                ${actChips}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
