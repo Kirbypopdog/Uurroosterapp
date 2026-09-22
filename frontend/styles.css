@@ -5043,9 +5043,9 @@ body[data-view-mode="day"] .timeline-day-cell {
    voor veel mensen niet te lezen. Groter kon toen niet: op 8px hadden twee
    chips 61 pixels nodig terwijl een dienst van acht uur er 59 geeft.
 
-   De tekst is nu twee letters (zie ACTIVITY_TYPE_LABELS_SHORT), en daarmee past
-   elf pixels wel: "Overl" op 7px was 25 pixels breed, "OL" op 11px is 23. Er
-   passen er dus evenveel als vroeger, maar je kan ze lezen. */
+   Victor koos ervoor de volle woorden te houden, dus de grootte blijft zoals
+   ze was. Wat wel veranderde is de ACHTERGROND: die was doorzichtig, en
+   daaronder ligt de teamkleur van het blok. Zie .activity-type-* hieronder. */
 .timeline-block .activity-chips-row {
     display: flex;
     gap: 2px;
@@ -5056,12 +5056,15 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .timeline-block .activity-chip {
     padding: 0 3px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: .02em;
+    /* Zeven pixels is klein, maar de volle woorden passen niet groter: "Overl"
+       op 7px is 25 pixels breed en twee chips vullen daarmee net de 59 pixels
+       van een dienst van acht uur. Op 8px hebben ze er 61 nodig en knipt de
+       tweede af. Zie ACTIVITY_TYPE_LABELS_SHORT voor waarom de volle woorden
+       de voorkeur kregen boven kortere codes op een grotere letter. */
+    font-size: 7px;
     border-left-width: 2px;
-    border-radius: 3px;
-    line-height: 15px;
+    border-radius: 2px;
+    line-height: 12px;
     white-space: nowrap;
     cursor: pointer;
 }

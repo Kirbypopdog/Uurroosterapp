@@ -245,15 +245,16 @@ const MAX_AFWEZIGHEIDSDAGEN = 366;
 const BEVESTIG_AFWEZIGHEIDSDAGEN = 60;
 
 // ===== ACTIVITY TYPE LABELS =====
-// #163: deze stonden op vier à vijf letters ("Overl", "Vorm") en pasten daardoor
-// alleen op zeven pixels in een dienstblok. Nagemeten: "Overl" op 7px is 25
-// pixels breed, "OV" op 11px is 23. Er passen er dus evenveel in een blok, maar
-// de letter is de helft groter en daarmee ook werkelijk te lezen.
+// #163: deze afkortingen passen alleen op zeven pixels in een dienstblok.
+// Nagemeten: "Overl" op 7px is 25 pixels breed en er passen er twee in de 59
+// pixels die een dienst van acht uur overhoudt; op 8px hebben twee chips 61
+// pixels nodig en knipt de tweede af.
 //
-// Elke code is twee letters en verschilt van de andere op de TWEEDE letter,
-// want OG/OL en VM/VG zijn anders te makkelijk te verwisselen. De volledige
-// naam staat in de tooltip.
-const ACTIVITY_TYPE_LABELS_SHORT = { oudergesprek: 'OG', vorming: 'VM', overleg: 'OL', afspraak: 'AF', vergadering: 'VG', andere: 'AN' };
+// Ik heb ze een ronde lang op twee letters gezet ("OL", "VM") zodat ze op 11px
+// pasten. Victor vond de volle woorden beter: "Overl" lees je meteen, "OL" is
+// een code die je eerst moet leren. Dat weegt zwaarder dan de lettergrootte,
+// dus ze staan terug zoals ze waren.
+const ACTIVITY_TYPE_LABELS_SHORT = { oudergesprek: 'OG', vorming: 'Vorm', overleg: 'Overl', afspraak: 'Afsp', vergadering: 'Verg', andere: 'And' };
 const ACTIVITY_TYPE_LABELS_FULL = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', vergadering: 'Vergadering', andere: 'Andere' };
 
 // ===== LUCIDE ICON HELPERS =====
