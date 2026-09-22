@@ -5030,41 +5030,32 @@ body[data-view-mode="day"] .timeline-day-cell {
     min-width: 20px;
 }
 
-/* Activity chips inside timeline blocks - compact inline style */
+/* Activiteitenchips in een dienstblok (#163).
+   De tekst is de volle afkorting ("Overl", "Vorm"): die lees je meteen, waar
+   een code als "OL" eerst geleerd moet worden.
+   De ACHTERGROND van .activity-type-* is ondoorzichtig gemaakt, want daaronder
+   ligt de teamkleur en die verschilt per team; zie daar. */
 .timeline-block .activity-chips-row {
     display: flex;
-    gap: 2px;
-    flex-wrap: nowrap;
-    max-width: 100%;
-    overflow: hidden;
-}
-
-/* #163: deze chips stonden op zeven pixels met vier à vijf letters, en dat was
-   voor veel mensen niet te lezen. Groter kon toen niet: op 8px hadden twee
-   chips 61 pixels nodig terwijl een dienst van acht uur er 59 geeft.
-
-   Victor koos ervoor de volle woorden te houden, dus de grootte blijft zoals
-   ze was. Wat wel veranderde is de ACHTERGROND: die was doorzichtig, en
-   daaronder ligt de teamkleur van het blok. Zie .activity-type-* hieronder. */
-.timeline-block .activity-chips-row {
-    display: flex;
-    gap: 2px;
+    gap: 1px;
     flex-wrap: nowrap;
     max-width: 100%;
     overflow: hidden;
 }
 
 .timeline-block .activity-chip {
-    padding: 0 3px;
-    /* Zeven pixels is klein, maar de volle woorden passen niet groter: "Overl"
-       op 7px is 25 pixels breed en twee chips vullen daarmee net de 59 pixels
-       van een dienst van acht uur. Op 8px hebben ze er 61 nodig en knipt de
-       tweede af. Zie ACTIVITY_TYPE_LABELS_SHORT voor waarom de volle woorden
-       de voorkeur kregen boven kortere codes op een grotere letter. */
-    font-size: 7px;
-    border-left-width: 2px;
+    /* Zeven pixels was te klein om prettig te lezen. De ruimte voor negen komt
+       uit de opmaak eromheen en niet uit de tekst: padding van 3 naar 2, de
+       linkerrand van 2 naar 1 en de tussenruimte van 2 naar 1. Dat scheelt zes
+       pixels per paar chips, ruim genoeg om de twee extra pixels lettergrootte
+       op te vangen.
+       Nagemeten op een dienst van acht uur, 67 pixels breed: twee chips hadden
+       op 7px met de oude opmaak 54 pixels nodig, op 9px met deze 57. */
+    padding: 0 2px;
+    font-size: 9px;
+    border-left-width: 1px;
     border-radius: 2px;
-    line-height: 12px;
+    line-height: 13px;
     white-space: nowrap;
     cursor: pointer;
 }
