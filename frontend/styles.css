@@ -1416,6 +1416,73 @@ html.session-restoring #login-container {
     display: none !important;
 }
 
+/* ===== OPSTARTSCHERM (#389) =====
+   Staat alleen in beeld tijdens het herstellen van een sessie, dus precies in
+   het gat waar zowel het loginscherm als de app verborgen zijn. Zie de
+   toelichting bij het element in index.html.
+
+   De maten volgen die van de echte app (zijbalk 240px, inhoud met dezelfde
+   padding), zodat er niets verspringt op het moment dat de app verschijnt. */
+#opstartscherm { display: none; }
+
+html.session-restoring #opstartscherm {
+    display: grid;
+    grid-template-columns: var(--sidebar-width) 1fr;
+    position: fixed;
+    inset: 0;
+    background: var(--bg-color);
+    z-index: 1;
+}
+
+.opstart-zijbalk {
+    background: var(--sidebar-bg);
+    padding: 18px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.opstart-merk { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
+.opstart-merkteken {
+    width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(150deg, var(--sage), var(--sage-700));
+    display: grid; place-items: center;
+    color: #fff; font-weight: 800; font-size: 16px;
+}
+.opstart-merknaam {
+    font-weight: 800; font-size: 15.5px; letter-spacing: -.01em;
+    color: var(--sidebar-text-active);
+}
+.opstart-navrij {
+    height: 34px; border-radius: 10px;
+    background: var(--sidebar-hover-bg);
+}
+
+.opstart-inhoud { padding: 22px 26px 48px; max-width: 1320px; margin: 0 auto; width: 100%; }
+.opstart-vlak { background: var(--surface-2); border-radius: var(--radius-md); }
+.opstart-eyebrow { width: 84px;  height: 12px; margin-bottom: 10px; }
+.opstart-titel   { width: 260px; height: 30px; margin-bottom: 26px; }
+.opstart-kaart   { height: 150px; margin-bottom: 16px; }
+
+/* Een volstrekt stilstaand skelet leest als bevroren. Deze ademhaling is traag
+   genoeg om rustig te blijven, en gaat uit voor wie beweging liever mijdt. */
+@keyframes opstart-adem { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+.opstart-vlak,
+.opstart-navrij { animation: opstart-adem 1.8s ease-in-out infinite; }
+.opstart-navrij:nth-child(3) { animation-delay: .1s; }
+.opstart-navrij:nth-child(4) { animation-delay: .2s; }
+.opstart-navrij:nth-child(5) { animation-delay: .3s; }
+.opstart-navrij:nth-child(6) { animation-delay: .4s; }
+@media (prefers-reduced-motion: reduce) {
+    .opstart-vlak, .opstart-navrij { animation: none; }
+}
+
+/* Onder de breedte waarop de zijbalk een uitschuiflade wordt, hoort het
+   opstartscherm die zijbalk ook niet te tonen. */
+@media (max-width: 900px) {
+    html.session-restoring #opstartscherm { grid-template-columns: 1fr; }
+    .opstart-zijbalk { display: none; }
+}
+
 .container {
     width: 100%;
     min-height: 100vh;

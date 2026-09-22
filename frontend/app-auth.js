@@ -252,6 +252,16 @@ function showApp() {
     // te herleiden is naar wie hem kreeg. Alleen het id; naam en e-mail gaan
     // nooit mee. Doet niets als de monitoring uitstaat.
     if (typeof monitoringZetGebruiker === 'function') monitoringZetGebruiker();
+    // #389: op het GESLAAGDE pad werd session-restoring nergens weggehaald; dat
+    // gebeurde alleen in de twee foutafhandelingen en in showLogin(). Dat viel
+    // niet op zolang die klasse enkel het loginscherm verborg, want dat hoorde
+    // op dat moment toch verborgen te zijn. Nu hangt het opstartscherm eraan,
+    // en dat bleef dus over de app heen staan.
+    //
+    // Hier en niet na de aanroep: dit is het punt waarop de app werkelijk in
+    // beeld komt, en het geldt zowel na het herstellen van een sessie als na
+    // een gewone aanmelding (waar de klasse niet staat, dus dan doet het niets).
+    document.documentElement.classList.remove('session-restoring');
     DOM.loginContainer.classList.add('hidden');
     DOM.appContainer.classList.remove('hidden');
     IconHelper.init(document.getElementById('current-period'));

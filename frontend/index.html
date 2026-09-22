@@ -60,6 +60,42 @@
         })();
     </script>
 
+    <!-- #389: tot de gegevens binnen zijn stond hier NIETS. De klasse
+         session-restoring verbergt het loginscherm (zodat dat niet voorbijflitst
+         bij wie al ingelogd is) en #app-container staat nog op hidden. Tussen
+         die twee momenten keek je naar een leeg wit scherm: gemeten 518 ms met
+         een snelle server, 6457 ms met een trage, en tientallen seconden bij een
+         koude start. Een leeg scherm leest als "stuk".
+
+         Dit is geen spinner maar het KADER van de app: dezelfde zijbalk op
+         dezelfde plek, met vlakken waar de inhoud komt. Daardoor verschuift er
+         niets wanneer de echte app verschijnt, en zie je meteen dat je in de
+         app zit en niet in een fout.
+
+         Puur markup en CSS, zonder JavaScript: het staat er dus al bij de
+         eerste paint, nog voordat één script geladen is. Het verdwijnt vanzelf
+         zodra app-auth.js de klasse session-restoring weghaalt, wat op alle
+         drie de uitkomsten gebeurt (gelukt, mislukt, sessie ongeldig). -->
+    <div id="opstartscherm" aria-hidden="true">
+        <div class="opstart-zijbalk">
+            <div class="opstart-merk">
+                <div class="opstart-merkteken">V</div>
+                <div class="opstart-merknaam">Het Vlot</div>
+            </div>
+            <div class="opstart-navrij"></div>
+            <div class="opstart-navrij"></div>
+            <div class="opstart-navrij"></div>
+            <div class="opstart-navrij"></div>
+            <div class="opstart-navrij"></div>
+        </div>
+        <div class="opstart-inhoud">
+            <div class="opstart-vlak opstart-eyebrow"></div>
+            <div class="opstart-vlak opstart-titel"></div>
+            <div class="opstart-vlak opstart-kaart"></div>
+            <div class="opstart-vlak opstart-kaart"></div>
+        </div>
+    </div>
+
     <!-- Login Scherm -->
     <div id="login-container">
         <div class="login-brandside">
