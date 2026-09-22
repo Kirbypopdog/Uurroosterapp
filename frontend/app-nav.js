@@ -131,6 +131,11 @@ function renderHome() {
     let html = '';
     html += renderHomeWelcome(user, role);
     if (role === 'admin') html += renderHomeOnboarding();
+    // #166: renderHomeStats bestond al, compleet met opmaak, maar werd nergens
+    // aangeroepen. Dode code dus. Hij staat nu in beeld, met de eigen uren
+    // ervóór: die gaan over jou, de andere over wat je moet beheren.
+    html += renderHomeEigenUren(user);
+    html += renderHomeStats(user, role);
     html += alertsHtml;
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
@@ -557,6 +562,79 @@ function renderHomeWelcome(user, role) {
 // stat-kaarten uit feature-issue #166, en dat issue staat nog open. Wordt #166
 // afgevoerd, dan mag deze functie mee, samen met _homeAlertCount in
 // renderHomeAlerts.
+/**
+ * #166: stat-kaarten bovenaan home.
+ *
+ * Deze gaan over JEZELF en staan daarom vóór de beheerkaarten: je uren deze
+ * week tegen je contract, je periodetotaal, en wat er op jou wacht. Die cijfers
+ * bestonden al maar stonden alleen klein onder je naam in de planning, dus je
+ * moest ernaartoe navigeren om te weten hoe je ervoor staat.
+ *
+ * Alleen voor wie meedraait in het rooster. Een adminaccount heeft geen
+ * diensten (zie isRoosterMedewerker in server.js), dus "32 van je 38 uur" zou
+ * daar altijd nul zijn.
+ *
+ * Zonder contracturen is er geen norm om tegen af te zetten. Dan geen balk en
+ * geen "van", alleen het getal; "32/0u" zou onzin zijn en delen door nul nog
+ * meer.
+ */
+function renderHomeEigenUren(user) {
+    if (!user || user.role === 'admin') return '';
+
+    const vandaag = new Date();
+    const weekStart = formatDateYYYYMMDD(getMonday(vandaag));
+    const contract = Number(user.contractHours) || 0;
+    const weekUren = getEmployeeHoursThisWeek(user.id, weekStart);
+    const periodeUren = getEmployeeHoursThisPeriod(user.id, weekStart);
+    const periodeNorm = contract > 0 ? contract * 4 : 0;
+
+    // Dezelfde regel als in de planning: rood boven de norm, oranje eronder.
+    const kaart = (icon, uren, norm, label) => {
+        const heeftNorm = norm > 0;
+        const boven = heeftNorm && uren > norm;
+        const kleur = !heeftNorm ? 'var(--info)' : (boven ? 'var(--color-danger)' : 'var(--warn)');
+        const vlak = !heeftNorm ? 'var(--info-bg)' : (boven ? 'var(--danger-bg)' : 'var(--warn-bg)');
+        const deel = heeftNorm ? Math.min(100, Math.round((uren / norm) * 100)) : 0;
+        const tekst = heeftNorm ? `${_uren(uren)}<span class="stat-card-van">/${_uren(norm)}u</span>`
+                                : `${_uren(uren)}u`;
+        return `
+        <div class="stat-card">
+            <div class="stat-card-ic" style="background:${vlak};color:${kleur}">${IconHelper.html(icon, 'md')}</div>
+            <div class="stat-card-body">
+                <div class="stat-card-v">${tekst}</div>
+                <div class="stat-card-k">${escapeHtml(label)}</div>
+                ${heeftNorm ? `<div class="stat-balk" role="img" aria-label="${deel} procent van ${_uren(norm)} uur">
+                    <span style="width:${deel}%;background:${kleur}"></span>
+                </div>` : ''}
+            </div>
+        </div>`;
+    };
+
+    // Wat er op JOU wacht: verzoeken waar jij aan zet bent.
+    const mij = user.id;
+    const opMij = (DataStore.swapRequests || []).filter(r =>
+        r.status === 'pending' && (r.targetUserId === mij || r.target_user_id === mij)).length;
+
+    return `
+        <div class="home-stats">
+            ${kaart('clock', weekUren, contract, 'deze week')}
+            ${kaart('calendar-range', periodeUren, periodeNorm, 'deze periode van 4 weken')}
+            <div class="stat-card">
+                <div class="stat-card-ic" style="background:var(--ok-bg);color:var(--sage-700)">${IconHelper.html('inbox', 'md')}</div>
+                <div class="stat-card-body">
+                    <div class="stat-card-v">${opMij}</div>
+                    <div class="stat-card-k">${opMij === 1 ? 'verzoek wacht op jou' : 'verzoeken wachten op jou'}</div>
+                </div>
+            </div>
+        </div>`;
+}
+
+// Uren zonder nodeloze decimalen: 32 in plaats van 32,0 maar wel 32,5.
+function _uren(u) {
+    const n = Math.round((Number(u) || 0) * 2) / 2;
+    return Number.isInteger(n) ? String(n) : String(n).replace('.', ',');
+}
+
 function renderHomeStats(user, role) {
     if (!['admin', 'roosterverantwoordelijke'].includes(role)) return '';
 
