@@ -2232,6 +2232,34 @@ textarea:focus-visible {
     gap: 14px;
     box-shadow: var(--shadow-sm);
 }
+
+/* #166: de kaarten brengen je ergens heen, dus zijn het knoppen. Een button
+   erft geen lettertype en centreert zijn tekst, dus dat zetten we terug; de
+   rest van de opmaak komt uit .stat-card zelf. Het optillen bij hover is het
+   enige verschil dat je ziet, want de kaart moet er nog altijd uitzien als een
+   kaart en niet als een knop in een formulier. */
+button.stat-card {
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    width: 100%;
+    cursor: pointer;
+    transition: box-shadow .15s ease, border-color .15s ease, transform .15s ease;
+}
+button.stat-card:hover {
+    border-color: var(--sage);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+button.stat-card:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+    button.stat-card { transition: none; }
+    button.stat-card:hover { transform: none; }
+}
+
 .stat-card-ic {
     width: 42px; height: 42px;
     border-radius: 12px;

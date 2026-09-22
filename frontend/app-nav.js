@@ -473,7 +473,7 @@ function renderHomeAlerts(role) {
 
     return `
         <div class="home-alerts home-alerts--collapsed mb-md">
-            <button class="home-alerts-header" onclick="this.closest('.home-alerts').classList.toggle('home-alerts--collapsed')" aria-expanded="false">
+            <button class="home-alerts-header" onclick="const b=this.closest('.home-alerts');this.setAttribute('aria-expanded', String(!b.classList.toggle('home-alerts--collapsed')))" aria-expanded="false">
                 <i data-lucide="bell" class="lucide-sm"></i>
                 <strong>Meldingen</strong>
                 <span class="home-alerts-count">${warnings.length}</span>
@@ -557,11 +557,6 @@ function renderHomeWelcome(user, role) {
     `;
 }
 
-// #182: deze functie wordt nergens aangeroepen, en AppState._homeAlertCount
-// voedt alleen hem. Bewust NIET verwijderd: hij is het begin van de
-// stat-kaarten uit feature-issue #166, en dat issue staat nog open. Wordt #166
-// afgevoerd, dan mag deze functie mee, samen met _homeAlertCount in
-// renderHomeAlerts.
 /**
  * #166: stat-kaarten bovenaan home.
  *
@@ -597,8 +592,7 @@ function renderHomeEigenUren(user) {
         const deel = heeftNorm ? Math.min(100, Math.round((uren / norm) * 100)) : 0;
         const tekst = heeftNorm ? `${_uren(uren)}<span class="stat-card-van">/${_uren(norm)}u</span>`
                                 : `${_uren(uren)}u`;
-        return `
-        <div class="stat-card">
+        return statKaart(`
             <div class="stat-card-ic" style="background:${vlak};color:${kleur}">${IconHelper.html(icon, 'md')}</div>
             <div class="stat-card-body">
                 <div class="stat-card-v">${tekst}</div>
@@ -606,8 +600,7 @@ function renderHomeEigenUren(user) {
                 ${heeftNorm ? `<div class="stat-balk" role="img" aria-label="${deel} procent van ${_uren(norm)} uur">
                     <span style="width:${deel}%;background:${kleur}"></span>
                 </div>` : ''}
-            </div>
-        </div>`;
+            </div>`, "switchView('planning')", 'Naar je planning');
     };
 
     // Wat er op JOU wacht: verzoeken waar jij aan zet bent.
@@ -619,13 +612,12 @@ function renderHomeEigenUren(user) {
         <div class="home-stats">
             ${kaart('clock', weekUren, contract, 'deze week')}
             ${kaart('calendar-range', periodeUren, periodeNorm, 'deze periode van 4 weken')}
-            <div class="stat-card">
+            ${statKaart(`
                 <div class="stat-card-ic" style="background:var(--ok-bg);color:var(--sage-700)">${IconHelper.html('inbox', 'md')}</div>
                 <div class="stat-card-body">
                     <div class="stat-card-v">${opMij}</div>
                     <div class="stat-card-k">${opMij === 1 ? 'verzoek wacht op jou' : 'verzoeken wachten op jou'}</div>
-                </div>
-            </div>
+                </div>`, "switchView('swaps')", 'Naar de ruilverzoeken')}
         </div>`;
 }
 
@@ -633,6 +625,34 @@ function renderHomeEigenUren(user) {
 function _uren(u) {
     const n = Math.round((Number(u) || 0) * 2) / 2;
     return Number.isInteger(n) ? String(n) : String(n).replace('.', ',');
+}
+
+/**
+ * #166: een kaart die ergens naartoe brengt hoort een knop te zijn en geen div.
+ * Dan werkt hij ook met het toetsenbord en leest een schermlezer hem als knop.
+ * Zonder doel blijft het een div, want een knop die nergens heen gaat is een
+ * leugen tegen wie op Tab drukt.
+ */
+function statKaart(inhoud, actie, titel) {
+    if (!actie) return `<div class="stat-card">${inhoud}</div>`;
+    return `<button type="button" class="stat-card" onclick="${actie}" title="${escapeHtml(titel || '')}">${inhoud}</button>`;
+}
+
+/**
+ * De kaart "aandachtspunten" en de balk "Meldingen" tonen hetzelfde getal: ze
+ * lezen allebei AppState._homeAlertCount, gezet door renderHomeAlerts. Dat is
+ * geen fout maar een taakverdeling. De kaart zegt HOEVEEL, de balk bevat WELKE.
+ * Klikken op de kaart vouwt die lijst open en brengt je erheen, zodat het geen
+ * twee losse dingen meer zijn die toevallig hetzelfde cijfer tonen.
+ */
+function openHomeMeldingen() {
+    const balk = document.querySelector('#home-content .home-alerts');
+    if (!balk) return;
+    balk.classList.remove('home-alerts--collapsed');
+    const kop = balk.querySelector('.home-alerts-header');
+    if (kop) kop.setAttribute('aria-expanded', 'true');
+    const zacht = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    balk.scrollIntoView({ behavior: zacht ? 'smooth' : 'auto', block: 'start' });
 }
 
 function renderHomeStats(user, role) {
@@ -660,21 +680,19 @@ function renderHomeStats(user, role) {
     // Aandachtspunten (zelfde telling als de alerts-balk, gezet door renderHomeAlerts)
     const alertCount = AppState._homeAlertCount || 0;
 
-    const stat = (icon, bg, color, value, label) => `
-        <div class="stat-card">
+    const stat = (icon, bg, color, value, label, actie, titel) => statKaart(`
             <div class="stat-card-ic" style="background:${bg};color:${color}">${IconHelper.html(icon, 'md')}</div>
             <div>
                 <div class="stat-card-v">${value}</div>
                 <div class="stat-card-k">${label}</div>
-            </div>
-        </div>`;
+            </div>`, actie, titel);
 
     return `
         <div class="home-stats">
-            ${stat('calendar-days', 'var(--ok-bg)', 'var(--sage-700)', shiftsThisWeek, 'diensten deze week')}
-            ${stat('users', 'var(--info-bg)', 'var(--info)', activeEmployees, 'medewerkers actief')}
-            ${stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken')}
-            ${stat('alert-triangle', 'var(--danger-bg)', 'var(--danger-color)', alertCount, 'aandachtspunten')}
+            ${stat('calendar-days', 'var(--ok-bg)', 'var(--sage-700)', shiftsThisWeek, 'diensten deze week', "switchView('planning')", 'Naar de planning')}
+            ${stat('users', 'var(--info-bg)', 'var(--info)', activeEmployees, 'medewerkers actief', "switchView('employees')", 'Naar de medewerkers')}
+            ${stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken', "switchView('swaps')", 'Naar de ruilverzoeken')}
+            ${stat('alert-triangle', 'var(--danger-bg)', 'var(--danger-color)', alertCount, 'aandachtspunten', alertCount ? 'openHomeMeldingen()' : '', 'Toon de meldingen')}
         </div>
     `;
 }
