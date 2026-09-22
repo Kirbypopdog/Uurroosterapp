@@ -539,12 +539,10 @@ body.dark-mode .builder-loaded-draft {
     border-color: var(--alert-info-border);
 }
 body.dark-mode .builder-draft-unsaved   { color: var(--alert-warning-text); }
-body.dark-mode .builder-vakantie-bar,
-body.dark-mode .responsible-section {
-    background: linear-gradient(135deg, #2a1a08, #1e1208);
-    border-color: #5a380e;
-    color: var(--alert-warning-text);
-}
+/* #180: hier stond een donkere noodregel met #2a1a08, #1e1208 en #5a380e,
+   precies de waarden van de donkere --alert-warning-tokens. Ze was nodig zolang
+   de lichte kant een hardgecodeerd amber verloop had. Nu allebei de kanten uit
+   dezelfde tokens komen, slaat het thema vanzelf om en is deze regel weg. */
 
 /* --- Concept kaart 3-dot menu (bg-primary/#fff fallback onzichtbaar in dark) --- */
 body.dark-mode .concept-card-menu-trigger {
@@ -1532,10 +1530,15 @@ html.session-restoring #login-container {
     max-width: 360px;
 }
 
+/* #180: de serifkoppen waren maar op enkele plekken doorgevoerd, en juist het
+   inlogscherm, dat je het vaakst ziet, bleef schreefloos. Dat gaf de app een
+   half omgezet gevoel op precies de eerste indruk. Iets groter en lichter van
+   gewicht, zoals de andere serifkoppen (.home-hi, .view-title). */
 .login-title {
-    font-size: 26px;
-    font-weight: 800;
-    letter-spacing: -.02em;
+    font-family: var(--font-serif);
+    font-size: 30px;
+    font-weight: 400;
+    letter-spacing: -.01em;
     color: var(--text-primary);
 }
 .login-lead {
@@ -1545,7 +1548,10 @@ html.session-restoring #login-container {
     margin: 6px 0 28px;
 }
 
-@media (max-width: 820px) {
+/* #180: dit stond op 820px terwijl de rest van de app op 900px schakelt.
+   Tussen die twee waarden viel het loginscherm nog in twee kolommen terwijl de
+   app er al mobiel uitzag. Eén waarde voor allebei. */
+@media (max-width: 900px) {
     #login-container { grid-template-columns: 1fr; }
     .login-brandside { display: none; }
 }
@@ -1681,15 +1687,34 @@ textarea {
     align-items: center;
 }
 
+/* #180: dit was een dichte donkere knop in lichte modus, terwijl donkere modus
+   hem al als rustige outline tekende. En de hover zette de achtergrond op
+   #5e5b52, precies de waarde van --secondary-color: de kleur stond dus stil.
+   Licht volgt nu donker, en de hover verandert werkelijk iets. */
 .btn-secondary {
-    background: var(--secondary-color);
-    color: white;
+    background: var(--surface-2);
+    color: var(--text-primary);
+    border: 1px solid var(--line-strong);
 }
 
 .btn-secondary:hover {
-    background: #5e5b52;
+    background: var(--raise);
+    border-color: var(--text-secondary);
     transform: translateY(-1px);
     box-shadow: var(--shadow-md);
+}
+
+/* #180: #planning-controls-toggle krijgt .active uit app-init.js, maar er was
+   geen stijl voor. De filterknop liet dus niet zien dat hij aanstond, terwijl
+   de heatmapknop ernaast dat wel doet. Zelfde behandeling. */
+.btn-secondary.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+.btn-secondary.active:hover {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
 }
 
 .btn-sm {
@@ -1775,13 +1800,14 @@ textarea:focus-visible {
 }
 
 /* Role Switcher for Testing */
+/* #180: zelfde amberen verloop uit het oude palet. */
 .role-switcher {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
     padding: 4px 8px;
-    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    border: 2px solid #f59e0b;
+    background: var(--alert-warning-bg);
+    border: 2px solid var(--alert-warning-border);
     border-radius: var(--radius-md);
 }
 
@@ -1989,9 +2015,11 @@ textarea:focus-visible {
 }
 
 /* Planning view: no max-width — timeline should use full available width */
+/* #180: hier stond padding-inline: 20px terwijl .view 26px gebruikt. De titel
+   verspringt daardoor zes pixels bij elke tabwissel. max-width blijft wel weg:
+   de tijdlijn mag de volle breedte gebruiken. */
 #planning-view {
     max-width: none;
-    padding-inline: 20px;
 }
 
 .view.active {
@@ -2068,8 +2096,12 @@ textarea:focus-visible {
 }
 
 /* ===== HOME DASHBOARD ===== */
+/* #180: dit overschreef de padding van .view, maar geen enkel home-element had
+   zelf een horizontale marge. De inhoud plakte daardoor tegen de zijbalk en
+   tegen de schermrand, ook op mobiel. Dezelfde padding als elke andere weergave,
+   en de losse margin-top op .home-hi kan daarmee weg. */
 #home-view {
-    padding: 0;
+    padding: 22px 26px 48px;
 }
 
 /* Serif begroeting (redesign) */
@@ -2077,7 +2109,6 @@ textarea:focus-visible {
     font-family: var(--font-serif);
     font-weight: 400;
     font-size: 34px;
-    margin-top: 32px;
     letter-spacing: -.01em;
     line-height: 1.05;
     color: var(--text-primary);
@@ -3488,9 +3519,9 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .staffing-warning-item {
-    background: var(--color-warning-light);
-    border: 1px solid #fbbf24;
-    color: var(--warn-text);
+    background: var(--alert-warning-bg);
+    border: 1px solid var(--alert-warning-border);
+    color: var(--alert-warning-text);
     padding: 6px 8px;
     border-radius: 4px;
     font-size: 11px;
@@ -4495,11 +4526,16 @@ body[data-view-mode="day"] .timeline-header {
 .timeline-day-header.manually-closed {
     border-color: transparent;
 }
+/* #180: dit was wit, want het lag op een donker verloop. Nu de vlakken de
+   warme alerttinten gebruiken, hoort de tekst mee te veranderen; wit op een
+   lichte achtergrond is onleesbaar. */
 .timeline-day-header.holiday .day-name,
-.timeline-day-header.holiday .day-num,
+.timeline-day-header.holiday .day-num {
+    color: var(--alert-warning-text);
+}
 .timeline-day-header.feestdag .day-name,
 .timeline-day-header.feestdag .day-num {
-    color: #fff;
+    color: var(--alert-error-text);
 }
 .timeline-day-header.manually-closed .day-name,
 .timeline-day-header.manually-closed .day-num {
@@ -4507,29 +4543,32 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 .timeline-day-header.holiday {
-    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    /* #180: dit was een fel amber verloop in een app die verder rustig is.
+       Nu de warme waarschuwingstint uit de tokens, die ook in donkere modus klopt. */
+    background: var(--alert-warning-bg);
+    color: var(--alert-warning-text);
+    border: 1px solid var(--alert-warning-border);
     position: relative;
 }
 
-.timeline-day-header.holiday::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h20v20H0z' fill='none'/%3E%3Ccircle cx='10' cy='10' r='1' fill='rgba(255,255,255,0.1)'/%3E%3C/svg%3E");
-    pointer-events: none;
-}
+/* #180: hier lag een stippelpatroon in wit op 10% dekking, bedoeld voor het
+   donkere verloop dat hier stond. Op een lichte achtergrond is dat onzichtbaar,
+   dus het is dode decoratie geworden. */
 
 /* ===== BELGISCHE FEESTDAGEN ===== */
 .timeline-day-header.feestdag {
-    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    /* #180: zie hierboven; feestdagen waren fel rood met verloop. */
+    background: var(--alert-error-bg);
+    color: var(--alert-error-text);
+    border: 1px solid var(--alert-error-border);
 }
 
 /* Feestdag wint visueel van vakantieperiode bij overlap */
 .timeline-day-header.holiday.feestdag {
-    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    /* #180: zie hierboven; feestdagen waren fel rood met verloop. */
+    background: var(--alert-error-bg);
+    color: var(--alert-error-text);
+    border: 1px solid var(--alert-error-border);
 }
 
 .feestdag-badge {
@@ -4844,9 +4883,10 @@ body[data-view-mode="day"] .timeline-header {
 }
 
 /* Weekend verantwoordelijke highlighting */
+/* #180: amber verloop uit het oude palet, zonder donkere tegenhanger. */
 .timeline-employee-cell.is-responsible {
-    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    border-left: 3px solid #f59e0b;
+    background: var(--alert-warning-bg);
+    border-left: 3px solid var(--alert-warning-border);
 }
 
 .timeline-employee-cell .responsible-badge {
@@ -5086,9 +5126,10 @@ body[data-view-mode="day"] .timeline-day-cell {
 /* Note: Drag & drop styles have been moved to the bottom of this file (around line 6200) */
 
 /* Valid drop target highlighting */
+/* #180: het groen en rood van de sleep-doelen kwamen uit het oude palet. */
 .timeline-day-cell.drop-target-valid {
-    background-color: rgba(16, 185, 129, 0.1) !important;
-    outline: 2px dashed #10b981;
+    background-color: var(--alert-ok-bg) !important;
+    outline: 2px dashed var(--ok);
     outline-offset: -2px;
 }
 
@@ -7176,9 +7217,9 @@ body[data-view-mode="day"] .timeline-day-cell {
     color: var(--ok-text);
 }
 .holiday-status-banner.upcoming {
-    background: #fffbeb;
-    border-color: #f59e0b;
-    color: #92400e;
+    background: var(--alert-warning-bg);
+    border-color: var(--alert-warning-border);
+    color: var(--alert-warning-text);
 }
 .holiday-status-icon {
     font-size: var(--text-xl);
@@ -8028,10 +8069,12 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* Add absence button */
+/* #180: dit was de enige knop in de app met een kleurverloop, en in een groen
+   dat nergens anders voorkomt. Nu het gewone primaire groen, dat met het thema
+   meebeweegt. Het contrast blijft geregeld: wit op --primary-color haalt 4,8,
+   waar het oude #10b981 op 2,54 zat. */
 .btn-add-absence {
-    /* Wit op #10b981 haalde 2,54. Deze twee stops brengen dat op 5,36 en 6,72,
-       met hetzelfde groen als basis. */
-    background: linear-gradient(135deg, #077a53 0%, #05593e 100%);
+    background: var(--primary-color);
     color: white;
     border: none;
     padding: 10px 20px;
@@ -8045,8 +8088,9 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .btn-add-absence:hover {
+    background: var(--primary-hover);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    box-shadow: var(--shadow-md);
 }
 
 /* ===== RESPONSIVE ===== */
@@ -8270,9 +8314,10 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* ===== WEEKEND/VAKANTIE VERANTWOORDELIJKE ===== */
+/* #180: zie .timeline-employee-cell.is-responsible. */
 .responsible-section {
-    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    border: 1px solid #f59e0b;
+    background: var(--alert-warning-bg);
+    border: 1px solid var(--alert-warning-border);
     border-radius: var(--radius-md);
     padding: 10px 16px;
     margin-bottom: 16px;
@@ -9675,7 +9720,9 @@ body[data-view-mode="day"] .timeline-day-cell {
     margin: 0 0 0.5rem 0;
     font-size: 0.95rem;
     font-weight: 600;
-    color: #5e5b52;
+    /* #180: dit was de waarde van --text-secondary, hardgecodeerd, dus hij
+       sloeg niet om in donkere modus. */
+    color: var(--text-secondary);
     text-align: center;
 }
 
@@ -10179,9 +10226,11 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* Toast Types */
+/* #180: succes stond op #10b981 en info op #4a7c6f, twee groenen die je naast
+   elkaar niet uit elkaar houdt. Allebei nu uit de tokens, en info wordt blauw. */
 .toast-success {
-    color: #10b981;
-    border-left-color: #10b981;
+    color: var(--alert-ok-text);
+    border-left-color: var(--ok);
 }
 
 .toast-error {
@@ -10190,13 +10239,13 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 .toast-warning {
-    color: #f59e0b;
-    border-left-color: #f59e0b;
+    color: var(--alert-warning-text);
+    border-left-color: var(--warn);
 }
 
 .toast-info {
-    color: #4a7c6f;
-    border-left-color: #4a7c6f;
+    color: var(--alert-info-text);
+    border-left-color: var(--info);
 }
 
 /* Toast Content */
@@ -10468,13 +10517,14 @@ body[data-view-mode="day"] .timeline-day-cell {
     margin-bottom: 16px;
 }
 
+/* #180: zelfde amberen verloop uit het oude palet. */
 .builder-vakantie-bar {
-    background: linear-gradient(135deg, #fef3c7, #fde68a);
-    border: 1px solid #f59e0b;
+    background: var(--alert-warning-bg);
+    border: 1px solid var(--alert-warning-border);
     border-radius: var(--radius-md);
     padding: 12px 16px;
     margin-bottom: 12px;
-    color: #92400e;
+    color: var(--alert-warning-text);
     font-size: 14px;
 }
 
@@ -12533,11 +12583,14 @@ button.concept-card-name {
     font-size: 11px; font-weight: 600; text-transform: uppercase;
 }
 .audit-create { background: #d1fae5; color: #065f46; }
-.audit-update { background: #dbeafe; color: var(--info-text); }
-.audit-delete { background: #fee2e2; color: #991b1b; }
-.audit-approve { background: #d1fae5; color: #065f46; }
-.audit-reject { background: #fee2e2; color: #991b1b; }
-.audit-cancel { background: #fef3c7; color: #92400e; }
+/* #180: deze zes stonden in harde hexwaarden uit het oude palet en hadden
+   daardoor geen donkere tegenhanger: lichte vlakken met donkere tekst bleven
+   ook in donkere modus staan. */
+.audit-update  { background: var(--alert-info-bg);    color: var(--alert-info-text); }
+.audit-delete  { background: var(--alert-error-bg);   color: var(--alert-error-text); }
+.audit-approve { background: var(--alert-ok-bg);      color: var(--alert-ok-text); }
+.audit-reject  { background: var(--alert-error-bg);   color: var(--alert-error-text); }
+.audit-cancel  { background: var(--alert-warning-bg); color: var(--alert-warning-text); }
 .audit-login { background: #f1efe8; color: #5e5b52; }
 
 .audit-pagination {

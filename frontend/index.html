@@ -297,6 +297,14 @@
                 </div>
             </div>
             <div id="builder-content"></div>
+            <!-- #180: de bouwer riep showSectionLoading('builder-view') al aan,
+                 maar dit element ontbrak. Die aanroep deed dus stilletjes niets
+                 en je zag bij het laden van een concept geen enkele
+                 terugkoppeling. -->
+            <div class="section-loading-overlay hidden">
+                <div class="section-loading-spinner"></div>
+                <span class="section-loading-text"></span>
+            </div>
         </div>
 
         <!-- Dienstenruil View -->
