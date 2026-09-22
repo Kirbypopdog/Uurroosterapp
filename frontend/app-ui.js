@@ -667,13 +667,22 @@ function applyTeamColors() {
         // Het tijdlijnblok is een verloop dat links op 78 procent kleur met wit
         // staat. Die lichtere helft bepaalt of de tekst leesbaar is, dus daar
         // wordt de tekstkleur op gekozen.
-        const textColorVerloop = getContrastColor(mengMetWit(color, 78));
+        // #163: het verloop liep tot de VOLLE teamkleur, en die is donkerder dan
+        // de lichte helft waarop de tekstkleur gekozen wordt. Op drie van de
+        // vijf teams zakte de tekst aan het donkere eind onder de 4,5: met de
+        // kleuren die hier staan haalde Vlot 2 nog 4,45, met de standaard-
+        // kleuren uit settings.js zakten Vlot 1 en Overkoepelend naar 3,95 en
+        // 4,42. Het verloop stopt nu op 88 procent. Het blijft dus een verloop,
+        // maar de twee einden liggen dichter bij elkaar en elk team haalt de
+        // eis over het hele blok.
+        const VERLOOP_LICHT = 78, VERLOOP_DONKER = 88;
+        const textColorVerloop = getContrastColor(mengMetWit(color, VERLOOP_LICHT));
         css += `
 .team-toggle.active[data-team="${teamId}"] { background: ${color} !important; color: ${textColor} !important; border-color: transparent !important; }
 .team-badge.${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .team-badge-mini.${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-block.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
-.timeline-block.team-${teamId} { background: linear-gradient(135deg, color-mix(in srgb, ${color} 78%, white) 0%, ${color} 100%) !important; color: ${textColorVerloop} !important; }
+.timeline-block.team-${teamId} { background: linear-gradient(135deg, color-mix(in srgb, ${color} ${VERLOOP_LICHT}%, white) 0%, color-mix(in srgb, ${color} ${VERLOOP_DONKER}%, white) 100%) !important; color: ${textColorVerloop} !important; border-left-color: ${color} !important; }
 .shift-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .shift-team-badge.team-${teamId} { background: ${color} !important; color: ${textColor} !important; }
 .timeline-team-header.team-${teamId} { --team-dot-color: ${color}; }

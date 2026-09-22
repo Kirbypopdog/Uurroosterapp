@@ -5012,6 +5012,12 @@ body[data-view-mode="day"] .timeline-day-cell {
     top: 4px;
     bottom: 4px;
     border-radius: 6px;
+    /* #163: een streep in de VOLLE teamkleur langs de linkerkant. Het vlak
+       zelf is een lichte tint van diezelfde kleur, dus deze streep is de enige
+       plek waar de teamkleur onverdund staat. Dat maakt twee blokken naast
+       elkaar makkelijker uit elkaar te houden dan de vlakken alleen.
+       De kleur zelf komt uit applyTeamColors(); dit is de terugval. */
+    border-left: 3px solid var(--line-strong);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -5035,6 +5041,9 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .timeline-block .activity-chip {
     padding: 0 3px;
+    /* #163: zeven pixels is erg klein, maar groter past niet. Met twee
+       activiteiten in een dienst van acht uur hebben de chips op 8px al 61
+       pixels nodig terwijl het blok er 59 geeft; op 7px passen ze. */
     font-size: 7px;
     border-left-width: 2px;
     border-radius: 2px;
@@ -5049,23 +5058,23 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 /* Lichtere gradient: zachte top-left → volle teamkleur (redesign) */
 .timeline-block.team-vlot1 {
-    background: linear-gradient(135deg, color-mix(in srgb, var(--team-vlot1) 78%, white) 0%, var(--team-vlot1) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--team-vlot1) 78%, white) 0%, color-mix(in srgb, var(--team-vlot1) 88%, white) 100%);
 }
 
 .timeline-block.team-vlot2 {
-    background: linear-gradient(135deg, color-mix(in srgb, var(--team-vlot2) 78%, white) 0%, var(--team-vlot2) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--team-vlot2) 78%, white) 0%, color-mix(in srgb, var(--team-vlot2) 88%, white) 100%);
 }
 
 .timeline-block.team-cargo {
-    background: linear-gradient(135deg, color-mix(in srgb, var(--team-cargo) 78%, white) 0%, var(--team-cargo) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--team-cargo) 78%, white) 0%, color-mix(in srgb, var(--team-cargo) 88%, white) 100%);
 }
 
 .timeline-block.team-overkoepelend {
-    background: linear-gradient(135deg, color-mix(in srgb, var(--team-overkoepelend) 78%, white) 0%, var(--team-overkoepelend) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--team-overkoepelend) 78%, white) 0%, color-mix(in srgb, var(--team-overkoepelend) 88%, white) 100%);
 }
 
 .timeline-block.team-jobstudent {
-    background: linear-gradient(135deg, color-mix(in srgb, var(--team-jobstudent) 78%, white) 0%, var(--team-jobstudent) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--team-jobstudent) 78%, white) 0%, color-mix(in srgb, var(--team-jobstudent) 88%, white) 100%);
 }
 
 /* Nachtdienst - loopt over naar volgende dag als 1 blok */
@@ -5120,6 +5129,17 @@ body[data-view-mode="day"] .timeline-day-cell {
        hetzelfde blok. Gemeten op een blauw team: de naam kwam op 5,12 uit en
        de tijd bleef op 3,68 hangen. */
     color: inherit;
+    /* #163: negen pixels is klein, kleiner dan de typeschaal van de app, die bij
+       13 begint. Maar groter kan niet: het blok is te smal. Nagemeten op een
+       scherm van 1440 pixels in weekweergave, met de ruimte die het blok
+       werkelijk overhoudt:
+           9px   "07:00-15:00" heeft 49 nodig en krijgt 59        past
+          10px   "15:00-22:00" heeft 55 nodig en krijgt 50        knipt af
+          11px   "07:00-15:00" heeft 60 nodig en krijgt 59        knipt af
+       Een afgeknipte tijd leest als een ANDERE tijd, en dat is erger dan klein.
+       Wil je hier grotere tekst, dan moet er eerst breedte bij: de dagweergave
+       geeft die, of een kortere notatie zoals "7-15" in plaats van
+       "07:00-15:00". Dat laatste is een inhoudelijke keuze, geen opmaak. */
     font-size: 9px;
     font-weight: 600;
     padding: 0 4px;
@@ -10952,11 +10972,11 @@ body[data-view-mode="day"] .timeline-day-cell {
     overflow: visible;
 }
 
-.builder-timeline-block.team-vlot1 { background: linear-gradient(135deg, color-mix(in srgb, var(--team-vlot1) 78%, white) 0%, var(--team-vlot1) 100%); }
-.builder-timeline-block.team-vlot2 { background: linear-gradient(135deg, color-mix(in srgb, var(--team-vlot2) 78%, white) 0%, var(--team-vlot2) 100%); }
-.builder-timeline-block.team-cargo { background: linear-gradient(135deg, color-mix(in srgb, var(--team-cargo) 78%, white) 0%, var(--team-cargo) 100%); }
-.builder-timeline-block.team-overkoepelend { background: linear-gradient(135deg, color-mix(in srgb, var(--team-overkoepelend) 78%, white) 0%, var(--team-overkoepelend) 100%); }
-.builder-timeline-block.team-jobstudent { background: linear-gradient(135deg, color-mix(in srgb, var(--team-jobstudent) 78%, white) 0%, var(--team-jobstudent) 100%); }
+.builder-timeline-block.team-vlot1 { background: linear-gradient(135deg, color-mix(in srgb, var(--team-vlot1) 78%, white) 0%, color-mix(in srgb, var(--team-vlot1) 88%, white) 100%); }
+.builder-timeline-block.team-vlot2 { background: linear-gradient(135deg, color-mix(in srgb, var(--team-vlot2) 78%, white) 0%, color-mix(in srgb, var(--team-vlot2) 88%, white) 100%); }
+.builder-timeline-block.team-cargo { background: linear-gradient(135deg, color-mix(in srgb, var(--team-cargo) 78%, white) 0%, color-mix(in srgb, var(--team-cargo) 88%, white) 100%); }
+.builder-timeline-block.team-overkoepelend { background: linear-gradient(135deg, color-mix(in srgb, var(--team-overkoepelend) 78%, white) 0%, color-mix(in srgb, var(--team-overkoepelend) 88%, white) 100%); }
+.builder-timeline-block.team-jobstudent { background: linear-gradient(135deg, color-mix(in srgb, var(--team-jobstudent) 78%, white) 0%, color-mix(in srgb, var(--team-jobstudent) 88%, white) 100%); }
 
 .btb-label {
     display: block;
