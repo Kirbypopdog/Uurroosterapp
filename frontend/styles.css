@@ -5039,45 +5039,31 @@ body[data-view-mode="day"] .timeline-day-cell {
     overflow: hidden;
 }
 
-/* #163: de activiteiten stonden als tekstchips IN het blok, afgekort tot vijf
-   letters op zeven pixels. Groter kon niet: met twee activiteiten in een dienst
-   van acht uur hadden ze op 8px al 61 pixels nodig terwijl het blok er 59 geeft.
-   Ze vochten dus om breedte die er niet is.
+/* #163: deze chips stonden op zeven pixels met vier à vijf letters, en dat was
+   voor veel mensen niet te lezen. Groter kon toen niet: op 8px hadden twee
+   chips 61 pixels nodig terwijl een dienst van acht uur er 59 geeft.
 
-   Nu een balkje onderaan, op de uren waar de activiteit valt. Dat gebruikt de
-   breedte die er WEL is en vertelt bovendien iets wat de chips niet vertelden,
-   namelijk WANNEER. Het wat staat in de tooltip en in de dienst zelf. */
-.activity-bar {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 5px;
-    pointer-events: none;   /* alleen de segmenten zelf vangen kliks */
+   De tekst is nu twee letters (zie ACTIVITY_TYPE_LABELS_SHORT), en daarmee past
+   elf pixels wel: "Overl" op 7px was 25 pixels breed, "OL" op 11px is 23. Er
+   passen er dus evenveel als vroeger, maar je kan ze lezen. */
+.timeline-block .activity-chips-row {
+    display: flex;
+    gap: 2px;
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow: hidden;
 }
 
-.timeline-block .activity-seg {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    /* De chipopmaak hoort hier niet: geen tekst, geen padding, geen ronding. */
-    padding: 0;
-    font-size: 0;
-    line-height: 0;
-    border: none;
-    border-radius: 0;
-    /* Smalle activiteiten mogen niet verdwijnen. Een kwartier op een dienst van
-       acht uur is minder dan één pixel; twee pixels blijft zichtbaar zonder de
-       verhouding merkbaar te vertekenen. */
-    min-width: 2px;
-    pointer-events: auto;
+.timeline-block .activity-chip {
+    padding: 0 3px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    border-left-width: 2px;
+    border-radius: 3px;
+    line-height: 15px;
+    white-space: nowrap;
     cursor: pointer;
-}
-
-/* Het blok centreert zijn inhoud; zonder deze ruimte loopt de tijd tegen het
-   balkje aan bij een lage rij. */
-.timeline-block:has(.activity-bar) .block-time {
-    margin-bottom: 5px;
 }
 
 .timeline-block:hover {
@@ -5189,12 +5175,12 @@ body[data-view-mode="day"] .timeline-day-cell {
     text-align: left;
 }
 
-/* Short shift blocks — hide time text at <45min (#147) */
-/* #163: de regel die de activiteiten op een smal blok verborg is vervallen.
-   Die bestond omdat de tekstchips daar niet pasten. Het balkje is vijf pixels
-   hoog en past altijd, en juist op een korte dienst is het nuttig om te zien
-   dat er nog iets in staat. */
-.timeline-block--xs .block-time {
+/* Short shift blocks — hide chips at <6u, hide time text at <45min (#147) */
+.timeline-block--sm .activity-chips-row {
+    display: none;
+}
+.timeline-block--xs .block-time,
+.timeline-block--xs .activity-chips-row {
     display: none;
 }
 
@@ -5413,35 +5399,47 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-weight: 500;
 }
 
+/* #163: deze achtergronden waren doorzichtig (0,7 en bij vergadering zelfs 0,3).
+   In een dienstblok ligt daar de teamkleur onder, die per team verschilt, dus
+   het contrast van de letters hing af van wie er in welk team zit. Nagemeten
+   over vijf teamkleuren zakte oudergesprek naar 4,44 en vergadering naar 2,49,
+   terwijl de eis 4,5 is.
+   Ondoorzichtig maakt het contrast vast en voorspelbaar, ongeacht het blok
+   eronder. Deze kleuren zijn de identiteit van een activiteitstype, net als de
+   teamkleuren, en blijven daarom hexwaarden en geen alert-tokens (#180). */
 .activity-type-oudergesprek {
-    background: rgba(251, 191, 36, 0.7);
+    background: #fbbf24;
     border-color: #d97706;
-    color: #78350f;
+    color: #78350f;             /* 5,43 */
 }
 .activity-type-vorming {
-    background: rgba(196, 181, 253, 0.7);
+    background: #c4b5fd;
     border-color: #7c3aed;
-    color: #4c1d95;
+    color: #4c1d95;             /* 5,93 */
 }
 .activity-type-overleg {
-    background: rgba(110, 231, 183, 0.7);
+    background: #6ee7b7;
     border-color: #059669;
-    color: #064e3b;
+    color: #064e3b;             /* 6,38 */
 }
 .activity-type-afspraak {
-    background: rgba(147, 197, 253, 0.7);
+    background: #93c5fd;
     border-color: #3d6a5e;
-    color: #1e3a5f;
+    color: #1e3a5f;             /* 6,38 */
 }
+/* Vergadering haalde ondoorzichtig nog maar 3,30: zijn amber en zijn tekst
+   lagen te dicht bijeen. En het felle amber van oudergesprek zat er zo dicht
+   tegenaan dat je de twee niet uit elkaar hield. Nu donker amber met witte
+   tekst: leesbaar op 5,56 en duidelijk anders dan oudergesprek (verschil 3,33). */
 .activity-type-vergadering {
-    background: rgba(245, 158, 11, 0.3);
-    border-color: #f59e0b;
-    color: #92400e;
+    background: #a3521b;
+    border-color: #7c3d12;
+    color: #ffffff;             /* 5,56 */
 }
 .activity-type-andere {
-    background: rgba(209, 213, 219, 0.7);
+    background: #d1d5db;
     border-color: #6b7280;
-    color: #1f2937;
+    color: #1f2937;             /* 9,96 */
 }
 
 /* Add activity button on shift block */

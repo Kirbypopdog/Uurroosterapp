@@ -171,44 +171,33 @@ function _bezetting() {
 }
 
 /**
- * #163: de activiteiten stonden als tekstchips in het dienstblok, afgekort tot
- * vijf letters op zeven pixels. Nagemeten paste daar niets groters in: met twee
- * activiteiten in een dienst van acht uur hebben de chips op 8px al 61 pixels
- * nodig terwijl het blok er 59 geeft.
+ * #163: de activiteitenchips stonden op zeven pixels, afgekort tot vier à vijf
+ * letters ("Overl", "Vorm"). Dat was voor veel mensen niet te lezen, en groter
+ * kon niet: op 8px hadden twee chips al 61 pixels nodig terwijl een dienst van
+ * acht uur er 59 geeft.
  *
- * Ze vochten dus om breedte die er niet is. Een balkje onderaan gebruikt de
- * breedte die er WEL is, en vertelt bovendien iets wat de chips niet vertelden:
- * WANNEER de activiteit valt. Het wat staat in de tooltip en in de dienst zelf.
+ * Ik heb het eerst omgebouwd naar een balkje onderaan op de juiste uren. Victor
+ * vond de chips beter, omdat je daarmee ziet WAT er staat en niet alleen
+ * wanneer. Terecht, en het echte probleem was de tekst en niet de vorm.
  *
- * @param {Array}  activiteiten  de activiteiten van deze dienst
- * @param {number} blokStart     eerste uur dat het blok toont, in decimale uren
- * @param {number} blokUren      breedte van het blok in uren
+ * De codes zijn nu twee letters (zie ACTIVITY_TYPE_LABELS_SHORT). Nagemeten:
+ * "Overl" op 7px is 25 pixels breed, "OL" op 11px is 23. Er passen er dus
+ * evenveel, maar de letter is de helft groter. De volledige naam en de tijd
+ * staan in de tooltip.
+ *
+ * @param {Array} activiteiten  de activiteiten van deze dienst
  */
-function activiteitenBalk(activiteiten, blokStart, blokUren) {
-    if (!activiteiten || !activiteiten.length || !(blokUren > 0)) return '';
-    const naUren = (t) => {
-        const [u, m] = String(t || '').split(':').map(Number);
-        return (u || 0) + (m || 0) / 60;
-    };
-    const stukken = activiteiten.map(act => {
-        let van = naUren(act.startTime);
-        let tot = naUren(act.endTime);
-        // Een activiteit over middernacht telt door op de volgende dag, net als
-        // de nachtdienst waar ze in zit.
-        if (tot <= van) tot += 24;
-        // Binnen het blok houden: een activiteit die buiten het zichtbare deel
-        // valt hoort geen balkje te krijgen dat aan de rand blijft plakken.
-        const links = Math.max(0, (van - blokStart) / blokUren) * 100;
-        const rechts = Math.min(1, (tot - blokStart) / blokUren) * 100;
-        if (!(rechts > links)) return '';
-        const lbl = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
+function activiteitenChips(activiteiten) {
+    if (!activiteiten || !activiteiten.length) return '';
+    const chips = activiteiten.map(act => {
+        const kort = ACTIVITY_TYPE_LABELS_SHORT[act.type] || act.type;
+        const vol = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
         const t = `${String(act.startTime).substring(0, 5)}-${String(act.endTime).substring(0, 5)}`;
-        const titel = escapeHtml(`${lbl} ${t}${act.description ? ' — ' + act.description : ''}`);
-        return `<span class="activity-chip activity-seg activity-type-${escapeHtml(act.type)}"`
-             + ` data-activity-id="${act.id}" title="${titel}"`
-             + ` style="left:${links.toFixed(2)}%;width:${(rechts - links).toFixed(2)}%"></span>`;
+        const titel = escapeHtml(`${vol} ${t}${act.description ? ' — ' + act.description : ''}`);
+        return `<span class="activity-chip activity-type-${escapeHtml(act.type)}"`
+             + ` data-activity-id="${act.id}" title="${titel}">${escapeHtml(kort)}</span>`;
     }).join('');
-    return stukken ? `<div class="activity-bar">${stukken}</div>` : '';
+    return `<div class="activity-chips-row">${chips}</div>`;
 }
 
 function calcPlanningHourlyHeadcount(date, hour) {
@@ -1091,8 +1080,7 @@ function renderTimelineView() {
                             // #163: activiteiten als balkje onderaan, op de uren waar ze
                             // vallen, in plaats van als tekstchips die om breedte vochten.
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            const actChips = activiteitenBalk(
-                                shiftActivities, Math.max(startFrac, START_HOUR), breedteUren);
+                            const actChips = activiteitenChips(shiftActivities);
 
                             // Show only start time when block is too narrow for full range (#147)
                             // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
@@ -1337,8 +1325,7 @@ function renderTimelineView() {
                             // #163: activiteiten als balkje onderaan, op de uren waar ze
                             // vallen, in plaats van als tekstchips die om breedte vochten.
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            const actChips = activiteitenBalk(
-                                shiftActivities, Math.max(startFrac, START_HOUR), breedteUren);
+                            const actChips = activiteitenChips(shiftActivities);
 
                             // Show only start time when block is too narrow for full range (#147)
                             // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
