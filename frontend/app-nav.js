@@ -716,7 +716,15 @@ function renderHomeStats(user, role) {
     // Actieve medewerkers
     const activeEmployees = (DataStore.users || []).filter(u => u.active !== false && u.role === 'medewerker').length;
 
-    // Open ruilverzoeken
+    // Open ruilverzoeken. Deze kaart is er ALLEEN voor wie geen eigen rij
+    // kaarten heeft, dus voor een adminaccount. Een roosterverantwoordelijke
+    // draait mee in het rooster en ziet hierboven al "verzoeken wachten op
+    // jou"; twee kaarten die allebei over ruilverzoeken gaan lezen als
+    // dubbelop, zeker als er van beide nul zijn. Van die twee is de eigen
+    // kaart de belangrijkste: sinds #114 keurt een lead geen ruil meer goed,
+    // dus een openstaand verzoek is niemands taak behalve die van de
+    // doelpersoon. Het totaal is informatie, geen werk.
+    const eigenRij = user && user.role !== 'admin';
     const openSwaps = (DataStore.swapRequests || []).filter(r =>
         r.status === 'pending'
     ).length;
@@ -735,7 +743,7 @@ function renderHomeStats(user, role) {
         <div class="home-stats">
             ${stat('calendar-days', 'var(--ok-bg)', 'var(--sage-700)', shiftsThisWeek, 'diensten deze week', "switchView('planning')", 'Naar de planning')}
             ${stat('users', 'var(--info-bg)', 'var(--info)', activeEmployees, 'medewerkers actief', "switchView('employees')", 'Naar de medewerkers')}
-            ${stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken', "switchView('swaps')", 'Naar de ruilverzoeken')}
+            ${eigenRij ? '' : stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken', "switchView('swaps')", 'Naar de ruilverzoeken')}
             ${statKaart(`
                 <div class="stat-card-ic" style="background:var(--danger-bg);color:var(--danger-color)">${IconHelper.html('alert-triangle', 'md')}</div>
                 <div>
