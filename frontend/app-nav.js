@@ -410,7 +410,6 @@ function renderHomeAlerts(role) {
     AppState._homeAlertCount = warnings.length;
     if (warnings.length === 0) return '';
 
-    const ALERT_COLLAPSE_AT = 5;
     const alertCategoryConfig = [
         { id: 'unstaffed', label: 'Onderbezetting', icon: 'users' },
         { id: '11h', label: '11-uur schending', icon: 'clock' },
@@ -452,14 +451,18 @@ function renderHomeAlerts(role) {
         </div>`;
     };
 
+    // Altijd per soort groeperen, ook bij twee meldingen. Hier stond een grens
+    // van vijf: daaronder kwamen de regels los onder elkaar te staan. Met veel
+    // fouten liep die lijst zo tientallen regels door, en dan zoek je in een
+    // rij regels die allemaal op elkaar lijken. Nu open je de soort die je
+    // zoekt. De prijs is één klik extra bij één enkele melding.
     let bodyHtml = '';
     for (const cat of alertCategoryConfig) {
         const catItems = alertGroups.get(cat.id);
         if (!catItems || catItems.length === 0) continue;
-        if (catItems.length >= ALERT_COLLAPSE_AT) {
-            bodyHtml += `
+        bodyHtml += `
         <div class="alert-group alert-group--collapsed">
-            <button class="alert-group-header" onclick="this.closest('.alert-group').classList.toggle('alert-group--collapsed')">
+            <button class="alert-group-header" onclick="const g=this.closest('.alert-group');this.setAttribute('aria-expanded', String(!g.classList.toggle('alert-group--collapsed')))" aria-expanded="false">
                 <i data-lucide="${cat.icon}" class="lucide-xs"></i>
                 <span class="alert-group-label">${cat.label}</span>
                 <span class="alert-group-count">${catItems.length}</span>
@@ -467,9 +470,6 @@ function renderHomeAlerts(role) {
             </button>
             <div class="alert-group-body">${catItems.map(renderAlertItem).join('')}</div>
         </div>`;
-        } else {
-            bodyHtml += catItems.map(renderAlertItem).join('');
-        }
     }
 
     // Geen eigen kop meer. De kaart "aandachtspunten" in renderHomeStats is de

@@ -2341,13 +2341,23 @@ button.stat-card:focus-visible {
        vormen ze de liggende L. Linksonder en rechtsonder wel, dat is het einde
        van de vorm. */
     border-top-right-radius: 0;
-    border: 1px solid var(--color-warning);
+    /* Dezelfde kleur als de kaart erboven. Die draagt het pictogram in
+       --danger-color op --danger-bg, dus een oranje rand eronder maakte er
+       twee dingen van in plaats van één vorm. */
+    border: 1px solid var(--danger-color);
     border-top-width: 0;
     background: var(--surface-color);
     box-shadow: 0 1px 6px rgba(0,0,0,0.06);
     overflow: hidden;
 }
-.home-meldingen-lijst { display: flex; flex-direction: column; }
+/* De lijst kan lang worden. Hij scrollt in zichzelf in plaats van de pagina
+   weg te duwen; zo blijft de kaart die hem opende in beeld. */
+.home-meldingen-lijst {
+    display: flex;
+    flex-direction: column;
+    max-height: 60vh;
+    overflow-y: auto;
+}
 
 /* De kaart die het paneel opent hoort er bovenop te staan en niet ernaast:
    onderaan vierkant, want daar gaat de lijst verder. */
@@ -2361,7 +2371,7 @@ button.stat-card:focus-visible {
 /* button ervoor gezet, anders wint de hoverrand van button.stat-card:hover. */
 button.stat-card--open,
 button.stat-card--open:hover {
-    border-color: var(--color-warning);
+    border-color: var(--danger-color);
     border-bottom-color: transparent;
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
@@ -2477,6 +2487,12 @@ button.stat-card--open:hover {
 .alert-group { border-bottom: 1px solid var(--border-color); }
 .alert-group:last-child { border-bottom: none; }
 .alert-group-header {
+    /* Blijft staan als je binnen de lijst scrollt. Met honderd meldingen van
+       dezelfde soort ben je anders na een halve schermhoogte kwijt waar je
+       in zit. */
+    position: sticky;
+    top: 0;
+    z-index: 1;
     width: 100%;
     display: flex;
     align-items: center;
@@ -2496,7 +2512,10 @@ button.stat-card--open:hover {
 .alert-group-header:hover { background: var(--bg-hover, #f1efe8); }
 .alert-group-label { flex: 1; }
 .alert-group-count {
-    background: var(--color-warning, #f59e0b);
+    /* Dezelfde kleur als de kaart en de rand van het paneel. Oranje op wit
+       haalde hier trouwens ook de contrasteis niet, en dit is tekst van 10
+       pixels. */
+    background: var(--danger-color);
     color: #fff;
     font-size: 10px;
     font-weight: 700;
