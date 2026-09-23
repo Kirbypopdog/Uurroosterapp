@@ -2297,10 +2297,16 @@ button.stat-card:focus-visible {
     .stat-balk span { transition: none; }
 }
 
-/* ── Meldingen paneel ─────────────────────────────────────────────────────
+/* ── Uitklappaneel onder een stat-kaart ───────────────────────────────────
    #166: hier stond een balk met een eigen kop "Meldingen" en een telbadge.
    Die kop toonde exact hetzelfde getal als de kaart "aandachtspunten" erboven,
    want allebei lezen ze AppState._homeAlertCount. De kaart is nu de kop.
+   Hetzelfde geldt voor "vraagt je aandacht": ook dat was een kaart met een
+   getal plus een losse lijst eronder die hetzelfde telde.
+
+   De kleur komt uit --paneel-kleur, die per soort op de kaart EN op het
+   paneel staat. Ze moeten gelijk zijn, anders valt de vorm weer uiteen in
+   twee dingen.
 
    Het paneel groeit uit die kaart in de vorm van een liggende L: eerst naar
    onder over de breedte van de kaart, daarna naar links over de volle rij.
@@ -2308,11 +2314,11 @@ button.stat-card:focus-visible {
    er niet voor de sier: zonder de vertraging op width schuift het paneel
    diagonaal open en lijkt het van nergens te komen.
 
-   --meldingen-start is de breedte van de kaart, in JS gezet bij het klikken.
+   --paneel-start is de breedte van de kaart, in JS gezet bij het klikken.
    Een vaste waarde kan niet: hoeveel kaarten er naast elkaar passen hangt af
    van de breedte van het scherm. */
-.home-meldingen {
-    width: var(--meldingen-start, 260px);
+.home-paneel {
+    width: var(--paneel-start, 260px);
     margin-left: auto;
     /* Dezelfde tussenruimte als tussen de kaarten onderling. De liggende balk
        van de L hoort niet tegen de kaarten ernaast te plakken. Het stuk onder
@@ -2329,7 +2335,7 @@ button.stat-card:focus-visible {
                 opacity .12s ease .26s,
                 visibility 0s linear .38s;
 }
-.home-meldingen--open {
+.home-paneel--open {
     width: 100%;
     margin-top: var(--stats-gap);
     opacity: 1;
@@ -2342,37 +2348,35 @@ button.stat-card:focus-visible {
                 visibility 0s;
 }
 @media (prefers-reduced-motion: reduce) {
-    .home-meldingen, .home-meldingen--open { transition: none; }
+    .home-paneel, .home-paneel--open { transition: none; }
 }
 /* De rand staat op een binnendoos en niet op het paneel zelf. Anders houdt het
    paneel dichtgeklapt nog 4 pixels rand over, want max-height nul knipt de
    inhoud weg maar niet de rand eromheen. */
-.home-meldingen-doos {
+.home-paneel-doos {
     border-radius: var(--radius-lg);
     /* Rechtsboven sluit de doos aan op de kaart, dus daar geen ronding: samen
        vormen ze de liggende L. Linksonder en rechtsonder wel, dat is het einde
        van de vorm. */
     border-top-right-radius: 0;
-    /* Dezelfde kleur als de kaart erboven. Die draagt het pictogram in
-       --danger-color op --danger-bg, dus een oranje rand eronder maakte er
-       twee dingen van in plaats van één vorm. */
-    border: 1px solid var(--danger-color);
+    /* Dezelfde kleur als de kaart erboven, via --paneel-kleur. */
+    border: 1px solid var(--paneel-kleur);
     background: var(--surface-color);
     box-shadow: 0 1px 6px rgba(0,0,0,0.06);
     overflow: hidden;
 }
 /* De lijst kan lang worden. Hij scrollt in zichzelf in plaats van de pagina
    weg te duwen; zo blijft de kaart die hem opende in beeld. */
-.home-meldingen-lijst {
+.home-paneel-lijst {
     display: flex;
     flex-direction: column;
     max-height: 60vh;
     overflow-y: auto;
 }
 
-/* De kaart die het paneel opent hoort er bovenop te staan en niet ernaast:
+/* De kaart die een paneel opent hoort er bovenop te staan en niet ernaast:
    onderaan vierkant, want daar gaat de lijst verder. */
-.stat-card--meldingen .stat-card-chevron {
+.stat-card-chevron {
     margin-left: auto;
     flex: none;
     transition: transform .2s ease;
@@ -2382,7 +2386,7 @@ button.stat-card:focus-visible {
 /* button ervoor gezet, anders wint de hoverrand van button.stat-card:hover. */
 button.stat-card--open,
 button.stat-card--open:hover {
-    border-color: var(--danger-color);
+    border-color: var(--paneel-kleur);
     border-bottom-color: transparent;
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
@@ -2395,20 +2399,30 @@ button.stat-card--open:hover {
 }
 /* De staande balk van de L is langer dan de kaart: hij loopt door de
    tussenruimte heen tot aan het paneel. Zonder dit stuk plakt het paneel
-   tegen de kaarten ernaast, en dat is geen L maar een blok onder een rij. */
+   tegen de kaarten ernaast, en dat is geen L maar een blok onder een rij.
+
+   Die ene pixel extra hoogte is de binnenhoek. Het paneel heeft rondom een
+   rand, dus ook bovenaan over de volle breedte, en die liep dwars onder de
+   staande balk door: daarmee was de L aan de binnenkant dichtgemetseld. Dit
+   stuk ligt er met zijn ondoorzichtige vlak overheen, precies zo breed als de
+   kaart, dus de bovenrand stopt waar de staande balk begint. */
 button.stat-card--open::after {
     content: '';
     position: absolute;
     left: -1px;
     right: -1px;
     top: 100%;
-    height: calc(var(--stats-gap) + 1px);
+    height: calc(var(--stats-gap) + 2px);
     background: var(--surface-color);
-    border-left: 1px solid var(--danger-color);
-    border-right: 1px solid var(--danger-color);
+    border-left: 1px solid var(--paneel-kleur);
+    border-right: 1px solid var(--paneel-kleur);
 }
+
+/* Per soort dezelfde kleur op de kaart en op het paneel dat eronder hangt. */
+.stat-card--meldingen, .home-paneel--meldingen { --paneel-kleur: var(--danger-color); }
+.stat-card--aandacht,  .home-paneel--aandacht  { --paneel-kleur: var(--sage-700); }
 @media (prefers-reduced-motion: reduce) {
-    .stat-card--meldingen .stat-card-chevron { transition: none; }
+    .stat-card-chevron { transition: none; }
 }
 
 /* ── Alert item (expandable) ─────────────────────────────────────────── */

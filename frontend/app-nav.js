@@ -125,24 +125,27 @@ function renderHome() {
 
     const role = getEffectiveRole();
 
-    // Bereken alerts eerst (zet AppState._homeAlertCount voor de stat-kaarten)
+    // De twee panelen eerst: ze zetten de tellingen die de kaarten erboven
+    // tonen (_homeAlertCount en _homeAandachtCount). De kaart is de kop van
+    // het paneel, dus het getal moet bekend zijn voor de kaart gemaakt wordt.
     const alertsHtml = renderHomeAlerts(role);
+    const aandachtHtml = renderHomeRequests(user);
 
     let html = '';
     html += renderHomeWelcome(user, role);
     if (role === 'admin') html += renderHomeOnboarding();
     html += renderHomeKaarten(user, role);
     html += alertsHtml;
+    html += aandachtHtml;
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
     html += renderHomeWeekendInfo();
-    html += renderHomeRequests(user);
     html += '</div>';
     html += renderHomeNuAanHetWerk();
 
     container.innerHTML = html;
     IconHelper.init(container);
-    meetMeldingenStart();
+    meetPaneelStarts();
 
     // Attach quick action click handlers
     container.querySelectorAll('.home-action-btn').forEach(btn => {
@@ -471,8 +474,8 @@ function renderHomeAlerts(role) {
     // Geen eigen kop meer. De kaart "aandachtspunten" in renderHomeStats is de
     // kop: die toonde toch al exact hetzelfde getal, want beide lezen
     // AppState._homeAlertCount. Twee koppen boven één lijst is er een te veel.
-    return `<div id="home-meldingen" class="home-meldingen">
-            <div class="home-meldingen-doos"><div class="home-meldingen-lijst">${bodyHtml}</div></div>
+    return `<div id="home-meldingen" class="home-paneel home-paneel--meldingen">
+            <div class="home-paneel-doos"><div class="home-paneel-lijst">${bodyHtml}</div></div>
         </div>`;
 }
 
@@ -596,10 +599,14 @@ function renderHomeEigenUren(user) {
             </div>`, "switchView('planning')", 'Naar je planning');
     };
 
-    // Wat er op JOU wacht: verzoeken waar jij aan zet bent.
-    const mij = user.id;
-    const opMij = (DataStore.swapRequests || []).filter(r =>
-        r.status === 'pending' && (r.targetUserId === mij || r.target_user_id === mij)).length;
+    // Wat er op JOU wacht. Deze kaart telde eerst alleen de ruilverzoeken waar
+    // jij de doelpersoon van bent, en onderaan home stond een losse kaart
+    // "Vraagt je aandacht" die diezelfde verzoeken telde PLUS je andere ruilen,
+    // de overnames van je team en een verlofronde die nog op jou wacht. Twee
+    // plekken, en de kleinste stond bovenaan. Nu is het één kaart met het
+    // volledige getal, die de lijst eronder opent. Het cijfer komt uit
+    // renderHomeRequests, dat in renderHome vóór de kaarten draait.
+    const aandacht = AppState._homeAandachtCount || 0;
 
     return [
         kaart('clock', weekUren, contract, 'deze week'),
@@ -607,9 +614,13 @@ function renderHomeEigenUren(user) {
         statKaart(`
                 <div class="stat-card-ic" style="background:var(--ok-bg);color:var(--sage-700)">${IconHelper.html('inbox', 'md')}</div>
                 <div class="stat-card-body">
-                    <div class="stat-card-v">${opMij}</div>
-                    <div class="stat-card-k">${opMij === 1 ? 'verzoek wacht op jou' : 'verzoeken wachten op jou'}</div>
-                </div>`, "switchView('swaps')", 'Naar de ruilverzoeken')
+                    <div class="stat-card-v">${aandacht}</div>
+                    <div class="stat-card-k">vraagt je aandacht</div>
+                </div>
+                ${aandacht ? '<i data-lucide="chevron-down" class="lucide-sm stat-card-chevron"></i>' : ''}`,
+                aandacht ? 'toggleHomePaneel(this)' : '',
+                'Toon wat je aandacht vraagt', 'stat-card--aandacht',
+                'aria-expanded="false" aria-controls="home-aandacht"')
     ];
 }
 
@@ -632,9 +643,13 @@ function statKaart(inhoud, actie, titel, extraKlasse, attrs) {
 }
 
 /**
- * De kaart "aandachtspunten" is de kop van de meldingenlijst. Ze toont HOEVEEL,
- * het paneel eronder bevat WELKE. Er stond hier eerst een aparte balk met
- * dezelfde kop en hetzelfde getal; die is weg.
+ * Een kaart met een paneel is de kop van dat paneel. De kaart toont HOEVEEL,
+ * het paneel eronder bevat WELKE. Bij de meldingen stond daar eerst een aparte
+ * balk met dezelfde kop en hetzelfde getal, bij "vraagt je aandacht" een losse
+ * kaart onderaan home. Allebei weg.
+ *
+ * Welk paneel bij welke kaart hoort staat in aria-controls, dus de koppeling
+ * die een schermlezer gebruikt is ook de koppeling die de code gebruikt.
  *
  * Het paneel groeit uit de kaart in de vorm van een liggende L: eerst naar
  * onder over de breedte van de kaart, daarna naar links over de volle rij.
@@ -646,32 +661,44 @@ function statKaart(inhoud, actie, titel, extraKlasse, attrs) {
  * De L vertrekt vanaf de kaart, dus het paneel begint even breed als zij en
  * eindigt daar weer bij het sluiten. Die breedte kan niet in de CSS staan:
  * hoeveel kaarten er naast elkaar passen hangt af van de breedte van het
- * scherm. Ze wordt daarom bij het renderen gemeten en in --meldingen-start
+ * scherm. Ze wordt daarom bij het renderen gemeten en in --paneel-start
  * gezet, NIET bij het klikken: een breedte die in dezelfde tel verandert als
  * de klasse omslaat, komt te laat om het vertrekpunt van de animatie te zijn.
  */
-function meetMeldingenStart() {
-    if (AppState._meldingenMeter) AppState._meldingenMeter.disconnect();
-    AppState._meldingenMeter = null;
-    const paneel = document.getElementById('home-meldingen');
-    const kaart = document.querySelector('.stat-card--meldingen');
-    if (!paneel || !kaart) return;
-    const zet = () => paneel.style.setProperty('--meldingen-start', `${kaart.offsetWidth}px`);
-    zet();
-    // De kaart wordt smaller of breder als het venster of de zijbalk verandert,
-    // en dan klopt het vertrekpunt niet meer.
-    if (typeof ResizeObserver === 'function') {
-        AppState._meldingenMeter = new ResizeObserver(zet);
-        AppState._meldingenMeter.observe(kaart);
-    }
+function meetPaneelStarts() {
+    (AppState._paneelMeters || []).forEach(m => m.disconnect());
+    AppState._paneelMeters = [];
+    document.querySelectorAll('#home-content .stat-card[aria-controls]').forEach(kaart => {
+        const paneel = document.getElementById(kaart.getAttribute('aria-controls'));
+        if (!paneel) return;
+        const zet = () => paneel.style.setProperty('--paneel-start', `${kaart.offsetWidth}px`);
+        zet();
+        // De kaart wordt smaller of breder als het venster of de zijbalk
+        // verandert, en dan klopt het vertrekpunt niet meer.
+        if (typeof ResizeObserver === 'function') {
+            const meter = new ResizeObserver(zet);
+            meter.observe(kaart);
+            AppState._paneelMeters.push(meter);
+        }
+    });
 }
 
-function toggleHomeMeldingen(knop) {
-    const paneel = document.getElementById('home-meldingen');
+function toggleHomePaneel(knop) {
+    const paneel = document.getElementById(knop.getAttribute('aria-controls'));
     if (!paneel) return;
     const doos = paneel.firstElementChild;
-    const open = !paneel.classList.contains('home-meldingen--open');
-    clearTimeout(AppState._meldingenTimer);
+    const open = !paneel.classList.contains('home-paneel--open');
+    clearTimeout(AppState._paneelTimer);
+
+    // Hoogstens één paneel tegelijk. Twee L-en onder elkaar, elk wijzend naar
+    // een andere kaart, leest als twee losse blokken.
+    document.querySelectorAll('#home-content .stat-card--open').forEach(k => {
+        if (k === knop) return;
+        k.classList.remove('stat-card--open');
+        k.setAttribute('aria-expanded', 'false');
+        const p = document.getElementById(k.getAttribute('aria-controls'));
+        if (p) { p.classList.remove('home-paneel--open'); p.style.maxHeight = ''; }
+    });
 
     // max-height moet de ECHTE hoogte van de lijst zijn. Met een ruime vaste
     // bovengrens staat de lijst er na een paar milliseconden al, want de
@@ -679,15 +706,15 @@ function toggleHomeMeldingen(knop) {
     // grens wordt de onderste afgeknipt.
     if (open) {
         paneel.style.maxHeight = `${doos.offsetHeight}px`;
-        paneel.classList.add('home-meldingen--open');
-        // Daarna de grens loslaten: een melding die je uitklapt maakt de lijst
+        paneel.classList.add('home-paneel--open');
+        // Daarna de grens loslaten: een regel die je uitklapt maakt de lijst
         // langer en mag niet tegen die hoogte aanlopen.
-        AppState._meldingenTimer = setTimeout(() => { paneel.style.maxHeight = 'none'; }, 280);
+        AppState._paneelTimer = setTimeout(() => { paneel.style.maxHeight = 'none'; }, 280);
     } else {
         // Vanaf 'none' valt niets te animeren, dus eerst de hoogte vastzetten.
         paneel.style.maxHeight = `${doos.offsetHeight}px`;
         void paneel.offsetHeight;
-        paneel.classList.remove('home-meldingen--open');
+        paneel.classList.remove('home-paneel--open');
         paneel.style.maxHeight = '';
     }
     knop.classList.toggle('stat-card--open', open);
@@ -735,7 +762,7 @@ function renderHomeStats(user, role) {
                     <div class="stat-card-k">aandachtspunten</div>
                 </div>
                 ${alertCount ? '<i data-lucide="chevron-down" class="lucide-sm stat-card-chevron"></i>' : ''}`,
-                alertCount ? 'toggleHomeMeldingen(this)' : '',
+                alertCount ? 'toggleHomePaneel(this)' : '',
                 'Toon de meldingen', 'stat-card--meldingen',
                 'aria-expanded="false" aria-controls="home-meldingen"')
     ].filter(Boolean);
@@ -866,6 +893,10 @@ function renderHomeQuickActions(role) {
 // `role` is geen parameter meer: sinds #197 gelden voor iedereen dezelfde
 // filterregels op de startpagina.
 function renderHomeRequests(user) {
+    // Zelfde grens als bij renderHomeEigenUren: een adminaccount draait niet
+    // mee in het rooster en krijgt dus ook de kaart niet die dit paneel opent.
+    // Een paneel zonder kaart zou onbereikbaar in de pagina staan.
+    if (!user || user.role === 'admin') { AppState._homeAandachtCount = 0; return ''; }
     const userId = Number(user.id || user.userId);
     const userTeam = user.team_id || user.mainTeam;
 
@@ -895,14 +926,14 @@ function renderHomeRequests(user) {
         r.status === 'open' && (!r.mySubmittedAt || r.myApproved === false)
     );
 
-    const totaal = pendingRequests.length + verlofTaken.length;
+    // De kaart "vraagt je aandacht" toont dit getal; zij is de kop van dit
+    // paneel. Hier stond eerder een losse kaart onderaan home met dezelfde
+    // telling erin, naast een stat-kaart die alleen de ruilverzoeken telde.
+    AppState._homeAandachtCount = pendingRequests.length + verlofTaken.length;
+    if (AppState._homeAandachtCount === 0) return '';
 
     let requestsHtml = '';
-    if (totaal === 0) {
-        requestsHtml = '<div class="home-card-empty"><i data-lucide="inbox" class="empty-state-icon"></i>Niets dat je aandacht vraagt</div>';
-    } else {
-        requestsHtml = '<div class="home-card-body">';
-
+    {
         verlofTaken.forEach(r => {
             const afgewezen = r.myApproved === false;
             const label = afgewezen ? 'Opnieuw invullen' : 'Invullen';
@@ -920,7 +951,9 @@ function renderHomeRequests(user) {
             `;
         });
 
-        pendingRequests.slice(0, 5).forEach(req => {
+        // Geen bovengrens van vijf meer met "+ N meer..." eronder: het paneel
+        // scrollt in zichzelf, dus een lange lijst past gewoon.
+        pendingRequests.forEach(req => {
             const isSwap = req.request_type === 'swap';
             const typeLabel = isSwap ? 'Ruil' : 'Overname';
             const requesterName = escapeHtml(req.requester_name || 'Onbekend');
@@ -941,22 +974,11 @@ function renderHomeRequests(user) {
                 </div>
             `;
         });
-        if (pendingRequests.length > 5) {
-            requestsHtml += `<div class="home-card-empty home-card-more">+ ${pendingRequests.length - 5} meer...</div>`;
-        }
-        requestsHtml += '</div>';
     }
 
-    // Niet langer alleen ruilverzoeken, dus ook niet langer "verzoeken"
-    return `
-        <div class="home-card">
-            <div class="home-card-header">
-                Vraagt je aandacht
-                ${totaal > 0 ? `<span class="card-count">${totaal}</span>` : ''}
-            </div>
-            ${requestsHtml}
-        </div>
-    `;
+    return `<div id="home-aandacht" class="home-paneel home-paneel--aandacht">
+            <div class="home-paneel-doos"><div class="home-paneel-lijst">${requestsHtml}</div></div>
+        </div>`;
 }
 
 function renderHomeTeamCoverage(role, user) {
