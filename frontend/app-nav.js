@@ -671,7 +671,14 @@ function meetPaneelStarts() {
     document.querySelectorAll('#home-content .stat-card[aria-controls]').forEach(kaart => {
         const paneel = document.getElementById(kaart.getAttribute('aria-controls'));
         if (!paneel) return;
-        const zet = () => paneel.style.setProperty('--paneel-start', `${kaart.offsetWidth}px`);
+        const zet = () => {
+            paneel.style.setProperty('--paneel-start', `${kaart.offsetWidth}px`);
+            // Hoever de kaart van de rechterrand af staat. Nul als ze de
+            // laatste van de rij is; anders hangt het paneel daaraan vast.
+            const rand = paneel.parentElement.getBoundingClientRect().right;
+            const tot = Math.max(0, Math.round(rand - kaart.getBoundingClientRect().right));
+            paneel.style.setProperty('--paneel-rechts', `${tot}px`);
+        };
         zet();
         // De kaart wordt smaller of breder als het venster of de zijbalk
         // verandert, en dan klopt het vertrekpunt niet meer.

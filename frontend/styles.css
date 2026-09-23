@@ -2250,7 +2250,11 @@ button.stat-card {
     transition: box-shadow .15s ease, border-color .15s ease, transform .15s ease;
 }
 button.stat-card:hover {
-    border-color: var(--sage);
+    /* Een kaart die een paneel opent hovert in de kleur van dat paneel. Hier
+       stond --sage vast, dus de kaart "aandachtspunten" kleurde bij het
+       aanwijzen groen terwijl ze rood is. Kaarten zonder eigen kleur, die
+       alleen ergens naartoe gaan, houden --sage. */
+    border-color: var(--paneel-kleur, var(--sage));
     box-shadow: var(--shadow-md);
     transform: translateY(-1px);
 }
@@ -2320,6 +2324,12 @@ button.stat-card:focus-visible {
 .home-paneel {
     width: var(--paneel-start, 260px);
     margin-left: auto;
+    /* De rechterrand van het paneel hoort aan de rechterrand van ZIJN kaart te
+       hangen, niet aan die van de pagina. Staat de kaart niet uiterst rechts,
+       dan zou het paneel anders onder de kaarten ernaast door lopen en is het
+       geen L meer. --paneel-rechts is de afstand van die kaart tot de rand,
+       in JS gemeten naast --paneel-start. */
+    margin-right: var(--paneel-rechts, 0px);
     /* Dezelfde tussenruimte als tussen de kaarten onderling. De liggende balk
        van de L hoort niet tegen de kaarten ernaast te plakken. Het stuk onder
        de kaart die hem opent wordt overbrugd door .stat-card--open::after. */
@@ -2336,7 +2346,7 @@ button.stat-card:focus-visible {
                 visibility 0s linear .38s;
 }
 .home-paneel--open {
-    width: 100%;
+    width: calc(100% - var(--paneel-rechts, 0px));
     margin-top: var(--stats-gap);
     opacity: 1;
     visibility: visible;
@@ -2372,7 +2382,17 @@ button.stat-card:focus-visible {
     flex-direction: column;
     max-height: 60vh;
     overflow-y: auto;
+    /* Moet er expliciet staan. Zodra overflow-y iets anders is dan visible,
+       rekent de browser visible om naar auto, en dan volstaat één pixel te
+       brede inhoud voor een horizontale schuifbalk onderaan het paneel. */
+    overflow-x: hidden;
 }
+
+/* De regels in dit paneel schuiven 4 pixels naar rechts bij het aanwijzen.
+   In de oude kaart zat daar de binnenmarge omheen; in een paneel dat de volle
+   breedte vult is die er niet, dus die komt hier terug. De meldingen hebben
+   hem niet nodig: dat zijn regels van rand tot rand. */
+.home-paneel--aandacht .home-paneel-lijst { padding: 10px 12px; }
 
 /* De kaart die een paneel opent hoort er bovenop te staan en niet ernaast:
    onderaan vierkant, want daar gaat de lijst verder. */
@@ -2925,9 +2945,12 @@ button.stat-card--open::after {
 }
 
 .home-request-item:hover {
-    background: #fffdf9;
-    border-color: var(--primary-color);
-    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+    /* #180: hier stonden #fffdf9 en een blauwe schaduw, rgba(37, 99, 235),
+       nog uit de Tailwind-tijd. Die schaduw was blauw op een warme pagina en
+       werkte alleen in lichte modus. */
+    background: var(--raise);
+    border-color: var(--paneel-kleur, var(--primary-color));
+    box-shadow: var(--shadow-md);
     transform: translateX(4px);
 }
 
