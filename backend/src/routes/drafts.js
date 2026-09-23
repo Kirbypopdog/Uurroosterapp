@@ -136,6 +136,139 @@ router.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterver
   }
 });
 
+/**
+ * #148 stap 1: één week wegschrijven in plaats van het hele concept.
+ *
+ * PUT /schedule-drafts/:id vervangt de hele grid-kolom met wat de browser
+ * stuurt, en de browser stuurt zijn eigen kopie van ALLE weken. Zolang er maar
+ * één iemand tegelijk in een concept kan, kan dat geen kwaad: het slot op
+ * conceptniveau geeft de tweede persoon een 423.
+ *
+ * Maar #148 wil juist dat twee mensen tegelijk in verschillende weken werken.
+ * Dan wordt dat hele-raster-schrijven gevaarlijk: A bewaart, B bewaart daarna
+ * zijn eigen kopie, en week 19 van A is weg zonder dat iemand iets merkt. Een
+ * slot op week 19 helpt daar niet tegen, want B raakte week 19 nooit aan.
+ *
+ * Deze route schrijft alleen de meegegeven week, en doet dat in de databank
+ * zelf met jsonb-samenvoeging. De browser leest dus niets terug en overschrijft
+ * niets van een ander. Daarmee is de weg vrij voor de weeksloten uit stap 2.
+ *
+ * Wat NIET per week gaat: de teamvergaderingen (_teamMeetings) staan per team
+ * en gelden voor het hele concept. Die blijven bij PUT horen.
+ */
+router.patch('/schedule-drafts/:id/weeks/:week', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  const { id, week } = req.params;
+  const {
+    weekGrid, staffingRules, patternWeek, patternMeta,
+    // Conceptbreed, en dus niet van één week. Ze reizen mee zodat een autosave
+    // één verzoek blijft: anders zou de bouwer hiernaast nog een PUT moeten
+    // sturen, en juist die PUT wilden we kwijt.
+    teamMeetings, teamFilter, type, holidayPeriodId, weekNumber,
+  } = req.body || {};
+
+  // De week wordt een sleutel in het JSON-object, dus hij moet een net getal
+  // zijn. Parameterbinding beschermt tegen injectie, maar een sleutel als
+  // "_pattern" zou de metadata van het concept overschrijven.
+  if (!/^[1-9][0-9]{0,2}$/.test(String(week))) {
+    return res.status(400).json({ error: 'Weeknummer moet een getal van 1 tot 999 zijn' });
+  }
+  if (weekGrid === undefined || weekGrid === null || typeof weekGrid !== 'object' || Array.isArray(weekGrid)) {
+    return res.status(400).json({ error: 'weekGrid is verplicht en moet een object zijn' });
+  }
+
+  try {
+    const lockCheck = await pool.query(
+      'SELECT locked_by, locked_by_name, locked_at FROM schedule_drafts WHERE id = $1',
+      [id]
+    );
+    if (lockCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Concept niet gevonden' });
+    }
+    const { locked_by, locked_by_name, locked_at } = lockCheck.rows[0];
+    const lockExpired = !locked_at || (Date.now() - new Date(locked_at).getTime()) > DRAFT_LOCK_TTL_MS;
+    if (locked_by && locked_by !== req.user.id && !lockExpired) {
+      return res.status(423).json({ error: `Concept is vergrendeld door ${locked_by_name}` });
+    }
+    const vernieuwLock = locked_by === req.user.id;
+
+    // De samenvoeging gebeurt op de OUDE waarde van grid, binnen dezelfde
+    // UPDATE, dus dit is één atomaire stap op de rij. COALESCE maakt de
+    // ontbrekende niveaus aan: bij een leeg concept bestaat _pattern nog niet.
+    const params = [id, String(week), JSON.stringify(weekGrid)];
+    let i = 4;
+    let expr = `COALESCE(grid, '{}'::jsonb)
+                || jsonb_build_object('_multiWeek', true)
+                || jsonb_build_object($2::text, $3::jsonb)`;
+    if (staffingRules !== undefined) {
+      expr += `
+                || jsonb_build_object('_staffingRules',
+                     COALESCE(grid->'_staffingRules', '{}'::jsonb)
+                     || jsonb_build_object($2::text, $${i}::jsonb))`;
+      params.push(JSON.stringify(staffingRules ?? {}));
+      i++;
+    }
+    if (patternWeek !== undefined || patternMeta !== undefined) {
+      // _pattern draagt twee soorten gegevens: de cycluslengte en de
+      // referentiedatum gelden voor het HELE concept, de gesloten dagen staan
+      // per week onder 'weeks'. Allebei worden ze hier samengevoegd in plaats
+      // van vervangen, zodat de ene soort de andere niet wist.
+      let patroon = `COALESCE(grid->'_pattern', '{}'::jsonb)`;
+      if (patternMeta !== undefined) {
+        patroon += ` || $${i}::jsonb`;
+        params.push(JSON.stringify(patternMeta ?? {}));
+        i++;
+      }
+      if (patternWeek !== undefined) {
+        patroon += `
+                     || jsonb_build_object('weeks',
+                          COALESCE(grid->'_pattern'->'weeks', '{}'::jsonb)
+                          || jsonb_build_object($2::text, $${i}::jsonb))`;
+        params.push(JSON.stringify(patternWeek ?? {}));
+        i++;
+      }
+      expr += `
+                || jsonb_build_object('_pattern', ${patroon})`;
+    }
+
+    if (teamMeetings !== undefined) {
+      expr += `
+                || jsonb_build_object('_teamMeetings', $${i}::jsonb)`;
+      params.push(JSON.stringify(teamMeetings ?? {}));
+      i++;
+    }
+
+    const kolommen = [`grid = ${expr}`, 'updated_at = NOW()'];
+    if (vernieuwLock) kolommen.push('locked_at = NOW()');
+    kolommen.push(`updated_by = $${i}`); params.push(req.user.id); i++;
+    kolommen.push(`updated_by_name = $${i}`); params.push(req.user.name); i++;
+    if (teamFilter !== undefined) { kolommen.push(`team_filter = $${i}`); params.push(teamFilter); i++; }
+    if (type !== undefined) { kolommen.push(`type = $${i}`); params.push(type); i++; }
+    if (holidayPeriodId !== undefined) { kolommen.push(`holiday_period_id = $${i}`); params.push(holidayPeriodId || null); i++; }
+    if (weekNumber !== undefined) { kolommen.push(`week_number = $${i}`); params.push(weekNumber); i++; }
+
+    const result = await pool.query(
+      `UPDATE schedule_drafts
+          SET ${kolommen.join(',\n              ')}
+        WHERE id = $1
+       RETURNING id, name, week_number as "weekNumber", team_filter as "teamFilter",
+                 grid, created_by_name as "createdByName", updated_by_name as "updatedByName",
+                 last_applied_at as "lastAppliedAt", last_applied_by as "lastAppliedBy",
+                 valid_from::text as "validFrom", valid_until::text as "validUntil",
+                 type, holiday_period_id as "holidayPeriodId",
+                 created_at as "createdAt", updated_at as "updatedAt"`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Concept niet gevonden' });
+    }
+    res.json({ draft: result.rows[0] });
+  } catch (err) {
+    console.error('Error updating schedule draft week:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.delete('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const { id } = req.params;
   try {

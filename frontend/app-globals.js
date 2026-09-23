@@ -47,6 +47,7 @@ const AppState = {
     builderTeamFilter: null,
     builderGrid: {},             // { [userId]: { [dayIndex0to6]: { startTime, endTime, team } } }
     builderGridByWeek: {},       // { [weekNumber]: builderGrid } — cache per week bij switchen
+    builderVuileWeken: new Set(), // #148: welke weken sinds de laatste autosave veranderd zijn
     builderLoadedDraftId: null,   // ID van het geladen concept (null = geen concept geladen)
     builderLoadedDraftName: null, // naam van het geladen concept
     builderIsDirty: false,

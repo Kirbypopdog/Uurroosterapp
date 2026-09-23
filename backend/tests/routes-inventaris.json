@@ -65,6 +65,8 @@
   "GET /users/:id",
   "PATCH /admin/users/:id",
   "PATCH /api/v1/admin/users/:id",
+  "PATCH /api/v1/schedule-drafts/:id/weeks/:week",
+  "PATCH /schedule-drafts/:id/weeks/:week",
   "POST /admin/migrate",
   "POST /admin/seed-teams",
   "POST /admin/test-email",

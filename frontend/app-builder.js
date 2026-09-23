@@ -1382,6 +1382,11 @@ function updateBuilderSaveStatus(state) {
 
 function setBuilderDirty() {
     AppState.builderIsDirty = true;
+    // #148: onthouden WELKE week veranderd is. De autosave schrijft sinds deze
+    // wijziging per week weg, en wie in drie seconden van week wisselt zou
+    // anders de vorige week niet bewaard krijgen.
+    if (!AppState.builderVuileWeken) AppState.builderVuileWeken = new Set();
+    AppState.builderVuileWeken.add(AppState.builderWeekNumber);
     updateBuilderSaveStatus('bezig');
     scheduleBuilderAutoSave();
 }
@@ -1401,6 +1406,10 @@ function scheduleBuilderAutoSave() {
 function startBuilderAutoSave() {
     AppState.builderSaveState = null;
     AppState.builderAutoSavedAt = null;
+    // #148: bij een nieuw concept beginnen met een schone lijst. Bleef hier een
+    // weeknummer van het vorige concept staan, dan zou de eerstvolgende
+    // autosave dat concept een week opdringen die er niet in thuishoort.
+    AppState.builderVuileWeken = new Set();
 }
 
 function stopBuilderAutoSave() {
@@ -1414,37 +1423,60 @@ async function autoSaveBuilderDraft() {
     AppState.builderAutoSaveTimer = null;
     if (!AppState.builderIsDirty || !AppState.builderLoadedDraftId) return true;
 
+    // De week waar je nu in zit staat nog in builderGrid; die moet eerst naar
+    // de cache voor we hem kunnen wegschrijven.
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
-    const multiGrid = { _multiWeek: true };
-    for (const [weekNum, weekGrid] of Object.entries(AppState.builderGridByWeek)) {
-        if (Object.keys(weekGrid).length > 0 && Object.values(weekGrid).some(d => Object.keys(d).length > 0)) {
-            multiGrid[weekNum] = weekGrid;
-        }
-    }
-
-    const updateData = {
-        grid: JSON.parse(JSON.stringify(multiGrid)),
-        weekNumber: AppState.builderWeekNumber,
-        teamFilter: AppState.builderTeamFilter,
-        type: AppState.builderConceptType || 'basis',
-        holidayPeriodId: AppState.builderHolidayPeriodId || null
-    };
-    if (AppState.builderPattern) updateData.grid._pattern = AppState.builderPattern;
     AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules));
-    if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
-        updateData.grid._staffingRules = AppState.builderStaffingRulesByWeek;
-    }
-    updateData.grid._teamMeetings = AppState.builderMeetings || {};
+
+    // #148: per week wegschrijven in plaats van het hele raster.
+    //
+    // Hier stond een PUT die de VOLLEDIGE grid-kolom verving met alle weken
+    // zoals deze browser ze kende. Dat kon zolang er maar één iemand tegelijk
+    // in een concept mag; het slot op conceptniveau hield de tweede buiten.
+    // Wil je dat twee mensen tegelijk in verschillende weken werken, dan wist
+    // die PUT het werk van de ander, en een slot op zijn week helpt daar niet
+    // tegen omdat jij die week nooit aanraakte.
+    const teSchrijven = new Set(AppState.builderVuileWeken || []);
+    teSchrijven.add(AppState.builderWeekNumber);
+    const weken = [...teSchrijven];
 
     updateBuilderSaveStatus('bezig');
     try {
-        await updateScheduleDraft(AppState.builderLoadedDraftId, updateData);
-        const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
-        if (cached) {
-            cached.grid = updateData.grid;
-            cached.weekNumber = AppState.builderWeekNumber;
-            cached.updatedAt = new Date().toISOString();
+        let antwoord = null;
+        for (let n = 0; n < weken.length; n++) {
+            const week = weken[n];
+            const lading = {
+                weekGrid: AppState.builderGridByWeek[week] || {},
+                staffingRules: AppState.builderStaffingRulesByWeek[week] || {},
+            };
+            if (AppState.builderPattern) {
+                lading.patternWeek = (AppState.builderPattern.weeks || {})[week] || {};
+            }
+            // Wat voor het HELE concept geldt gaat één keer mee, bij de laatste
+            // week. Anders staat het bij elk verzoek opnieuw in de lucht.
+            if (n === weken.length - 1) {
+                lading.teamMeetings = AppState.builderMeetings || {};
+                lading.teamFilter = AppState.builderTeamFilter;
+                lading.type = AppState.builderConceptType || 'basis';
+                lading.holidayPeriodId = AppState.builderHolidayPeriodId || null;
+                lading.weekNumber = AppState.builderWeekNumber;
+                if (AppState.builderPattern) {
+                    const { weeks, ...rest } = AppState.builderPattern;
+                    lading.patternMeta = rest;
+                }
+            }
+            antwoord = await updateScheduleDraftWeek(AppState.builderLoadedDraftId, week, lading);
         }
+
+        const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
+        if (cached && antwoord?.draft) {
+            // Het raster van de SERVER en niet dat van ons: daar kan intussen
+            // een week van iemand anders in staan.
+            cached.grid = antwoord.draft.grid;
+            cached.weekNumber = antwoord.draft.weekNumber;
+            cached.updatedAt = antwoord.draft.updatedAt;
+        }
+        AppState.builderVuileWeken = new Set();
         AppState.builderIsDirty = false;
         const now = new Date();
         AppState.builderAutoSavedAt = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -1453,7 +1485,8 @@ async function autoSaveBuilderDraft() {
     } catch (err) {
         // Dit was vroeger stil: enkel een console.error, terwijl je werk niet
         // bewaard was. Nu er geen opslaanknop meer is, moet dit zichtbaar zijn
-        // én zelf opnieuw proberen.
+        // én zelf opnieuw proberen. De vuile weken blijven staan, dus een
+        // volgende poging pakt ze opnieuw mee.
         console.error('Auto-save failed:', err);
         AppState.builderIsDirty = true;
         updateBuilderSaveStatus('mislukt');
@@ -1813,6 +1846,7 @@ function attachBuilderEventListeners(container) {
         const doReset = () => {
             AppState.builderGrid = {};
             AppState.builderGridByWeek = {};
+            AppState.builderVuileWeken = new Set();
             AppState.builderStaffingRules = {};
             AppState.builderStaffingRulesByWeek = {};
             AppState.builderMeetings = {};

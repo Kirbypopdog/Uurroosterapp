@@ -85,35 +85,20 @@ async function saveBuilderDraft() {
     // If a draft is loaded, UPDATE it directly (no modal needed)
     if (AppState.builderLoadedDraftId) {
         try {
-            const updateData = {
-                grid: JSON.parse(JSON.stringify(multiGrid)),
-                weekNumber: AppState.builderWeekNumber,
-                teamFilter: AppState.builderTeamFilter,
-                type: AppState.builderConceptType || 'basis',
-                holidayPeriodId: AppState.builderHolidayPeriodId || null
-            };
-            // Include pattern + rotation + staffing rules in grid metadata
-            if (AppState.builderPattern) updateData.grid._pattern = AppState.builderPattern;
-            // Sync staffing rules cache and save
-            AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules));
-            if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
-                updateData.grid._staffingRules = AppState.builderStaffingRulesByWeek;
-            }
-            // Save team meetings in draft
-            updateData.grid._teamMeetings = AppState.builderMeetings || {};
-            // Rotation is managed via Settings, not stored in draft
+            // #148: hier stond dezelfde opbouw van het volledige raster als in
+            // autoSaveBuilderDraft, met dezelfde PUT die alle weken verving.
+            // Twee plekken die hetzelfde doen is er een te veel, en de tweede
+            // wordt vergeten. Bewaren gaat nu overal via die ene functie, die
+            // per week wegschrijft.
             const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
             if (cached) cached._previousGrid = JSON.parse(JSON.stringify(cached.grid || {}));
-            await updateScheduleDraft(AppState.builderLoadedDraftId, updateData);
-            // Update local cache
-            if (cached) {
-                cached.grid = updateData.grid;
-                cached.weekNumber = AppState.builderWeekNumber;
-                cached.teamFilter = AppState.builderTeamFilter;
-                cached.updatedAt = new Date().toISOString();
-                cached.updatedByName = AppState.currentUser?.name || 'Onbekend';
+
+            const gelukt = await autoSaveBuilderDraft();
+            if (!gelukt) {
+                showToast('Fout bij bijwerken concept', 'error');
+                return;
             }
-            AppState.builderIsDirty = false;
+
             await unlockScheduleDraft(AppState.builderLoadedDraftId);
             AppState.builderScreen = 'overview';
             renderBuilder();
@@ -122,7 +107,7 @@ async function saveBuilderDraft() {
             // If this draft is currently active AND grid actually changed, ask to re-apply
             const newestActiveId = findNewestActiveDraftId(DataStore.settings.schedule_drafts || []);
             const previousGrid = cached ? JSON.stringify(cached._previousGrid) : null;
-            const newGrid = JSON.stringify(updateData.grid);
+            const newGrid = cached ? JSON.stringify(cached.grid) : null;
             if (newestActiveId === AppState.builderLoadedDraftId && previousGrid !== newGrid) {
                 const wantsApply = await showReapplyAfterEditModal(AppState.builderLoadedDraftName);
                 if (wantsApply) {
@@ -469,6 +454,8 @@ function showNewConceptTypeModal() {
         // Initialize new concept in AppState
         AppState.builderGrid = {};
         AppState.builderGridByWeek = {};
+    AppState.builderVuileWeken = new Set();
+        AppState.builderVuileWeken = new Set();
         AppState.builderStaffingRules = {};
         AppState.builderStaffingRulesByWeek = {};
         AppState.builderShowStaffingEditor = false;

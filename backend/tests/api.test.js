@@ -1989,6 +1989,114 @@ describe('POST /schedule-drafts', () => {
   });
 });
 
+// ===== PATCH /schedule-drafts/:id/weeks/:week (#148 stap 1) =====
+
+describe('PATCH /schedule-drafts/:id/weeks/:week', () => {
+  function adminToken() {
+    return makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+  }
+  // Het slot staat op deze admin zelf, dus de route mag door.
+  function mockEigenSlot() {
+    pool.query.mockResolvedValueOnce({ rows: [{ locked_by: 1, locked_by_name: 'Admin', locked_at: new Date() }] });
+  }
+
+  test('schrijft ALLEEN de meegegeven week en vervangt niet de hele grid', async () => {
+    mockActiveUser();
+    mockEigenSlot();
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 'd1', grid: {} }] }); // UPDATE
+    const res = await request(app)
+      .patch('/api/v1/schedule-drafts/d1/weeks/3')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ weekGrid: { 7: { 0: { start: '07:00', end: '15:00' } } } });
+
+    expect(res.status).toBe(200);
+    const update = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE schedule_drafts')
+    );
+    expect(update).toBeDefined();
+    // Dit is de hele bedoeling van deze route: de kolom wordt samengevoegd,
+    // niet overschreven. `grid = $n` zou het werk van een ander wegvagen.
+    expect(update[0]).toContain('jsonb_build_object');
+    expect(update[0]).not.toMatch(/SET\s+grid = \$\d/);
+    // De week gaat als PARAMETER mee, niet in de tekst van de query.
+    expect(update[1]).toContain('3');
+  });
+
+  test('raakt _staffingRules en _pattern niet aan als ze niet meegestuurd worden', async () => {
+    mockActiveUser();
+    mockEigenSlot();
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 'd1', grid: {} }] });
+    await request(app)
+      .patch('/api/v1/schedule-drafts/d1/weeks/2')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ weekGrid: {} });
+
+    const update = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE schedule_drafts')
+    );
+    expect(update[0]).not.toContain('_staffingRules');
+    expect(update[0]).not.toContain('_pattern');
+  });
+
+  test('voegt _staffingRules en _pattern per week toe als ze er wel bij zitten', async () => {
+    mockActiveUser();
+    mockEigenSlot();
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 'd1', grid: {} }] });
+    await request(app)
+      .patch('/api/v1/schedule-drafts/d1/weeks/2')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ weekGrid: {}, staffingRules: { 1: [] }, patternWeek: { closedDays: [0] } });
+
+    const update = pool.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE schedule_drafts')
+    );
+    expect(update[0]).toContain("'_staffingRules'");
+    // Onder _pattern hoort het bij 'weeks', niet op het hoogste niveau: daar
+    // staat ook de cycluslengte, en die geldt voor het hele concept.
+    expect(update[0]).toContain("'weeks'");
+  });
+
+  test('weigert een weeknummer dat geen getal is', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .patch('/api/v1/schedule-drafts/d1/weeks/_pattern')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ weekGrid: {} });
+    expect(res.status).toBe(400);
+  });
+
+  test('weigert een verzoek zonder weekGrid', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .patch('/api/v1/schedule-drafts/d1/weeks/1')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  test('geeft 423 als het concept bij iemand anders vergrendeld is', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValueOnce({
+      rows: [{ locked_by: 9, locked_by_name: 'Sofie', locked_at: new Date() }]
+    });
+    const res = await request(app)
+      .patch('/api/v1/schedule-drafts/d1/weeks/1')
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .send({ weekGrid: {} });
+    expect(res.status).toBe(423);
+    expect(res.body.error).toContain('Sofie');
+  });
+
+  test('geeft 403 voor een medewerker', async () => {
+    mockActiveUser();
+    const res = await request(app)
+      .patch('/api/v1/schedule-drafts/d1/weeks/1')
+      .set('Authorization', `Bearer ${makeToken({ id: 5, role: 'medewerker', name: 'User', team_id: 'vlot1' })}`)
+      .send({ weekGrid: {} });
+    expect(res.status).toBe(403);
+  });
+});
+
 // ===== POST /admin/users =====
 
 describe('POST /admin/users', () => {

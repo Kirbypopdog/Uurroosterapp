@@ -2072,6 +2072,21 @@ async function updateScheduleDraft(id, data) {
     });
 }
 
+/**
+ * #148 stap 1: één week wegschrijven in plaats van het hele concept.
+ *
+ * updateScheduleDraft hierboven stuurt het VOLLEDIGE raster mee, dus alle weken
+ * zoals deze browser ze kent. Zodra twee mensen tegelijk in hetzelfde concept
+ * mogen werken, wist de een daarmee het werk van de ander. Deze route raakt
+ * alleen de week die je bewerkt hebt; de samenvoeging gebeurt in de databank.
+ */
+async function updateScheduleDraftWeek(id, week, data) {
+    return dataApiFetch(`/schedule-drafts/${id}/weeks/${week}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data)
+    });
+}
+
 async function deleteScheduleDraft(id) {
     return dataApiFetch(`/schedule-drafts/${id}`, {
         method: 'DELETE'
