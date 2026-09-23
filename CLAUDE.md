@@ -61,7 +61,13 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 ### Backend (`backend/`)
 | Bestand | Doel |
 |---------|------|
-| `src/server.js` | Alle API endpoints + auto-migratie bij startup |
+| `src/server.js` | Express opzetten, opstarten, de routers monteren. Was 7213 regels met alle endpoints erin; sinds #157 nog 395 |
+| `src/routes/*.js` | De endpoints, één bestand per domein. Elk bestand maakt zijn router met `maakRouter()` en exporteert hem; `server.js` hangt ze met `v1.use()` op in de volgorde waarin ze vroeger stonden |
+| `src/veilige-router.js` | `maakRouter()`: een router die een afwijzende async handler naar `next(err)` stuurt (#380). Gebruik deze, nooit `express.Router()` rechtstreeks, anders krijgt een verzoek bij een fout géén antwoord |
+| `src/middleware/auth.js` | `signToken`, `requireAuth`, `requireAdmin`, `requireRole` |
+| `src/helpers/audit.js` | `logAudit`: het schrijven naar de audit log. Het LEZEN is een route en staat in `routes/audit-log.js` |
+| `src/helpers/dienstregels.js` | Waar een dienst aan moet voldoen: `validateShiftRules`, `blockDayIfEmpty`, `getMinRustUren`, de afwezigheidstypes en de tijdcontroles. De enige helpers die meer dan één domein deelt |
+| `src/migraties.js` | De `MIGRATIONS`-array en `runMigrations()` |
 | `src/db.js` | PostgreSQL connection pool |
 | `src/email.js` | Resend email service (9 notificatie types) |
 | `src/utils.js` | Pure datumhulpfuncties (`getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`, `getEasterDate`, `getBelgianPublicHolidays`) |
@@ -82,6 +88,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `schooljaar.test.js` | Schooljaar- en periodeberekeningen |
 | `schema-drift.test.js` | Bewaakt dat `sql/schema.sql` niet achterloopt op de migraties (#329, #311) |
 | `monitoring.test.js` | Wat de foutmonitoring wegfiltert, op sleutelnaam én op waarde (#156) |
+| `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
 sneller dan dit bestand (#291).
@@ -113,7 +120,7 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 3. **ALTIJD** parameterized queries gebruiken (nooit string concatenation in SQL)
 4. **Backend retourneert BEIDE** `userId` EN `employeeId` (backward compatibility alias)
 5. **Permissions** checken in ZOWEL frontend ALS backend
-6. **Migraties**: geversioneerd via de `MIGRATIONS`-array + `runMigrations()` in server.js (draait bij elke startup, elke migratie exact één keer). Voeg nieuwe schema changes toe als nieuwe migratie-entry **én werk `sql/schema.sql` bij**, zodat beide wegen dezelfde database opleveren. `backend/tests/schema-drift.test.js` bewaakt dat: een kolom, index, tabel of constraint die alleen in een migratie staat laat die test falen. Migratie `000_base_schema` draait `schema.sql` idempotent, dus een verse database (bv. staging) initialiseert zichzelf; `ensureBootstrapData()` maakt standaardteams + admin-account aan zonder bestaande data te overschrijven
+6. **Migraties**: geversioneerd via de `MIGRATIONS`-array + `runMigrations()` in `src/migraties.js` (draait bij elke startup, elke migratie exact één keer). Voeg nieuwe schema changes toe als nieuwe migratie-entry **én werk `sql/schema.sql` bij**, zodat beide wegen dezelfde database opleveren. `backend/tests/schema-drift.test.js` bewaakt dat: een kolom, index, tabel of constraint die alleen in een migratie staat laat die test falen. Die test leest `src/migraties.js` als TEKST, dus verhuist dat bestand ooit, dan moet de test mee. Migratie `000_base_schema` draait `schema.sql` idempotent, dus een verse database (bv. staging) initialiseert zichzelf; `ensureBootstrapData()` maakt standaardteams + admin-account aan zonder bestaande data te overschrijven
 7. **shift_blocks**: Bij shift delete wordt block aangemaakt (voorkomt auto-regeneratie). Manual shift create verwijdert block.
 8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging
 9. **Fetch wrapper**: Gebruik uitsluitend `dataApiFetch()` uit `data.js`. `apiFetch()` is verwijderd (issue #26 opgelost). Uitzondering: `fetchPublicHolidays()` gebruikt plain `fetch()` want `/public-holidays` vereist geen auth.
@@ -307,7 +314,7 @@ cd backend
 npm test           # Alle tests uitvoeren, in enkele seconden
 ```
 
-Negen testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
+Tien testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
 voor wat elk bestand dekt. Tests gebruiken Jest + Supertest en de database wordt
 volledig gemockt, dus er is geen echte databank nodig.
 
