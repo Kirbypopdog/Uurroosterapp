@@ -334,7 +334,7 @@ function renderProfile() {
     DOM.profileContent.innerHTML = `
         <!-- Hero header -->
         <div class="profile-hero">
-            <div class="profile-hero-avatar" style="background:${teamColor}">${escapeHtml(initials)}</div>
+            ${avatarHtml(user.name, teamColor, teamName)}
             <div class="profile-hero-info">
                 <h2 class="profile-hero-name">${escapeHtml(user.name)}</h2>
                 <div class="profile-hero-meta">
@@ -832,7 +832,7 @@ function renderEmployeeCard(emp) {
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
             <div class="employee-header">
-                <span class="emp-avatar" style="background:${teamColor};color:${getContrastColor(teamColor)}" title="${escapeHtml(teamName)}">${initials}</span>
+                ${avatarHtml(emp.name, teamColor, teamName)}
                 <div class="employee-card-info">
                     <div class="employee-name">${employeeName}</div>
                     <div class="employee-card-sub">${subLine}</div>

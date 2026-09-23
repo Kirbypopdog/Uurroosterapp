@@ -243,7 +243,16 @@ function populateUserMenu() {
     if (!user) return;
     const avatar = document.getElementById('avatar-circle');
     const menuName = document.getElementById('user-menu-name');
-    if (avatar) avatar.textContent = getInitials(user.name);
+    if (avatar) {
+        avatar.textContent = getInitials(user.name);
+        // #167: deze cirkel stond als enige op de vaste --primary-color, dus
+        // op de kleur van de app in plaats van die van je team. Overal elders
+        // draagt hij de teamkleur, en dat is ook hier bruikbaar: je ziet in de
+        // zijbalk meteen onder welk team je ingelogd bent.
+        const kleur = teamKleur(user.mainTeam || user.team_id);
+        avatar.style.background = kleur;
+        avatar.style.color = getContrastColor(kleur);
+    }
     if (menuName) menuName.textContent = user.name;
 }
 

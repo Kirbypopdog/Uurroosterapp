@@ -349,9 +349,9 @@ function renderSwapRequestCard(swapRequest, mode) {
         <div class="swap-request-card">
             <div class="swap-request-header">
                 <div class="swap-people">
-                    <span class="swap-person"><span class="emp-avatar" style="background:${reqColor};color:${getContrastColor(reqColor)}">${reqInitials}</span>${escapeHtml(swapRequest.requester_name)}</span>
+                    <span class="swap-person">${avatarHtml(swapRequest.requester_name, reqColor, reqTeamName)}${escapeHtml(swapRequest.requester_name)}</span>
                     <span class="swap-people-arrow">${IconHelper.html(ICONS.swap, 'xs')}</span>
-                    <span class="swap-person"><span class="emp-avatar" style="background:${tgtColor};color:${getContrastColor(tgtColor)}">${tgtInitials}</span>${escapeHtml(swapRequest.target_name)}</span>
+                    <span class="swap-person">${avatarHtml(swapRequest.target_name, tgtColor, tgtTeamName)}${escapeHtml(swapRequest.target_name)}</span>
                 </div>
                 <span class="swap-status-badge status-${swapRequest.status}">
                     ${escapeHtml(swapStatusTekst(swapRequest, mode))}
@@ -454,7 +454,7 @@ function renderTakeoverRequestCard(takeoverRequest, mode = 'available') {
     // Title based on mode
     const titleHtml = mode === 'view'
         ? '<span class="swap-person-name">Je zoekt iemand voor deze dienst</span>'
-        : `<span class="swap-person"><span class="emp-avatar" style="background:${takeoverColor};color:${getContrastColor(takeoverColor)}">${reqInitials}</span>${escapeHtml(takeoverRequest.requester_name)} zoekt iemand</span>`;
+        : `<span class="swap-person">${avatarHtml(takeoverRequest.requester_name, takeoverColor)}${escapeHtml(takeoverRequest.requester_name)} zoekt iemand</span>`;
 
     return `
         <div class="swap-request-card takeover-card">

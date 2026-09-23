@@ -200,7 +200,7 @@ function renderAvailability() {
             const initials = escapeHtml(getInitials(emp.name || ''));
             html += `<div class="availability-employee-row${isCurrentUser ? ' current-user' : ''}">
                 <div class="availability-employee-col">
-                    <span class="emp-avatar" style="background:${teamColor};color:${getContrastColor(teamColor)}">${initials}</span>
+                    ${avatarHtml(emp.name, teamColor)}
                     <span class="emp-name">${escapeHtml(emp.name)}</span>
                 </div>
             `;

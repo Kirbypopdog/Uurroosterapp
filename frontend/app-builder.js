@@ -667,7 +667,7 @@ function renderBuilderEmployeeRow(employee) {
     const _empInitials = escapeHtml(getInitials(employee.name || ''));
     const verlofDagen = getBuilderLeaveDays(employee.id, AppState.builderWeekNumber);
     html += `<div class="builder-name-cell">
-        <span class="emp-avatar" style="background:${_empColor};color:${getContrastColor(_empColor)}">${_empInitials}</span>
+        ${avatarHtml(employee.name, _empColor)}
         <div class="builder-name-cell-text">
             <span class="emp-name">${escapeHtml(employee.name)}</span>
             <span class="emp-contract">${contractHours}u/week${verlofDagen.length

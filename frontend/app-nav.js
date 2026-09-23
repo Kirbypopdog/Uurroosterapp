@@ -1187,7 +1187,7 @@ function renderHomeNuAanHetWerk() {
 
         return `
             <div class="on-duty-chip">
-                <div class="on-duty-avatar" style="background:${escapeHtml(teamColor)};color:${getContrastColor(teamColor)}">${escapeHtml(initials)}</div>
+                ${avatarHtml(name, teamColor)}
                 <div class="on-duty-info">
                     <span class="on-duty-name">${escapeHtml(name)}</span>
                     <span class="on-duty-time">${escapeHtml(startTime)} – ${escapeHtml(endTime)}</span>

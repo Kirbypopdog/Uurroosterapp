@@ -816,7 +816,7 @@ function renderTimelineView() {
         const periodLabel = periodContract > 0 ? `${_fmtHrs(periodH)}/${periodContract}u` : `${_fmtHrs(periodH)}u`;
         return `<div class="timeline-employee-cell${respClass}" ${respTip}>
             <div class="emp-name-row">
-                <span class="emp-av" style="background:${teamColor};color:${getContrastColor(teamColor)}">${initials}</span>
+                ${avatarHtml(emp.name, teamColor)}
                 ${respBadge}<span class="emp-name">${name}</span>
             </div>
             <div class="emp-hours-line">

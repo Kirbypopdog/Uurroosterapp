@@ -637,6 +637,8 @@ function showSelectPrompt(message, title, options) {
 // --text-primary: dit staat op een teamkleur, niet op de paginaachtergrond, en
 // moet in beide thema's hetzelfde blijven.
 const TEKST_OP_LICHT = '#14110c';
+// Voor wie geen team heeft, of een team dat niet meer bestaat.
+const AVATAR_STANDAARDKLEUR = '#8d897c';
 
 function _hexNaarRgb(hexColor) {
     if (typeof hexColor !== 'string') return null;
@@ -683,6 +685,33 @@ function getContrastColor(hexColor) {
     const opWit = _contrast(rgb, [255, 255, 255]);
     const opDonker = _contrast(rgb, _hexNaarRgb(TEKST_OP_LICHT));
     return opDonker > opWit ? TEKST_OP_LICHT : '#ffffff';
+}
+
+/**
+ * #167: de initialencirkel bij een naam, op één plek.
+ *
+ * Hij stond op zeven plekken in de CSS en negen keer in de JS, elke keer
+ * opnieuw uitgeschreven: initialen halen, teamkleur opzoeken, contrastkleur
+ * uitrekenen. Zeven kopieën betekent zeven kansen om er één te vergeten, en
+ * dat was ook gebeurd: de grote cirkel op het profiel zette de letters altijd
+ * op wit, ongeacht de teamkleur.
+ *
+ * De kleur komt van het TEAM en niet van de naam. Het issue stelde een tint
+ * voor die uit de letters van de naam wordt berekend, maar dan draagt de kleur
+ * geen betekenis meer en botst ze met de teamkleuren, die er wel een hebben.
+ * Twee kleursystemen door elkaar leest als één systeem dat niet klopt.
+ */
+function teamKleur(teamId) {
+    return DataStore.settings.teams?.[teamId]?.color || AVATAR_STANDAARDKLEUR;
+}
+
+function avatarHtml(naam, kleur, titel) {
+    const vlak = kleur || AVATAR_STANDAARDKLEUR;
+    // data-tooltip en niet title: dat laatste laat de browser zijn eigen zwarte
+    // kadertje tekenen, dat er niet uitziet als de rest van de app en pas na een
+    // seconde of twee verschijnt.
+    const tip = titel ? ` data-tooltip="${escapeHtml(titel)}"` : '';
+    return `<span class="avatar" style="background:${vlak};color:${getContrastColor(vlak)}"${tip}>${escapeHtml(getInitials(naam || ''))}</span>`;
 }
 
 function applyTeamColors() {
