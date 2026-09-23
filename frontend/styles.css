@@ -42,6 +42,11 @@
     --shadow-sm: 0 1px 2px rgba(43,42,38,.04), 0 4px 16px rgba(43,42,38,.05);
     --shadow-md: 0 4px 14px rgba(43,42,38,.08);
     --shadow-lg: 0 16px 50px rgba(43,42,38,.16);
+    /* #166: de ruimte tussen de stat-kaarten op home. Staat hier omdat drie
+       plekken hem moeten kennen: het raster zelf, de tussenruimte boven het
+       meldingenpaneel, en het verlengstuk van de kaart dat die ruimte
+       overbrugt. Lopen die uiteen, dan klopt de vorm van de L niet meer. */
+    --stats-gap: 14px;
     --radius-sm: 9px;
     --radius-md: 12px;
     --radius-lg: 16px;
@@ -2217,7 +2222,7 @@ textarea:focus-visible {
 .home-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 14px;
+    gap: var(--stats-gap);
     margin-top: 22px;
 }
 .stat-card {
@@ -2309,6 +2314,10 @@ button.stat-card:focus-visible {
 .home-meldingen {
     width: var(--meldingen-start, 260px);
     margin-left: auto;
+    /* Dezelfde tussenruimte als tussen de kaarten onderling. De liggende balk
+       van de L hoort niet tegen de kaarten ernaast te plakken. Het stuk onder
+       de kaart die hem opent wordt overbrugd door .stat-card--open::after. */
+    margin-top: 0;
     max-height: 0;
     opacity: 0;
     visibility: hidden;
@@ -2316,15 +2325,18 @@ button.stat-card:focus-visible {
     /* sluiten: eerst naar rechts, dan omhoog */
     transition: width .2s ease,
                 max-height .2s ease .18s,
+                margin-top .2s ease .18s,
                 opacity .12s ease .26s,
                 visibility 0s linear .38s;
 }
 .home-meldingen--open {
     width: 100%;
+    margin-top: var(--stats-gap);
     opacity: 1;
     visibility: visible;
     /* openen: eerst naar onder, dan naar links */
     transition: max-height .2s ease,
+                margin-top .2s ease,
                 opacity .12s ease,
                 width .2s ease .18s,
                 visibility 0s;
@@ -2345,7 +2357,6 @@ button.stat-card:focus-visible {
        --danger-color op --danger-bg, dus een oranje rand eronder maakte er
        twee dingen van in plaats van één vorm. */
     border: 1px solid var(--danger-color);
-    border-top-width: 0;
     background: var(--surface-color);
     box-shadow: 0 1px 6px rgba(0,0,0,0.06);
     overflow: hidden;
@@ -2377,6 +2388,24 @@ button.stat-card--open:hover {
     border-bottom-right-radius: 0;
     transform: none;
     box-shadow: var(--shadow-sm);
+    /* z-index opdat dit verlengstuk boven het paneel valt: het paneel staat
+       later in de HTML en zou er anders overheen tekenen. */
+    position: relative;
+    z-index: 2;
+}
+/* De staande balk van de L is langer dan de kaart: hij loopt door de
+   tussenruimte heen tot aan het paneel. Zonder dit stuk plakt het paneel
+   tegen de kaarten ernaast, en dat is geen L maar een blok onder een rij. */
+button.stat-card--open::after {
+    content: '';
+    position: absolute;
+    left: -1px;
+    right: -1px;
+    top: 100%;
+    height: calc(var(--stats-gap) + 1px);
+    background: var(--surface-color);
+    border-left: 1px solid var(--danger-color);
+    border-right: 1px solid var(--danger-color);
 }
 @media (prefers-reduced-motion: reduce) {
     .stat-card--meldingen .stat-card-chevron { transition: none; }
