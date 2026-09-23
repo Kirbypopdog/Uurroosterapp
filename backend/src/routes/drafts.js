@@ -79,7 +79,9 @@ router.put('/schedule-drafts/:id', requireAuth, requireRole('admin', 'roosterver
       const { locked_by, locked_by_name, locked_at } = lockCheck.rows[0];
       const lockExpired = !locked_at || (Date.now() - new Date(locked_at).getTime()) > DRAFT_LOCK_TTL_MS;
       if (locked_by && locked_by !== req.user.id && !lockExpired) {
-        return res.status(423).json({ error: `Concept is vergrendeld door ${locked_by_name}` });
+        // lockedByName los erbij: de bouwer moet de naam kunnen tonen zonder
+        // hem uit een zin te moeten pulken.
+        return res.status(423).json({ error: `Concept is vergrendeld door ${locked_by_name}`, lockedByName: locked_by_name });
       }
       // #304: de hartslag. De frontend nam de vergrendeling één keer bij het
       // openen en vernieuwde ze nooit, terwijl ze na DRAFT_LOCK_TTL_MS vervalt.
@@ -187,7 +189,7 @@ router.patch('/schedule-drafts/:id/weeks/:week', requireAuth, requireRole('admin
     const { locked_by, locked_by_name, locked_at } = lockCheck.rows[0];
     const lockExpired = !locked_at || (Date.now() - new Date(locked_at).getTime()) > DRAFT_LOCK_TTL_MS;
     if (locked_by && locked_by !== req.user.id && !lockExpired) {
-      return res.status(423).json({ error: `Concept is vergrendeld door ${locked_by_name}` });
+      return res.status(423).json({ error: `Concept is vergrendeld door ${locked_by_name}`, lockedByName: locked_by_name });
     }
     const vernieuwLock = locked_by === req.user.id;
 

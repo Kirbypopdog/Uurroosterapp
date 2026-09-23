@@ -2085,6 +2085,9 @@ describe('PATCH /schedule-drafts/:id/weeks/:week', () => {
       .send({ weekGrid: {} });
     expect(res.status).toBe(423);
     expect(res.body.error).toContain('Sofie');
+    // De naam ook los, zodat de bouwer hem kan tonen zonder hem uit een zin te
+    // moeten pulken. Zonder dit bleef de melding "Niet bewaard" zonder reden.
+    expect(res.body.lockedByName).toBe('Sofie');
   });
 
   test('geeft 403 voor een medewerker', async () => {

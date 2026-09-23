@@ -1483,12 +1483,40 @@ async function autoSaveBuilderDraft() {
         updateBuilderSaveStatus('bewaard');
         return true;
     } catch (err) {
+        AppState.builderIsDirty = true;
+
+        // Een 423 betekent dat iemand anders het concept heeft overgenomen.
+        // Dat lost zichzelf NOOIT op, dus opnieuw proberen is hier verkeerd:
+        // de bouwer bleef elke tien seconden een verzoek sturen dat altijd
+        // afketste, en toonde ondertussen alleen "Niet bewaard" zonder te
+        // zeggen waarom. Je werk stond dan in je scherm en nergens anders.
+        //
+        // Dit kan gebeuren doordat de vergrendeling vervalt als je een half uur
+        // niets bewaart. Kom je daarna terug en typ je verder, dan is het
+        // concept al van een ander.
+        if (err.status === 423) {
+            console.error('Auto-save geweigerd, concept is overgenomen:', err);
+            updateBuilderSaveStatus('mislukt');
+            const naam = err.data?.lockedByName || 'iemand anders';
+            const terugnemen = await showConfirm(
+                `${naam} heeft dit concept overgenomen, dus je wijzigingen zijn niet bewaard. Wil je de vergrendeling terugnemen en alsnog bewaren? ${naam} verliest dan zijn vergrendeling.`,
+                'Concept overgenomen'
+            );
+            if (!terugnemen) return false;
+            try {
+                await lockScheduleDraft(AppState.builderLoadedDraftId, true);
+            } catch (fout) {
+                showToast('De vergrendeling kon niet overgenomen worden. Controleer je verbinding.', 'error');
+                return false;
+            }
+            return autoSaveBuilderDraft();
+        }
+
         // Dit was vroeger stil: enkel een console.error, terwijl je werk niet
         // bewaard was. Nu er geen opslaanknop meer is, moet dit zichtbaar zijn
         // én zelf opnieuw proberen. De vuile weken blijven staan, dus een
         // volgende poging pakt ze opnieuw mee.
         console.error('Auto-save failed:', err);
-        AppState.builderIsDirty = true;
         updateBuilderSaveStatus('mislukt');
         if (AppState.builderAutoSaveTimer) clearTimeout(AppState.builderAutoSaveTimer);
         AppState.builderAutoSaveTimer = setTimeout(() => autoSaveBuilderDraft(), 10000);
