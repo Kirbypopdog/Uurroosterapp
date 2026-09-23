@@ -477,7 +477,7 @@ function renderHomeAlerts(role) {
         </div>`;
     }
 
-    // Geen eigen kop meer. De kaart "aandachtspunten" in renderHomeStats is de
+    // Geen eigen kop meer. De kaart "roosterproblemen" in renderHomeStats is de
     // kop: die toonde toch al exact hetzelfde getal, want beide lezen
     // AppState._homeAlertCount. Twee koppen boven één lijst is er een te veel.
     return `<div id="home-meldingen" class="home-paneel home-paneel--meldingen">
@@ -678,12 +678,16 @@ function meetPaneelStarts() {
         const paneel = document.getElementById(kaart.getAttribute('aria-controls'));
         if (!paneel) return;
         const zet = () => {
-            paneel.style.setProperty('--paneel-start', `${kaart.offsetWidth}px`);
+            // Allebei ONAFGEROND. Een raster met auto-fit deelt de rij in
+            // breedtes met cijfers achter de komma, dus offsetWidth en een
+            // afgeronde afstand schelen er zo een halve pixel mee. Die zie je:
+            // de rechterrand van het paneel lag dan net naast die van de kaart.
+            const rk = kaart.getBoundingClientRect();
+            paneel.style.setProperty('--paneel-start', `${rk.width}px`);
             // Hoever de kaart van de rechterrand af staat. Nul als ze de
             // laatste van de rij is; anders hangt het paneel daaraan vast.
             const rand = paneel.parentElement.getBoundingClientRect().right;
-            const tot = Math.max(0, Math.round(rand - kaart.getBoundingClientRect().right));
-            paneel.style.setProperty('--paneel-rechts', `${tot}px`);
+            paneel.style.setProperty('--paneel-rechts', `${Math.max(0, rand - rk.right)}px`);
         };
         zet();
         // De kaart wordt smaller of breder als het venster of de zijbalk
@@ -756,7 +760,12 @@ function renderHomeStats(user, role) {
         r.status === 'pending'
     ).length;
 
-    // Aandachtspunten (zelfde telling als de alerts-balk, gezet door renderHomeAlerts)
+    // Problemen in het rooster: onderbezetting, te weinig rust, een dienst op
+    // een dag dat iemand afwezig is. Deze kaart heette "aandachtspunten", maar
+    // ernaast staat "vraagt je aandacht" en dat zijn twee heel verschillende
+    // dingen: dit gaat over het rooster dat je beheert, die over wat er op jou
+    // persoonlijk ligt te wachten. Twee labels met hetzelfde woord erin lees je
+    // als twee helften van hetzelfde.
     const alertCount = AppState._homeAlertCount || 0;
 
     const stat = (icon, bg, color, value, label, actie, titel) => statKaart(`
@@ -772,11 +781,11 @@ function renderHomeStats(user, role) {
                 <div class="stat-card-ic" style="background:var(--danger-bg);color:var(--danger-color)">${IconHelper.html('alert-triangle', 'md')}</div>
                 <div>
                     <div class="stat-card-v">${alertCount}</div>
-                    <div class="stat-card-k">aandachtspunten</div>
+                    <div class="stat-card-k">roosterproblemen</div>
                 </div>
                 ${alertCount ? '<i data-lucide="chevron-down" class="lucide-sm stat-card-chevron"></i>' : ''}`,
                 alertCount ? 'toggleHomePaneel(this)' : '',
-                'Toon de meldingen', 'stat-card--meldingen',
+                'Toon de problemen in het rooster', 'stat-card--meldingen',
                 'aria-expanded="false" aria-controls="home-meldingen"')
     ].filter(Boolean);
 }
