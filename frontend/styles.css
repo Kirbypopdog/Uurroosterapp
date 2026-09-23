@@ -12853,13 +12853,26 @@ button.concept-card-name {
     margin-bottom: var(--space-xs);
     border-bottom: 1px solid var(--border-color);
 }
-/* Reduced motion - respect user preferences */
+/* Reduced motion - respect user preferences
+   #164: hier stond alleen dat elke animatie 0,01 milliseconde mag duren. Voor
+   een animatie die ÉÉN keer loopt is dat goed: die is dan meteen klaar. Maar
+   zeven animaties in deze app lopen met `infinite`, en die gingen daardoor
+   niet uit maar juist ongeveer honderdduizend keer per seconde. Precies het
+   omgekeerde van wat iemand vraagt die bewegende beelden niet verdraagt, en
+   bij een knipperend vlak ook niet ongevaarlijk.
+   Nagemeten met de voorkeur aan: de laadspinner en de badge "actie vereist"
+   stonden allebei op duur 1e-05s met herhaling infinite.
+   animation-iteration-count zet ze op één doorloop, dus ze komen meteen op hun
+   eindtoestand tot stilstand. scroll-behavior hoort in dezelfde uitzondering:
+   vloeiend scrollen is ook beweging. */
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
     *::after {
         transition-duration: 0.01ms !important;
         animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
     }
 }
 
