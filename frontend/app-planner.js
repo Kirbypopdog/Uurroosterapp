@@ -572,13 +572,13 @@ function openValidationDetailsModal(filterRule) {
             </div>`;
         }).join('');
 
-    DOM.warningDetailsModal.classList.remove('hidden');
+    toonModal(DOM.warningDetailsModal);
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function closeWarningDetailsModal() {
     if (!DOM.warningDetailsModal) return;
-    DOM.warningDetailsModal.classList.add('hidden');
+    verbergModal(DOM.warningDetailsModal);
 }
 // Backwards compat aliases
 function openWarningDetailsModal() { openValidationDetailsModal(); }

@@ -1229,7 +1229,7 @@ function openBuilderShiftModal(employeeId, dayIndex) {
             isReserve: isReserveChecked
         };
         setBuilderDirty();
-        modal.classList.add('hidden');
+        verbergModal(modal);
         renderBuilder();
     });
 
@@ -1245,7 +1245,7 @@ function openBuilderShiftModal(employeeId, dayIndex) {
             }
         }
         setBuilderDirty();
-        modal.classList.add('hidden');
+        verbergModal(modal);
         renderBuilder();
     });
 
@@ -1253,14 +1253,14 @@ function openBuilderShiftModal(employeeId, dayIndex) {
     const cancelBtn = document.getElementById('builder-shift-cancel');
     const newCancelBtn = cancelBtn.cloneNode(true);
     cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-    newCancelBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    newCancelBtn.addEventListener('click', () => verbergModal(modal));
 
     const closeBtn = document.getElementById('builder-shift-modal-close');
     const newCloseBtn = closeBtn.cloneNode(true);
     closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
-    newCloseBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    newCloseBtn.addEventListener('click', () => verbergModal(modal));
 
-    modal.classList.remove('hidden');
+    toonModal(modal);
 }
 
 // --- Builder: Loading ---

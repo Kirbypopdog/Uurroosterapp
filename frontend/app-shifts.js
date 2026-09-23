@@ -155,7 +155,7 @@ function openAddShiftModal() {
     DOM.shiftSubmitBtn.classList.remove('hidden');
     resetShiftSubmitBtn();
 
-    DOM.shiftModal.classList.remove('hidden');
+    toonModal(DOM.shiftModal);
     updateShiftBlockNotice();
 }
 
@@ -172,7 +172,7 @@ function openAddShiftForEmployee(employeeId, date) {
     // waar die thuishoort is de enige zinnige beginwaarde.
     const emp = getEmployee(employeeId);
     populateShiftTeamDropdown(emp ? (emp.mainTeam || emp.main_team) : '');
-    DOM.shiftModal.classList.remove('hidden');
+    toonModal(DOM.shiftModal);
     updateShiftBlockNotice();
 }
 
@@ -369,7 +369,7 @@ function openShiftModal(shift, canEdit) {
     DOM.shiftValidationErrors.innerHTML = issuesHtml;
     IconHelper.init(DOM.shiftValidationErrors);
 
-    DOM.shiftModal.classList.remove('hidden');
+    toonModal(DOM.shiftModal);
 }
 
 function resetShiftSubmitBtn() {
@@ -381,7 +381,7 @@ function resetShiftSubmitBtn() {
 }
 
 function closeShiftModal() {
-    DOM.shiftModal.classList.add('hidden');
+    verbergModal(DOM.shiftModal);
     DOM.shiftForm.reset();
     AppState.editingShiftId = null;
     resetShiftSubmitBtn();
@@ -496,11 +496,11 @@ function openSwapRequestModal(shift) {
     document.getElementById('swap-validation-display').classList.add('hidden');
 
     // Show modal
-    document.getElementById('swap-request-modal').classList.remove('hidden');
+    toonModal(document.getElementById('swap-request-modal'));
 }
 
 function closeSwapRequestModal() {
-    document.getElementById('swap-request-modal').classList.add('hidden');
+    verbergModal(document.getElementById('swap-request-modal'));
     swapRequestState = { requesterShift: null, targetEmployeeId: null, targetShiftId: null };
 }
 
@@ -682,7 +682,7 @@ let shiftAfstaanChoiceState = {
 
 function openShiftAfstaanChoiceModal(shift) {
     shiftAfstaanChoiceState.shift = shift;
-    document.getElementById('shift-afstaan-choice-modal').classList.remove('hidden');
+    toonModal(document.getElementById('shift-afstaan-choice-modal'));
 
     // Add click handlers for the choice buttons
     document.getElementById('choice-swap-btn').onclick = () => {
@@ -697,7 +697,7 @@ function openShiftAfstaanChoiceModal(shift) {
 }
 
 function closeShiftAfstaanChoiceModal() {
-    document.getElementById('shift-afstaan-choice-modal').classList.add('hidden');
+    verbergModal(document.getElementById('shift-afstaan-choice-modal'));
     shiftAfstaanChoiceState.shift = null;
 }
 
@@ -734,11 +734,11 @@ function openTakeoverRequestModal(shift) {
     document.getElementById('takeover-message').value = '';
 
     // Show modal
-    document.getElementById('takeover-request-modal').classList.remove('hidden');
+    toonModal(document.getElementById('takeover-request-modal'));
 }
 
 function closeTakeoverRequestModal() {
-    document.getElementById('takeover-request-modal').classList.add('hidden');
+    verbergModal(document.getElementById('takeover-request-modal'));
     takeoverRequestState.shiftToGiveAway = null;
 }
 
@@ -1001,7 +1001,7 @@ function openAddActivityModal(userId, date, shiftStart, shiftEnd, shiftId) {
     document.getElementById('activity-end').value = '';
     document.getElementById('activity-description').value = '';
     document.getElementById('activity-delete-btn').classList.add('hidden');
-    document.getElementById('activity-modal').classList.remove('hidden');
+    toonModal(document.getElementById('activity-modal'));
     IconHelper.init(document.getElementById('activity-modal'));
 }
 
@@ -1025,12 +1025,12 @@ function openEditActivityModal(activityId) {
     document.getElementById('activity-end').value = activity.endTime;
     document.getElementById('activity-description').value = activity.description || '';
     document.getElementById('activity-delete-btn').classList.remove('hidden');
-    document.getElementById('activity-modal').classList.remove('hidden');
+    toonModal(document.getElementById('activity-modal'));
     IconHelper.init(document.getElementById('activity-modal'));
 }
 
 function closeActivityModal() {
-    document.getElementById('activity-modal').classList.add('hidden');
+    verbergModal(document.getElementById('activity-modal'));
 }
 
 async function handleActivitySubmit(e) {

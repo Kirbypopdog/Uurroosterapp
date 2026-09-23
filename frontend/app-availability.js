@@ -625,12 +625,12 @@ function openAvailabilityModal(employeeId = null, date = null) {
     infoDiv.innerHTML = '';
     updateAbsenceDateInfo();
 
-    modal.classList.remove('hidden');
+    toonModal(modal);
 }
 
 function closeAvailabilityModal() {
     const modal = document.getElementById('availability-modal');
-    modal.classList.add('hidden');
+    verbergModal(modal);
     // #233: noodklep, zie closeShiftModal in app-shifts.js voor de toelichting.
     hideSectionLoading('availability-view');
 }

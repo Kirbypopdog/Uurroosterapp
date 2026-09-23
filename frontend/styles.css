@@ -6156,6 +6156,37 @@ body[data-view-mode="day"] .timeline-day-cell {
     }
 }
 
+/* #390: sluiten met dezelfde beweging als openen, maar korter. Openen mag even
+   duren omdat je moet zien WAT er verschijnt; sluiten hoeft alleen te laten
+   zien DAT er iets weggaat. De duur mag hier veranderen zonder dat er in de JS
+   iets mee hoeft: verbergModal wacht op animationend en niet op een klok. Dat
+   was eerst wel een klok, en toen sprong het venster halverwege weg omdat de
+   animatie later begon dan de timer dacht.
+
+   pointer-events uit, want het venster ligt er nog een fractie van een seconde
+   overheen en zou een klik opvangen die voor de pagina bedoeld is. */
+.modal.modal--sluit {
+    animation: modalOverlayUit .18s ease-in forwards;
+    pointer-events: none;
+}
+.modal.modal--sluit .modal-content {
+    animation: modalContentUit .18s ease-in forwards;
+}
+@keyframes modalOverlayUit {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+@keyframes modalContentUit {
+    from {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: scale(0.97) translateY(6px);
+    }
+}
+
 .modal-content {
     background: var(--surface-color);
     border-radius: var(--radius-lg);

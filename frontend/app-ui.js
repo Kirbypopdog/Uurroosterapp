@@ -30,7 +30,7 @@ const FocusTrap = {
                 if (closer) {
                     closer.click();
                 } else {
-                    modal.classList.add('hidden');
+                    verbergModal(modal);
                     this.deactivate();
                 }
                 return;
@@ -128,7 +128,7 @@ function initModalFocusTrap() {
                         : [...(node.querySelectorAll?.('.modal') || [])];
                     modals.forEach(modal => {
                         observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
-                        if (!modal.classList.contains('hidden')) FocusTrap.activate(modal);
+                        if (!modal.classList.contains('hidden') && !modal.classList.contains('modal--sluit')) FocusTrap.activate(modal);
                     });
                 });
                 mutation.removedNodes.forEach(node => {
@@ -144,7 +144,11 @@ function initModalFocusTrap() {
             if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
                 const el = mutation.target;
                 if (!el.classList.contains('modal')) continue;
-                if (el.classList.contains('hidden')) {
+                // #390: een venster dat aan het sluiten is telt hier als
+                // gesloten. Anders ziet deze observer de sluitklasse als "niet
+                // verborgen" en zet hij de focusval opnieuw op een venster dat
+                // op het punt staat te verdwijnen.
+                if (el.classList.contains('hidden') || el.classList.contains('modal--sluit')) {
                     if (FocusTrap._activeModal === el) FocusTrap.deactivate();
                 } else {
                     FocusTrap.activate(el);
@@ -390,6 +394,65 @@ function hideSectionLoading(viewId) {
     if (overlay) overlay.classList.add('hidden');
 }
 
+// ===== MODAL TONEN EN VERBERGEN =====
+//
+// #390: openen animeerde, sluiten niet. Het venster verdween in één beeld,
+// precies op het moment dat je wél even wil zien dat er iets gebeurd is.
+//
+// Dat kon niet per plek opgelost worden. Het gebeurde op negentien plaatsen met
+// classList.add('hidden'), en een sluitbeweging vraagt dat het venster nog even
+// blijft staan. Half animeren is slechter dan nergens, dus het moest centraal.
+// Deze twee functies zijn sindsdien de enige weg.
+//
+// Het verbergen gebeurt op animationend en niet op een klok. Dat was eerst wel
+// zo, met een timer die even lang liep als de animatie in de CSS, en dat ging
+// mis: de animatie begon meetbaar later dan de timer, dus het venster sprong
+// halverwege weg. Gemeten liep hij op 176ms nog op 51 procent dekking terwijl
+// de timer al bijna afliep. De browser weet zelf het beste wanneer hij klaar
+// is. De tijd hieronder is alleen nog een vangnet voor het geval er helemaal
+// geen animatie draait.
+const MODAL_SLUIT_VANGNET_MS = 600;
+
+function toonModal(modal) {
+    if (!modal) return;
+    // Een venster dat nog aan het sluiten was, gaat gewoon weer open. Zonder
+    // deze regel zou de lopende sluiting het even later alsnog verbergen.
+    modal.classList.remove('modal--sluit');
+    modal.classList.remove('hidden');
+}
+
+function verbergModal(modal) {
+    if (!modal || modal.classList.contains('hidden')) return;
+
+    // Wie beweging heeft uitgezet krijgt geen wachttijd: meteen weg.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        modal.classList.add('hidden');
+        return;
+    }
+
+    modal.classList.add('modal--sluit');
+    const inhoud = modal.querySelector('.modal-content') || modal;
+
+    let afgerond = false;
+    const afronden = () => {
+        if (afgerond) return;
+        afgerond = true;
+        clearTimeout(vangnet);
+        inhoud.removeEventListener('animationend', opAnimatieEinde);
+        // Ging hij intussen weer open, dan heeft toonModal de klasse al
+        // weggehaald en hoort hier niets meer te gebeuren.
+        if (!modal.classList.contains('modal--sluit')) return;
+        modal.classList.remove('modal--sluit');
+        modal.classList.add('hidden');
+    };
+    // animationend borrelt op, dus de naam nakijken: een animatie op iets
+    // binnenin het venster mag het venster niet sluiten.
+    const opAnimatieEinde = (e) => { if (e.animationName === 'modalContentUit') afronden(); };
+
+    inhoud.addEventListener('animationend', opAnimatieEinde);
+    const vangnet = setTimeout(afronden, MODAL_SLUIT_VANGNET_MS);
+}
+
 // ===== CONFIRMATION DIALOG SYSTEM =====
 function showConfirm(message, title = 'Bevestig actie', options = {}) {
     return new Promise((resolve) => {
@@ -416,7 +479,7 @@ function showConfirm(message, title = 'Bevestig actie', options = {}) {
         cancelBtn.style.display = options.hideCancel ? 'none' : '';
 
         // Show modal
-        modal.classList.remove('hidden');
+        toonModal(modal);
 
         // Handle OK
         const handleOk = () => {
@@ -432,7 +495,7 @@ function showConfirm(message, title = 'Bevestig actie', options = {}) {
 
         // Cleanup function
         const cleanup = () => {
-            modal.classList.add('hidden');
+            verbergModal(modal);
             cancelBtn.style.display = '';
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);
@@ -555,13 +618,13 @@ function showInputPrompt(message, title = 'Invoer', defaultValue = '', okText = 
         messageEl.textContent = message;
         inputEl.value = defaultValue;
         okBtn.textContent = okText || 'OK';
-        modal.classList.remove('hidden');
+        toonModal(modal);
         setTimeout(() => inputEl.focus(), 50);
 
         const handleOk = () => { cleanup(); resolve(inputEl.value.trim()); };
         const handleCancel = () => { cleanup(); resolve(null); };
         const cleanup = () => {
-            modal.classList.add('hidden');
+            verbergModal(modal);
             okBtn.textContent = 'OK';
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);
@@ -604,13 +667,13 @@ function showSelectPrompt(message, title, options) {
             selectEl.appendChild(o);
         });
         inputEl.replaceWith(selectEl);
-        modal.classList.remove('hidden');
+        toonModal(modal);
         setTimeout(() => selectEl.focus(), 50);
 
         const handleOk = () => { cleanup(); resolve(selectEl.value); };
         const handleCancel = () => { cleanup(); resolve(null); };
         const cleanup = () => {
-            modal.classList.add('hidden');
+            verbergModal(modal);
             selectEl.replaceWith(inputEl);
             okBtn.removeEventListener('click', handleOk);
             cancelBtn.removeEventListener('click', handleCancel);

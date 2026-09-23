@@ -1464,7 +1464,7 @@ function openCopyWeekModal() {
     targetSelect.value = AppState.builderWeekNumber === cycleLength ? 1 : AppState.builderWeekNumber + 1;
 
     updateCopyWeekConflictWarning();
-    document.getElementById('copy-week-modal').classList.remove('hidden');
+    toonModal(document.getElementById('copy-week-modal'));
 }
 
 function updateCopyWeekConflictWarning() {
@@ -1522,7 +1522,7 @@ function executeCopyWeek() {
     // ingepland en blijft de statusregel "bewaard" tonen.
     setBuilderDirty();
 
-    document.getElementById('copy-week-modal').classList.add('hidden');
+    verbergModal(document.getElementById('copy-week-modal'));
     renderBuilder();
     showToast(`Week ${sourceWeek} gekopieerd naar week ${targetWeek}`, 'success');
 }
@@ -1541,7 +1541,7 @@ function openDraftDiffModal() {
     if (drafts.length >= 2) selB.selectedIndex = 1;
 
     document.getElementById('draft-diff-result').innerHTML = '';
-    document.getElementById('draft-diff-modal').classList.remove('hidden');
+    toonModal(document.getElementById('draft-diff-modal'));
 }
 
 function diffDrafts(draftA, draftB) {

@@ -447,7 +447,7 @@ function setupEventListeners() {
     });
 
     // Copy-week modal (builder)
-    const closeModal = () => document.getElementById('copy-week-modal')?.classList.add('hidden');
+    const closeModal = () => verbergModal(document.getElementById('copy-week-modal'));
     document.getElementById('copy-week-modal-close')?.addEventListener('click', closeModal);
     document.getElementById('copy-week-cancel')?.addEventListener('click', closeModal);
     document.getElementById('copy-week-modal')?.addEventListener('click', (e) => {
@@ -458,7 +458,7 @@ function setupEventListeners() {
     document.getElementById('copy-week-target')?.addEventListener('change', updateCopyWeekConflictWarning);
 
     // Draft diff modal
-    const closeDiff = () => document.getElementById('draft-diff-modal')?.classList.add('hidden');
+    const closeDiff = () => verbergModal(document.getElementById('draft-diff-modal'));
     document.getElementById('draft-diff-modal-close')?.addEventListener('click', closeDiff);
     document.getElementById('draft-diff-close')?.addEventListener('click', closeDiff);
     document.getElementById('draft-diff-modal')?.addEventListener('click', (e) => { if (e.target.id === 'draft-diff-modal') closeDiff(); });

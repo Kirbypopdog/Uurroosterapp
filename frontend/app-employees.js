@@ -871,7 +871,7 @@ function openAddEmployeeModal() {
 
     generateWeekScheduleHTML();
     resetWeekScheduleForm();
-    DOM.employeeModal.classList.remove('hidden');
+    toonModal(DOM.employeeModal);
 }
 
 function openEditEmployeeModal(employeeId) {
@@ -935,7 +935,7 @@ function openEditEmployeeModal(employeeId) {
         IconHelper.init(viewBtn);
     }
 
-    DOM.employeeModal.classList.remove('hidden');
+    toonModal(DOM.employeeModal);
 }
 
 function generateReadOnlyWeekScheduleHTML(employee) {
@@ -1013,7 +1013,7 @@ function generateReadOnlyWeekScheduleHTML(employee) {
 }
 
 function closeEmployeeModal() {
-    DOM.employeeModal.classList.add('hidden');
+    verbergModal(DOM.employeeModal);
     DOM.employeeForm.reset();
     AppState.editingEmployeeId = null;
     DOM.employeeDeleteBtn.classList.add('hidden');
