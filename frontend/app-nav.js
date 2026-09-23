@@ -137,11 +137,17 @@ function renderHome() {
     html += renderHomeKaarten(user, role);
     html += alertsHtml;
     html += aandachtHtml;
+    // De rechterkolom hield vroeger drie kaarten vast; "Vraagt je aandacht" is
+    // daar weg en zit nu in het paneel bovenaan. Dat liet een gat naast de
+    // lange lijst met komende diensten. "Nu aan het werk" stond los onder het
+    // raster en vult het nu op.
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
+    html += '<div class="home-grid-zij">';
     html += renderHomeWeekendInfo();
-    html += '</div>';
     html += renderHomeNuAanHetWerk();
+    html += '</div>';
+    html += '</div>';
 
     container.innerHTML = html;
     IconHelper.init(container);
@@ -1150,7 +1156,7 @@ function renderHomeNuAanHetWerk() {
 
     if (activeShifts.length === 0) {
         return `
-            <div class="home-card home-card-on-duty mt-lg">
+            <div class="home-card home-card-on-duty">
                 <div class="home-card-header">Nu aan het werk</div>
                 <div class="home-card-empty">
                     <i data-lucide="moon" class="empty-state-icon"></i>
@@ -1182,7 +1188,7 @@ function renderHomeNuAanHetWerk() {
     }).join('');
 
     return `
-        <div class="home-card home-card-on-duty mt-lg">
+        <div class="home-card home-card-on-duty">
             <div class="home-card-header">
                 Nu aan het werk
                 <span class="card-count">${activeShifts.length}</span>
