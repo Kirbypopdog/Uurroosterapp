@@ -122,7 +122,7 @@ function renderBuilderOverview(container) {
             <div class="builder-overview-header">
                 <div class="builder-overview-title-row">
                     <h3>Concepten</h3>
-                    ${getEffectiveRole() === 'admin' ? `<button class="btn btn-secondary btn-sm" id="builder-upload-concept" title="Concept importeren"><i data-lucide="upload" class="lucide-xs"></i> Importeren</button>` : ''}
+                    ${getEffectiveRole() === 'admin' ? `<button class="btn btn-secondary btn-sm" id="builder-upload-concept" data-tooltip="Concept importeren"><i data-lucide="upload" class="lucide-xs"></i> Importeren</button>` : ''}
                 </div>
                 <div class="builder-overview-filter-row">
                     <select id="builder-overview-filter" class="form-input form-input-sm"
@@ -211,13 +211,13 @@ function renderConceptCard(draft, newestActiveId) {
         <div class="builder-concept-card draft-status-${statusCls}" data-draft-id="${escapeHtml(draft.id)}">
             <div class="concept-card-header">
                 <span class="concept-card-name-row">
-                    <span class="concept-card-dot" style="background:${teamDotColor}" title="${escapeHtml(teamLabel)}"></span>
+                    <span class="concept-card-dot" style="background:${teamDotColor}" data-tooltip="${escapeHtml(teamLabel)}"></span>
                     <!-- #267: openen kon alleen via het kebabknopje van 30 bij
                          26 px. De naam is nu zelf een knop met de standaardactie,
                          en de hele kaart is aantikbaar (zie de klikafhandeling
                          in attachConceptCardListeners). -->
                     <button type="button" class="concept-card-name concept-card-open" data-draft-id="${dId}"
-                            title="${isActive ? 'Bewerken' : 'Laden'}">${escapeHtml(draft.name)}</button>
+                            data-tooltip="${isActive ? 'Bewerken' : 'Laden'}">${escapeHtml(draft.name)}</button>
                 </span>
                 <div class="concept-card-menu">
                     <!-- #365: deze knop bevat alleen een icoon, dus zonder
@@ -383,7 +383,7 @@ function renderBuilderControls(role, userTeam) {
         <div class="builder-team-locked">
             ${IconHelper.html('filter', 'xs')}
             Enkel ${escapeHtml(teams[AppState.builderTeamFilter]?.name || AppState.builderTeamFilter)}
-            <button type="button" id="builder-clear-team-filter" title="Alle teams tonen">${IconHelper.html(ICONS.close, 'xs')}</button>
+            <button type="button" id="builder-clear-team-filter" data-tooltip="Alle teams tonen">${IconHelper.html(ICONS.close, 'xs')}</button>
         </div>` : '';
 
     return `
@@ -412,11 +412,11 @@ function renderBuilderControls(role, userTeam) {
                             }
                             btns += `<button class="btn ${wn === w ? 'btn-primary' : 'btn-secondary'} btn-sm builder-week-btn" id="builder-week-${w}">
                                 Week ${w} (${escapeHtml(weekBtnLabel)})
-                                ${!isVakantie && cl > 1 ? `<span class="builder-week-remove" data-week="${w}" title="Week verwijderen">&times;</span>` : ''}
+                                ${!isVakantie && cl > 1 ? `<span class="builder-week-remove" data-week="${w}" data-tooltip="Week verwijderen">&times;</span>` : ''}
                             </button>`;
                         }
                         if (!isVakantie && cl < 8) {
-                            btns += `<button class="btn btn-secondary btn-sm" id="builder-add-week" title="Week toevoegen">+ Week</button>`;
+                            btns += `<button class="btn btn-secondary btn-sm" id="builder-add-week" data-tooltip="Week toevoegen">+ Week</button>`;
                         }
                         return btns;
                     })()}
@@ -434,7 +434,7 @@ function renderBuilderControls(role, userTeam) {
                         const metVerlof = (AppState.builderTeamFilter ? getEmployeesByTeam(AppState.builderTeamFilter) : getAllEmployees(true))
                             .filter(e => getBuilderLeaveDays(e.id, AppState.builderWeekNumber).length > 0).length;
                         return `<button class="btn btn-sm ${AppState.builderHideOnLeave ? 'btn-primary' : 'btn-secondary'} builder-hide-leave-toggle" id="builder-hide-leave-toggle"
-                            title="Verbergt wie deze week verlof heeft">
+                            data-tooltip="Verbergt wie deze week verlof heeft">
                             <i data-lucide="${AppState.builderHideOnLeave ? 'eye-off' : 'users'}" class="lucide-xs"></i>
                             Alleen beschikbaren${metVerlof ? ` (${metVerlof} met verlof)` : ''}</button>`;
                     })() : ''}
@@ -538,7 +538,7 @@ function renderBuilderGrid(role, userTeam) {
 
     // Header
     html += '<div class="builder-grid-header">';
-    html += `<div class="builder-name-header">Medewerker${hiddenOnLeaveCount > 0 ? `<span class="builder-leave-hidden-badge" title="${hiddenOnLeaveCount} medewerker(s) verborgen wegens verlof">${hiddenOnLeaveCount} verlof</span>` : ''}</div>`;
+    html += `<div class="builder-name-header">Medewerker${hiddenOnLeaveCount > 0 ? `<span class="builder-leave-hidden-badge" data-tooltip="${hiddenOnLeaveCount} medewerker(s) verborgen wegens verlof">${hiddenOnLeaveCount} verlof</span>` : ''}</div>`;
     dayNames.forEach((name, i) => {
         let headerClass = 'builder-day-header builder-day-toggle';
         const jsDow = dayIndexToJsDow(i);
@@ -554,7 +554,7 @@ function renderBuilderGrid(role, userTeam) {
             d.setDate(d.getDate() + i);
             dateLabel = `<span class="builder-day-date">${d.getDate()} ${d.toLocaleDateString('nl-BE', { month: 'short' })}</span>`;
         }
-        html += `<div class="${headerClass}" data-jsdow="${jsDow}" title="Klik om ${isClosed ? 'te openen' : 'te sluiten'}"><span class="day-name">${label}${lockIcon}</span>${dateLabel}</div>`;
+        html += `<div class="${headerClass}" data-jsdow="${jsDow}" data-tooltip="Klik om ${isClosed ? 'te openen' : 'te sluiten'}"><span class="day-name">${label}${lockIcon}</span>${dateLabel}</div>`;
     });
     html += '<div class="builder-hours-header">Uren</div>';
     html += '</div>';
@@ -570,7 +570,7 @@ function renderBuilderGrid(role, userTeam) {
         const teamName = teams[teamKey]?.name || teamKey;
         const dicht = AppState.collapsedTeams.has(teamKey);
         html += `<div class="builder-team-section team-${teamKey}${dicht ? ' collapsed' : ''}" data-builder-team="${teamKey}" role="button" tabindex="0"
-                      aria-expanded="${!dicht}" title="Klik om in of uit te klappen">
+                      aria-expanded="${!dicht}" data-tooltip="Klik om in of uit te klappen">
             <span>${escapeHtml(teamName)} (${teamEmployees.length})</span>
             <span class="builder-team-toggle">${IconHelper.html('chevron-up', 'sm')}</span>
         </div>`;
@@ -587,7 +587,7 @@ function renderBuilderGrid(role, userTeam) {
     if (otherEmployees.length > 0) {
         const overigDicht = AppState.collapsedTeams.has('_builder_overig');
         html += `<div class="builder-team-section${overigDicht ? ' collapsed' : ''}" data-builder-team="_builder_overig" role="button" tabindex="0"
-                      aria-expanded="${!overigDicht}" title="Klik om in of uit te klappen">
+                      aria-expanded="${!overigDicht}" data-tooltip="Klik om in of uit te klappen">
             <span>Overig (${otherEmployees.length})</span>
             <span class="builder-team-toggle">${IconHelper.html('chevron-up', 'sm')}</span>
         </div>`;
@@ -1103,7 +1103,7 @@ function renderBuilderDrafts() {
                                 <span class="builder-draft-meta">${escapeHtml(draft.createdByName || 'Onbekend')} &middot; ${dateStr}</span>
                             </div>
                             <div class="builder-draft-actions">
-                                <button class="btn btn-secondary btn-sm builder-draft-rename" data-draft-id="${escapeHtml(draft.id)}" title="Hernoemen">Hernoemen</button>
+                                <button class="btn btn-secondary btn-sm builder-draft-rename" data-draft-id="${escapeHtml(draft.id)}" data-tooltip="Hernoemen">Hernoemen</button>
                                 <button class="btn btn-secondary btn-sm builder-draft-load" data-draft-id="${escapeHtml(draft.id)}">Laden</button>
                                 <button class="btn btn-primary btn-sm builder-draft-apply" data-draft-id="${escapeHtml(draft.id)}">Toepassen</button>
                                 <button class="btn btn-danger btn-sm builder-draft-delete" data-draft-id="${escapeHtml(draft.id)}">Verwijderen</button>

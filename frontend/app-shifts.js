@@ -23,7 +23,7 @@ function renderShiftCard(shift) {
     let availabilityIcon = '';
     if (availability && !availability.available) {
         const reason = escapeHtml(availability.reason || 'Geen reden opgegeven');
-        availabilityIcon = `<span class="shift-availability-indicator unavailable" title="Medewerker niet beschikbaar: ${reason}">${IconHelper.html(ICONS.warning, 'xs')}</span>`;
+        availabilityIcon = `<span class="shift-availability-indicator unavailable" data-tooltip="Medewerker niet beschikbaar: ${reason}">${IconHelper.html(ICONS.warning, 'xs')}</span>`;
     } else if (availability && availability.shiftTypes && availability.shiftTypes.length > 0) {
         // Check if shift matches availability
         let shiftType = null;
@@ -33,14 +33,14 @@ function renderShiftCard(shift) {
 
         if (shiftType && !availability.shiftTypes.includes(shiftType)) {
             const shiftTypes = escapeHtml(availability.shiftTypes.join(', '));
-            availabilityIcon = `<span class="shift-availability-indicator partial" title="Alleen beschikbaar voor: ${shiftTypes}">${IconHelper.html(ICONS.zap, 'xs')}</span>`;
+            availabilityIcon = `<span class="shift-availability-indicator partial" data-tooltip="Alleen beschikbaar voor: ${shiftTypes}">${IconHelper.html(ICONS.zap, 'xs')}</span>`;
         }
     }
 
     // Activity count for card view
     const activities = getActivitiesByEmployee(shift.employeeId, shift.date);
     const activityBadge = activities.length > 0
-        ? `<span class="activity-count-badge" title="${activities.map(a => a.type).join(', ')}">${IconHelper.html('calendar-plus', 'xs')} ${activities.length}</span>`
+        ? `<span class="activity-count-badge" data-tooltip="${activities.map(a => a.type).join(', ')}">${IconHelper.html('calendar-plus', 'xs')} ${activities.length}</span>`
         : '';
 
     const employeeName = escapeHtml(employee.name);

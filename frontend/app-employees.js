@@ -404,7 +404,7 @@ function renderProfile() {
                     <div class="profile-meta-row">
                         <span class="profile-meta-label">E-mailmeldingen</span>
                         <span class="profile-meta-value">
-                            <label class="toggle-switch" title="Ontvang email meldingen bij ruilverzoeken, overnames en ziekmeldingen">
+                            <label class="toggle-switch" data-tooltip="Ontvang email meldingen bij ruilverzoeken, overnames en ziekmeldingen">
                                 <input type="checkbox" id="email-notifications-toggle" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
                                 <span class="toggle-slider"></span>
                             </label>
@@ -798,7 +798,7 @@ function renderEmployeeCard(emp) {
     const contractHours = emp.contractHours || 0;
     const teamName = (DataStore.settings.teams || {})[emp.mainTeam]?.name || emp.mainTeam || '';
     const teamColor = (DataStore.settings.teams || {})[emp.mainTeam]?.color || '#94a3b8';
-    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" title="Geen e-mail, voeg er een toe om een welkomstmail te sturen">Geen email</span>` : '';
+    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" data-tooltip="Geen e-mail, voeg er een toe om een welkomstmail te sturen">Geen email</span>` : '';
 
     // Hours for admin/planner view
     const weekStart = getEmployeeWeekStart(emp.id);

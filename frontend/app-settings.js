@@ -838,7 +838,7 @@ function renderClosedDatesList() {
         const reasonHtml = cd.reason ? ' · ' + escapeHtml(cd.reason) : '';
         return `<li class="closed-date-item">
             <span>${IconHelper.html(ICONS.lock,'xs')} <strong>${escapeHtml(label)}</strong>${reasonHtml}</span>
-            <button class="btn btn-sm btn-danger" onclick="handleRemoveClosedDate('${cd.date}')" title="Verwijder">
+            <button class="btn btn-sm btn-danger" onclick="handleRemoveClosedDate('${cd.date}')" data-tooltip="Verwijder">
                 ${IconHelper.html(ICONS.delete,'xs')}
             </button>
         </li>`;
@@ -2049,26 +2049,26 @@ function renderTeamsConfig() {
         const inWeekend = eligibleTeams.includes(teamId);
         html += `
         <div class="team-config-item" data-team-id="${teamId}" draggable="true">
-            <span class="team-drag-handle" title="Versleep om volgorde te wijzigen">&#8942;</span>
+            <span class="team-drag-handle" data-tooltip="Versleep om volgorde te wijzigen">&#8942;</span>
             <div class="team-color-dot" style="background: ${team.color}"></div>
             <div class="team-info">
                 <span class="team-name">${teamName}</span>
                 <div class="settings-team-toggles">
-                    <label class="team-toggle-label" title="Telt mee in bezettingsberekening">
+                    <label class="team-toggle-label" data-tooltip="Telt mee in bezettingsberekening">
                         <input type="checkbox" class="coverage-team-cb" data-team-id="${teamId}" ${inCoverage ? 'checked' : ''} onchange="saveTeamToggles()" />
                         <span>Bezetting</span>
                     </label>
-                    <label class="team-toggle-label" title="Draait mee in weekendverantwoordelijke rotatie">
+                    <label class="team-toggle-label" data-tooltip="Draait mee in weekendverantwoordelijke rotatie">
                         <input type="checkbox" class="eligible-team-cb" data-team-id="${teamId}" ${inWeekend ? 'checked' : ''} onchange="saveTeamToggles()" />
                         <span>Weekend</span>
                     </label>
                 </div>
             </div>
             <div class="team-actions">
-                <button type="button" class="btn-icon-only" onclick="editTeam('${teamId}')" title="Naam bewerken" aria-label="Naam van ${teamName} bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
+                <button type="button" class="btn-icon-only" onclick="editTeam('${teamId}')" data-tooltip="Naam bewerken" aria-label="Naam van ${teamName} bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
                 <input type="color" class="color-picker" value="${team.color}"
-                       onchange="updateTeamColor('${teamId}', this.value)" title="Kleur wijzigen" aria-label="Kleur van ${teamName} wijzigen"/>
-                <button type="button" class="btn-icon-only danger" onclick="deleteTeam('${teamId}')" title="Verwijderen" aria-label="Team ${teamName} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
+                       onchange="updateTeamColor('${teamId}', this.value)" data-tooltip="Kleur wijzigen" aria-label="Kleur van ${teamName} wijzigen"/>
+                <button type="button" class="btn-icon-only danger" onclick="deleteTeam('${teamId}')" data-tooltip="Verwijderen" aria-label="Team ${teamName} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
             </div>
         </div>`;
     });
@@ -2140,8 +2140,8 @@ function renderTemplatesConfig() {
                 <span class="template-times">${template.start} - ${template.end} (${duration})</span>
             </div>
             <div class="template-actions">
-                <button type="button" class="btn-icon-only" onclick="editTemplate('${templateId}')" title="Bewerken" aria-label="Sjabloon ${templateName} bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
-                <button type="button" class="btn-icon-only danger" onclick="deleteTemplate('${templateId}')" title="Verwijderen" aria-label="Sjabloon ${templateName} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
+                <button type="button" class="btn-icon-only" onclick="editTemplate('${templateId}')" data-tooltip="Bewerken" aria-label="Sjabloon ${templateName} bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
+                <button type="button" class="btn-icon-only danger" onclick="deleteTemplate('${templateId}')" data-tooltip="Verwijderen" aria-label="Sjabloon ${templateName} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
             </div>
         </div>`;
     });
@@ -2300,7 +2300,7 @@ function openTemplateModal(templateId = null, template = null) {
     let iconPickerHtml = '<div class="template-icon-picker">';
     iconOptions.forEach(opt => {
         const selected = currentIcon === opt.id ? 'selected' : '';
-        iconPickerHtml += `<button type="button" class="template-icon-option ${selected}" data-icon="${opt.id}" title="${opt.label}" onclick="selectTemplateIcon(this)">
+        iconPickerHtml += `<button type="button" class="template-icon-option ${selected}" data-icon="${opt.id}" data-tooltip="${opt.label}" onclick="selectTemplateIcon(this)">
             ${IconHelper.html(opt.id, 'md')}
             <span class="template-icon-label">${opt.label}</span>
         </button>`;
@@ -2451,7 +2451,7 @@ function renderHolidayPeriods() {
                     <span class="holiday-period-days">(${days} dagen, ${totalWeeks} ${totalWeeks === 1 ? 'week' : 'weken'})</span>
                 </span>
             </div>
-            <button type="button" class="btn-icon-only danger" onclick="deleteHolidayPeriod(${period.id})" title="Verwijderen" aria-label="Vakantieperiode ${escapeHtml(period.name || '')} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
+            <button type="button" class="btn-icon-only danger" onclick="deleteHolidayPeriod(${period.id})" data-tooltip="Verwijderen" aria-label="Vakantieperiode ${escapeHtml(period.name || '')} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
         </div>`;
     }).join('');
 }
@@ -2594,7 +2594,7 @@ async function openAddHolidayModal() {
                     <div class="quick-select-buttons">
                         ${vakanties.map(v => `
                             <button type="button" class="btn btn-sm btn-outline"
-                                title="${escapeHtml(v.start)} tot en met ${escapeHtml(v.eind)}"
+                                data-tooltip="${escapeHtml(v.start)} tot en met ${escapeHtml(v.eind)}"
                                 onclick="prefillHoliday('${escapeHtml(v.naam)}', '${v.start}', '${v.eind}')">
                                 ${escapeHtml(v.kort)}${v.eind < vandaag ? ' (voorbij)' : ''}
                             </button>`).join('')}

@@ -102,7 +102,7 @@ function renderBuilderStaffingEditor() {
                             <span>min</span>
                             <input type="number" class="form-input staffing-min-input" data-day="${d}" data-idx="${idx}" value="${rule.min != null ? rule.min : 1}" min="0" max="10">
                         </div>
-                        <button class="staffing-rule-remove" data-day="${d}" data-idx="${idx}" title="Verwijder">×</button>
+                        <button class="staffing-rule-remove" data-day="${d}" data-idx="${idx}" data-tooltip="Verwijder">×</button>
                     </div>`;
                 });
 
@@ -154,7 +154,7 @@ function renderBuilderMeetingsEditor() {
                         <select class="meeting-day" data-team="${teamId}" data-idx="${idx}">
                             ${dayLabels.map((d, di) => `<option value="${di}" ${di === m.day ? 'selected' : ''}>${d}</option>`).join('')}
                         </select>
-                        <button class="meeting-rule-remove" data-team="${teamId}" data-idx="${idx}" title="Verwijder">&times;</button>
+                        <button class="meeting-rule-remove" data-team="${teamId}" data-idx="${idx}" data-tooltip="Verwijder">&times;</button>
                     </div>
                     <div class="meeting-rule-row">
                         <select class="meeting-from" data-team="${teamId}" data-idx="${idx}">${timeSelectOptions(m.from || 9)}</select>

@@ -769,6 +769,11 @@ function createTooltipElement() {
     document.addEventListener('mouseover', handleTooltipShow);
     document.addEventListener('mouseout', handleTooltipHide);
     document.addEventListener('scroll', handleTooltipHide, true);
+    // Ook bij toetsenbordfocus. Een knop met alleen een pictogram had vroeger
+    // een title-attribuut, en dat is nu een data-tooltip; zonder deze twee
+    // regels zou wie met Tab navigeert de uitleg helemaal kwijt zijn.
+    document.addEventListener('focusin', handleTooltipShow);
+    document.addEventListener('focusout', handleTooltipHide);
 }
 
 function handleTooltipShow(e) {

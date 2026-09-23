@@ -165,15 +165,15 @@
                         <span class="avatar" id="avatar-circle"></span>
                         <span class="user-menu-name" id="user-menu-name"></span>
                     </button>
-                    <button class="nav-logout-btn" id="logout-btn" aria-label="Uitloggen" title="Uitloggen">
+                    <button class="nav-logout-btn" id="logout-btn" aria-label="Uitloggen" data-tooltip="Uitloggen">
                         <i data-lucide="log-out" class="lucide-sm"></i>
                     </button>
                 </div>
                 <div class="sidebar-foot-actions">
-                    <button class="sidebar-icon-btn" id="dark-mode-btn" aria-label="Donker thema" title="Donker/licht thema">
+                    <button class="sidebar-icon-btn" id="dark-mode-btn" aria-label="Donker thema" data-tooltip="Donker/licht thema">
                         <i data-lucide="moon" class="lucide-sm"></i>
                     </button>
-                    <button class="sidebar-icon-btn" id="sidebar-collapse-btn" aria-label="Zijbalk inklappen" title="Inklappen">
+                    <button class="sidebar-icon-btn" id="sidebar-collapse-btn" aria-label="Zijbalk inklappen" data-tooltip="Inklappen">
                         <i data-lucide="panel-left-close" class="lucide-sm"></i>
                     </button>
                 </div>
@@ -224,7 +224,7 @@
                         <button id="today-btn" class="btn btn-secondary btn-sm">Vandaag</button>
                         <button id="next-week" class="nav-arrow-btn" aria-label="Volgende"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
                     </div>
-                    <div id="current-period" class="period-display period-display--clickable" title="Klik om naar een datum te springen">
+                    <div id="current-period" class="period-display period-display--clickable" data-tooltip="Klik om naar een datum te springen">
                         <span id="current-period-text"></span>
                         <input type="date" id="week-jump-input" class="week-jump-input" aria-label="Spring naar week">
                     </div>
@@ -233,12 +233,12 @@
                         <button class="view-toggle-btn" data-mode="day">Dag</button>
                         <button class="view-toggle-btn active" data-mode="week">Week</button>
                     </div>
-                    <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
+                    <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" data-tooltip="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
                 </div>
                 <div class="planning-controls-row hidden" id="planning-filters-row">
                     <div class="planning-filter-buttons">
-                        <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
-                        <label class="toggle-switch-label" title="Verberg medewerkers zonder diensten">
+                        <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" data-tooltip="Team bezetting heatmap">Bezetting</button>
+                        <label class="toggle-switch-label" data-tooltip="Verberg medewerkers zonder diensten">
                             <input type="checkbox" id="filter-shifts-toggle" class="toggle-switch-input">
                             <span class="toggle-switch-slider"></span>
                             <span class="toggle-switch-text">Verberg lege rijen</span>

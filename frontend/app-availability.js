@@ -96,7 +96,7 @@ function renderAvailability() {
                     <button id="availability-today" class="btn btn-secondary btn-sm">Vandaag</button>
                     <button id="availability-next-week" class="nav-arrow-btn" aria-label="Volgende week">${IconHelper.html(ICONS.right, 'sm')}</button>
                 </div>
-                <div id="availability-period" class="period-display period-display--clickable" title="Klik om naar een datum te springen">
+                <div id="availability-period" class="period-display period-display--clickable" data-tooltip="Klik om naar een datum te springen">
                     <span>${formatDate(weekDates[0])} – ${formatDate(weekDates[6])}</span>
                     <input type="date" id="availability-week-jump" class="week-jump-input" aria-label="Spring naar week">
                 </div>
@@ -279,7 +279,7 @@ function renderAvailability() {
                     <div class="availability-cell-content ${statusClass}${canEdit ? '' : ' readonly-cell'}"${celToets}
                          data-employee-id="${emp.id}"
                          data-date="${date}"
-                         title="${escapeHtml(tooltipText)}">
+                         data-tooltip="${escapeHtml(tooltipText)}">
                         ${conflictIcon}${statusText ? `<span class="status-label">${escapeHtml(statusText)}</span>` : `<span class="status-check">${IconHelper.html(ICONS.check, 'xs')}</span>`}
                     </div>
                 ` : '';

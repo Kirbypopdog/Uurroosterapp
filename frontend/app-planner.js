@@ -195,7 +195,7 @@ function activiteitenChips(activiteiten) {
         const t = `${String(act.startTime).substring(0, 5)}-${String(act.endTime).substring(0, 5)}`;
         const titel = escapeHtml(`${vol} ${t}${act.description ? ' — ' + act.description : ''}`);
         return `<span class="activity-chip activity-type-${escapeHtml(act.type)}"`
-             + ` data-activity-id="${act.id}" title="${titel}">${escapeHtml(kort)}</span>`;
+             + ` data-activity-id="${act.id}" data-tooltip="${titel}">${escapeHtml(kort)}</span>`;
     }).join('');
     return `<div class="activity-chips-row">${chips}</div>`;
 }
@@ -452,7 +452,7 @@ function renderValidationAlerts() {
         breakdown.forEach(item => {
             const cfg = VALIDATION_CATEGORY_CONFIG[item.rule.toLowerCase()] ||
                 { icon: item.isError ? 'alert-circle' : 'alert-triangle', label: item.rule, level: item.isError ? 'error' : 'warning' };
-            html += `<button class="validation-chip validation-chip-${cfg.level}" data-rule="${escapeHtml(item.rule)}" title="Klik voor details">
+            html += `<button class="validation-chip validation-chip-${cfg.level}" data-rule="${escapeHtml(item.rule)}" data-tooltip="Klik voor details">
                 ${IconHelper.html(cfg.icon, 'sm')}
                 <span>${escapeHtml(cfg.label)}</span>
                 <span class="validation-chip-count">${item.count}</span>
@@ -520,7 +520,7 @@ function renderIssueEntryList(entries) {
     const canDismiss = ['admin', 'roosterverantwoordelijke'].includes(AppState.currentUser?.role);
     const renderEntry = e => `<li class="issue-entry">
         <span class="issue-entry-label">${escapeHtml(e.label)}</span>
-        ${e.key && canDismiss ? `<button class="issue-entry-dismiss btn-ghost" title="Negeren" onclick="dismissFromPlanningTab('${escapeHtml(e.key)}')">${IconHelper.html('eye-off', 'xs')}</button>` : ''}
+        ${e.key && canDismiss ? `<button class="issue-entry-dismiss btn-ghost" data-tooltip="Negeren" onclick="dismissFromPlanningTab('${escapeHtml(e.key)}')">${IconHelper.html('eye-off', 'xs')}</button>` : ''}
     </li>`;
     if (entries.length <= COLLAPSE_AT) {
         return `<ul class="issue-entry-list">${entries.map(renderEntry).join('')}</ul>`;

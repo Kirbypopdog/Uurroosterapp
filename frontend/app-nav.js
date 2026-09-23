@@ -518,7 +518,7 @@ function renderHomeOnboarding() {
     <div class="home-card onboarding-checklist mb-md">
         <div class="onboarding-header">
             <h3 class="onboarding-title">App instellen</h3>
-            <button class="btn btn-sm btn-ghost onboarding-dismiss" onclick="dismissOnboardingChecklist(this)" title="Verbergen">✕</button>
+            <button class="btn btn-sm btn-ghost onboarding-dismiss" onclick="dismissOnboardingChecklist(this)" data-tooltip="Verbergen">✕</button>
         </div>
         <div class="onboarding-progress">
             <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
@@ -645,7 +645,7 @@ function _uren(u) {
 function statKaart(inhoud, actie, titel, extraKlasse, attrs) {
     const klasse = `stat-card${extraKlasse ? ' ' + extraKlasse : ''}`;
     if (!actie) return `<div class="${klasse}">${inhoud}</div>`;
-    return `<button type="button" class="${klasse}"${attrs ? ' ' + attrs : ''} onclick="${actie}" title="${escapeHtml(titel || '')}">${inhoud}</button>`;
+    return `<button type="button" class="${klasse}"${attrs ? ' ' + attrs : ''} onclick="${actie}" data-tooltip="${escapeHtml(titel || '')}">${inhoud}</button>`;
 }
 
 /**
