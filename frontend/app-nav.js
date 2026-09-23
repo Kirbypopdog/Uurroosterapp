@@ -131,11 +131,7 @@ function renderHome() {
     let html = '';
     html += renderHomeWelcome(user, role);
     if (role === 'admin') html += renderHomeOnboarding();
-    // #166: renderHomeStats bestond al, compleet met opmaak, maar werd nergens
-    // aangeroepen. Dode code dus. Hij staat nu in beeld, met de eigen uren
-    // ervóór: die gaan over jou, de andere over wat je moet beheren.
-    html += renderHomeEigenUren(user);
-    html += renderHomeStats(user, role);
+    html += renderHomeKaarten(user, role);
     html += alertsHtml;
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
@@ -571,7 +567,7 @@ function renderHomeWelcome(user, role) {
  * meer.
  */
 function renderHomeEigenUren(user) {
-    if (!user || user.role === 'admin') return '';
+    if (!user || user.role === 'admin') return [];
 
     const vandaag = new Date();
     const weekStart = formatDateYYYYMMDD(getMonday(vandaag));
@@ -605,17 +601,16 @@ function renderHomeEigenUren(user) {
     const opMij = (DataStore.swapRequests || []).filter(r =>
         r.status === 'pending' && (r.targetUserId === mij || r.target_user_id === mij)).length;
 
-    return `
-        <div class="home-stats">
-            ${kaart('clock', weekUren, contract, 'deze week')}
-            ${kaart('calendar-range', periodeUren, periodeNorm, 'deze periode van 4 weken')}
-            ${statKaart(`
+    return [
+        kaart('clock', weekUren, contract, 'deze week'),
+        kaart('calendar-range', periodeUren, periodeNorm, 'deze periode van 4 weken'),
+        statKaart(`
                 <div class="stat-card-ic" style="background:var(--ok-bg);color:var(--sage-700)">${IconHelper.html('inbox', 'md')}</div>
                 <div class="stat-card-body">
                     <div class="stat-card-v">${opMij}</div>
                     <div class="stat-card-k">${opMij === 1 ? 'verzoek wacht op jou' : 'verzoeken wachten op jou'}</div>
-                </div>`, "switchView('swaps')", 'Naar de ruilverzoeken')}
-        </div>`;
+                </div>`, "switchView('swaps')", 'Naar de ruilverzoeken')
+    ];
 }
 
 // Uren zonder nodeloze decimalen: 32 in plaats van 32,0 maar wel 32,5.
@@ -700,21 +695,13 @@ function toggleHomeMeldingen(knop) {
 }
 
 function renderHomeStats(user, role) {
-    if (!['admin', 'roosterverantwoordelijke'].includes(role)) return '';
+    if (!['admin', 'roosterverantwoordelijke'].includes(role)) return [];
 
-    // Diensten deze week
-    const weekStart = getMonday(new Date());
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    const wkStartStr = formatDateYYYYMMDD(weekStart);
-    const wkEndStr = formatDateYYYYMMDD(weekEnd);
-    const shiftsThisWeek = (DataStore.shifts || []).filter(s => {
-        const d = (s.date || '').split('T')[0];
-        return d >= wkStartStr && d <= wkEndStr;
-    }).length;
-
-    // Actieve medewerkers
-    const activeEmployees = (DataStore.users || []).filter(u => u.active !== false && u.role === 'medewerker').length;
+    // Hier stonden ook "diensten deze week" en "medewerkers actief". Die zijn
+    // eruit: het zijn getallen waar niets uit volgt. Dat er deze week 52
+    // diensten staan zegt niets zonder te weten hoeveel het er horen te zijn,
+    // en hoeveel medewerkers actief zijn verandert een paar keer per jaar. Op
+    // een kaart hoort iets waar je naar handelt.
 
     // Open ruilverzoeken. Deze kaart is er ALLEEN voor wie geen eigen rij
     // kaarten heeft, dus voor een adminaccount. Een roosterverantwoordelijke
@@ -739,12 +726,9 @@ function renderHomeStats(user, role) {
                 <div class="stat-card-k">${label}</div>
             </div>`, actie, titel);
 
-    return `
-        <div class="home-stats">
-            ${stat('calendar-days', 'var(--ok-bg)', 'var(--sage-700)', shiftsThisWeek, 'diensten deze week', "switchView('planning')", 'Naar de planning')}
-            ${stat('users', 'var(--info-bg)', 'var(--info)', activeEmployees, 'medewerkers actief', "switchView('employees')", 'Naar de medewerkers')}
-            ${eigenRij ? '' : stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken', "switchView('swaps')", 'Naar de ruilverzoeken')}
-            ${statKaart(`
+    return [
+        eigenRij ? '' : stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken', "switchView('swaps')", 'Naar de ruilverzoeken'),
+        statKaart(`
                 <div class="stat-card-ic" style="background:var(--danger-bg);color:var(--danger-color)">${IconHelper.html('alert-triangle', 'md')}</div>
                 <div>
                     <div class="stat-card-v">${alertCount}</div>
@@ -753,9 +737,19 @@ function renderHomeStats(user, role) {
                 ${alertCount ? '<i data-lucide="chevron-down" class="lucide-sm stat-card-chevron"></i>' : ''}`,
                 alertCount ? 'toggleHomeMeldingen(this)' : '',
                 'Toon de meldingen', 'stat-card--meldingen',
-                'aria-expanded="false" aria-controls="home-meldingen"')}
-        </div>
-    `;
+                'aria-expanded="false" aria-controls="home-meldingen"')
+    ].filter(Boolean);
+}
+
+/**
+ * Eén raster voor alle stat-kaarten. Het waren er twee: je eigen cijfers en de
+ * beheercijfers. Nu de beheerrij nog maar uit de meldingenkaart bestaat, zou
+ * die als losse rij over de volle breedte komen te staan.
+ */
+function renderHomeKaarten(user, role) {
+    const kaarten = [...renderHomeEigenUren(user), ...renderHomeStats(user, role)];
+    if (kaarten.length === 0) return '';
+    return `<div class="home-stats">${kaarten.join('')}</div>`;
 }
 
 function renderHomeShifts(user) {
