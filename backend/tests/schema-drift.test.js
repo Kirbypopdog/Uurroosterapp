@@ -14,13 +14,14 @@ const fs = require('fs');
 const path = require('path');
 
 const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'sql', 'schema.sql'), 'utf8');
-const serverJs = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+// #157: de migraties stonden in server.js en staan nu in migraties.js.
+const migratiesJs = fs.readFileSync(path.join(__dirname, '..', 'src', 'migraties.js'), 'utf8');
 
-// Alleen het stuk tot aan het einde van de MIGRATIONS-array, zodat gewone
-// queries in de endpoints niet meetellen.
-const migratieBlok = serverJs.slice(
-  serverJs.indexOf('const MIGRATIONS'),
-  serverJs.indexOf('async function runMigrations')
+// Alleen het stuk tot aan het einde van de MIGRATIONS-array, zodat andere
+// queries in dat bestand niet meetellen.
+const migratieBlok = migratiesJs.slice(
+  migratiesJs.indexOf('const MIGRATIONS'),
+  migratiesJs.indexOf('async function runMigrations')
 );
 
 function genormaliseerd(tekst) {
