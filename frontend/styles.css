@@ -14197,3 +14197,39 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
     color: var(--warn-text);
     font-weight: 600;
 }
+
+/* ── Op het beginscherm (#159) ────────────────────────────────────────────
+   Twee kleine dingen die alleen op een telefoon iets doen.
+
+   De raakvlakken waren al grotendeels geregeld: onder 480 pixels staan .btn,
+   .nav-btn en de invoervelden al op 44. Er staat daar ook een bewuste keuze om
+   .btn-sm op 36 te houden, zodat secundaire knoppen niet log ogen; die blijft.
+   Wat nergens geregeld was, staat hieronder. Gemeten op 390 pixels was
+   uitloggen 32x32 en de gebruikersknop 32 hoog.
+
+   De vraag staat op pointer: coarse en niet op schermbreedte, want het gaat om
+   vingers en niet om pixels. Een smal browservenster op een laptop houdt zo
+   zijn compacte maten.
+
+   En de veilige zone onderaan. Staat de app op het beginscherm, dan loopt hij
+   door tot de onderrand van het scherm, en op een iPhone zit daar de streep
+   voor het thuisgebaar overheen. Zonder deze marge liggen de onderste knoppen
+   van de zijbalk eronder. env() is nul op alles zonder inkeping, dus dit doet
+   elders niets. */
+@media (pointer: coarse) {
+    .nav-logout-btn,
+    .mobile-menu-btn,
+    .tcard-toggle {
+        min-width: 44px;
+        min-height: 44px;
+    }
+    .user-menu-trigger {
+        min-height: 44px;
+    }
+}
+
+@media (display-mode: standalone) {
+    .sidebar-foot {
+        padding-bottom: calc(var(--space-sm, 8px) + env(safe-area-inset-bottom));
+    }
+}

@@ -6,6 +6,21 @@
          knijpzoomen, en juist deze app toont op een telefoon dichte
          roostertabellen met kleine cijfers. Weglaten is de hele fix. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- #159: op het beginscherm zetten. Bewust GEEN service worker en GEEN
+         push: Victor wil alleen dat de app als app opent. Een service worker
+         zou hier bovendien risico geven, want deze app heeft geen bouwstap en
+         versiebeheer gebeurt met ?v= achter de scripts; een cachende worker kan
+         mensen vastzetten op een versie die ze er met verversen niet uit
+         krijgen. -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4a7c6f">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <!-- iOS leest nog altijd de apple-variant; de andere is de opvolger. -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Het Vlot">
     <title>Het Vlot - Roosterplanning</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232d6a4f'/><text x='16' y='23' font-size='20' text-anchor='middle' fill='white'>📋</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
