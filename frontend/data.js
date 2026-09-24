@@ -201,8 +201,60 @@ const MELD_TRAAG_MS = 8000;
 const WACHT_KORT_MS = 20000;
 const WACHT_LANG_MS = 55000;
 
+/**
+ * #159: waar het inlogtoken staat, op één plek.
+ *
+ * Het stond in sessionStorage, en dat is leeg zodra je het tabblad sluit. De
+ * server geeft nochtans een token van ZEVEN DAGEN mee, dus die zeven dagen
+ * werden nooit gebruikt: elke keer opnieuw inloggen. Op een app die vanaf het
+ * beginscherm start valt dat extra op, want elke start is een nieuwe sessie.
+ *
+ * Het onderscheid: draait de app vanaf het beginscherm, dan blijft de
+ * aanmelding staan zolang het token geldig is, net als bij elke andere app op
+ * je telefoon. In een gewoon browsertabblad blijft het zoals het was, tot je
+ * het tabblad sluit.
+ *
+ * Dat onderscheid is er om één reden. De app bevat ziekmeldingen, en dat zijn
+ * gezondheidsgegevens (#152). Er is nergens een uitlog-na-inactiviteit, dus op
+ * een gedeelde computer zou een blijvende aanmelding betekenen dat de volgende
+ * persoon ziet wie er ziek is. Een app op een beginscherm staat per definitie
+ * op iemands eigen toestel.
+ */
+function draaitAlsApp() {
+    try {
+        return window.matchMedia('(display-mode: standalone)').matches
+            || window.navigator.standalone === true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function bewaarToken(token) {
+    try {
+        (draaitAlsApp() ? localStorage : sessionStorage).setItem('hetvlot_token', token);
+    } catch (e) {
+        // Privémodus of volle opslag: dan maar voor deze sessie.
+        try { sessionStorage.setItem('hetvlot_token', token); } catch (e2) { /* opgeven */ }
+    }
+}
+
+// Allebei lezen, want de opslag kan tussen twee keer openen verschillen: eerst
+// in een tabblad ingelogd en daarna de app geopend, of omgekeerd.
+function leesToken() {
+    try {
+        return sessionStorage.getItem('hetvlot_token') || localStorage.getItem('hetvlot_token');
+    } catch (e) {
+        return null;
+    }
+}
+
+function wisToken() {
+    try { sessionStorage.removeItem('hetvlot_token'); } catch (e) { /* zie hierboven */ }
+    try { localStorage.removeItem('hetvlot_token'); } catch (e) { /* zie hierboven */ }
+}
+
 async function dataApiFetch(path, options = {}) {
-    const token = sessionStorage.getItem('hetvlot_token');
+    const token = leesToken();
     const headers = {
         'Content-Type': 'application/json',
         ...(token ? { 'Authorization': `Bearer ${token}` } : {})
@@ -278,7 +330,7 @@ async function dataApiFetch(path, options = {}) {
     if (!response.ok) {
         if (response.status === 401) {
             // Token ontbreekt of verlopen — sessie opruimen en terug naar login
-            sessionStorage.removeItem('hetvlot_token');
+            wisToken();
             sessionStorage.removeItem('hetvlot_user');
             // #269: 'sessie' zorgt dat handleLogout de openstaande vensters
             // sluit en uitlegt waarom je terug op het loginscherm staat.
@@ -653,7 +705,7 @@ async function updateShift(id, updates) {
 async function refreshShifts({ startDate, endDate, merge = false } = {}) {
     // Geen actieve sessie → niets ophalen. Voorkomt 401-ruis wanneer init-code
     // (bv. setCurrentWeek) een refresh triggert vóór de gebruiker is ingelogd.
-    if (!sessionStorage.getItem('hetvlot_token')) return DataStore.shifts;
+    if (!leesToken()) return DataStore.shifts;
     try {
         // Auto-use active range if set and no explicit params given
         if (!startDate && !endDate && _activeShiftRange) {

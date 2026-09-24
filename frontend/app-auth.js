@@ -35,7 +35,7 @@ async function handleLogin(e) {
         AppState.currentUser = data.user;
         AppState.authToken = data.token;
         sessionStorage.setItem('hetvlot_user', JSON.stringify(data.user));
-        sessionStorage.setItem('hetvlot_token', data.token);
+        bewaarToken(data.token);
         // Load data from database
         await loadDataFromAPI();
         syncTeamFilters();
@@ -77,7 +77,7 @@ async function handleLogin(e) {
         AppState.currentUser = null;
         AppState.authToken = null;
         sessionStorage.removeItem('hetvlot_user');
-        sessionStorage.removeItem('hetvlot_token');
+        wisToken();
 
         // Ensure login screen is visible
         const bewaardEmail = technisch ? email : '';
@@ -107,7 +107,7 @@ function handleLogout(reden) {
     AppState.currentUser = null;
     AppState.authToken = null;
     sessionStorage.removeItem('hetvlot_user');
-    sessionStorage.removeItem('hetvlot_token');
+    wisToken();
     // #294: deze twee staan in localStorage, dus zonder dit erven ze over naar
     // de volgende gebruiker op hetzelfde toestel. De toets in showApp vangt een
     // verboden weergave nu wel af, maar iemand hoort ook niet te beginnen op
@@ -160,7 +160,7 @@ async function checkSession() {
         return;
     }
 
-    const savedToken = sessionStorage.getItem('hetvlot_token');
+    const savedToken = leesToken();
     if (!savedToken) {
         showLogin();
         return;

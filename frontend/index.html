@@ -42,13 +42,18 @@
         // sessie: #login-container staat zichtbaar in de HTML en werd pas
         // verborgen NADAT de /me-sessiecheck terugkwam (lokaal ~130ms, op een
         // trage mobiele verbinding een stuk langer en duidelijk zichtbaar).
-        // Deze check leest sessionStorage synchroon vóór de eerste paint.
+        // Deze check leest de opslag synchroon vóór de eerste paint.
         // showLogin() haalt de klasse weer weg als de sessie ongeldig blijkt.
+        //
+        // #159: allebei de opslagen nakijken. Draait de app vanaf het
+        // beginscherm, dan staat het token in localStorage; in een tabblad in
+        // sessionStorage. leesToken() in data.js doet hetzelfde, maar dat
+        // bestand is hier nog niet geladen: dit moet vóór de eerste paint.
         try {
-            if (sessionStorage.getItem('hetvlot_token')) {
+            if (sessionStorage.getItem('hetvlot_token') || localStorage.getItem('hetvlot_token')) {
                 document.documentElement.classList.add('session-restoring');
             }
-        } catch (e) { /* sessionStorage geblokkeerd — dan gewoon login tonen */ }
+        } catch (e) { /* opslag geblokkeerd — dan gewoon login tonen */ }
     </script>
 </head>
 <body>
