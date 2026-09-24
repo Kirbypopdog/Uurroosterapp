@@ -206,51 +206,43 @@ const WACHT_LANG_MS = 55000;
  *
  * Het stond in sessionStorage, en dat is leeg zodra je het tabblad sluit. De
  * server geeft nochtans een token van ZEVEN DAGEN mee, dus die zeven dagen
- * werden nooit gebruikt: elke keer opnieuw inloggen. Op een app die vanaf het
- * beginscherm start valt dat extra op, want elke start is een nieuwe sessie.
+ * werden nooit gebruikt: elke keer opnieuw inloggen.
  *
- * Het onderscheid: draait de app vanaf het beginscherm, dan blijft de
- * aanmelding staan zolang het token geldig is, net als bij elke andere app op
- * je telefoon. In een gewoon browsertabblad blijft het zoals het was, tot je
- * het tabblad sluit.
+ * Nu blijft de aanmelding staan zolang het token geldig is, overal. Dat is een
+ * bewuste keuze van Victor, ook voor een gewoon browsertabblad.
  *
- * Dat onderscheid is er om één reden. De app bevat ziekmeldingen, en dat zijn
- * gezondheidsgegevens (#152). Er is nergens een uitlog-na-inactiviteit, dus op
- * een gedeelde computer zou een blijvende aanmelding betekenen dat de volgende
- * persoon ziet wie er ziek is. Een app op een beginscherm staat per definitie
- * op iemands eigen toestel.
+ * WAT DAT BETEKENT, ZODAT NIEMAND HET LATER PER ONGELUK TERUGDRAAIT OF UITBREIDT:
+ * de app bevat ziekmeldingen, en dat zijn gezondheidsgegevens (#152). Er is
+ * nergens een uitlog-na-inactiviteit. Op een computer die door meer dan één
+ * persoon gebruikt wordt, blijft de vorige persoon dus ingelogd tot het token
+ * verloopt of tot iemand op uitloggen drukt. Wordt dat ooit een probleem, dan
+ * is de oplossing een uitlog-na-inactiviteit en niet het terugzetten van deze
+ * opslag: dat laatste maakt alleen het inloggen weer lastig zonder het gat te
+ * dichten.
  */
-function draaitAlsApp() {
-    try {
-        return window.matchMedia('(display-mode: standalone)').matches
-            || window.navigator.standalone === true;
-    } catch (e) {
-        return false;
-    }
-}
-
 function bewaarToken(token) {
     try {
-        (draaitAlsApp() ? localStorage : sessionStorage).setItem('hetvlot_token', token);
+        localStorage.setItem('hetvlot_token', token);
     } catch (e) {
-        // Privémodus of volle opslag: dan maar voor deze sessie.
+        // Privémodus of volle opslag: dan maar voor deze sessie, zodat je
+        // tenminste kunt werken.
         try { sessionStorage.setItem('hetvlot_token', token); } catch (e2) { /* opgeven */ }
     }
 }
 
-// Allebei lezen, want de opslag kan tussen twee keer openen verschillen: eerst
-// in een tabblad ingelogd en daarna de app geopend, of omgekeerd.
+// Allebei lezen: er kan nog een token uit sessionStorage staan van vóór deze
+// wijziging, en de terugval hierboven schrijft daar ook naartoe.
 function leesToken() {
     try {
-        return sessionStorage.getItem('hetvlot_token') || localStorage.getItem('hetvlot_token');
+        return localStorage.getItem('hetvlot_token') || sessionStorage.getItem('hetvlot_token');
     } catch (e) {
         return null;
     }
 }
 
 function wisToken() {
-    try { sessionStorage.removeItem('hetvlot_token'); } catch (e) { /* zie hierboven */ }
     try { localStorage.removeItem('hetvlot_token'); } catch (e) { /* zie hierboven */ }
+    try { sessionStorage.removeItem('hetvlot_token'); } catch (e) { /* zie hierboven */ }
 }
 
 async function dataApiFetch(path, options = {}) {

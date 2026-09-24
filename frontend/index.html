@@ -45,12 +45,12 @@
         // Deze check leest de opslag synchroon vóór de eerste paint.
         // showLogin() haalt de klasse weer weg als de sessie ongeldig blijkt.
         //
-        // #159: allebei de opslagen nakijken. Draait de app vanaf het
-        // beginscherm, dan staat het token in localStorage; in een tabblad in
-        // sessionStorage. leesToken() in data.js doet hetzelfde, maar dat
-        // bestand is hier nog niet geladen: dit moet vóór de eerste paint.
+        // #159: allebei de opslagen nakijken. Het token staat sindsdien in
+        // localStorage, maar er kan er nog een in sessionStorage zitten van
+        // daarvoor. leesToken() in data.js doet hetzelfde; dat bestand is hier
+        // nog niet geladen, want dit moet vóór de eerste paint.
         try {
-            if (sessionStorage.getItem('hetvlot_token') || localStorage.getItem('hetvlot_token')) {
+            if (localStorage.getItem('hetvlot_token') || sessionStorage.getItem('hetvlot_token')) {
                 document.documentElement.classList.add('session-restoring');
             }
         } catch (e) { /* opslag geblokkeerd — dan gewoon login tonen */ }
