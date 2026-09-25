@@ -104,6 +104,8 @@ async function handleLogin(e) {
 // reden mag 'sessie' zijn; dan volgt er een melding waarom je terug op het
 // loginscherm staat. Bij een gewone uitlog blijft die uiteraard achterwege.
 function handleLogout(reden) {
+    stopInactiviteitsWacht();
+    try { localStorage.removeItem(ACTIVITEIT_SLEUTEL); } catch (e) { /* privémodus */ }
     AppState.currentUser = null;
     AppState.authToken = null;
     sessionStorage.removeItem('hetvlot_user');
@@ -124,6 +126,9 @@ function handleLogout(reden) {
     showLogin();
     if (reden === 'sessie') {
         showToast('Je sessie is verlopen. Log opnieuw in.', 'warning');
+    }
+    if (reden === 'inactief') {
+        showToast('Je bent uitgelogd omdat de app vier uur niet gebruikt is.', 'warning');
     }
 }
 
@@ -153,6 +158,67 @@ function sluitAlleVensters() {
     AppState._shiftBackendForce = false;
 }
 
+// ===== UITLOGGEN BIJ INACTIVITEIT (#159) =====
+//
+// De laptops worden gedeeld, maar iedereen heeft zijn eigen login en dus zijn
+// eigen browserprofiel. Wat overblijft is de laptop die onbewaakt open blijft
+// staan: dan kan iemand anders verder in jouw geopende sessie, en de app bevat
+// ziekmeldingen (#152).
+//
+// Het token blijft vierentwintig uur geldig en loopt mee zolang je bezig bent.
+// Deze teller vult dat aan: vier uur niets aanraken en de sessie wordt gewist.
+//
+// Op een TIJDSTEMPEL en niet op een aflopende timer. Een timer telt niet door
+// terwijl een laptop dicht is, en hij bestaat niet meer na een herlading. Een
+// tijdstempel in localStorage overleeft allebei, en wordt daarom ook bij het
+// OPSTARTEN nagekeken en niet alleen tijdens het gebruik.
+const INACTIEF_UITLOGGEN_MS = 4 * 60 * 60 * 1000;
+const ACTIVITEIT_SLEUTEL = 'hetvlot_laatste_activiteit';
+// Niet bij elke klik naar de opslag schrijven; eens per minuut is nauwkeurig
+// genoeg voor een grens van vier uur.
+const ACTIVITEIT_SCHRIJFPAUZE_MS = 60 * 1000;
+
+let _activiteitTimer = null;
+let _laatstGeschreven = 0;
+
+function noteerActiviteit() {
+    const nu = Date.now();
+    if (nu - _laatstGeschreven < ACTIVITEIT_SCHRIJFPAUZE_MS) return;
+    _laatstGeschreven = nu;
+    try { localStorage.setItem(ACTIVITEIT_SLEUTEL, String(nu)); } catch (e) { /* privémodus */ }
+}
+
+function teLangStil() {
+    try {
+        const laatste = Number(localStorage.getItem(ACTIVITEIT_SLEUTEL));
+        // Geen tijdstempel betekent een sessie van vóór deze functie, of een
+        // geblokkeerde opslag. Dat is geen reden om iemand eruit te gooien.
+        if (!laatste) return false;
+        return (Date.now() - laatste) > INACTIEF_UITLOGGEN_MS;
+    } catch (e) {
+        return false;
+    }
+}
+
+function startInactiviteitsWacht() {
+    stopInactiviteitsWacht();
+    _laatstGeschreven = 0;
+    noteerActiviteit();
+    ['pointerdown', 'keydown'].forEach(soort =>
+        document.addEventListener(soort, noteerActiviteit, { passive: true, capture: true }));
+    // Elke minuut kijken. Sliep het toestel, dan vuurt dit bij het ontwaken en
+    // ziet de vergelijking meteen dat er te veel tijd voorbij is.
+    _activiteitTimer = setInterval(() => {
+        if (teLangStil()) handleLogout('inactief');
+    }, 60 * 1000);
+}
+
+function stopInactiviteitsWacht() {
+    if (_activiteitTimer) { clearInterval(_activiteitTimer); _activiteitTimer = null; }
+    ['pointerdown', 'keydown'].forEach(soort =>
+        document.removeEventListener(soort, noteerActiviteit, { capture: true }));
+}
+
 async function checkSession() {
     // Don't check session if login is in progress
     if (AppState.isAuthenticating) {
@@ -163,6 +229,13 @@ async function checkSession() {
     const savedToken = leesToken();
     if (!savedToken) {
         showLogin();
+        return;
+    }
+    // #159: stond de app vier uur onaangeroerd, dan telt dat ook als het
+    // tabblad intussen dicht was of de laptop sliep. Hier nakijken en niet
+    // alleen in de timer, want die bestaat na een herlading niet meer.
+    if (teLangStil()) {
+        handleLogout('inactief');
         return;
     }
     AppState.authToken = savedToken;
@@ -257,6 +330,7 @@ function populateUserMenu() {
 }
 
 function showApp() {
+    startInactiviteitsWacht();
     // #156: het gebruiker-id aan de foutmonitoring koppelen, zodat een melding
     // te herleiden is naar wie hem kreeg. Alleen het id; naam en e-mail gaan
     // nooit mee. Doet niets als de monitoring uitstaat.

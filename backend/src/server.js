@@ -51,9 +51,13 @@ const defaultOrigins = [
 const allowedOrigins = process.env.FRONTEND_URL
   ? [...new Set([...process.env.FRONTEND_URL.split(',').map(o => o.trim()), ...defaultOrigins])]
   : defaultOrigins;
+// #159: X-Vernieuwd-Token moet de frontend kunnen LEZEN. Een browser geeft van
+// een antwoord van een andere oorsprong maar een handvol headers vrij; wat daar
+// niet bij staat bestaat voor JavaScript gewoon niet, zonder foutmelding.
+const exposedHeaders = ['X-Vernieuwd-Token'];
 const corsOptions = process.env.NODE_ENV === 'production'
-  ? { origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)), credentials: true }
-  : {};
+  ? { origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)), credentials: true, exposedHeaders }
+  : { exposedHeaders };
 app.use(cors(corsOptions));
 app.use(express.json());
 

@@ -1989,6 +1989,64 @@ describe('POST /schedule-drafts', () => {
   });
 });
 
+// ===== Meelopend token (#159) =====
+
+describe('#159 het token loopt mee zolang je bezig bent', () => {
+  const jwtLib = require('jsonwebtoken');
+
+  function tokenMet(urenRest) {
+    return jwtLib.sign(
+      { id: 1, role: 'admin', team_id: null, name: 'Admin', exp: Math.floor(Date.now() / 1000) + Math.round(urenRest * 3600) },
+      'test-secret-key-for-unit-tests'
+    );
+  }
+
+  // /me doet na de actief-controle nog een eigen query naar het profiel.
+  function mockProfiel() {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Admin', role: 'admin' }] });
+  }
+
+  test('een vers token krijgt GEEN vernieuwing mee', async () => {
+    mockActiveUser();
+    mockProfiel();
+    const res = await request(app)
+      .get('/api/v1/me')
+      .set('Authorization', `Bearer ${tokenMet(20)}`);
+    expect(res.status).toBe(200);
+    // Nog twintig van de vierentwintig uur over: niets te vernieuwen. Anders
+    // zou elk verzoek een nieuw token maken, en dat is verspilling.
+    expect(res.headers['x-vernieuwd-token']).toBeUndefined();
+  });
+
+  test('een token over de helft krijgt er wel een mee', async () => {
+    mockActiveUser();
+    mockProfiel();
+    const res = await request(app)
+      .get('/api/v1/me')
+      .set('Authorization', `Bearer ${tokenMet(4)}`);
+    expect(res.status).toBe(200);
+    const vers = res.headers['x-vernieuwd-token'];
+    expect(vers).toBeDefined();
+    // En het verse token moet weer een volle termijn hebben, anders schuift de
+    // vervaldatum nooit op en vliegt iemand er middenin zijn werk uit.
+    const ontleed = jwtLib.verify(vers, 'test-secret-key-for-unit-tests');
+    const urenGeldig = (ontleed.exp - Math.floor(Date.now() / 1000)) / 3600;
+    expect(urenGeldig).toBeGreaterThan(23);
+    expect(urenGeldig).toBeLessThanOrEqual(24);
+    // Dezelfde persoon en rol, niet zomaar een nieuw token.
+    expect(ontleed.id).toBe(1);
+    expect(ontleed.role).toBe('admin');
+  });
+
+  test('een verlopen token wordt niet vernieuwd maar geweigerd', async () => {
+    const res = await request(app)
+      .get('/api/v1/me')
+      .set('Authorization', `Bearer ${tokenMet(-1)}`);
+    expect(res.status).toBe(401);
+    expect(res.headers['x-vernieuwd-token']).toBeUndefined();
+  });
+});
+
 // ===== PATCH /schedule-drafts/:id/weeks/:week (#148 stap 1) =====
 
 describe('PATCH /schedule-drafts/:id/weeks/:week', () => {

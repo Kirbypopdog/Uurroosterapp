@@ -7,11 +7,24 @@ const { pool } = require('../db');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
+// #159: het token was zeven dagen geldig en werd nooit vernieuwd. Dat is nu
+// vierentwintig uur, met een vernieuwing zolang je bezig bent.
+//
+// Die twee horen bij elkaar. Alleen verkorten zou betekenen dat je middenin je
+// werk uitgelogd wordt, want de klok liep gewoon door. Met de vernieuwing
+// hieronder merkt wie de app gebruikt er niets van, en betekent dit getal
+// alleen nog: HOE LANG JE WEG MAG BLIJVEN voor je opnieuw moet inloggen.
+const TOKEN_GELDIGHEID_UREN = 24;
+// Vanaf wanneer een vers token meegestuurd wordt. Bij de helft: elk verzoek een
+// nieuw token maken is verspilling, en pas op het laatste moment vernieuwen
+// betekent dat wie precies dan even niets doet alsnog buitenvliegt.
+const VERNIEUW_ONDER_UREN = TOKEN_GELDIGHEID_UREN / 2;
+
 function signToken(user) {
   return jwt.sign(
     { id: user.id, role: user.role, team_id: user.team_id, name: user.name },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: `${TOKEN_GELDIGHEID_UREN}h` }
   );
 }
 
@@ -31,6 +44,17 @@ async function requireAuth(req, res, next) {
     const activeCheck = await pool.query('SELECT active FROM users WHERE id = $1', [req.user.id]);
     if (!activeCheck.rows.length || activeCheck.rows[0].active === false) {
       return res.status(401).json({ error: 'Account is gedeactiveerd' });
+    }
+
+    // #159: is het token over de helft, dan gaat er een vers exemplaar mee in
+    // een header. De frontend bewaart dat stilletjes. Wie de app gebruikt blijft
+    // zo ingelogd zonder er ooit iets van te merken; wie hem een dag laat
+    // liggen, moet opnieuw inloggen.
+    const restUren = (req.user.exp * 1000 - Date.now()) / 3600000;
+    if (restUren < VERNIEUW_ONDER_UREN) {
+      res.set('X-Vernieuwd-Token', signToken({
+        id: req.user.id, role: req.user.role, team_id: req.user.team_id, name: req.user.name,
+      }));
     }
     return next();
   } catch (err) {
@@ -54,4 +78,4 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { signToken, requireAuth, requireAdmin, requireRole };
+module.exports = { signToken, requireAuth, requireAdmin, requireRole, TOKEN_GELDIGHEID_UREN };

@@ -319,6 +319,13 @@ async function dataApiFetch(path, options = {}) {
         if (meldTimer) clearTimeout(meldTimer);
     }
 
+    // #159: de server stuurt een vers token mee zodra het huidige over de helft
+    // van zijn levensduur is. Stilletjes bewaren, zodat wie de app gebruikt
+    // ingelogd blijft zonder er iets van te merken. De header is in de CORS
+    // vrijgegeven; zonder dat zou hij hier onzichtbaar zijn.
+    const versToken = response.headers.get('X-Vernieuwd-Token');
+    if (versToken) bewaarToken(versToken);
+
     if (!response.ok) {
         if (response.status === 401) {
             // Token ontbreekt of verlopen — sessie opruimen en terug naar login
