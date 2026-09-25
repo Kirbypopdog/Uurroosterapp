@@ -1993,6 +1993,10 @@ describe('POST /schedule-drafts', () => {
 
 describe('#159 het token loopt mee zolang je bezig bent', () => {
   const jwtLib = require('jsonwebtoken');
+  // Uit de code halen en niet overtypen: verandert de duur ooit, dan meet deze
+  // test nog steeds wat hij hoort te meten in plaats van stuk te gaan op een
+  // getal dat nergens meer op slaat.
+  const { TOKEN_GELDIGHEID_UREN } = require('../src/middleware/auth');
 
   function tokenMet(urenRest) {
     return jwtLib.sign(
@@ -2011,9 +2015,9 @@ describe('#159 het token loopt mee zolang je bezig bent', () => {
     mockProfiel();
     const res = await request(app)
       .get('/api/v1/me')
-      .set('Authorization', `Bearer ${tokenMet(20)}`);
+      .set('Authorization', `Bearer ${tokenMet(TOKEN_GELDIGHEID_UREN * 0.9)}`);
     expect(res.status).toBe(200);
-    // Nog twintig van de vierentwintig uur over: niets te vernieuwen. Anders
+    // Nog negentig procent van de looptijd over: niets te vernieuwen. Anders
     // zou elk verzoek een nieuw token maken, en dat is verspilling.
     expect(res.headers['x-vernieuwd-token']).toBeUndefined();
   });
@@ -2023,7 +2027,7 @@ describe('#159 het token loopt mee zolang je bezig bent', () => {
     mockProfiel();
     const res = await request(app)
       .get('/api/v1/me')
-      .set('Authorization', `Bearer ${tokenMet(4)}`);
+      .set('Authorization', `Bearer ${tokenMet(TOKEN_GELDIGHEID_UREN * 0.1)}`);
     expect(res.status).toBe(200);
     const vers = res.headers['x-vernieuwd-token'];
     expect(vers).toBeDefined();
@@ -2031,8 +2035,8 @@ describe('#159 het token loopt mee zolang je bezig bent', () => {
     // vervaldatum nooit op en vliegt iemand er middenin zijn werk uit.
     const ontleed = jwtLib.verify(vers, 'test-secret-key-for-unit-tests');
     const urenGeldig = (ontleed.exp - Math.floor(Date.now() / 1000)) / 3600;
-    expect(urenGeldig).toBeGreaterThan(23);
-    expect(urenGeldig).toBeLessThanOrEqual(24);
+    expect(urenGeldig).toBeGreaterThan(TOKEN_GELDIGHEID_UREN - 1);
+    expect(urenGeldig).toBeLessThanOrEqual(TOKEN_GELDIGHEID_UREN);
     // Dezelfde persoon en rol, niet zomaar een nieuw token.
     expect(ontleed.id).toBe(1);
     expect(ontleed.role).toBe('admin');

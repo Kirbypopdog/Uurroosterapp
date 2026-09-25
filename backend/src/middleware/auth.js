@@ -7,14 +7,19 @@ const { pool } = require('../db');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// #159: het token was zeven dagen geldig en werd nooit vernieuwd. Dat is nu
-// vierentwintig uur, met een vernieuwing zolang je bezig bent.
+// #159: het token was zeven dagen geldig en werd nooit vernieuwd. De duur is
+// zeven dagen gebleven, maar hij loopt nu mee zolang je bezig bent.
 //
-// Die twee horen bij elkaar. Alleen verkorten zou betekenen dat je middenin je
-// werk uitgelogd wordt, want de klok liep gewoon door. Met de vernieuwing
-// hieronder merkt wie de app gebruikt er niets van, en betekent dit getal
-// alleen nog: HOE LANG JE WEG MAG BLIJVEN voor je opnieuw moet inloggen.
-const TOKEN_GELDIGHEID_UREN = 24;
+// Dit getal betekent daardoor maar één ding: HOE LANG JE WEG MAG BLIJVEN voor
+// je opnieuw moet inloggen. Wie de app dagelijks gebruikt raakt het nooit.
+//
+// Het stond even op 24 uur. Dat is teruggedraaid omdat een medewerker die zijn
+// rooster één keer per week bekijkt dan élke keer opnieuw moest inloggen, en
+// dat is de meerderheid. De bescherming tegen een onbewaakte laptop komt niet
+// van dit getal maar van het uitloggen na inactiviteit in app-auth.js: een
+// kortere geldigheid helpt daar niets, want het token is op dat moment vers.
+const TOKEN_GELDIGHEID_UREN = 7 * 24;
+
 // Vanaf wanneer een vers token meegestuurd wordt. Bij de helft: elk verzoek een
 // nieuw token maken is verspilling, en pas op het laatste moment vernieuwen
 // betekent dat wie precies dan even niets doet alsnog buitenvliegt.
