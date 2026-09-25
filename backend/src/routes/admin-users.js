@@ -246,13 +246,6 @@ router.put('/users/:id', requireAuth, async (req, res) => {
   }
 
   try {
-    const week1Json = JSON.stringify(weekScheduleWeek1 || []);
-    const week2Json = JSON.stringify(weekScheduleWeek2 || []);
-    // Use weekSchedules directly if provided (for cycles > 2 weeks), otherwise build from week1/week2
-    const weekSchedulesJson = Array.isArray(weekSchedules) && weekSchedules.length > 0
-      ? JSON.stringify(weekSchedules)
-      : JSON.stringify([weekScheduleWeek1 || [], weekScheduleWeek2 || []]);
-
     // Get old email before updating
     const oldUserResult = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
     const oldEmail = oldUserResult.rows.length > 0 ? oldUserResult.rows[0].email : null;
@@ -260,25 +253,58 @@ router.put('/users/:id', requireAuth, async (req, res) => {
     // Only admins may change email; roosterverantwoordelijke cannot
     const newEmail = role === 'admin' && email ? email.trim().toLowerCase() : oldEmail;
 
+    // #391: de SET wordt opgebouwd uit alleen de velden die MEEGESTUURD zijn.
+    // Hier stonden alle kolommen onvoorwaardelijk in, met de waarden
+    // rechtstreeks uit req.body. Een verzoek met enkel { name, active } zette
+    // daardoor main_team, team_id en de weekroosters op null en
+    // contract_hours op 0 — zonder foutmelding, dus de medewerker hield zijn
+    // naam en account maar was zijn team en uren kwijt. In de planning valt
+    // dat pas op als de bezetting niet meer klopt.
+    //
+    // Het venster in de app stuurt telkens het volledige formulier mee, dus
+    // langs die weg viel het niet op. Het bijt zodra iets anders deze route
+    // met een deelverzoek gebruikt.
+    const zetters = [];
+    const waarden = [];
+    const zet = (kolommen, waarde, cast = '') => {
+      waarden.push(waarde);
+      for (const kolom of [].concat(kolommen)) zetters.push(`${kolom} = $${waarden.length}${cast}`);
+    };
+
+    zet('name', name);
+    zet('email', newEmail);
+    // team_id deelt bewust dezelfde plaatshouder als main_team: die twee horen
+    // gelijk te zijn, anders falen de permissies (CLAUDE.md regel 2).
+    if (mainTeam !== undefined) zet(['main_team', 'team_id'], mainTeam || null);
+    if (contractHours !== undefined) zet('contract_hours', contractHours || 0);
+    if (active !== undefined) zet('active', active !== false);
+
+    // De drie roosterkolommen vormen één groep. Wie er één meestuurt, stuurt
+    // het hele rooster; wie er geen enkele meestuurt, raakt ze geen van drieën
+    // aan. Dat houdt het gedrag voor het volledige formulier precies gelijk.
+    if (weekScheduleWeek1 !== undefined || weekScheduleWeek2 !== undefined || weekSchedules !== undefined) {
+      // Use weekSchedules directly if provided (for cycles > 2 weeks), otherwise build from week1/week2
+      const weekSchedulesJson = Array.isArray(weekSchedules) && weekSchedules.length > 0
+        ? JSON.stringify(weekSchedules)
+        : JSON.stringify([weekScheduleWeek1 || [], weekScheduleWeek2 || []]);
+      zet('week_schedule_week1', JSON.stringify(weekScheduleWeek1 || []), '::jsonb');
+      zet('week_schedule_week2', JSON.stringify(weekScheduleWeek2 || []), '::jsonb');
+      zet('week_schedules', weekSchedulesJson, '::jsonb');
+    }
+
+    waarden.push(userId);
+
     const result = await pool.query(
       `UPDATE users
-       SET name = $1,
-           email = $2,
-           main_team = $3,
-           team_id = $3,
-           contract_hours = $4,
-           active = $5,
-           week_schedule_week1 = $6::jsonb,
-           week_schedule_week2 = $7::jsonb,
-           week_schedules = $8::jsonb
-       WHERE id = $9
+       SET ${zetters.join(',\n           ')}
+       WHERE id = $${waarden.length}
        RETURNING id, name, email, role, team_id,
                  main_team as "mainTeam", extra_teams as "extraTeams",
                  contract_hours as "contractHours", active,
                  week_schedule_week1 as "weekScheduleWeek1",
                  week_schedule_week2 as "weekScheduleWeek2",
                 week_schedules as "weekSchedules"`,
-      [name, newEmail, mainTeam || null, contractHours || 0, active !== false, week1Json, week2Json, weekSchedulesJson, userId]
+      waarden
     );
 
     if (result.rows.length === 0) {

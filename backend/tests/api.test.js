@@ -4280,6 +4280,97 @@ describe('PUT /users/:id en de foreign key op team_id (#221)', () => {
   });
 });
 
+// ===== PUT /users/:id schrijft alleen wat meegestuurd is (#391) =====
+
+describe('PUT /users/:id laat velden met rust die niet meegestuurd zijn (#391)', () => {
+  const beheerder = { id: 1, role: 'admin', name: 'Admin', team_id: null };
+
+  // Haalt de UPDATE-query en haar parameters op uit de mock. `set` is alleen
+  // het stuk tussen SET en WHERE: de RETURNING noemt álle kolommen, dus tegen
+  // de volledige query toetsen zegt niets over wat er geschreven wordt.
+  function deUpdate() {
+    const call = pool.query.mock.calls.find(c => String(c[0]).includes('UPDATE users'));
+    expect(call).toBeDefined();
+    const sql = String(call[0]);
+    const set = sql.slice(sql.indexOf('SET '), sql.indexOf('WHERE id'));
+    return { sql, set, params: call[1] };
+  }
+
+  function mockPut(antwoord = {}) {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ email: 'anna@hetvlot.be' }] }) // oude email opzoeken
+      .mockResolvedValueOnce({ rows: [{ id: 5, name: 'Anna', ...antwoord }] }); // de UPDATE
+    pool.query.mockResolvedValue({ rows: [], rowCount: 0 });           // logAudit
+  }
+
+  test('een deelverzoek raakt team, uren en weekrooster niet aan', async () => {
+    mockPut();
+    const res = await request(app)
+      .put('/api/v1/users/5')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Anna', active: false });
+
+    expect(res.status).toBe(200);
+    const { set } = deUpdate();
+    // Dit is de kern: deze kolommen mogen niet in de SET voorkomen. Stonden ze
+    // er wel, dan werden ze op null / 0 gezet zonder dat iemand erom vroeg.
+    expect(set).not.toContain('main_team');
+    expect(set).not.toContain('team_id');
+    expect(set).not.toContain('contract_hours');
+    expect(set).not.toContain('week_schedule');
+    // Wat wél meegestuurd is, wordt gewoon geschreven.
+    expect(set).toContain('name');
+    expect(set).toContain('active');
+  });
+
+  test('mainTeam meesturen zet team_id op dezelfde waarde', async () => {
+    mockPut();
+    await request(app)
+      .put('/api/v1/users/5')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Anna', mainTeam: 'vlot1' });
+
+    const { set, params } = deUpdate();
+    // Eén plaatshouder voor allebei: zo kunnen ze niet uiteenlopen, en dat
+    // moeten ze niet (CLAUDE.md regel 2).
+    const nummer = set.match(/main_team = \$(\d+)/)[1];
+    expect(set).toContain(`team_id = $${nummer}`);
+    expect(params[Number(nummer) - 1]).toBe('vlot1');
+  });
+
+  test('het volledige formulier schrijft nog steeds alles weg', async () => {
+    mockPut();
+    await request(app)
+      .put('/api/v1/users/5')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({
+        name: 'Anna', mainTeam: 'vlot1', contractHours: 38, active: true,
+        weekScheduleWeek1: [{ day: 1 }], weekScheduleWeek2: [],
+      });
+
+    const { set, params } = deUpdate();
+    for (const kolom of ['name', 'email', 'main_team', 'team_id', 'contract_hours', 'active',
+      'week_schedule_week1', 'week_schedule_week2', 'week_schedules']) {
+      expect(set).toContain(kolom);
+    }
+    expect(params).toContain(38);
+    expect(params).toContain('vlot1');
+  });
+
+  test('contracturen 0 meesturen is een echte waarde, geen weglating', async () => {
+    mockPut();
+    await request(app)
+      .put('/api/v1/users/5')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ name: 'Anna', contractHours: 0 });
+
+    const { set, params } = deUpdate();
+    expect(set).toContain('contract_hours');
+    expect(params).toContain(0);
+  });
+});
+
 // ===== #236: het type van een afwezigheid wordt gevalideerd =====
 
 // ===== Gelijke start- en eindtijd (#295) =====
