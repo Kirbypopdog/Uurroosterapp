@@ -677,8 +677,8 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 <button type="button" class="modal-close" aria-label="Sluiten" onclick="document.getElementById('replace-employee-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
-                <div class="info-box neutral mb-md">
-                    <p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster wordt gekopieerd naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>
+                <div class="info-box neutral mb-md" id="replace-intro">
+                    <p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster, het team en de contracturen gaan naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>
                 </div>
                 <form id="replace-employee-form">
                     <div class="form-group">
@@ -698,7 +698,14 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                     <div class="form-group hidden" id="replace-date-group">
                         <label for="replace-from-date">Overnemen vanaf *</label>
                         <input type="date" id="replace-from-date" class="form-input" value="${today}" min="${today}" />
+                        <small class="text-muted">Ligt deze datum in de toekomst, dan blijft ${escapeHtml(departingUser.name)} tot dan gewoon werken. De diensten verhuizen meteen; team, uren en de deactivatie volgen op die dag.</small>
                     </div>
+                    <div class="form-group hidden" id="replace-eigen-group">
+                        <label>Eigen diensten van de vervanger vanaf die datum</label>
+                        <label class="radio-label"><input type="radio" name="replace-eigen" value="behouden" checked> Behouden — waarschuw me als ze botsen</label>
+                        <label class="radio-label"><input type="radio" name="replace-eigen" value="verwijderen"> Verwijderen — het contract wordt volledig overgenomen</label>
+                    </div>
+                    <div id="replace-botsingen" class="hidden mt-sm"></div>
                     <div id="replace-summary" class="hidden mt-sm"></div>
                     <div class="modal-actions">
                         <button type="button" class="btn btn-secondary" onclick="document.getElementById('replace-employee-modal').remove()">Annuleren</button>
@@ -715,14 +722,24 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
     // Toggle date picker
     const transferCheckbox = modal.querySelector('#replace-transfer-shifts');
     const dateGroup = modal.querySelector('#replace-date-group');
+    const eigenGroup = modal.querySelector('#replace-eigen-group');
+    const botsingenEl = modal.querySelector('#replace-botsingen');
     transferCheckbox.addEventListener('change', () => {
         dateGroup.classList.toggle('hidden', !transferCheckbox.checked);
+        eigenGroup.classList.toggle('hidden', !transferCheckbox.checked);
         updateReplaceSummary();
     });
 
     // Update summary on changes
     modal.querySelector('#replace-new-user').addEventListener('change', updateReplaceSummary);
     modal.querySelector('#replace-from-date').addEventListener('change', updateReplaceSummary);
+    modal.querySelectorAll('input[name="replace-eigen"]').forEach(r =>
+        r.addEventListener('change', updateReplaceSummary));
+
+    function gekozenEigenDiensten() {
+        const gekozen = modal.querySelector('input[name="replace-eigen"]:checked');
+        return gekozen ? gekozen.value : 'behouden';
+    }
 
     function updateReplaceSummary() {
         const summaryEl = modal.querySelector('#replace-summary');
@@ -731,13 +748,28 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         const transfer = transferCheckbox.checked;
         const fromDate = modal.querySelector('#replace-from-date').value;
 
+        // Een ingangsdatum in de toekomst betekent dat de vertrekker tot dan
+        // blijft werken. Zowel de inleiding als de samenvatting moet dat
+        // zeggen: laat je de inleiding op "wordt gedeactiveerd" staan, dan
+        // spreekt ze de samenvatting eronder tegen en gelooft de beheerder de
+        // bovenste.
+        const gaatLaterIn = !!(transfer && fromDate && fromDate > today);
+        modal.querySelector('#replace-intro').innerHTML = gaatLaterIn
+            ? `<p><strong>${escapeHtml(departingUser.name)}</strong> wordt vanaf <strong>${fromDate}</strong> vervangen. Tot dan blijft zij gewoon werken.</p>`
+            : `<p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster, het team en de contracturen gaan naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>`;
+
         if (!newUser) {
             summaryEl.classList.add('hidden');
             return;
         }
 
         let summaryHtml = '<div class="info-box warning"><strong>Samenvatting:</strong><ul class="summary-list">';
-        summaryHtml += `<li>Basisrooster van <strong>${escapeHtml(departingUser.name)}</strong> wordt gekopieerd naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
+
+        if (gaatLaterIn) {
+            summaryHtml += `<li>Basisrooster, team en contracturen van <strong>${escapeHtml(departingUser.name)}</strong> gaan <strong>op ${fromDate}</strong> naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
+        } else {
+            summaryHtml += `<li>Basisrooster, team en contracturen van <strong>${escapeHtml(departingUser.name)}</strong> gaan naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
+        }
 
         if (transfer && fromDate) {
             const futureShifts = DataStore.shifts.filter(s =>
@@ -745,11 +777,26 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             );
             summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${fromDate})`;
             summaryHtml += `<br><small class="text-muted">Telling op basis van de geladen planning, het werkelijke aantal kan hoger zijn</small></li>`;
+
+            const eigenDiensten = DataStore.shifts.filter(s =>
+                String(s.employeeId) === String(newUser.id) && s.date >= fromDate
+            );
+            if (eigenDiensten.length > 0) {
+                if (gekozenEigenDiensten() === 'verwijderen') {
+                    summaryHtml += `<li><strong>${eigenDiensten.length}</strong> eigen diensten van <strong>${escapeHtml(newUser.name)}</strong> worden verwijderd</li>`;
+                } else {
+                    summaryHtml += `<li><strong>${escapeHtml(newUser.name)}</strong> heeft zelf nog <strong>${eigenDiensten.length}</strong> diensten vanaf die datum; die blijven staan. Botsen ze, dan stopt de vervanging en krijg je te zien welke</li>`;
+                }
+            }
         } else {
             summaryHtml += `<li>Geen diensten overgedragen. Pas het actieve concept opnieuw toe via Rooster bouwen</li>`;
         }
 
-        summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
+        if (gaatLaterIn) {
+            summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> blijft werken tot ${fromDate} en wordt dan pas gedeactiveerd</li>`;
+        } else {
+            summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
+        }
         summaryHtml += '</ul></div>';
 
         summaryEl.innerHTML = summaryHtml;
@@ -775,12 +822,23 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         }
 
         const newUser = activeUsers.find(u => String(u.id) === String(newUserId));
-        const confirmMsg = `Weet je zeker dat je ${departingUser.name} wilt vervangen door ${newUser.name}?\n\nDeze actie kan niet ongedaan worden gemaakt.`;
+        const eigenDienstenVervanger = gekozenEigenDiensten();
+        const gaatLaterIn = !!(fromDate && fromDate > today);
+
+        let confirmMsg = gaatLaterIn
+            ? `Weet je zeker dat je ${departingUser.name} vanaf ${fromDate} wilt vervangen door ${newUser.name}?\n\nDe diensten verhuizen meteen. ${departingUser.name} blijft werken tot ${fromDate}.`
+            : `Weet je zeker dat je ${departingUser.name} wilt vervangen door ${newUser.name}?\n\nDeze actie kan niet ongedaan worden gemaakt.`;
+        if (fromDate && eigenDienstenVervanger === 'verwijderen') {
+            confirmMsg += `\n\nDe eigen diensten van ${newUser.name} vanaf ${fromDate} worden verwijderd.`;
+        }
 
         if (!await showConfirm(confirmMsg, 'Medewerker vervangen', { danger: true, confirmText: 'Vervangen' })) return;
 
+        botsingenEl.classList.add('hidden');
+        botsingenEl.innerHTML = '';
+
         try {
-            const result = await replaceEmployee(Number(departingUser.id), Number(newUserId), fromDate);
+            const result = await replaceEmployee(Number(departingUser.id), Number(newUserId), fromDate, eigenDienstenVervanger);
             modal.remove();
 
             // Weekendverantwoordelijkheid overerven
@@ -806,7 +864,9 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 }
             }
 
-            let msg = `${departingUser.name} vervangen door ${newUser.name}`;
+            let msg = result.gaatLaterIn
+                ? `${departingUser.name} wordt op ${result.ingangsdatum} vervangen door ${newUser.name}`
+                : `${departingUser.name} vervangen door ${newUser.name}`;
             if (result.shiftsTransferred > 0) {
                 msg += ` (${result.shiftsTransferred} diensten overgedragen)`;
             }
@@ -815,12 +875,43 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             }
             showToast(msg, 'success');
 
+            if (result.gaatLaterIn) {
+                showToast(`${departingUser.name} blijft actief tot ${result.ingangsdatum}. Team en contracturen gaan op die dag naar ${newUser.name}.`, 'info', 8000);
+            }
+            if (result.eigenDienstenVerwijderd > 0) {
+                showToast(`${result.eigenDienstenVerwijderd} eigen diensten van ${newUser.name} verwijderd`, 'info', 6000);
+            }
+            if (result.verzoekenGeannuleerd > 0) {
+                showToast(`${result.verzoekenGeannuleerd} openstaande ruil- of overnameverzoeken van ${departingUser.name} geannuleerd`, 'info', 6000);
+            }
+
             if (result.hint === 'apply_concept') {
                 showToast(`${newUser.name} heeft nog geen diensten. Pas het actieve concept opnieuw toe via Rooster bouwen.`, 'info', 6000);
             }
 
             if (onComplete) onComplete();
         } catch (error) {
+            // De backend weigert met 409 en een lijst botsingen als de vervanger
+            // zelf al diensten heeft die in de weg zitten. Die lijst hoort in het
+            // venster en niet in een toast: het zijn datums die je naast elkaar
+            // wil kunnen lezen, en het venster moet openblijven zodat je meteen
+            // op "Verwijderen" kunt overschakelen.
+            const botsingen = error.data && error.data.botsingen;
+            if (error.status === 409 && Array.isArray(botsingen) && botsingen.length > 0) {
+                const rijen = botsingen.map(b => `<li><strong>${escapeHtml(b.datum)}</strong> — ${escapeHtml(departingUser.name)} ${escapeHtml(b.vertrekker)} tegenover ${escapeHtml(newUser.name)} ${escapeHtml(b.vervanger)}${b.zelfdeStart ? ' (zelfde starttijd)' : ''}</li>`).join('');
+                botsingenEl.innerHTML = `<div class="alert alert-error">
+                    ${IconHelper.html(ICONS.error, 'sm')}
+                    <div>
+                        <strong>${escapeHtml(error.message)}</strong>
+                        <ul class="summary-list">${rijen}</ul>
+                        <small>Kies hierboven "Verwijderen" om de eigen diensten van ${escapeHtml(newUser.name)} te laten vervallen, of pas de ingangsdatum aan. Er is nog niets gewijzigd.</small>
+                    </div>
+                </div>`;
+                botsingenEl.classList.remove('hidden');
+                IconHelper.init(botsingenEl);
+                botsingenEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                return;
+            }
             showToast(`Vervanging mislukt: ${error.message}`, 'error');
         }
     });

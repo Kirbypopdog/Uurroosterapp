@@ -66,6 +66,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `src/veilige-router.js` | `maakRouter()`: een router die een afwijzende async handler naar `next(err)` stuurt (#380). Gebruik deze, nooit `express.Router()` rechtstreeks, anders krijgt een verzoek bij een fout géén antwoord |
 | `src/middleware/auth.js` | `signToken`, `requireAuth`, `requireAdmin`, `requireRole` |
 | `src/helpers/audit.js` | `logAudit`: het schrijven naar de audit log. Het LEZEN is een route en staat in `routes/audit-log.js` |
+| `src/helpers/overnames.js` | `voerGeplandeOvernamesUit()`: de overnames uit `geplande_overnames` afmaken die vandaag ingaan. Draait bij opstart en elk uur |
 | `src/helpers/dienstregels.js` | Waar een dienst aan moet voldoen: `validateShiftRules`, `blockDayIfEmpty`, `getMinRustUren`, de afwezigheidstypes en de tijdcontroles. De enige helpers die meer dan één domein deelt |
 | `src/migraties.js` | De `MIGRATIONS`-array en `runMigrations()` |
 | `src/db.js` | PostgreSQL connection pool |
@@ -95,7 +96,7 @@ sneller dan dit bestand (#291).
 
 ## Database Schema
 
-**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions
+**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions, geplande_overnames
 
 Kernrelaties:
 - `shifts.user_id` → `users.id`
@@ -205,6 +206,46 @@ dagelijkse samenvatting naast de directe mail aan het eigen team.
 - `GET /api/v1/audit-log` - Audit log met filters en paginatie
 - `POST /api/v1/admin/users/:id/replace` - Medewerker vervangen
 - `PUT /api/v1/me/email-preferences` - Email notificatie voorkeur
+
+**Een medewerker vervangen.** Eén verzoek, maar twee momenten. Wat de planning
+vooruit laat kloppen gebeurt METEEN: de diensten, de blokkades en de
+activiteiten vanaf `transferShiftsFrom` verhuizen naar de vervanger. Wat aan het
+CONTRACT hangt — weekrooster, team, extra teams, contracturen, en het
+deactiveren van de vertrekker — gebeurt pas op die datum.
+
+Dat onderscheid komt uit de praktijk: iemand neemt een contract over op een
+afgesproken dag, maar de vertrekker werkt tot dan gewoon door. Deed de app alles
+ineens, dan kon zij vanaf het instellen niet meer inloggen en droeg de vervanger
+een contract dat nog niet begonnen was.
+
+| ligt `transferShiftsFrom` in de toekomst? | wat er nu gebeurt |
+|---|---|
+| nee (of niet meegegeven) | alles ineens, zoals vroeger |
+| ja | diensten verhuizen; de rest komt in `geplande_overnames` te staan |
+
+`voerGeplandeOvernamesUit()` in `src/helpers/overnames.js` maakt rijpe overnames
+af. Die draait bij het opstarten en elk uur daarna, net als de bewaartermijnen.
+De server slaapt in na een kwartier stilte, dus in de praktijk voert de eerste
+die de app die dag opent de overname uit — vroeg genoeg voor een grens van een
+hele dag. Is een van de twee intussen weg of niet actief, dan vervalt de rij op
+`geannuleerd` in plaats van elk uur opnieuw te mislukken. Een partiële unieke
+index laat maar één `gepland`-rij per vertrekker toe.
+
+`eigenDienstenVervanger` zegt wat er met de EIGEN diensten van de vervanger
+gebeurt vanaf die datum: `behouden` (standaard) of `verwijderen`. Bij
+`behouden` zoekt de route eerst botsingen op en weigert met **409** plus een
+lijst `botsingen: [{datum, vertrekker, vervanger, zelfdeStart}]`. Zonder die
+controle liep de vervanging tegen de unieke index
+`idx_shifts_uniek_per_start` aan en las de beheerder alleen "Server error bij
+vervanging", zonder één aanwijzing wélke dag het probleem was. Een overlap met
+een ANDERE starttijd wordt óók gemeld: die glipt langs de index en zou de
+vervanger stilletjes twee diensten op één dag geven.
+
+Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
+ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.
+Ze laten staan betekende dat de tegenpartij een verzoek zag van iemand die weg
+is, en dat aanvaarden de dienst van de VERVANGER verzette. Meeverhuizen is geen
+alternatief: dan erft de vervanger een vraag die zij nooit gesteld heeft.
 
 ### Agendakoppeling (iCal)
 - `POST /api/v1/me/ical-token` - Persoonlijke feedlink aanmaken of vervangen

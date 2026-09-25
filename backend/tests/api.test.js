@@ -2957,6 +2957,188 @@ describe('POST /import', () => {
 // ===== POST /admin/users/:id/replace =====
 
 describe('POST /admin/users/:id/replace', () => {
+  // Drie dingen die hier ontbraken, gevonden door de vervanging tegen een echte
+  // databank uit te voeren.
+  function mockVervanging(oudeGebruiker, nieuweGebruiker) {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [], rowCount: 0 });        // logAudit
+    mockClient.query
+      .mockResolvedValueOnce({ rows: [] })                    // BEGIN
+      .mockResolvedValueOnce({ rows: [oudeGebruiker] })       // oude gebruiker FOR UPDATE
+      .mockResolvedValueOnce({ rows: [nieuweGebruiker] })     // nieuwe gebruiker FOR UPDATE
+      .mockResolvedValue({ rows: [], rowCount: 0 });          // de rest
+    return mockClient;
+  }
+  const OUD = {
+    id: 4, name: 'Els', main_team: 'vlot2', team_id: 'vlot2', extra_teams: ['cargo'],
+    contract_hours: 30, week_schedules: [], week_schedule_week1: [], week_schedule_week2: [],
+  };
+
+  test('neemt team, extra teams en contracturen mee, niet alleen het weekrooster', async () => {
+    const mockClient = mockVervanging(OUD, { id: 7, name: 'Nele', active: true });
+    const res = await request(app)
+      .post('/api/v1/admin/users/4/replace')
+      .set('Authorization', `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`)
+      .send({ replacementUserId: 7 });
+    expect(res.status).toBe(200);
+
+    const kopie = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('UPDATE users SET') && c[0].includes('week_schedules')
+    );
+    expect(kopie).toBeDefined();
+    expect(kopie[0]).toContain('main_team');
+    expect(kopie[0]).toContain('contract_hours');
+    expect(kopie[0]).toContain('extra_teams');
+    // team_id moet op main_team gezet worden en niet op de oude team_id:
+    // die twee horen gelijk te zijn, anders falen de permissies (CLAUDE.md 2).
+    expect(kopie[1]).toContain('vlot2');
+    expect(kopie[1]).toContain(30);
+    expect(res.body.teamOvergenomen).toBe('vlot2');
+    expect(res.body.contracturenOvergenomen).toBe(30);
+  });
+
+  test('trekt openstaande ruil- en overnameverzoeken van de vertrekker in', async () => {
+    const mockClient = mockVervanging(OUD, { id: 7, name: 'Nele', active: true });
+    const res = await request(app)
+      .post('/api/v1/admin/users/4/replace')
+      .set('Authorization', `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`)
+      .send({ replacementUserId: 7 });
+    expect(res.status).toBe(200);
+
+    const annuleren = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('shift_swap_requests') && c[0].includes("'cancelled'")
+    );
+    expect(annuleren).toBeDefined();
+    // Alleen wat nog openstaat, en zowel wat zij vroeg als wat aan haar gevraagd is.
+    expect(annuleren[0]).toContain("status = 'pending'");
+    expect(annuleren[0]).toContain('requester_user_id');
+    expect(annuleren[0]).toContain('target_user_id');
+    expect(annuleren[1][0]).toBe(4);
+  });
+
+  test('weigert een vervanger die niet actief is', async () => {
+    mockVervanging(OUD, { id: 7, name: 'Nele', active: false });
+    const res = await request(app)
+      .post('/api/v1/admin/users/4/replace')
+      .set('Authorization', `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`)
+      .send({ replacementUserId: 7 });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('Nele');
+  });
+
+  // De drie tests hierboven lopen langs een vaste volgorde van queries. De
+  // overname met een ingangsdatum slaat er een paar over (er wordt pas op de
+  // dag zelf gedeactiveerd), dus die krijgen een mock die op de SQL-TEKST
+  // antwoordt in plaats van op de volgorde. Anders verschuift elke toevoeging
+  // in de route alle nummers hier.
+  function mockVervangingOpTekst(oudeGebruiker, nieuweGebruiker, antwoorden = []) {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    let gebruikersSelects = 0;
+    mockClient.query.mockImplementation((sql) => {
+      const tekst = String(sql);
+      if (tekst.includes('FOR UPDATE') && tekst.includes('FROM users')) {
+        gebruikersSelects++;
+        return Promise.resolve({ rows: [gebruikersSelects === 1 ? oudeGebruiker : nieuweGebruiker] });
+      }
+      for (const [fragment, resultaat] of antwoorden) {
+        if (tekst.includes(fragment)) return Promise.resolve(resultaat);
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+    pool.query.mockResolvedValue({ rows: [], rowCount: 0 });        // logAudit
+    return mockClient;
+  }
+
+  const adminToken = () => `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`;
+  // Ver genoeg vooruit dat deze test niet op een dag omslaat.
+  const overEenMaand = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
+  test('weigert met 409 en noemt de dagen als de vervanger zelf al diensten heeft', async () => {
+    const mockClient = mockVervangingOpTekst(OUD, { id: 7, name: 'Nele', active: true }, [
+      ['zelfde_start', { rows: [
+        { datum: '2026-10-05', vertrekker_start: '07:00:00', vertrekker_eind: '15:00:00',
+          vervanger_start: '07:00:00', vervanger_eind: '12:00:00', zelfde_start: true },
+        { datum: '2026-10-08', vertrekker_start: '07:00:00', vertrekker_eind: '15:00:00',
+          vervanger_start: '14:00:00', vervanger_eind: '22:00:00', zelfde_start: false },
+      ] }],
+    ]);
+
+    const res = await request(app)
+      .post('/api/v1/admin/users/4/replace')
+      .set('Authorization', adminToken())
+      .send({ replacementUserId: 7, transferShiftsFrom: overEenMaand });
+
+    expect(res.status).toBe(409);
+    expect(res.body.botsingen).toHaveLength(2);
+    // Tijden afgeknipt tot uu:mm, niet de uu:mm:ss die pg teruggeeft.
+    expect(res.body.botsingen[0]).toEqual({
+      datum: '2026-10-05', vertrekker: '07:00-15:00', vervanger: '07:00-12:00', zelfdeStart: true,
+    });
+    // Een overlap met een ANDERE starttijd telt ook mee: de unieke index vangt
+    // die niet, en de vervanger zou er stilletjes twee diensten op één dag aan
+    // overhouden.
+    expect(res.body.botsingen[1].zelfdeStart).toBe(false);
+
+    // Er is niets gewijzigd.
+    const sqls = mockClient.query.mock.calls.map(c => String(c[0]));
+    expect(sqls).toContain('ROLLBACK');
+    expect(sqls.some(q => q.includes('UPDATE shifts SET user_id'))).toBe(false);
+  });
+
+  test('verwijdert de eigen diensten van de vervanger als daarvoor gekozen is', async () => {
+    const mockClient = mockVervangingOpTekst(OUD, { id: 7, name: 'Nele', active: true }, [
+      ['DELETE FROM shifts', { rows: [], rowCount: 3 }],
+      ['UPDATE shifts SET user_id', { rows: [], rowCount: 9 }],
+    ]);
+
+    const res = await request(app)
+      .post('/api/v1/admin/users/4/replace')
+      .set('Authorization', adminToken())
+      .send({ replacementUserId: 7, transferShiftsFrom: overEenMaand, eigenDienstenVervanger: 'verwijderen' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.eigenDienstenVerwijderd).toBe(3);
+    expect(res.body.shiftsTransferred).toBe(9);
+
+    const sqls = mockClient.query.mock.calls.map(c => String(c[0]));
+    // Wissen gebeurt VOOR het overdragen, anders neemt de DELETE de zojuist
+    // overgedragen diensten mee.
+    expect(sqls.findIndex(q => q.includes('DELETE FROM shifts')))
+      .toBeLessThan(sqls.findIndex(q => q.includes('UPDATE shifts SET user_id')));
+    // En dan hoeft er niet meer naar botsingen gezocht te worden.
+    expect(sqls.some(q => q.includes('zelfde_start'))).toBe(false);
+  });
+
+  test('een ingangsdatum in de toekomst legt de overname vast zonder nu al te deactiveren', async () => {
+    const mockClient = mockVervangingOpTekst(OUD, { id: 7, name: 'Nele', active: true });
+
+    const res = await request(app)
+      .post('/api/v1/admin/users/4/replace')
+      .set('Authorization', adminToken())
+      .send({ replacementUserId: 7, transferShiftsFrom: overEenMaand });
+
+    expect(res.status).toBe(200);
+    expect(res.body.gaatLaterIn).toBe(true);
+    expect(res.body.ingangsdatum).toBe(overEenMaand);
+
+    const sqls = mockClient.query.mock.calls.map(c => String(c[0]));
+    // De diensten verhuizen wel meteen: de planning moet vooruit kloppen.
+    expect(sqls.some(q => q.includes('UPDATE shifts SET user_id'))).toBe(true);
+    // Maar het contract nog niet, en de vertrekker blijft actief.
+    expect(sqls.some(q => q.includes('UPDATE users SET') && q.includes('week_schedules'))).toBe(false);
+    expect(sqls.some(q => q.includes('active = false'))).toBe(false);
+    // Openstaande verzoeken blijven staan zolang zij nog werkt.
+    expect(sqls.some(q => q.includes("status = 'cancelled'"))).toBe(false);
+    // De overname staat genoteerd voor die dag.
+    const vastgelegd = mockClient.query.mock.calls.find(c => String(c[0]).includes('INSERT INTO geplande_overnames'));
+    expect(vastgelegd).toBeDefined();
+    expect(vastgelegd[1]).toContain(overEenMaand);
+  });
+
   // Regressie #141: bij een lage medewerker-ID (bv. 3) mag de grid-remap enkel
   // de medewerker-sleutel hernoemen, niet de dag-van-de-week-index "3".
   test('remaps employee key without corrupting day-of-week indices (#141)', async () => {
@@ -2977,8 +3159,9 @@ describe('POST /admin/users/:id/replace', () => {
     mockClient.query
       .mockResolvedValueOnce({ rows: [] })                                                 // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: oldId, name: 'Oud', week_schedules: [], week_schedule_week1: [], week_schedule_week2: [] }] }) // old user FOR UPDATE
-      .mockResolvedValueOnce({ rows: [{ id: newId, name: 'Nieuw', active: false }] })      // new user FOR UPDATE
-      .mockResolvedValueOnce({ rows: [] })                                                 // copy week_schedules
+      .mockResolvedValueOnce({ rows: [{ id: newId, name: 'Nieuw', active: true }] })      // new user FOR UPDATE
+      .mockResolvedValueOnce({ rows: [] })                                                 // rooster, team en uren overnemen
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })                                    // openstaande verzoeken annuleren
       .mockResolvedValueOnce({ rows: [] })                                                 // deactivate old
       .mockResolvedValueOnce({ rows: [{ id: 1, grid }] })                                  // SELECT drafts FOR UPDATE
       .mockResolvedValueOnce({ rows: [] })                                                 // UPDATE schedule_drafts
@@ -3021,8 +3204,9 @@ describe('POST /admin/users/:id/replace', () => {
     mockClient.query
       .mockResolvedValueOnce({ rows: [] })                                                 // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: oldId, name: 'Oud', week_schedules: [], week_schedule_week1: [], week_schedule_week2: [] }] })
-      .mockResolvedValueOnce({ rows: [{ id: newId, name: 'Nieuw', active: false }] })
-      .mockResolvedValueOnce({ rows: [] })                                                 // copy week_schedules
+      .mockResolvedValueOnce({ rows: [{ id: newId, name: 'Nieuw', active: true }] })
+      .mockResolvedValueOnce({ rows: [] })                                                 // rooster, team en uren overnemen
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })                                    // openstaande verzoeken annuleren
       .mockResolvedValueOnce({ rows: [] })                                                 // deactivate old
       .mockResolvedValueOnce({ rows: [{ id: 1, grid }] })                                  // SELECT drafts (prefilter LIKE matcht dagindex)
       .mockResolvedValueOnce({ rows: [] });                                                // COMMIT (geen UPDATE schedule_drafts)

@@ -882,6 +882,40 @@ const MIGRATIONS = [
         console.log(`Migratie 046: ${r.rowCount} bestaande agendalink(s) gedateerd op vandaag.`);
       }
     }
+  },
+  {
+    name: '047_geplande_overnames',
+    up: async (client) => {
+      // #vervangen: een overname gaat in op een DATUM. Tot nu toe stuurde die
+      // datum alleen welke diensten verhuisden; het deactiveren van de
+      // vertrekker en het overzetten van team en uren gebeurde meteen. Wie de
+      // overname een week vooruit klaarzette, sloot daarmee iemand buiten die
+      // nog een week moest werken.
+      //
+      // Deze tabel houdt vast wat er op die dag nog moet gebeuren.
+      // voerGeplandeOvernamesUit() in server.js voert ze uit bij het opstarten
+      // en elk uur daarna, net zoals de bewaartermijnen (#151).
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS geplande_overnames (
+          id              SERIAL PRIMARY KEY,
+          oude_gebruiker  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          nieuwe_gebruiker INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          ingangsdatum    DATE NOT NULL,
+          status          TEXT NOT NULL DEFAULT 'gepland' CHECK (status IN ('gepland', 'uitgevoerd', 'geannuleerd')),
+          aangemaakt_door INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          aangemaakt_door_naam TEXT,
+          aangemaakt_op   TIMESTAMP DEFAULT NOW(),
+          uitgevoerd_op   TIMESTAMP
+        )`);
+      // Eén openstaande overname per vertrekker: twee tegelijk zou betekenen
+      // dat niemand weet wie zijn team en uren krijgt.
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_een_geplande_overname_per_persoon
+          ON geplande_overnames (oude_gebruiker) WHERE status = 'gepland'`);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_geplande_overnames_datum
+          ON geplande_overnames (ingangsdatum) WHERE status = 'gepland'`);
+    }
   }
 ];
 

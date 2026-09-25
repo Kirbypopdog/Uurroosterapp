@@ -184,7 +184,29 @@ CREATE INDEX IF NOT EXISTS idx_availability_user ON availability(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_main_team ON users(main_team);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
 CREATE INDEX IF NOT EXISTS idx_shift_blocks_user_date ON shift_blocks(user_id, date);
+-- #vervangen: een overname van een contract gaat in op een DATUM. Wat er op die
+-- dag nog moet gebeuren staat hier: de vertrekker deactiveren en team, extra
+-- teams, contracturen en weekrooster naar de vervanger zetten. De diensten
+-- verhuizen wel meteen, want de planning moet vooruit kloppen.
+-- voerGeplandeOvernamesUit() in server.js werkt dit af bij het opstarten en elk
+-- uur daarna.
+CREATE TABLE IF NOT EXISTS geplande_overnames (
+  id              SERIAL PRIMARY KEY,
+  oude_gebruiker  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  nieuwe_gebruiker INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ingangsdatum    DATE NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'gepland' CHECK (status IN ('gepland', 'uitgevoerd', 'geannuleerd')),
+  aangemaakt_door INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  aangemaakt_door_naam TEXT,
+  aangemaakt_op   TIMESTAMP DEFAULT NOW(),
+  uitgevoerd_op   TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON shift_swap_requests(status);
+-- Eén openstaande overname per vertrekker: twee tegelijk zou betekenen dat
+-- niemand weet wie zijn team en uren krijgt.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_een_geplande_overname_per_persoon ON geplande_overnames (oude_gebruiker) WHERE status = 'gepland';
+CREATE INDEX IF NOT EXISTS idx_geplande_overnames_datum ON geplande_overnames (ingangsdatum) WHERE status = 'gepland';
 CREATE INDEX IF NOT EXISTS idx_swap_requests_requester ON shift_swap_requests(requester_user_id);
 CREATE INDEX IF NOT EXISTS idx_swap_requests_target ON shift_swap_requests(target_user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_id);

@@ -583,11 +583,17 @@ async function deleteEmployee(id) {
     }
 }
 
-async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom = null) {
+// eigenDienstenVervanger: wat er met de EIGEN diensten van de vervanger gebeurt
+// vanaf de ingangsdatum. 'behouden' laat ze staan (de backend weigert dan met
+// 409 en een lijst botsingen als ze in de weg zitten), 'verwijderen' ruimt ze
+// op. De keuze staat hier expliciet en heeft geen standaard in de backend die
+// stilzwijgend wist.
+async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom = null, eigenDienstenVervanger = 'behouden') {
     try {
         const body = { replacementUserId };
         if (transferShiftsFrom) {
             body.transferShiftsFrom = transferShiftsFrom;
+            body.eigenDienstenVervanger = eigenDienstenVervanger;
         }
         const result = await dataApiFetch(`/admin/users/${oldUserId}/replace`, {
             method: 'POST',
