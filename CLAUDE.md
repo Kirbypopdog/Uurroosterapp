@@ -89,6 +89,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `schooljaar.test.js` | Schooljaar- en periodeberekeningen |
 | `schema-drift.test.js` | Bewaakt dat `sql/schema.sql` niet achterloopt op de migraties (#329, #311) |
 | `monitoring.test.js` | Wat de foutmonitoring wegfiltert, op sleutelnaam én op waarde (#156) |
+| `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
@@ -311,6 +312,17 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
 - **Opstartscherm** (#389): `index.html` zet de klasse `session-restoring` op `<html>` zodra er een token in `sessionStorage` staat. Die verbergt het loginscherm (anders flitst dat voorbij bij wie al ingelogd is) en `#app-container` staat dan nog op `hidden`. In dat gat toont `#opstartscherm` het KADER van de app: dezelfde zijbalk op dezelfde plek, met vlakken waar de inhoud komt. Puur markup en CSS, dus het staat er al bij de eerste paint. **De klasse moet op élk pad weggehaald worden**: in `showApp()` (geslaagd), in de twee foutafhandelingen van `checkSession()` en in `showLogin()`. Vergeet je er één, dan blijft het opstartscherm over de app heen staan
 - **Stat-kaarten op home** (#166): twee reeksen, elk met een eigen doelgroep. `renderHomeEigenUren()` toont JOUW uren deze week en deze periode tegen je contract, plus wat op jou wacht; alleen voor wie meedraait in het rooster, want een adminaccount heeft geen diensten. `renderHomeStats()` toont de BEHEERcijfers en is er alleen voor admin en roosterverantwoordelijke. Zonder contracturen verschijnt er geen balk en geen "van": `32/0u` zou onzin zijn. De kleurregel is dezelfde als bij de uren in de planning: rood boven de norm, oranje eronder
 - **Bezetting en activiteiten** (#145): `calcPlanningHourlyHeadcount()` in `app-planner.js` geeft `bruto` (wie een dienst heeft) en `netto` (bruto min wie op dat uur een activiteit heeft). ALLE zes de activiteittypes verminderen de netto bezetting, voor hun volle duur. Dat is nagevraagd en bevestigd: bij oudergesprek, vorming, overleg, vergadering, afspraak én andere staat de begeleider niet bij de groep. Er is bewust geen uitzondering per type en geen vinkje "ik blijf bereikbaar" per activiteit: dan moet iemand dat elke keer beoordelen en kan het vergeten worden, en te vaak waarschuwen is bij bezetting de veilige kant. Netto voedt precies drie plekken: de onderbezettingsmeldingen in `renderHomeAlerts`, de bezettingsbalk in de planning en `validateMinimumStaffing` in `validation.js`. Activiteittypes worden verder nergens in logica onderscheiden, alleen voor kleur en label
+- **Weekend- en vakantieverantwoordelijke**: je bent verantwoordelijk voor het WEEKEND, dus alleen in een week waarin het weekend open is. Staat het weekend dicht, dan is er niemand aan de beurt en toont de app niemand. Tijdens een vakantie staat de verantwoordelijke PER WEEK, aan te duiden in de roosterbouwer: in de kerstvakantie doet de ene persoon week 1 en een ander week 2. Een vakantieweek is daarmee uitgepraat — is er voor die week niemand aangeduid, dan is er niemand, en valt de app bewust NIET terug op de rotatie. Een vakantieweek verbruikt ook geen beurt, dus na de vakantie gaat de rotatie verder waar hij gebleven was.
+
+  Alles zit in de frontend: `getOrCalculateResponsible()` in `data.js` is de enige bron, de backend bewaart alleen `settings.responsibleRotation` en kent verder geen verantwoordelijke. De volgorde is: handmatige toewijzing → vakantieweek → open weekend → rotatie. De rotatie loopt alfabetisch op naam door `getEligibleEmployeesForResponsible()`.
+
+  **Drie valkuilen die hier alle drie tegelijk in zaten** en die samen twee klachten opleverden ("hij blijft hangen op X" en "de vakantieverantwoordelijke komt niet in de planning" — één gebeurtenis, twee kanten):
+  1. `getEmployee()` vergeleek met `===`. Een id komt als GETAL uit de API maar als STRING uit elke `<select>`, en `weeklyResponsibles` bewaart precies zo'n keuze. `120 === "120"` is false, dus de vakantie-override vond nooit iemand en viel zonder een spoor terug op de rotatie. Vergelijk id-s daarom altijd als tekst.
+  2. Het weeknummer binnen een vakantie werd met `Math.floor` uit een verschil in milliseconden gehaald. Over de overgang naar zomertijd liggen twee lokale middernachten 6,958 dagen uit elkaar, dus een paasvakantie toonde in week 2 de persoon van week 1. Gebruik `Math.round` voor hele weken.
+  3. De regel "alleen bij een open weekend" stond drie keer los bij de aanroepers (planning, beginscherm, instellingen) en ontbrak bij de vierde. Hij hoort in `getOrCalculateResponsible()` zelf.
+
+  `backend/tests/verantwoordelijke.test.js` bewaakt dit. Let op bij het schrijven van zo'n test: `data.js` draait in Node in een modulewrapper, dus zijn `const DataStore` is module-scoped en `global.DataStore` vullen bereikt hem NIET — stil, want de functies lezen dan de lege standaard. Importeer `DataStore` uit de module en vul die.
+
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.
 
@@ -397,7 +409,7 @@ cd backend
 npm test           # Alle tests uitvoeren, in enkele seconden
 ```
 
-Tien testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
+Elf testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
 voor wat elk bestand dekt. Tests gebruiken Jest + Supertest en de database wordt
 volledig gemockt, dus er is geen echte databank nodig.
 

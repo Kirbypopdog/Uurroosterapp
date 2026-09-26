@@ -612,7 +612,18 @@ async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom 
 
 function getEmployee(id) {
     // Find in all users (employees are non-admin users)
-    return DataStore.users.find(e => e.id === id);
+    //
+    // Vergelijken als TEKST, niet met ===. Een id komt als GETAL uit de API,
+    // maar als STRING terug uit elke <select> en elk radioveld. `120 === "120"`
+    // is false, en dan geeft deze functie stilletjes undefined terug.
+    //
+    // Daar is de vakantieverantwoordelijke jarenlang op stukgelopen:
+    // `weeklyResponsibles` bewaart de keuze uit een <select>, dus een string,
+    // waardoor de override in getOrCalculateResponsible nooit iemand vond en
+    // zonder een spoor terugviel op de gewone rotatie. De rotatiecode zelf
+    // normaliseert wél (`String(e.id) === startEmployeeId`); die twee liepen
+    // uiteen.
+    return DataStore.users.find(e => String(e.id) === String(id));
 }
 
 function getAllEmployees(activeOnly = false) {
@@ -1881,30 +1892,55 @@ function getOrCalculateResponsible(weekStartDate) {
     const manual = getWeekendResponsible(weekStartDate);
     if (manual) return manual;
 
-    // Vakantie verantwoordelijke override: check elke dag in de week
+    // Vakantie: de verantwoordelijke staat PER WEEK en wordt in de
+    // roosterbouwer aangeduid. In de kerstvakantie doet de ene persoon week 1
+    // en een ander week 2.
+    //
+    // Een vakantieweek is daarmee UITGEPRAAT: staat er niemand voor die week,
+    // dan is er niemand. Hier viel de code vroeger terug op de gewone rotatie,
+    // en dan stond er tijdens de vakantie iemand die helemaal niet aan de beurt
+    // was — bovendien bleef die persoon staan zolang de vakantie duurde, want
+    // vakantieweken laten de rotatieteller niet oplopen. Dat leverde de twee
+    // klachten op die één en dezelfde gebeurtenis waren: "hij blijft hangen op
+    // X" en "de vakantieverantwoordelijke komt niet in de planning".
     for (let i = 0; i < 7; i++) {
         const day = new Date(parseDateOnly(weekStartDate));
         day.setDate(day.getDate() + i);
         const hp = getHolidayPeriod(day);
-        if (hp) {
-            // Per-week responsible (weeklyResponsibles) takes priority over legacy single responsibleId
-            if (hp.weeklyResponsibles) {
-                const periodStart = parseDateOnly(hp.startDate);
-                const periodMonday = getMondayOfWeek(periodStart);
-                const thisMonday = getMondayOfWeek(day);
-                const weekNum = Math.floor((thisMonday - periodMonday) / (7 * 86400000)) + 1;
-                const respId = hp.weeklyResponsibles[String(weekNum)];
-                if (respId) {
-                    const emp = getEmployee(respId);
-                    if (emp) return emp;
-                }
-            } else if (hp.responsibleId) {
-                // Legacy: single responsible for entire period
-                const emp = getEmployee(hp.responsibleId);
-                if (emp) return emp;
-            }
+        if (!hp) continue;
+
+        // Per-week responsible (weeklyResponsibles) takes priority over legacy single responsibleId
+        if (hp.weeklyResponsibles) {
+            const periodMonday = getMondayOfWeek(parseDateOnly(hp.startDate));
+            const thisMonday = getMondayOfWeek(day);
+            // Afronden, niet afkappen. Twee lokale middernachten liggen over de
+            // overgang naar zomertijd 6,958 dagen uit elkaar in plaats van 7,
+            // en Math.floor maakt daar een week te weinig van. Een vakantie die
+            // over de laatste zondag van maart loopt — de paasvakantie doet dat
+            // vaak — toonde dan in week 2 de persoon van week 1.
+            const weekNum = Math.round((thisMonday - periodMonday) / (7 * 86400000)) + 1;
+            const respId = hp.weeklyResponsibles[String(weekNum)];
+            const emp = respId ? getEmployee(respId) : null;
+            return emp || null;
         }
+        if (hp.responsibleId) {
+            // Legacy: single responsible for entire period
+            return getEmployee(hp.responsibleId) || null;
+        }
+        return null;
     }
+
+    // Je bent verantwoordelijk voor het WEEKEND, dus alleen in een week waarin
+    // het weekend open is. Is het weekend dicht, dan is er niemand aan de
+    // beurt en mag er ook niemand aangeduid staan.
+    //
+    // De planning, het beginscherm en het instellingenscherm filterden hier
+    // alle drie zelf al op, elk met hun eigen aanroep van
+    // isWeekendOrHolidayWeek. De regel hoort hier, anders kan een vierde
+    // aanroeper hem vergeten — wat het bewerkvenster in de instellingen dan
+    // ook deed. Een handmatige toewijzing hierboven blijft wél gelden: die is
+    // een bewuste keuze van de beheerder.
+    if (!isWeekendOrHolidayWeek(weekStartDate)) return null;
 
     const rotation = DataStore.settings.responsibleRotation;
     if (!rotation) return null;
@@ -2353,12 +2389,22 @@ function getWeekScheduleFromDraft(employee, weekNumber, draft) {
 // This does not affect browser behavior since `module` is not defined there.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    // De DataStore zelf hoort hierbij. In Node draait dit bestand in een
+    // modulewrapper, dus `const DataStore` hierboven is module-scoped: een test
+    // die `global.DataStore` vult bereikt hem NIET en toetst dan stilzwijgend
+    // de standaardwaarden. Door de referentie mee te geven kan een test de
+    // velden vullen die de functies eronder lezen.
+    DataStore,
     parseDateOnly,
     formatDateYYYYMMDD,
     getMonday,
     getSchoolAnchorMonday,
     getSchoolYearAnchorMonday,
     getSchoolWeekNumber,
-    getFourWeekPeriodDates
+    getFourWeekPeriodDates,
+    getEmployee,
+    getEligibleEmployeesForResponsible,
+    isWeekendOrHolidayWeek,
+    getOrCalculateResponsible
   };
 }

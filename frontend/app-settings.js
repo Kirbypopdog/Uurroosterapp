@@ -854,7 +854,11 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 if (rotation.assignments) {
                     for (const [dateKey, assignedId] of Object.entries(rotation.assignments)) {
                         if (String(assignedId) === String(departingUser.id)) {
-                            rotation.assignments[dateKey] = String(newUserId);
+                            // Als GETAL wegschrijven, net als setWeekendResponsible
+                            // doet. Hier stond String(), en zolang getEmployee met
+                            // === vergeleek verdween de weekendverantwoordelijke
+                            // van die week na een vervanging stilletjes.
+                            rotation.assignments[dateKey] = Number(newUserId);
                             rotationChanged = true;
                         }
                     }
