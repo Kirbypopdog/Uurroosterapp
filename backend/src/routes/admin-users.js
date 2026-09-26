@@ -143,10 +143,22 @@ router.patch('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => 
            active = COALESCE($7, active),
            week_schedule_week1 = COALESCE($8::jsonb, week_schedule_week1),
            week_schedule_week2 = COALESCE($9::jsonb, week_schedule_week2),
-           week_schedules = COALESCE($10::jsonb, jsonb_build_array(
-             COALESCE($8::jsonb, week_schedule_week1),
-             COALESCE($9::jsonb, week_schedule_week2)
-           )),
+           -- #392: de terugval hieronder bouwt week_schedules op uit week1 en
+           -- week2, dus uit precies TWEE weken. Die stond vroeger meteen achter
+           -- COALESCE($10), waardoor élke PATCH zonder roosterveld hem uitvoerde:
+           -- een rolwijziging of een deactivatie knipte de cyclus van iemand met
+           -- drie of meer weken terug naar twee. Herbouwen mag alleen wanneer
+           -- week1 of week2 werkelijk meegestuurd is; anders blijft de kolom
+           -- zoals hij was.
+           week_schedules = CASE
+             WHEN $10::jsonb IS NOT NULL THEN $10::jsonb
+             WHEN $8::jsonb IS NOT NULL OR $9::jsonb IS NOT NULL
+               THEN jsonb_build_array(
+                 COALESCE($8::jsonb, week_schedule_week1),
+                 COALESCE($9::jsonb, week_schedule_week2)
+               )
+             ELSE week_schedules
+           END,
            email_notifications_enabled = COALESCE($12, email_notifications_enabled)
        WHERE id = $11
        RETURNING id, name, email, role, team_id,

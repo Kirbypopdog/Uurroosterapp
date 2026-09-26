@@ -2546,6 +2546,76 @@ describe('PATCH /admin/users/:id', () => {
     expect(updateCall[0]).toContain('team_id = COALESCE($2, team_id)');
     expect(updateCall[1][1]).toBeNull(); // $2 (team_id || mainTeam || null) === null
   });
+
+  // Regressie #392: week_schedules stond achter COALESCE($10, jsonb_build_array(
+  // week1, week2)). De terugval bouwt de kolom op uit precies TWEE weken, en
+  // liep bij élke PATCH zonder roosterveld. Een rolwijziging of een deactivatie
+  // knipte de cyclus van iemand met drie of meer weken dus terug naar twee.
+  //
+  // De databank is hier gemockt, dus dit toetst de VORM van de query. Het
+  // gedrag zelf is tegen een echte postgres nagemeten: 3 weken bleven 3.
+  describe('week_schedules bij een PATCH zonder roosterveld (#392)', () => {
+    function mockPatch() {
+      mockActiveUser();
+      pool.query
+        .mockResolvedValueOnce({ rows: [{ email: 'jan@example.com' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 5, name: 'Jan' }] })
+        .mockResolvedValueOnce({ rows: [] });
+      return makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null });
+    }
+    function deUpdate() {
+      const call = pool.query.mock.calls.find(
+        c => typeof c[0] === 'string' && c[0].includes('UPDATE users') && c[0].includes('SET role')
+      );
+      expect(call).toBeTruthy();
+      return { sql: call[0], params: call[1] };
+    }
+
+    test('de kolom blijft staan als er geen enkel roosterveld meekomt', async () => {
+      const token = mockPatch();
+      const res = await request(app)
+        .patch('/admin/users/5')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ role: 'roosterverantwoordelijke' });
+      expect(res.status).toBe(200);
+
+      const { sql, params } = deUpdate();
+      // Alle drie de roosterparameters leeg: de query mag dan niets herbouwen.
+      expect(params[7]).toBeNull();   // $8  week1
+      expect(params[8]).toBeNull();   // $9  week2
+      expect(params[9]).toBeNull();   // $10 weekSchedules
+      // Dit is de kern: er is een tak die de kolom ongemoeid laat, en de
+      // herbouw hangt aan een voorwaarde in plaats van aan een kale COALESCE.
+      expect(sql).toContain('ELSE week_schedules');
+      expect(sql).not.toContain('week_schedules = COALESCE($10::jsonb, jsonb_build_array');
+    });
+
+    test('week1 meesturen leidt week_schedules nog steeds af', async () => {
+      const token = mockPatch();
+      await request(app)
+        .patch('/admin/users/5')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ role: 'medewerker', weekScheduleWeek1: [{ w: 'nieuw' }] });
+
+      const { sql, params } = deUpdate();
+      expect(params[7]).toBe(JSON.stringify([{ w: 'nieuw' }]));
+      expect(sql).toContain('jsonb_build_array');
+      expect(sql).toContain('$8::jsonb IS NOT NULL OR $9::jsonb IS NOT NULL');
+    });
+
+    test('weekSchedules zelf meesturen wint van de afleiding', async () => {
+      const token = mockPatch();
+      const cyclus = [[{ w: 1 }], [{ w: 2 }], [{ w: 3 }], [{ w: 4 }]];
+      await request(app)
+        .patch('/admin/users/5')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ role: 'medewerker', weekSchedules: cyclus });
+
+      const { sql, params } = deUpdate();
+      expect(params[9]).toBe(JSON.stringify(cyclus));
+      expect(sql).toContain('WHEN $10::jsonb IS NOT NULL THEN $10::jsonb');
+    });
+  });
 });
 
 // ===== GET /calendar/:token.ics (iCal feed) =====
