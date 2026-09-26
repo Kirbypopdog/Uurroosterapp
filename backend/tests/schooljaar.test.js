@@ -6,7 +6,14 @@
 global.window = { DEFAULT_SETTINGS: {} };
 global.DataStore = { settings: {} };
 
+// #394: vullen moet in de DataStore VAN DE MODULE. In Node draait data.js in
+// een modulewrapper, dus zijn `const DataStore` is module-scoped en de globale
+// hierboven bereikt hem niet — die is alleen nodig om het bestand te laden.
+// Daar is deze test lang in gelopen: zetStart schreef naar een object waar
+// niemand naar keek, en alle veertien tests draaiden tegen de lege standaard.
+// Nagegaan door elke waarde door onzin te vervangen; ze slaagden alsnog.
 const {
+  DataStore,
   getSchoolAnchorMonday,
   getSchoolYearAnchorMonday,
   getSchoolWeekNumber,
@@ -14,7 +21,7 @@ const {
   formatDateYYYYMMDD
 } = require('../../frontend/data.js');
 
-const zetStart = (datum) => { global.DataStore.settings.schoolYearStart = { date: datum }; };
+const zetStart = (datum) => { DataStore.settings.schoolYearStart = { date: datum }; };
 
 // ===== getSchoolAnchorMonday =====
 
