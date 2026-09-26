@@ -3,6 +3,7 @@ const { maakRouter } = require('../veilige-router');
 const { pool } = require('../db');
 const { requireAuth, requireAdmin, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../helpers/audit');
+const { vandaagInBelgie } = require('../utils');
 
 const router = maakRouter();
 
@@ -99,7 +100,11 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     // team en uren wacht tot die dag. Anders sluit je iemand buiten die nog een
     // week moet werken, en krijgt de vervanger een contract dat nog niet
     // begonnen is.
-    const vandaag = new Date().toISOString().slice(0, 10);
+    // Belgische datum, niet de UTC-datum van de server: anders leest een
+    // beheerder die om 00:30 een overname op VANDAAG zet, een ingangsdatum die
+    // volgens de server nog in de toekomst ligt, en wordt de vervanging
+    // ingepland in plaats van meteen uitgevoerd (#299 in de frontend).
+    const vandaag = vandaagInBelgie();
     const gaatLaterIn = !!transferShiftsFrom && transferShiftsFrom > vandaag;
 
     if (newUser.active === false) {

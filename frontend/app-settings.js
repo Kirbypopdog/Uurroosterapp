@@ -2535,7 +2535,9 @@ function renderHolidayPeriods() {
         // Calculate weeks in this period
         const periodMonday = getMondayOfWeek(start);
         const periodEndMonday = getMondayOfWeek(end);
-        const totalWeeks = Math.floor((periodEndMonday - periodMonday) / (7 * 86400000)) + 1;
+        // Math.round, niet floor — zie de toelichting bij initCycleLength in
+        // app-builder-drafts.js. Over de zomertijdgrens telde dit een week te weinig.
+        const totalWeeks = Math.round((periodEndMonday - periodMonday) / (7 * 86400000)) + 1;
 
         return `
         <div class="holiday-period-item ${statusClass}">

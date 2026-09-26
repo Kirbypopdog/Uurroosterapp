@@ -388,7 +388,11 @@ function showNewConceptTypeModal() {
                 const pEnd = parseDateOnly(period.endDate);
                 const pMonday = getMondayOfWeek(pStart);
                 const pEndMonday = getMondayOfWeek(pEnd);
-                initCycleLength = Math.floor((pEndMonday - pMonday) / (7 * 86400000)) + 1;
+                // Afronden, niet afkappen: over de overgang naar zomertijd liggen
+                // twee lokale middernachten 6,958 dagen uit elkaar, en Math.floor
+                // maakt daar een week te weinig van. Een vakantie die die grens
+                // overspant kreeg dan een concept met één week te weinig.
+                initCycleLength = Math.round((pEndMonday - pMonday) / (7 * 86400000)) + 1;
             }
         }
 

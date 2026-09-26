@@ -71,7 +71,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `src/migraties.js` | De `MIGRATIONS`-array en `runMigrations()` |
 | `src/db.js` | PostgreSQL connection pool |
 | `src/email.js` | Resend email service (9 notificatie types) |
-| `src/utils.js` | Pure datumhulpfuncties (`getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`, `getEasterDate`, `getBelgianPublicHolidays`) |
+| `src/utils.js` | Pure datumhulpfuncties (`getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`, `getEasterDate`, `getBelgianPublicHolidays`, `vandaagInBelgie`) |
 | `sql/schema.sql` | Volledig schema van de eindtoestand. Spiegelt wat de migraties samen opleveren, zodat een verse database in één keer goed staat |
 | `scripts/seed.js` | Seed teams + admin account |
 | `scripts/setup-db.js` | Voert schema.sql uit |
@@ -322,6 +322,14 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   3. De regel "alleen bij een open weekend" stond drie keer los bij de aanroepers (planning, beginscherm, instellingen) en ontbrak bij de vierde. Hij hoort in `getOrCalculateResponsible()` zelf.
 
   `backend/tests/verantwoordelijke.test.js` bewaakt dit. Let op bij het schrijven van zo'n test: `data.js` draait in Node in een modulewrapper, dus zijn `const DataStore` is module-scoped en `global.DataStore` vullen bereikt hem NIET — stil, want de functies lezen dan de lege standaard. Importeer `DataStore` uit de module en vul die.
+
+- **Uurwisseling en "vandaag"**: twee valkuilen die er los van elkaar uitzien maar allebei één uur opleveren.
+
+  **Een week uit milliseconden halen.** Twee lokale middernachten liggen over de overgang naar ZOMERTIJD 6,958 dagen uit elkaar in plaats van 7. `Math.floor(verschil / (7 * 86400000))` telt daar een week te weinig; `Math.round` niet. Dit zat op drie plekken: het weeknummer van de vakantieverantwoordelijke, de cycluslengte van een nieuw vakantieconcept (`app-builder-drafts.js`) en het weken-label bij een vakantieperiode (`app-settings.js`). Het slaat alleen toe bij een periode die de grens OVERSPANT — een paasvakantie die eind maart begint. De overgang naar wintertijd geeft 7,042 dagen en is met afkappen toevallig ongevaarlijk; vertrouw daar niet op.
+
+  **De datum van vandaag.** De server draait in UTC, de gebruikers zitten in België. `new Date().toISOString().slice(0, 10)` geeft daardoor tussen middernacht en 01:00 (winter) of 02:00 (zomer) nog de datum van GISTEREN. In de frontend is dat #299 (gebruik daar `formatDateYYYYMMDD`); in de backend helpt die niet, want die leest de tijdzone van de SERVER. Gebruik daar `vandaagInBelgie()` uit `src/utils.js`, dat de tijdzone expliciet zet. Een tijdSTEMPEL (`createdAt`, `syncedAt`, iCal-`DTSTAMP`) is iets anders: dat is een moment en hoort wél in UTC.
+
+  **Wat hier géén probleem is:** de urenberekening. `calculateShiftHours()` rekent in verstreken milliseconden, maar de wisseling valt om 02:00 en dat ligt in het slaapvenster 23:00–07:00, dat als vast forfait telt in plaats van als verstreken tijd. De enige nachtdiensten in gebruik (18:00→09:00 en 18:00→10:00) nemen dat pad, dus geen enkele dienst verandert van lengte. Zou er ooit een dienst komen die 02:00–03:00 overspant zonder door het slaapvenster te lopen, dan telt die op de wisselnacht een uur minder of meer — fysiek correct, maar het verschilt dan van wat de klok op het rooster zegt.
 
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.

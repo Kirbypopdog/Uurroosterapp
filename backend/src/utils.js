@@ -141,7 +141,24 @@ function formatICalDateTime(dateStr, timeStr) {
   return dateStr.replace(/-/g, '') + 'T' + timeStr.replace(':', '') + '00';
 }
 
+// De datum van VANDAAG zoals de gebruiker hem ziet, dus in Belgische tijd.
+//
+// De server draait in UTC. `new Date().toISOString().slice(0, 10)` geeft
+// daardoor tussen middernacht en 01:00 (winter) of 02:00 (zomer) nog de datum
+// van GISTEREN, terwijl het bij de gebruiker al morgen is. Dat is dezelfde
+// fout die #299 in de frontend opleverde, en de reden dat daar
+// `formatDateYYYYMMDD` staat in plaats van `toISOString`.
+//
+// Hier helpt `formatDateYYYYMMDD` niet: die leest de tijdzone van de SERVER,
+// en die staat op UTC. De tijdzone moet dus expliciet. 'en-CA' is de opmaak
+// die YYYY-MM-DD oplevert.
+const TIJDZONE = 'Europe/Brussels';
+function vandaagInBelgie(nu = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TIJDZONE }).format(nu);
+}
+
 module.exports = {
   getMonday, formatDateYYYYMMDD, parseLocalDate, getEasterDate, getBelgianPublicHolidays,
-  parseShiftDateTime, getShiftEndDT, hoursBetweenShifts, shiftsOverlapCheck, formatICalDateTime
+  parseShiftDateTime, getShiftEndDT, hoursBetweenShifts, shiftsOverlapCheck, formatICalDateTime,
+  vandaagInBelgie, TIJDZONE
 };
