@@ -94,6 +94,13 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
 sneller dan dit bestand (#291).
 
+### MCP server (`mcp-server/`)
+| Bestand | Doel |
+|---------|------|
+| `stdio.js` | De server die `.mcp.json` start onder de naam `uurroosterapp`. Leest zijn gegevens uit `mcp-server/.env`, dat niet in git staat — zie MCP Server verderop |
+| `index.js` | Dezelfde tools als HTTP-server, voor een gehoste opzet |
+| `.env.example` | Welke variabelen `stdio.js` nodig heeft |
+
 ## Database Schema
 
 **Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions, geplande_overnames
@@ -309,9 +316,37 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
 
 ## MCP Server
 
-De MCP server is actief en verbonden met de productie-API. Dit laat Claude toe om live data te lezen tijdens development, debugging en feature-bouw.
+Live data lezen tijdens development, debugging en feature-bouw.
 
 **API URL**: `https://uurrooster-app.onrender.com/api/v1`
+
+### Er zijn er TWEE, en ze heten bijna hetzelfde
+
+Dezelfde tools, dezelfde database, maar ze halen hun gegevens ergens anders
+vandaan. Dat verschil bepaalt welke het doet.
+
+| server | waar hij vandaan komt | werkt in een cloudsessie? |
+|--------|----------------------|---------------------------|
+| **`Vlot_Dashboard`** | gehoste connector op het account | **ja, gebruik deze** |
+| `uurroosterapp` | `mcp-server/stdio.js`, via de ingecheckte `.mcp.json` | nee |
+
+**Gebruik `Vlot_Dashboard`.** De tools heten `mcp__Vlot_Dashboard__<naam>`.
+
+`uurroosterapp` is onze eigen server uit `mcp-server/`. Hij leest `API_URL`,
+`ADMIN_EMAIL`, `ADMIN_PASSWORD` en `DATABASE_URL` uit `mcp-server/.env`, en dat
+bestand staat in `.gitignore` — terecht, er zit het wachtwoord van de
+productiedatabase in. Op een eigen machine mét dat bestand werkt hij; in een
+verse kloon of een cloudsessie start hij wel op maar heeft hij niets, en
+antwoordt hij met **`DATABASE_URL niet ingesteld.`**
+
+Zie je die tekst, dan is de server niet stuk en is er niets te repareren: je
+hebt de verkeerde te pakken. Ga naar `Vlot_Dashboard` en probeer opnieuw. Zet
+dat `.env` er NIET bij om het op te lossen — dan staat het wachtwoord van de
+productiedatabase in een wegwerpcontainer.
+
+Dit is een keer misgelopen: op #392 kwam te staan dat de productiedata niet na
+te gaan was en dat de MCP stuk was. Allebei onwaar; er was alleen naar de
+verkeerde van de twee gekeken. De vraag was in één query te beantwoorden.
 
 ### Beschikbare tools
 
@@ -334,7 +369,7 @@ De MCP server is actief en verbonden met de productie-API. Dit laat Claude toe o
 
 ### Veiligheidsregel MCP
 
-> ⚠️ **Schrijf-tools** (`create_shift`, `update_shift`, `delete_shift`) raken de **productiedatabase**. Deze tools NOOIT gebruiken zonder expliciete bevestiging van Victor — ook niet als de vraag dit impliciet suggereert. Altijd eerst de actie beschrijven en wachten op "ja, doe het".
+> ⚠️ **Schrijf-tools** (`create_shift`, `update_shift`, `delete_shift`) raken de **productiedatabase**, langs WELKE van de twee servers dan ook. Deze tools NOOIT gebruiken zonder expliciete bevestiging van Victor — ook niet als de vraag dit impliciet suggereert. Altijd eerst de actie beschrijven en wachten op "ja, doe het".
 
 ### Gebruik tijdens development
 
