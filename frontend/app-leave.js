@@ -960,6 +960,21 @@ function renderLeaveManagerActions(round, medewerkers, subMap, nogNiet, blocks =
                 </div>` : '<p class="text-muted text-sm">Niets te beoordelen.</p>'}
             <div class="leave-manager-actions">
                 ${round.status === 'open' ? `<button class="btn btn-secondary" id="leave-close" data-open="${nogNiet.length}">Ronde sluiten</button>` : ''}
+                ${/* Sluiten was een eenrichtingsstraat: het scherm kon een ronde
+                      alleen vooruit zetten (open -> gesloten -> toegepast), nooit
+                      terug. Sloot je te vroeg, of bleek achteraf dat iemand nog
+                      moest invullen, dan was de enige uitweg een nieuwe ronde en
+                      iedereen opnieuw laten invullen.
+
+                      Alleen vanuit 'gesloten'. Vanuit 'toegepast' weigert de
+                      backend met 409 (#386): het verlof staat dan al in de
+                      planning, en heropenen zou de ronde en de planning uit
+                      elkaar laten lopen. Een fout in een toegepaste ronde
+                      herstel je via 'Verlof verdelen' en opnieuw toepassen,
+                      want dát stemt de planning af (#384). Die knop hier tonen
+                      zou dus alleen een foutmelding opleveren. */''}
+                ${round.status === 'gesloten'
+                    ? '<button class="btn btn-secondary" id="leave-heropen">Ronde heropenen</button>' : ''}
                 ${/* #201: 'Verlof verdelen' stond alleen bij status 'gesloten'.
                       Wie per ongeluk eerst toepaste, zag beide knoppen
                       verdwijnen en had geen zichtbare weg terug, terwijl de
@@ -1079,6 +1094,7 @@ function bindLeaveEvents(container, data) {
     });
     container.querySelector('#leave-submit')?.addEventListener('click', () => saveLeaveDraft(round, true));
     container.querySelector('#leave-close')?.addEventListener('click', e => closeLeaveRound(round, Number(e.currentTarget.dataset.open || 0)));
+    container.querySelector('#leave-heropen')?.addEventListener('click', () => heropenLeaveRound(round));
     container.querySelector('#leave-apply')?.addEventListener('click', () => applyLeaveRound(round));
     container.querySelector('#leave-export')?.addEventListener('click', () => exportLeaveRound(data));
     container.querySelector('#leave-resync')?.addEventListener('click', () => resyncLeaveClosedDays(data));
@@ -1245,6 +1261,24 @@ async function closeLeaveRound(round, aantalOpen) {
         renderLeave();
     } catch (err) {
         showToast('Sluiten mislukt: ' + getUserFriendlyError(err), 'error');
+    }
+}
+
+// De weg terug uit 'gesloten'. Niet uit 'toegepast': dat weigert de backend
+// (#386), en terecht — het verlof staat dan in de planning en de ronde zou
+// daarvan los gaan lopen.
+async function heropenLeaveRound(round) {
+    if (!await showConfirm(
+        'Medewerkers kunnen daarna weer invullen en indienen.',
+        'Ronde heropenen', { confirmText: 'Heropenen' })) return;
+    try {
+        await dataApiFetch(`/leave-rounds/${round.id}`, {
+            method: 'PUT', body: JSON.stringify({ status: 'open' })
+        });
+        showToast('Ronde heropend, medewerkers kunnen weer invullen', 'success');
+        renderLeave();
+    } catch (err) {
+        showToast('Heropenen mislukt: ' + getUserFriendlyError(err), 'error');
     }
 }
 
