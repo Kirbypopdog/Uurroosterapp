@@ -1306,11 +1306,31 @@ async function applyLeaveRound(round) {
             const ingetrokken = res.removed
                 ? `, ${res.removed} ingetrokken`
                 : '';
-            showToast(`${res.applied} verlofdagen toegepast${ingetrokken}`, 'success');
+            // Nul toegepast is geen succes om groen te melden. De backend
+            // weigert intussen als er verlof klaarstaat dat niet goedgekeurd
+            // is, dus nul betekent hier: niemand heeft verlof gevraagd.
+            if (res.applied === 0 && !res.removed) {
+                showToast('Niemand had verlof aangeduid, er is dus niets toegepast', 'info', 6000);
+            } else {
+                showToast(`${res.applied} verlofdagen toegepast${ingetrokken}`, 'success');
+            }
             if (typeof refreshAvailability === 'function') await refreshAvailability();
         });
         renderLeave();
     } catch (err) {
+        // De backend houdt het tegen als er wél verlof ingevuld staat maar van
+        // niemand goedgekeurd is. Die namen horen in beeld: zonder die lijst
+        // zag de beheerder alleen "0 toegepast" naast een scherm vol rode
+        // cellen, en dat leest als een kapotte knop.
+        const tegenhouders = err.data && err.data.tegenhouders;
+        if (err.status === 409 && Array.isArray(tegenhouders) && tegenhouders.length > 0) {
+            await showConfirm(
+                `${err.message}\n\n${err.data.detail}\n\nKeur die medewerkers eerst goed bij Beheer, en pas daarna toe.`,
+                'Nog niets goedgekeurd',
+                { confirmText: 'Begrepen', hideCancel: true }
+            );
+            return;
+        }
         showToast('Toepassen mislukt: ' + getUserFriendlyError(err), 'error');
     }
 }

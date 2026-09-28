@@ -693,6 +693,46 @@ router.post('/leave-rounds/:id/apply', requireAuth, requireRole(...LEAVE_MANAGER
       [req.params.id]
     );
 
+    // Staat er verlof ingevuld dat NIET wordt meegenomen omdat de indiening
+    // ontbreekt of nog niet beoordeeld is, dan levert toepassen nul dagen op
+    // terwijl het scherm vol rode cellen staat. Dat las als "de app doet het
+    // niet", en erger: de ronde ging alsnog op 'toegepast', zodat het leek
+    // alsof de zaak afgehandeld was.
+    //
+    // Zelfde behandeling als een onverdeeld voorkeurblok hierboven: weigeren
+    // en zeggen wie het tegenhoudt. Alleen bij een ronde die nog nooit is
+    // toegepast — staat ze al op 'toegepast', dan moet het opruimen van #384
+    // wél kunnen draaien, ook als er intussen geen goedkeuring meer over is.
+    if (rows.rows.length === 0 && roundRes.rows[0].status === 'gesloten') {
+      const tegenhouders = await client.query(
+        `SELECT u.id, u.name,
+                CASE WHEN s.user_id IS NULL   THEN 'niet_ingediend'
+                     WHEN s.approved IS NULL  THEN 'niet_beoordeeld'
+                     ELSE 'afgewezen' END AS reden
+           FROM (SELECT DISTINCT user_id FROM leave_round_entries
+                  WHERE round_id = $1 AND status = 'verlof') e
+           JOIN users u ON u.id = e.user_id
+           LEFT JOIN leave_round_submissions s
+             ON s.round_id = $1 AND s.user_id = e.user_id
+          WHERE s.approved IS DISTINCT FROM TRUE
+          ORDER BY u.name`,
+        [req.params.id]
+      );
+      if (tegenhouders.rows.length > 0) {
+        const per = { niet_ingediend: [], niet_beoordeeld: [], afgewezen: [] };
+        tegenhouders.rows.forEach(r => per[r.reden].push(r.name));
+        const stukken = [];
+        if (per.niet_ingediend.length)  stukken.push(`nog niet ingediend: ${per.niet_ingediend.join(', ')}`);
+        if (per.niet_beoordeeld.length) stukken.push(`ingediend maar nog niet beoordeeld: ${per.niet_beoordeeld.join(', ')}`);
+        if (per.afgewezen.length)       stukken.push(`afgewezen: ${per.afgewezen.join(', ')}`);
+        return res.status(409).json({
+          error: 'Er is verlof ingevuld, maar van niemand is het goedgekeurd. Toepassen zou nul dagen opleveren.',
+          detail: stukken.join(' · '),
+          tegenhouders: tegenhouders.rows.map(r => ({ id: r.id, naam: r.name, reden: r.reden })),
+        });
+      }
+    }
+
     const reden = `Verlofplanning: ${roundName}`;
 
     await client.query('BEGIN');

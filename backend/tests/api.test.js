@@ -4056,6 +4056,98 @@ describe('Verlofrondes', () => {
     expect(res.body.applied).toBe(1);
   });
 
+  // ===== verlof dat klaarstaat maar van niemand goedgekeurd is =====
+
+  // Gevonden tijdens het testen van staging: een kerstblok vol rode cellen,
+  // en toepassen meldde "0 verlofdagen toegepast". Dat getal klopte — apply
+  // neemt alleen verlof van GOEDGEKEURDE indieningen — maar niemand had
+  // ingediend, en dat stond alleen in een banner elders op het scherm. Erger:
+  // de ronde ging alsnog op 'toegepast'.
+  const arrangeNietGoedgekeurd = (roundStatus, tegenhouders) => {
+    const mockClient = { query: jest.fn(), release: jest.fn() };
+    pool.connect.mockResolvedValueOnce(mockClient);
+    pool.query.mockResolvedValueOnce({ rows: [{ active: true }] });
+    pool.query.mockResolvedValue({ rows: [] });
+    mockClient.query.mockImplementation((sql) => {
+      if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+      if (sql.includes('SELECT name, status FROM leave_rounds')) {
+        return Promise.resolve({ rows: [{ name: 'Schooljaar', status: roundStatus }] });
+      }
+      if (sql.includes("b.mode = 'voorkeur'")) return Promise.resolve({ rows: [] });
+      if (sql.includes('CASE WHEN s.user_id IS NULL')) return Promise.resolve({ rows: tegenhouders });
+      if (sql.includes('FROM leave_round_entries e')) return Promise.resolve({ rows: [] });
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+    return mockClient;
+  };
+
+  test('POST /apply weigert en noemt wie er nog niet ingediend heeft', async () => {
+    const mockClient = arrangeNietGoedgekeurd('gesloten', [
+      { id: 2, name: 'Anna Testerman', reden: 'niet_ingediend' },
+      { id: 3, name: 'Carla Demo',     reden: 'niet_ingediend' },
+    ]);
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/apply')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/niemand is het goedgekeurd/i);
+    expect(res.body.detail).toContain('Anna Testerman');
+    expect(res.body.detail).toContain('Carla Demo');
+    expect(res.body.tegenhouders).toHaveLength(2);
+
+    // En er is niets gebeurd: geen afwezigheid, en de ronde blijft gesloten.
+    const geschreven = mockClient.query.mock.calls.filter(c => typeof c[0] === 'string'
+      && (c[0].includes('INSERT INTO availability') || c[0].includes("status = 'toegepast'")));
+    expect(geschreven).toHaveLength(0);
+  });
+
+  test('POST /apply onderscheidt niet ingediend, niet beoordeeld en afgewezen', async () => {
+    arrangeNietGoedgekeurd('gesloten', [
+      { id: 2, name: 'Anna',  reden: 'niet_ingediend' },
+      { id: 3, name: 'Bram',  reden: 'niet_beoordeeld' },
+      { id: 4, name: 'Cleo',  reden: 'afgewezen' },
+    ]);
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/apply')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(409);
+    expect(res.body.detail).toMatch(/nog niet ingediend: Anna/);
+    expect(res.body.detail).toMatch(/nog niet beoordeeld: Bram/);
+    expect(res.body.detail).toMatch(/afgewezen: Cleo/);
+  });
+
+  test('een ronde die al toegepast is mag wél door, zodat het opruimen kan draaien', async () => {
+    // #384 haalt verlof weg dat deze ronde niet meer toekent. Wordt een
+    // goedkeuring ingetrokken, dan is er niets meer toe te passen maar moet
+    // het oude verlof juist verdwijnen. Weigeren zou dat blokkeren.
+    const mockClient = arrangeNietGoedgekeurd('toegepast', [
+      { id: 2, name: 'Anna', reden: 'niet_beoordeeld' },
+    ]);
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/apply')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.applied).toBe(0);
+    const del = mockClient.query.mock.calls.find(
+      c => typeof c[0] === 'string' && c[0].includes('DELETE FROM availability'));
+    expect(del).toBeTruthy();
+  });
+
+  test('geen verlof ingevuld: gewoon toepassen, geen weigering', async () => {
+    // Iedereen koos "werken". Dan is nul dagen het juiste antwoord en hoort
+    // de ronde gewoon afgerond te worden.
+    arrangeNietGoedgekeurd('gesloten', []);
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/apply')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.applied).toBe(0);
+  });
+
   // ===== #384: een herziene verdeling trekt het oude verlof in =====
 
   test('POST /apply ruimt verlof op dat deze ronde niet meer toekent (#384)', async () => {
