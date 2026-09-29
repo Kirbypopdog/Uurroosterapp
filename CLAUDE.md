@@ -89,6 +89,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `schooljaar.test.js` | Schooljaar- en periodeberekeningen |
 | `schema-drift.test.js` | Bewaakt dat `sql/schema.sql` niet achterloopt op de migraties (#329, #311) |
 | `monitoring.test.js` | Wat de foutmonitoring wegfiltert, op sleutelnaam én op waarde (#156) |
+| `permissies.test.js` | De pure rolchecks uit `frontend/app-permissions.js`, zoals wie een dienst mag afstaan |
 | `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
@@ -128,7 +129,7 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 2. **ALTIJD** `team_id` syncen met `main_team` bij user updates (anders falen permissies)
 3. **ALTIJD** parameterized queries gebruiken (nooit string concatenation in SQL)
 4. **Backend retourneert BEIDE** `userId` EN `employeeId` (backward compatibility alias)
-5. **Permissions** checken in ZOWEL frontend ALS backend
+5. **Permissions** checken in ZOWEL frontend ALS backend. Alleen de backend is veilig maar niet genoeg: staat de check daar alleen, dan biedt het scherm een actie aan die pas bij de laatste klik geweigerd wordt. Zo bood "Dienst afstaan" zich aan op een dienst uit het verleden, en liep je vier stappen door voor de backend `Shift ligt in het verleden` terugstuurde. De twee moeten dezelfde grens trekken — de backend vergelijkt met vandaag om middernacht, dus `canRequestSwap` doet dat ook, en een dienst van vandaag mag nog
 6. **Migraties**: geversioneerd via de `MIGRATIONS`-array + `runMigrations()` in `src/migraties.js` (draait bij elke startup, elke migratie exact één keer). Voeg nieuwe schema changes toe als nieuwe migratie-entry **én werk `sql/schema.sql` bij**, zodat beide wegen dezelfde database opleveren. `backend/tests/schema-drift.test.js` bewaakt dat: een kolom, index, tabel of constraint die alleen in een migratie staat laat die test falen. Die test leest `src/migraties.js` als TEKST, dus verhuist dat bestand ooit, dan moet de test mee. Migratie `000_base_schema` draait `schema.sql` idempotent, dus een verse database (bv. staging) initialiseert zichzelf; `ensureBootstrapData()` maakt standaardteams + admin-account aan zonder bestaande data te overschrijven
 7. **shift_blocks**: Bij shift delete wordt block aangemaakt (voorkomt auto-regeneratie). Manual shift create verwijdert block.
 8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging
@@ -421,7 +422,7 @@ cd backend
 npm test           # Alle tests uitvoeren, in enkele seconden
 ```
 
-Elf testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
+Twaalf testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
 voor wat elk bestand dekt. Tests gebruiken Jest + Supertest en de database wordt
 volledig gemockt, dus er is geen echte databank nodig.
 
