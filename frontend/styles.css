@@ -1591,16 +1591,6 @@ html.session-restoring #opstartscherm {
     box-shadow: var(--shadow-sm);
 }
 .login-brand-name { font-weight: 800; font-size: 18px; color: var(--text-primary); }
-.login-bigline {
-    font-family: var(--font-serif);
-    font-weight: 400;
-    font-size: 52px;
-    line-height: 1.05;
-    letter-spacing: -.01em;
-    max-width: 14ch;
-    color: var(--text-primary);
-}
-.login-bigline em { font-style: italic; color: var(--sage-700); }
 .login-brand-foot { font-size: 12.5px; color: var(--ink-3); font-weight: 600; }
 
 .login-formside {
@@ -13897,10 +13887,6 @@ body.dark-mode .shift-source-info.manual {
     border-color: var(--ok-text);
     color: var(--ok-text);
 }
-
-/* De slogan op het inlogscherm en de naam in de begroeting gebruiken allebei
-   --sage-700, dat voor een lichte achtergrond gemaakt is (#287). */
-body.dark-mode .login-bigline em { color: var(--ok-text); }
 
 /* Rolpillen in het profiel: lichte mix met wit plus donkere tekst (#336). */
 body.dark-mode .profile-hero-role.role-admin,
