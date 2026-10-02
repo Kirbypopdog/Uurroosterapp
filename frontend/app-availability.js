@@ -548,6 +548,15 @@ function openAvailabilityModal(employeeId = null, date = null) {
     populateAbsenceEmployeeDropdown();
     vulAfwezigheidstypes();
 
+    // Diensten aanbieden voor overname staat UIT tot je het zelf aanzet.
+    // Dit venster wordt hergebruikt, dus zonder deze regel houdt het vinkje de
+    // stand van de vorige keer vast: wie één keer een ziekmelding met overname
+    // doorgaf, bood bij de volgende afwezigheid ongemerkt opnieuw zijn diensten
+    // aan. Een vinkje in de markup alleen zet het dus niet uit — alleen de
+    // eerste keer.
+    const takeoverVinkje = document.getElementById('absence-offer-takeover');
+    if (takeoverVinkje) takeoverVinkje.checked = false;
+
     // #310: een venster rond vandaag op beide datumvelden. Zonder min en max
     // kwam een typfout als 2206 in plaats van 2026 ongehinderd door, waarna
     // updateAbsenceDateInfo ruim 65.000 dagen doorliep en per dag de volledige
