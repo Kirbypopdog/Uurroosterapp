@@ -290,6 +290,24 @@ CREATE INDEX IF NOT EXISTS idx_leave_subs_round    ON leave_round_submissions(ro
 CREATE INDEX IF NOT EXISTS idx_leave_rounds_status ON leave_rounds(status);
 
 -- Kolommen en indexen die eerder alleen via migraties bestonden (#329).
+
+-- LET OP: dit bestand draait ook als migratie 000_base_schema, en dan tegen een
+-- database die AL BESTAAT. `CREATE TABLE IF NOT EXISTS` is daar een no-op, dus
+-- een kolom die hierboven in een CREATE TABLE staat maar in die oudere database
+-- nog niet bestaat, wordt NIET aangemaakt — waarna de index eronder omvalt met
+-- "column does not exist" en het opstarten afbreekt.
+--
+-- Dat is precies wat er bij de eerste productiedeploy gebeurde: productie stond
+-- op migratie 032, `draft_id` komt pas in 037 en 038, en 000_base_schema brak af
+-- op idx_shifts_draft_id. Een verse database had er geen last van, want daar
+-- maakt CREATE TABLE de kolom wél aan — dus staging zag het niet.
+--
+-- Elke kolom die een index of constraint hieronder nodig heeft, moet daarom ook
+-- los als ADD COLUMN IF NOT EXISTS staan. Op een verse database is dat een
+-- no-op; op een oudere database is het de reparatie.
+ALTER TABLE shifts            ADD COLUMN IF NOT EXISTS draft_id TEXT;
+ALTER TABLE shift_activities  ADD COLUMN IF NOT EXISTS draft_id TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_shifts_draft_id ON shifts(draft_id) WHERE draft_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false;
 CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id);
