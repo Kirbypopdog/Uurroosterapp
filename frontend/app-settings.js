@@ -755,7 +755,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         // bovenste.
         const gaatLaterIn = !!(transfer && fromDate && fromDate > today);
         modal.querySelector('#replace-intro').innerHTML = gaatLaterIn
-            ? `<p><strong>${escapeHtml(departingUser.name)}</strong> wordt vanaf <strong>${fromDate}</strong> vervangen. Tot dan blijft zij gewoon werken.</p>`
+            ? `<p><strong>${escapeHtml(departingUser.name)}</strong> wordt vanaf <strong>${formatDateShortMetJaar(fromDate)}</strong> vervangen. Tot dan blijft zij gewoon werken.</p>`
             : `<p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster, het team en de contracturen gaan naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>`;
 
         if (!newUser) {
@@ -766,7 +766,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         let summaryHtml = '<div class="info-box warning"><strong>Samenvatting:</strong><ul class="summary-list">';
 
         if (gaatLaterIn) {
-            summaryHtml += `<li>Basisrooster, team en contracturen van <strong>${escapeHtml(departingUser.name)}</strong> gaan <strong>op ${fromDate}</strong> naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
+            summaryHtml += `<li>Basisrooster, team en contracturen van <strong>${escapeHtml(departingUser.name)}</strong> gaan <strong>op ${formatDateShortMetJaar(fromDate)}</strong> naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
         } else {
             summaryHtml += `<li>Basisrooster, team en contracturen van <strong>${escapeHtml(departingUser.name)}</strong> gaan naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
         }
@@ -775,7 +775,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             const futureShifts = DataStore.shifts.filter(s =>
                 String(s.employeeId) === String(departingUser.id) && s.date >= fromDate
             );
-            summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${fromDate})`;
+            summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${formatDateShortMetJaar(fromDate)})`;
             summaryHtml += `<br><small class="text-muted">Telling op basis van de geladen planning, het werkelijke aantal kan hoger zijn</small></li>`;
 
             const eigenDiensten = DataStore.shifts.filter(s =>
@@ -793,7 +793,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         }
 
         if (gaatLaterIn) {
-            summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> blijft werken tot ${fromDate} en wordt dan pas gedeactiveerd</li>`;
+            summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> blijft werken tot ${formatDateShortMetJaar(fromDate)} en wordt dan pas gedeactiveerd</li>`;
         } else {
             summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
         }
@@ -826,10 +826,10 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         const gaatLaterIn = !!(fromDate && fromDate > today);
 
         let confirmMsg = gaatLaterIn
-            ? `Weet je zeker dat je ${departingUser.name} vanaf ${fromDate} wilt vervangen door ${newUser.name}?\n\nDe diensten verhuizen meteen. ${departingUser.name} blijft werken tot ${fromDate}.`
+            ? `Weet je zeker dat je ${departingUser.name} vanaf ${formatDateShortMetJaar(fromDate)} wilt vervangen door ${newUser.name}?\n\nDe diensten verhuizen meteen. ${departingUser.name} blijft werken tot ${formatDateShortMetJaar(fromDate)}.`
             : `Weet je zeker dat je ${departingUser.name} wilt vervangen door ${newUser.name}?\n\nDeze actie kan niet ongedaan worden gemaakt.`;
         if (fromDate && eigenDienstenVervanger === 'verwijderen') {
-            confirmMsg += `\n\nDe eigen diensten van ${newUser.name} vanaf ${fromDate} worden verwijderd.`;
+            confirmMsg += `\n\nDe eigen diensten van ${newUser.name} vanaf ${formatDateShortMetJaar(fromDate)} worden verwijderd.`;
         }
 
         if (!await showConfirm(confirmMsg, 'Medewerker vervangen', { danger: true, confirmText: 'Vervangen' })) return;
@@ -869,7 +869,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             }
 
             let msg = result.gaatLaterIn
-                ? `${departingUser.name} wordt op ${result.ingangsdatum} vervangen door ${newUser.name}`
+                ? `${departingUser.name} wordt op ${formatDateShortMetJaar(result.ingangsdatum)} vervangen door ${newUser.name}`
                 : `${departingUser.name} vervangen door ${newUser.name}`;
             if (result.shiftsTransferred > 0) {
                 msg += ` (${result.shiftsTransferred} diensten overgedragen)`;
@@ -880,7 +880,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             showToast(msg, 'success');
 
             if (result.gaatLaterIn) {
-                showToast(`${departingUser.name} blijft actief tot ${result.ingangsdatum}. Team en contracturen gaan op die dag naar ${newUser.name}.`, 'info', 8000);
+                showToast(`${departingUser.name} blijft actief tot ${formatDateShortMetJaar(result.ingangsdatum)}. Team en contracturen gaan op die dag naar ${newUser.name}.`, 'info', 8000);
             }
             if (result.eigenDienstenVerwijderd > 0) {
                 showToast(`${result.eigenDienstenVerwijderd} eigen diensten van ${newUser.name} verwijderd`, 'info', 6000);
