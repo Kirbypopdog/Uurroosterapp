@@ -1,5 +1,53 @@
 // HET VLOT ROOSTERPLANNING - AFWEZIGHEID TAB EN MODAL
 
+// #311: één lijst afwezigheidstypes in de frontend. De sleutels stonden op drie
+// plekken: hier als label, in het keuzemenu in index.html, en impliciet overal
+// waar op een type getoetst wordt. Het keuzemenu wordt nu hieruit opgebouwd,
+// zodat de HTML en de labels niet uiteen kunnen lopen.
+//
+// De backend heeft zijn eigen lijst (AFWEZIGHEIDSTYPES in server.js) en de
+// database een CHECK-constraint. Die drie kunnen zonder build-stap niet één
+// constante delen, dus ze moeten gelijk blijven: wie hier een type toevoegt,
+// voegt het ook daar toe.
+// `werkwoord` is de zin die de drag-handler gebruikt ("Anna verlof heeft op
+// woensdag"). Die stond daar als eigen lijstje, zonder 'vrij', waardoor de
+// tekst voor 'vrij' terugviel op "afwezig is" (#314).
+//
+// `teltAlsAfwezig` markeert of het type een echte afwezigheid is. 'vrij' is
+// puur informatief en levert nergens een conflict op (#173); validateAvailability
+// sloot het al uit, de drag-handler niet.
+const ABSENCE_TYPES = {
+    'verlof':   { label: 'Verlof',   keuze: 'Verlof',           werkwoord: 'verlof heeft',    teltAlsAfwezig: true },
+    'ziek':     { label: 'Ziekte',   keuze: 'Ziekte',           werkwoord: 'ziek is',         teltAlsAfwezig: true },
+    'overuren': { label: 'Overuren', keuze: 'Overuren opnemen', werkwoord: 'overuren opneemt', teltAlsAfwezig: true },
+    'vorming':  { label: 'Vorming',  keuze: 'Vorming',          werkwoord: 'vorming heeft',   teltAlsAfwezig: true },
+    'andere':   { label: 'Andere',   keuze: 'Andere',           werkwoord: 'afwezig is',      teltAlsAfwezig: true },
+    'vrij':     { label: 'Vrij',     keuze: 'Vrij',             werkwoord: 'vrij is',         teltAlsAfwezig: false }
+};
+
+// Is dit type een echte afwezigheid, of alleen een markering? Onbekende types
+// tellen als afwezig, want dat is de veilige kant: dan komt er hooguit een
+// vraag te veel.
+function teltAlsAfwezigheid(type) {
+    if (!type) return false;
+    const t = ABSENCE_TYPES[type];
+    return t ? t.teltAlsAfwezig : true;
+}
+
+const ABSENCE_LABELS = Object.fromEntries(
+    Object.entries(ABSENCE_TYPES).map(([sleutel, t]) => [sleutel, t.label])
+);
+
+// Vult het keuzemenu in de afwezigheidsmodal vanuit ABSENCE_TYPES.
+function vulAfwezigheidstypes() {
+    const veld = document.getElementById('absence-type');
+    if (!veld) return;
+    veld.innerHTML = '<option value="">-- Selecteer type --</option>'
+        + Object.entries(ABSENCE_TYPES)
+            .map(([sleutel, t]) => `<option value="${escapeHtml(sleutel)}">${escapeHtml(t.keuze)}</option>`)
+            .join('');
+}
+
 function renderAvailability() {
     const startDateStr = formatDateYYYYMMDD(AppState.currentWeekStart);
     const weekDates = getWeekDates(startDateStr);
@@ -7,16 +55,9 @@ function renderAvailability() {
     let employees = getAllEmployees(true);
     const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
 
-    const absenceLabels = {
-        'verlof': 'Verlof',
-        'ziek': 'Ziekte',
-        'overuren': 'Overuren',
-        'vorming': 'Vorming',
-        'andere': 'Andere'
-    };
-
     // Group employees by team (same order as Timeline)
     let teamOrder = getTeamOrder();
+    let zonderTeam = false;
     // Medewerker only sees own team
     if (role === 'medewerker') {
         const userTeam = AppState.currentUser?.team_id
@@ -26,6 +67,11 @@ function renderAvailability() {
             teamOrder = teamOrder.filter(teamId => teamId === userTeam);
             employees = employees.filter(emp => emp.mainTeam === userTeam);
         } else {
+            // #349: een medewerker zonder team zag hier een tabel met alleen
+            // een koprij en verder niets. Dat is niet zijn fout en hij kan het
+            // zelf niet oplossen, dus hij hoort te weten waarom het scherm leeg
+            // is en bij wie hij moet zijn.
+            zonderTeam = true;
             teamOrder = [];
             employees = [];
         }
@@ -34,16 +80,27 @@ function renderAvailability() {
     teamOrder.forEach(team => {
         employeesByTeam[team] = employees.filter(emp => emp.mainTeam === team);
     });
+    // #231: de tabel groepeert per team, dus wie geen team heeft (of een team
+    // dat niet meer in de instellingen staat) viel er helemaal uit. Bij
+    // Afwezigheid is dat erger dan elders: je kunt voor die persoon dan geen
+    // verlof of ziekte registreren.
+    const geenTeamLeden = employees
+        .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
 
     let html = `
-        <div class="availability-controls">
-            <div class="date-navigation">
-                <button id="availability-prev-week" class="btn btn-nav">${IconHelper.html(ICONS.left, 'sm')}</button>
-                <button id="availability-today" class="btn">Vandaag</button>
-                <button id="availability-next-week" class="btn btn-nav">${IconHelper.html(ICONS.right, 'sm')}</button>
-            </div>
-            <div class="period-display">${formatDate(weekDates[0])} - ${formatDate(weekDates[6])}</div>
-            <div class="availability-actions">
+        <div class="planning-controls">
+            <div class="planning-controls-row">
+                <div class="date-navigation">
+                    <button id="availability-prev-week" class="nav-arrow-btn" aria-label="Vorige week">${IconHelper.html(ICONS.left, 'sm')}</button>
+                    <button id="availability-today" class="btn btn-secondary btn-sm">Vandaag</button>
+                    <button id="availability-next-week" class="nav-arrow-btn" aria-label="Volgende week">${IconHelper.html(ICONS.right, 'sm')}</button>
+                </div>
+                <div id="availability-period" class="period-display period-display--clickable" data-tooltip="Klik om naar een datum te springen">
+                    <span>${formatDate(weekDates[0])} – ${formatDate(weekDates[6])}</span>
+                    <input type="date" id="availability-week-jump" class="week-jump-input" aria-label="Spring naar week">
+                </div>
+                <div class="controls-spacer"></div>
                 <div class="availability-legend-inline">
                     <span class="legend-chip available">Beschikbaar</span>
                     <span class="legend-chip absent">Afwezig</span>
@@ -55,11 +112,11 @@ function renderAvailability() {
 
         <!-- Mobile day navigation for availability -->
         <div id="availability-mobile-day-nav" class="mobile-day-nav availability-mobile-nav">
-            <button id="availability-mobile-prev-day" class="btn btn-sm">${IconHelper.html(ICONS.left, 'sm')}</button>
+            <button id="availability-mobile-prev-day" class="btn btn-secondary btn-sm" aria-label="Vorige dag">${IconHelper.html(ICONS.left, 'sm')}</button>
             <div id="availability-mobile-day-display" class="mobile-day-display">
                 ${getAvailabilityMobileDayDisplayHTML()}
             </div>
-            <button id="availability-mobile-next-day" class="btn btn-sm">${IconHelper.html(ICONS.right, 'sm')}</button>
+            <button id="availability-mobile-next-day" class="btn btn-secondary btn-sm" aria-label="Volgende dag">${IconHelper.html(ICONS.right, 'sm')}</button>
         </div>
 
         <div class="availability-container" data-mobile-day="${AppState.availabilityMobileDayIndex}">
@@ -69,12 +126,14 @@ function renderAvailability() {
     `;
 
     // Header with days
+    const todayStr = formatDateYYYYMMDD(new Date());
     weekDates.forEach((date, index) => {
         const d = parseDateOnly(date);
         const dayOfWeek = d.getDay();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
         const isClosed = isDayClosed(date);
         let dayClass = 'availability-day-col';
+        if (date === todayStr) dayClass += ' today';
         if (isClosed) dayClass += ' closed';
         else if (isWeekend) dayClass += ' weekend';
 
@@ -86,15 +145,51 @@ function renderAvailability() {
 
     html += `</div>`; // End header row
 
-    // Rows grouped by team
-    teamOrder.forEach(teamId => {
-        const teamEmployees = employeesByTeam[teamId];
-        if (teamEmployees.length === 0) return;
+    // #349: geen enkele rij op te bouwen? Zeg dan waarom, zoals Planning en
+    // Ruilen dat ook doen, in plaats van een tabel met enkel een koprij.
+    if (zonderTeam) {
+        html += `<div class="no-items-text availability-leeg">
+            Je account hangt nog niet aan een team, dus er is hier niets te tonen.
+            Vraag je roosterverantwoordelijke om je bij een team te zetten.
+        </div>`;
+    }
 
-        const teamName = escapeHtml(DataStore.settings.teams[teamId]?.name || teamId);
+    // #349, tweede geval: er zijn wel teams maar nergens een medewerker. Dat
+    // gebeurt op een verse installatie. Eerder bewust overgeslagen omdat je op
+    // dat moment zelf accounts aan het aanmaken bent, maar Planning en Ruilen
+    // zeggen in dezelfde situatie wél iets, en een tabel met enkel een koprij
+    // oogt kapot in plaats van leeg.
+    const geenEnkeleRij = !zonderTeam
+        && geenTeamLeden.length === 0
+        && teamOrder.every(t => !(employeesByTeam[t] || []).length);
+    if (geenEnkeleRij) {
+        const magAccountsBeheren = role === 'admin' || role === 'roosterverantwoordelijke';
+        html += `<div class="no-items-text availability-leeg">
+            Nog geen medewerkers om afwezigheden voor te tonen.
+            ${magAccountsBeheren
+                ? 'Voeg ze toe bij Instellingen, Accounts.'
+                : 'Vraag je roosterverantwoordelijke om accounts aan te maken.'}
+        </div>`;
+    }
 
-        // Team header
-        html += `<div class="availability-team-header ${teamId}">
+    // Rows grouped by team. De bak "Geen team" hangt er als laatste achter.
+    const teamVolgorde = geenTeamLeden.length > 0 ? [...teamOrder, '_no_team'] : teamOrder;
+    teamVolgorde.forEach(teamId => {
+        const teamEmployees = teamId === '_no_team' ? geenTeamLeden : employeesByTeam[teamId];
+        if (!teamEmployees || teamEmployees.length === 0) return;
+
+        const teamName = teamId === '_no_team'
+            ? 'Geen team'
+            : escapeHtml(DataStore.settings.teams[teamId]?.name || teamId);
+        // Een vaste tint en geen CSS-variabele: getContrastColor rekent de
+        // tekstkleur uit de achtergrond en kan var(--ink-3) niet doorrekenen.
+        const teamColor = teamId === '_no_team'
+            ? '#6f6b5e'
+            : (DataStore.settings.teams[teamId]?.color || '#8d897c');
+
+        // Team header (rustige stijl met team-kleur-dot, consistent met planning/medewerkers)
+        html += `<div class="availability-team-header">
+            <span class="team-header-dot" style="background:${teamColor}"></span>
             <span class="team-name">${teamName}</span>
             <span class="team-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</span>
         </div>`;
@@ -102,8 +197,10 @@ function renderAvailability() {
         // Employee rows for this team
         teamEmployees.forEach(emp => {
             const isCurrentUser = emp.id === AppState.currentUser?.id;
+            const initials = escapeHtml(getInitials(emp.name || ''));
             html += `<div class="availability-employee-row${isCurrentUser ? ' current-user' : ''}">
                 <div class="availability-employee-col">
+                    ${avatarHtml(emp.name, teamColor)}
                     <span class="emp-name">${escapeHtml(emp.name)}</span>
                 </div>
             `;
@@ -137,7 +234,7 @@ function renderAvailability() {
                     // Afwezigheid heeft prioriteit
                     if (absence && absence.type) {
                         statusClass = 'absent';
-                        statusText = absenceLabels[absence.type] || 'Afwezig';
+                        statusText = ABSENCE_LABELS[absence.type] || 'Afwezig';
                         tooltipText = absence.reason ? `${statusText}: ${absence.reason}` : statusText;
 
                         // Check voor conflict met dienst
@@ -158,17 +255,31 @@ function renderAvailability() {
                     } else {
                         statusClass = 'available';
                         statusText = '';
-                        tooltipText = canManageAvailability(emp.id) ? 'Beschikbaar - klik om afwezigheid te registreren' : '';
+                        tooltipText = canManageAvailability(emp.id) ? 'Beschikbaar, klik om afwezigheid te registreren' : '';
                     }
                 }
 
                 const conflictIcon = hasConflict ? `<span class="conflict-icon">${IconHelper.html(ICONS.warning, 'xs')}</span>` : '';
                 const canEdit = canManageAvailability(emp.id);
+                // #277: de cel is een div en stond dus niet in de tabvolgorde.
+                // Registreren en wijzigen kon nog via "+ Afwezigheid", maar een
+                // bestaande afwezigheid VERWIJDEREN kan alleen via deze cel,
+                // want de knop Verwijderen verschijnt enkel als de modal vanuit
+                // een cel geopend wordt. Dat was met het toetsenbord dus
+                // onbereikbaar.
+                //
+                // Alleen bewerkbare cellen worden focusbaar: een readonly-cel
+                // doet niets en zou de tabvolgorde alleen maar verlengen.
+                const celLabel = escapeHtml(
+                    `${emp.name}, ${date}${statusText ? `, ${statusText}` : ', beschikbaar'}`);
+                const celToets = canEdit
+                    ? ` role="button" tabindex="0" aria-label="${celLabel}"`
+                    : '';
                 const cellContent = !isClosed ? `
-                    <div class="availability-cell-content ${statusClass}${canEdit ? '' : ' readonly-cell'}"
+                    <div class="availability-cell-content ${statusClass}${canEdit ? '' : ' readonly-cell'}"${celToets}
                          data-employee-id="${emp.id}"
                          data-date="${date}"
-                         title="${escapeHtml(tooltipText)}">
+                         data-tooltip="${escapeHtml(tooltipText)}">
                         ${conflictIcon}${statusText ? `<span class="status-label">${escapeHtml(statusText)}</span>` : `<span class="status-check">${IconHelper.html(ICONS.check, 'xs')}</span>`}
                     </div>
                 ` : '';
@@ -188,13 +299,39 @@ function renderAvailability() {
     // Add event listeners for navigation
     document.getElementById('availability-prev-week').addEventListener('click', () => {
         AppState.currentWeekStart.setDate(AppState.currentWeekStart.getDate() - 7);
+        updateShiftRefreshRange();
         renderAvailability();
     });
 
     document.getElementById('availability-next-week').addEventListener('click', () => {
         AppState.currentWeekStart.setDate(AppState.currentWeekStart.getDate() + 7);
+        updateShiftRefreshRange();
         renderAvailability();
     });
+
+    // Springen naar een datum, net als in de planning: daar kon je op de
+    // periode klikken om een kalender te openen, hier niet.
+    const availJump = document.getElementById('availability-week-jump');
+    const availPeriod = document.getElementById('availability-period');
+    if (availJump && availPeriod) {
+        availPeriod.addEventListener('click', () => {
+            if (AppState.currentWeekStart) availJump.value = formatDateYYYYMMDD(AppState.currentWeekStart);
+            if (availJump.showPicker) availJump.showPicker(); else availJump.click();
+        });
+        availJump.addEventListener('change', e => {
+            const [y, m, d] = e.target.value.split('-').map(Number);
+            if (!y || !m || !d) return;
+            const gekozen = new Date(y, m - 1, d);
+            if (isNaN(gekozen.getTime())) return;
+            AppState.currentWeekStart = getMonday(gekozen);
+            // Op mobiel toont deze tab één dag: die mee laten springen,
+            // anders land je op de maandag van een week die je niet koos.
+            const dow = gekozen.getDay();
+            AppState.availabilityMobileDayIndex = dow === 0 ? 6 : dow - 1;
+            updateShiftRefreshRange();
+            renderAvailability();
+        });
+    }
 
     document.getElementById('availability-today').addEventListener('click', () => {
         AppState.currentWeekStart = getMonday(new Date());
@@ -202,6 +339,7 @@ function renderAvailability() {
         const today = new Date();
         const dayOfWeek = today.getDay();
         AppState.availabilityMobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        updateShiftRefreshRange();
         renderAvailability();
     });
 
@@ -302,7 +440,15 @@ function updateAbsenceDateInfo() {
         const end = parseDateOnly(endDate);
 
         if (end >= start) {
-            const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+            const days = aantalDagenInclusief(start, end);
+            // #310: boven het plafond niet doorrekenen. De conflictscan loopt
+            // dag per dag door de volledige shiftlijst, dus bij een typfout van
+            // tweehonderd jaar bevriest het veld bij het verlaten ervan.
+            if (days > MAX_AFWEZIGHEIDSDAGEN) {
+                infoDiv.innerHTML = `<span class="error-text">${days} dagen geselecteerd. Dat is meer dan ${MAX_AFWEZIGHEIDSDAGEN}. Controleer de einddatum.</span>`;
+                infoDiv.classList.add('error');
+                return;
+            }
             infoDiv.innerHTML = `<span class="info-badge">${days} dag${days !== 1 ? 'en' : ''} geselecteerd</span>`;
             infoDiv.classList.remove('error');
 
@@ -322,7 +468,7 @@ function updateAbsenceDateInfo() {
                 if (conflictDates.length > 0) {
                     conflictDiv.innerHTML = `<div class="absence-conflict-alert">
                         ${IconHelper.html('alert-triangle', 'sm')}
-                        <span>${conflictDates.length} shift${conflictDates.length !== 1 ? 's' : ''} ingepland op deze dag${conflictDates.length !== 1 ? 'en' : ''} — ${conflictDates.map(d => formatDate(d)).join(', ')}</span>
+                        <span>${conflictDates.length} dienst${conflictDates.length !== 1 ? 'en' : ''} ingepland op deze dag${conflictDates.length !== 1 ? 'en' : ''}: ${conflictDates.map(d => formatDate(d)).join(', ')}</span>
                     </div>`;
                     IconHelper.init(conflictDiv);
 
@@ -348,10 +494,18 @@ function populateAbsenceEmployeeDropdown() {
 
     // Group by team
     const teamOrder = getTeamOrder();
-    teamOrder.forEach(teamId => {
-        const teamEmployees = employees.filter(emp => emp.mainTeam === teamId);
+    // #231: de keuzelijst groepeert per team en liet iedereen zonder team dus
+    // weg. Die konden daardoor nergens in de app afwezig gemeld worden.
+    const zonderTeam = employees.filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam));
+    const volgorde = zonderTeam.length > 0 ? [...teamOrder, '_no_team'] : teamOrder;
+    volgorde.forEach(teamId => {
+        const teamEmployees = teamId === '_no_team'
+            ? zonderTeam
+            : employees.filter(emp => emp.mainTeam === teamId);
         if (teamEmployees.length > 0) {
-            const teamName = DataStore.settings.teams[teamId]?.name || teamId;
+            const teamName = teamId === '_no_team'
+                ? 'Geen team'
+                : (DataStore.settings.teams[teamId]?.name || teamId);
             const optgroup = document.createElement('optgroup');
             optgroup.label = teamName;
 
@@ -392,6 +546,25 @@ function openAvailabilityModal(employeeId = null, date = null) {
 
     // Populate employee dropdown
     populateAbsenceEmployeeDropdown();
+    vulAfwezigheidstypes();
+
+    // #310: een venster rond vandaag op beide datumvelden. Zonder min en max
+    // kwam een typfout als 2206 in plaats van 2026 ongehinderd door, waarna
+    // updateAbsenceDateInfo ruim 65.000 dagen doorliep en per dag de volledige
+    // shiftlijst filterde. Ruim genomen, want een afwezigheid in het verleden
+    // corrigeren moet mogelijk blijven.
+    const venster = (verschuiving) => {
+        const d = new Date();
+        d.setFullYear(d.getFullYear() + verschuiving);
+        return formatDateYYYYMMDD(d);
+    };
+    const vroegst = venster(-5);
+    const laatst = venster(5);
+    [startDateInput, endDateInput].forEach(veld => {
+        if (!veld) return;
+        veld.min = vroegst;
+        veld.max = laatst;
+    });
 
     // Check if opening for specific employee/date or general
     if (employeeId && date) {
@@ -430,7 +603,16 @@ function openAvailabilityModal(employeeId = null, date = null) {
     } else {
         // Opening fresh (e.g., from button)
         modalTitle.textContent = 'Afwezigheid registreren';
-        employeeSelect.value = '';
+        // #205: hier stond onvoorwaardelijk `employeeSelect.value = ''`, wat de
+        // voorselectie wiste die populateAbsenceEmployeeDropdown net had gezet.
+        // Voor een medewerker bleef het veld op disabled staan zonder waarde,
+        // dus opslaan gaf "Selecteer een medewerker" en er was geen weg uit het
+        // venster. De knop "+ Afwezigheid" werkte daarmee niet voor de grootste
+        // gebruikersgroep.
+        //
+        // Wie maar één persoon mag kiezen houdt zijn voorselectie. Wie er
+        // meerdere mag kiezen begint met een leeg veld, zoals voorheen.
+        if (!employeeSelect.disabled) employeeSelect.value = '';
         startDateInput.value = '';
         endDateInput.value = '';
         absenceTypeSelect.value = '';
@@ -443,15 +625,27 @@ function openAvailabilityModal(employeeId = null, date = null) {
     infoDiv.innerHTML = '';
     updateAbsenceDateInfo();
 
-    modal.classList.remove('hidden');
+    toonModal(modal);
 }
 
 function closeAvailabilityModal() {
     const modal = document.getElementById('availability-modal');
-    modal.classList.add('hidden');
+    verbergModal(modal);
+    // #233: noodklep, zie closeShiftModal in app-shifts.js voor de toelichting.
+    hideSectionLoading('availability-view');
 }
 
 async function handleAvailabilitySave() {
+    // #253: openAvailabilityModal zet editMode en originalDate, maar tot nu toe
+    // las niemand die uit. Wie een bestaande afwezigheid opende en het bereik
+    // verschoof (5 juli naar 6 tot 8 juli) hield 5 juli erbij staan, want er
+    // wordt alleen geschreven voor het NIEUWE bereik. De modal oogt als een
+    // bewerkscherm, compleet met een knop Verwijderen, dus dat is de verwachting
+    // die hij wekt.
+    const modalEl = document.getElementById('availability-modal');
+    const bewerktEen = modalEl?.dataset.editMode === 'single';
+    const oorspronkelijkeDatum = modalEl?.dataset.originalDate || null;
+
     const employeeId = Number(document.getElementById('absence-employee').value);
     const startDate = document.getElementById('absence-start-date').value;
     const endDate = document.getElementById('absence-end-date').value;
@@ -478,9 +672,27 @@ async function handleAvailabilitySave() {
         return;
     }
 
+    // #310: hetzelfde plafond als de route, plus een vraag bij een bereik dat
+    // groot is maar niet onmogelijk. Een afwezigheid van meer dan twee maanden
+    // komt voor, een van tweehonderd jaar is altijd een typfout.
+    const aantalDagen = aantalDagenInclusief(startDate, endDate);
+    if (aantalDagen > MAX_AFWEZIGHEIDSDAGEN) {
+        showToast(`Dit bereik beslaat ${aantalDagen} dagen. Maximaal ${MAX_AFWEZIGHEIDSDAGEN} dagen per registratie. Controleer de einddatum.`, 'warning');
+        return;
+    }
+    if (aantalDagen > BEVESTIG_AFWEZIGHEIDSDAGEN) {
+        const door = await showConfirm(
+            `Je staat op het punt ${aantalDagen} dagen afwezigheid te registreren, van ${formatDate(startDate)} tot en met ${formatDate(endDate)}. Klopt dat?`,
+            'Groot datumbereik',
+            { confirmText: `Ja, ${aantalDagen} dagen registreren` }
+        );
+        if (!door) return;
+    }
+
     try {
         // Check for conflicts first
         let conflictDates = [];
+        const alleDatums = [];
         // Use string dates to avoid timezone conversion issues
         const startParts = startDate.split('-').map(Number);
         const endParts = endDate.split('-').map(Number);
@@ -494,11 +706,40 @@ async function handleAvailabilitySave() {
             const day = String(checkDate.getDate()).padStart(2, '0');
             const dateStr = `${year}-${month}-${day}`;
 
+            alleDatums.push(dateStr);
+
             const shifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
             if (shifts.length > 0) {
                 conflictDates.push(dateStr);
             }
             checkDate.setDate(checkDate.getDate() + 1);
+        }
+
+        // #203: een bestaande afwezigheid werd stil overschreven. Wie op een dag
+        // 'vrij' stond met reden 'Vaste vrije dag' werd zonder enige melding
+        // 'ziek', en de oude waarde was daarna nergens meer terug te vinden.
+        // Eén registratie per persoon per dag blijft de regel, maar je hoort te
+        // weten dat je iets vervangt. De backend houdt het nu ook bij in de
+        // audit log.
+        const teVervangen = alleDatums
+            .map(dateStr => ({ dateStr, bestaand: getAvailability(employeeId, dateStr) }))
+            .filter(({ bestaand }) => bestaand && bestaand.type && bestaand.type !== absenceType);
+
+        if (teVervangen.length > 0) {
+            const naam = getEmployee(employeeId)?.name || 'Deze medewerker';
+            const nieuwLabel = ABSENCE_LABELS[absenceType] || 'afwezigheid';
+            const regels = teVervangen.slice(0, 5).map(({ dateStr, bestaand }) => {
+                const label = ABSENCE_LABELS[bestaand.type] || bestaand.type;
+                return `${formatDateShort(parseDateOnly(dateStr))}: ${label}${bestaand.reason ? ` (${bestaand.reason})` : ''}`;
+            });
+            if (teVervangen.length > 5) regels.push(`en nog ${teVervangen.length - 5} dag(en)`);
+
+            const bevestigd = await showConfirm(
+                `${naam} staat al genoteerd op ${teVervangen.length} dag${teVervangen.length !== 1 ? 'en' : ''}:\n\n` +
+                regels.join('\n') +
+                `\n\nVervangen door ${nieuwLabel}? De oude registratie gaat verloren.`
+            );
+            if (!bevestigd) return;
         }
 
         // Read takeover preference from inline checkbox (no confirm dialogs needed)
@@ -515,20 +756,53 @@ async function handleAvailabilitySave() {
             employeeId, startDate, endDate, absenceType, reason, createTakeoverRequests
         );
 
+        // #253: viel de oorspronkelijke dag buiten het nieuwe bereik, dan is hij
+        // verplaatst en hoort de oude registratie weg. Bewust ná het opslaan:
+        // mislukt het opslaan, dan is er niets gewist.
+        let weesMislukt = null;
+        if (bewerktEen && oorspronkelijkeDatum
+            && (oorspronkelijkeDatum < startDate || oorspronkelijkeDatum > endDate)) {
+            try {
+                await removeAvailability(employeeId, oorspronkelijkeDatum, { skipRefresh: true });
+            } catch (fout) {
+                console.error('Oude afwezigheidsdag niet verwijderd:', fout);
+                weesMislukt = oorspronkelijkeDatum;
+            }
+        }
+
+        // #282: wijzigt het type naar iets dat geen overname meer rechtvaardigt,
+        // dan blijft de dienst anders openstaan terwijl de medewerker gewoon
+        // komt werken. Alleen 'ziek' en 'verlof' bieden diensten aan; bij elk
+        // ander type horen openstaande verzoeken dus weg. Blijft het type wél
+        // ziek of verlof, dan raken we niets aan: wie eerder bewust een dienst
+        // aanbood, wil die aanbieding niet kwijt door een reden bij te werken.
+        let overnames = null;
+        if (absenceType !== 'ziek' && absenceType !== 'verlof') {
+            overnames = await annuleerOvernamesVoorPeriode(employeeId, startDate, endDate);
+        }
+
         closeAvailabilityModal();
+        await refreshAvailability();
         renderAvailability();
         renderPlanning(); // Update planning view to show conflicts
+
+        if (weesMislukt) {
+            showToast(`De nieuwe afwezigheid is opgeslagen, maar ${formatDateShort(parseDateOnly(weesMislukt))} `
+                + 'kon niet verwijderd worden. Haal die dag met de hand weg.', 'error');
+        }
 
         const employee = getEmployee(employeeId);
         const employeeName = employee?.name || 'de medewerker';
         const daysSet = result.availability?.length || 0;
-        const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid' }[absenceType] || 'Afwezigheid';
+        const typeName = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezigheid', 'vrij': 'Vrij' }[absenceType] || 'Afwezigheid';
 
         let msg = `${typeName} geregistreerd voor ${employeeName} (${daysSet} dag${daysSet !== 1 ? 'en' : ''})`;
         if (result.takeoverRequests > 0) {
-            msg += ` — ${result.takeoverRequests} shift${result.takeoverRequests !== 1 ? 's' : ''} aangeboden voor overname`;
+            msg += `, ${result.takeoverRequests} dienst${result.takeoverRequests !== 1 ? 'en' : ''} aangeboden voor overname`;
         }
         showToast(msg, 'success');
+
+        meldOvernameAnnulaties(overnames);
 
         if (absenceType === 'ziek') {
             showToast('Vergeet niet de personeelsdienst te verwittigen', 'info');
@@ -537,7 +811,9 @@ async function handleAvailabilitySave() {
         }
     } catch (error) {
         console.error('Error saving availability:', error);
-        showToast('Er ging iets mis bij het opslaan: ' + error.message, 'error');
+        // #361: hier stond error.message, dus een kale Engelse backendtekst
+        // kwam ongefilterd in de toast. Elders gaat alles door de vertaler.
+        showToast('Er ging iets mis bij het opslaan: ' + getUserFriendlyError(error), 'error');
     } finally {
         hideSectionLoading('availability-view');
     }
@@ -561,97 +837,148 @@ async function handleRemoveAbsence() {
         return;
     }
 
-    const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+    const days = aantalDagenInclusief(start, end);
 
-    if (!await showConfirm(`Afwezigheid verwijderen voor ${days} dag${days !== 1 ? 'en' : ''}?`)) {
+    if (!await showConfirm(`Afwezigheid verwijderen voor ${days} dag${days !== 1 ? 'en' : ''}?`,
+        'Afwezigheid verwijderen', { danger: true, confirmText: 'Afwezigheid verwijderen' })) {
         return;
     }
 
     showSectionLoading('availability-view', 'Afwezigheid verwijderen...');
 
-    // Remove absence for each day in range
-    let currentDate = parseDateOnly(start);
-    const removePromises = [];
-
-    while (currentDate <= end) {
-        const dateStr = formatDateYYYYMMDD(currentDate);
-        removePromises.push(removeAvailability(employeeId, dateStr, { skipRefresh: true }));
-        currentDate.setDate(currentDate.getDate() + 1);
-    }
-
-    // Wait for all deletions to complete, then refresh once
-    await Promise.all(removePromises);
-    await refreshAvailability();
-
-    // Cancel any pending takeover requests for shifts on these dates
+    // #226: de tegenhanger handleAvailabilitySave heeft try/catch/finally,
+    // hier ontbrak dat. Faalde één van de DELETE-aanroepen (bv. een
+    // netwerkfout of een herstart van de backend), dan verliet de functie de
+    // handler met een rejection: geen foutmelding, en closeAvailabilityModal,
+    // renderAvailability en hideSectionLoading werden nooit bereikt. De
+    // laadoverlay bleef zo over de tab staan, ook na wisselen van tab.
     try {
-        console.log('[Auto-cancel] Starting auto-cancel for removed absence');
-        console.log('[Auto-cancel] Employee ID:', employeeId);
-        console.log('[Auto-cancel] Date range:', formatDateYYYYMMDD(start), 'to', formatDateYYYYMMDD(end));
+        // Remove absence for each day in range. allSettled i.p.v. all: een
+        // mislukte dag mag de andere dagen niet blokkeren, en we willen weten
+        // wélke dag het niet lukte in plaats van alleen dat er iets mislukte.
+        let currentDate = parseDateOnly(start);
+        const dateStrs = [];
+        while (currentDate <= end) {
+            dateStrs.push(formatDateYYYYMMDD(currentDate));
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+        const uitslagen = await Promise.allSettled(
+            dateStrs.map(dateStr => removeAvailability(employeeId, dateStr, { skipRefresh: true }))
+        );
+        const mislukt = dateStrs.filter((_, i) => uitslagen[i].status === 'rejected');
 
-        await getSwapRequests(); // Refresh swap requests
-        console.log('[Auto-cancel] Total swap requests in DataStore:', DataStore.swapRequests.length);
+        await refreshAvailability();
 
-        const affectedShifts = [];
-
-        // Find all shifts for this employee in the date range
-        let checkDate = parseDateOnly(start);
-        while (checkDate <= end) {
-            const dateStr = formatDateYYYYMMDD(checkDate);
-            const shifts = getShiftsByEmployee(employeeId, dateStr, dateStr);
-            console.log(`[Auto-cancel] Date ${dateStr}: Found ${shifts.length} shift(s)`, shifts.map(s => ({ id: s.id, userId: s.userId })));
-            affectedShifts.push(...shifts);
-            checkDate.setDate(checkDate.getDate() + 1);
+        if (mislukt.length > 0) {
+            console.error('Fout bij verwijderen afwezigheid op:', mislukt);
+            showToast(
+                `Verwijderen mislukt voor ${mislukt.length} dag${mislukt.length !== 1 ? 'en' : ''}: ${mislukt.map(d => formatDate(d)).join(', ')}. De rest is verwijderd.`,
+                'error'
+            );
+            // Modal blijft open zodat de gebruiker het opnieuw kan proberen
+            // voor de dagen die nog niet gelukt zijn.
+            renderAvailability();
+            renderPlanning();
+            return;
         }
 
-        console.log('[Auto-cancel] Total affected shifts:', affectedShifts.length, affectedShifts.map(s => s.id));
+        // #282: de uitkomst wordt nu gemeld. Mislukt het annuleren, dan staat
+        // de dienst nog open voor overname terwijl de medewerker niet meer
+        // afwezig is, en dat hoort de gebruiker te weten.
+        const overnames = await annuleerOvernamesVoorPeriode(employeeId, startDate, endDate);
 
-        // Debug: Show all takeover requests for this employee
-        const employeeTakeoverRequests = DataStore.swapRequests.filter(sr =>
-            sr.requester_user_id === employeeId &&
-            sr.request_type === 'takeover' &&
-            sr.status === 'pending'
-        );
-        console.log('[Auto-cancel] All pending takeover requests for employee:', employeeTakeoverRequests.map(sr => ({
-            id: sr.id,
-            requester_shift_id: sr.requester_shift_id,
-            status: sr.status
-        })));
+        closeAvailabilityModal();
+        renderAvailability();
+        renderPlanning(); // Update planning view
+        showToast(`Afwezigheid verwijderd voor ${days} dag${days !== 1 ? 'en' : ''}.`, 'success');
+        meldOvernameAnnulaties(overnames);
+    } catch (error) {
+        console.error('Fout bij verwijderen afwezigheid:', error);
+        showToast('Verwijderen mislukt: ' + getUserFriendlyError(error), 'error');
+    } finally {
+        hideSectionLoading('availability-view');
+    }
+}
 
-        // Find and cancel pending takeover requests for these shifts
-        const requestsToCancel = DataStore.swapRequests.filter(sr =>
+/**
+ * Annuleert openstaande overnameverzoeken voor diensten in een periode waarin
+ * de medewerker niet langer afwezig is. Losstaand van handleRemoveAbsence
+ * gehouden (#226) zodat een fout hierin niet de hoofdafhandeling kan overslaan.
+ *
+ * #282: drie dingen veranderd.
+ *
+ * De betrokken diensten kwamen uit DataStore.shifts, en dat bevat alleen het
+ * geladen venster. Een overnameverzoek voor een dienst daarbuiten werd dus
+ * niet geannuleerd. Het verzoek zelf draagt al requester_shift_date mee uit
+ * de database, dus de datum van de dienst komt nu daarvandaan en de cache
+ * speelt geen rol meer.
+ *
+ * Mislukte annuleringen verdwenen in de console. Ze worden nu geteld en
+ * teruggegeven, zodat de aanroeper ze kan tonen.
+ *
+ * Deze functie sluit de modal en hertekent niet meer. Dat deed de aanroeper
+ * ook al, dus alles gebeurde twee keer.
+ *
+ * Geeft terug: { geprobeerd, gelukt, mislukteDatums }.
+ */
+async function annuleerOvernamesVoorPeriode(employeeId, startDatumStr, eindDatumStr) {
+    const uitkomst = { geprobeerd: 0, gelukt: 0, mislukteDatums: [] };
+    try {
+        await getSwapRequests(); // verse lijst uit de database
+
+        const teAnnuleren = (DataStore.swapRequests || []).filter(sr =>
             sr.request_type === 'takeover' &&
             sr.status === 'pending' &&
-            sr.requester_user_id === employeeId &&
-            affectedShifts.some(shift => shift.id === sr.requester_shift_id)
+            Number(sr.requester_user_id) === Number(employeeId) &&
+            sr.requester_shift_date >= startDatumStr &&
+            sr.requester_shift_date <= eindDatumStr
         );
 
-        console.log('[Auto-cancel] Pending takeover requests for this employee:', DataStore.swapRequests.filter(sr => sr.requester_user_id === employeeId && sr.request_type === 'takeover').length);
-        console.log('[Auto-cancel] Requests to cancel:', requestsToCancel.length, requestsToCancel.map(sr => ({ id: sr.id, shiftId: sr.requester_shift_id })));
+        uitkomst.geprobeerd = teAnnuleren.length;
+        if (teAnnuleren.length === 0) return uitkomst;
 
-        if (requestsToCancel.length > 0) {
-            const cancelPromises = requestsToCancel.map(sr => {
-                console.log(`[Auto-cancel] Cancelling request ${sr.id} for shift ${sr.requester_shift_id}...`);
-                return cancelSwapRequest(sr.id)
-                    .then(() => console.log(`[Auto-cancel] ✓ Cancelled request ${sr.id}`))
-                    .catch(err => {
-                        console.error(`[Auto-cancel] ✗ Failed to cancel request ${sr.id}:`, err);
-                    });
-            });
-            await Promise.all(cancelPromises);
-
-            console.log(`[Auto-cancel] Complete: ${requestsToCancel.length} takeover request(s) cancelled`);
-        } else {
-            console.log('[Auto-cancel] No requests to cancel');
-        }
-    } catch (error) {
-        console.error('[Auto-cancel] Error cancelling takeover requests:', error);
-        // Don't block the flow if cancellation fails
+        const resultaten = await Promise.allSettled(
+            teAnnuleren.map(sr => cancelSwapRequest(sr.id))
+        );
+        resultaten.forEach((r, i) => {
+            if (r.status === 'fulfilled') {
+                uitkomst.gelukt++;
+            } else {
+                console.error('Annuleren overnameverzoek mislukt:', teAnnuleren[i].id, r.reason);
+                uitkomst.mislukteDatums.push(teAnnuleren[i].requester_shift_date);
+            }
+        });
+    } catch (fout) {
+        console.error('Overnameverzoeken annuleren mislukt:', fout);
+        // Bewust niet doorgooien: het intrekken van de afwezigheid zelf is al
+        // gelukt, en dat mag niet alsnog als mislukt overkomen.
+        uitkomst.mislukteDatums.push('onbekend');
     }
+    return uitkomst;
+}
 
-    closeAvailabilityModal();
-    renderAvailability();
-    renderPlanning(); // Update planning view
-    hideSectionLoading('availability-view');
+/**
+ * Toont wat annuleerOvernamesVoorPeriode heeft opgeleverd. Zwijgt wanneer er
+ * niets te annuleren viel, want dan is er niets te melden.
+ */
+function meldOvernameAnnulaties(uitkomst) {
+    if (!uitkomst || uitkomst.geprobeerd === 0) return;
+    if (uitkomst.mislukteDatums.length === 0) {
+        const n = uitkomst.gelukt;
+        showToast(`${n} openstaand${n !== 1 ? 'e' : ''} overnameverzoek${n !== 1 ? 'en' : ''} ingetrokken.`, 'success');
+        return;
+    }
+    const datums = uitkomst.mislukteDatums
+        .filter(d => d !== 'onbekend')
+        .map(d => formatDate(d));
+    const staart = datums.length > 0
+        ? ` voor ${datums.join(', ')}`
+        : '';
+    const meervoud = uitkomst.mislukteDatums.length !== 1;
+    showToast(
+        `De dienst${meervoud ? 'en' : ''}${staart} ${meervoud ? 'staan' : 'staat'} nog open voor overname. `
+        + `Trek ${meervoud ? 'de verzoeken' : 'het verzoek'} zelf in via Ruilen.`,
+        'warning'
+    );
 }
 

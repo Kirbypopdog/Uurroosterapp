@@ -21,7 +21,18 @@ function getShiftEndDateTime(shift) {
     const endDT = parseDateTime(shift.date, shift.endTime);
 
     // Als eindtijd vóór starttijd valt (ook bij zelfde uur maar vroeger minuut), eindigt de dienst de volgende dag
-    if (endDT < startDT) {
+    //
+    // #295: hier stond `<`, terwijl getShiftEndDT in backend/src/utils.js `<=`
+    // gebruikt. Bij gelijke start- en eindtijd zag de frontend dus een dienst
+    // van nul uur en de backend een van vierentwintig. Voor 2027-09-10 van
+    // 09:00 tot 09:00 berekende de frontend 10 september 09:00 en de backend
+    // 11 september 09:00. Die dienst telde in de urenoverzichten 0 uur en
+    // blokkeerde in de backendcontroles de hele volgende dag.
+    //
+    // De backendvariant is hier de juiste: ze levert nooit een dienst van nul
+    // uur op. Beide kanten weigeren zulke invoer nu bovendien, dus dit is het
+    // vangnet voor wat er al staat.
+    if (endDT <= startDT) {
         endDT.setDate(endDT.getDate() + 1);
     }
 
@@ -56,12 +67,8 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
     const warnings = [];
     const minHoursBetweenShifts = DataStore.settings.rules?.minHoursBetweenShifts || 11;
 
-    // Haal alle diensten van deze medewerker op (behalve de dienst(en) die we aanpassen)
-    // excludeShiftId can be a single ID or an array of IDs
-    const excludeIds = Array.isArray(excludeShiftId) ? excludeShiftId : (excludeShiftId ? [excludeShiftId] : []);
-    const employeeShifts = DataStore.shifts.filter(s =>
-        s.employeeId === employeeId && !excludeIds.includes(s.id)
-    );
+    // #257: alleen de diensten rond deze datum, niet het hele schooljaar.
+    const employeeShifts = dienstenRondDatum(employeeId, newShift.date, excludeShiftId);
 
     // Check voor elke bestaande dienst
     employeeShifts.forEach(existingShift => {
@@ -73,8 +80,17 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
             const employeeName = employee?.name || `Medewerker #${employeeId}`;
             errors.push({
                 type: ValidationRules.ERROR,
-                rule: '11-uur regel',
-                message: `${employeeName} heeft minder dan ${minHoursBetweenShifts} uur rust tussen diensten (${displayHours} uur tussen ${formatDate(existingShift.date)} en ${formatDate(newShift.date)})`,
+                // #247: 'rule' is de tekst die de gebruiker leest en is al eens
+                // hernoemd. 'code' is waar de code op mag testen.
+                code: 'rust',
+                rule: `${minHoursBetweenShifts}-uur regel`,
+                // #346: hier stonden alleen twee datums. Bij twee diensten op
+                // dezelfde dag las dat als "tussen maandag 31 augustus en
+                // maandag 31 augustus", en door de volgorde waarin de
+                // kandidaten binnenkomen stonden ze bij een dagovergang vaak
+                // omgekeerd. De tijden erbij, en chronologisch gezet, maken
+                // meteen duidelijk om welke twee diensten het gaat.
+                message: `${employeeName} heeft minder dan ${minHoursBetweenShifts} uur rust tussen diensten (${displayHours} uur ${beschrijfRustPaar(existingShift, newShift)})`,
                 shift1: existingShift,
                 shift2: newShift
             });
@@ -84,14 +100,70 @@ function validate11HourRule(employeeId, newShift, excludeShiftId = null) {
     return { errors, warnings };
 }
 
+// #346: "tussen ma 31 aug 22:00-07:00 en di 1 sep 09:00-17:00". De vroegste
+// dienst komt eerst, ongeacht in welke volgorde de validatie ze aanbood.
+function beschrijfRustPaar(a, b) {
+    const sleutel = (sh) => `${sh.date} ${sh.startTime}`;
+    const [eerste, tweede] = sleutel(a) <= sleutel(b) ? [a, b] : [b, a];
+    const kort = (sh) => `${formatDate(sh.date)} ${sh.startTime}-${sh.endTime}`;
+    return `tussen ${kort(eerste)} en ${kort(tweede)}`;
+}
+
+// #257: beide regels hieronder haalden met DataStore.shifts.filter ALLE
+// diensten van de medewerker op en liepen die allemaal af, met vier
+// Date-objecten per paar. Een rustregel en een overlap kunnen alleen spelen
+// tussen diensten die hooguit een dag uit elkaar liggen, dus dat zijn er
+// hooguit een handvol. De backend deed dat al goed: validateShiftRules beperkt
+// de kandidaten met date BETWEEN datum-2 AND datum+2. Diezelfde grens hier.
+//
+// Twee dagen marge is ruim genoeg: de rustregel kijkt naar het gat tussen het
+// einde van de ene en het begin van de volgende dienst, en met een nachtdienst
+// erbij overspant dat nooit meer dan twee kalenderdagen.
+const VALIDATIE_MARGE_DAGEN = 2;
+
+// Schuif een datum van de vorm YYYY-MM-DD een aantal dagen op en geef hem in
+// dezelfde vorm terug. Bewust niet via parseDateOnly en formatDateYYYYMMDD uit
+// data.js: dit bestand wordt ook los in de tests geladen, en de vergelijking
+// verderop is toch een tekstvergelijking.
+function _schuifDatum(datum, dagen) {
+    const [j, m, d] = String(datum).slice(0, 10).split('-').map(Number);
+    const dt = new Date(j, m - 1, d);
+    dt.setDate(dt.getDate() + dagen);
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    return `${dt.getFullYear()}-${mm}-${dd}`;
+}
+
+function dienstenRondDatum(employeeId, datum, excludeShiftId = null) {
+    const excludeIds = Array.isArray(excludeShiftId) ? excludeShiftId : (excludeShiftId ? [excludeShiftId] : []);
+    const vanStr = _schuifDatum(datum, -VALIDATIE_MARGE_DAGEN);
+    const totStr = _schuifDatum(datum, VALIDATIE_MARGE_DAGEN);
+
+    // Index per medewerker, eenmaal opgebouwd en hergebruikt zolang de store
+    // niet wijzigt. Zonder deze index blijft elke aanroep nog altijd de hele
+    // lijst aflopen, ook al valideert hij er daarna maar een paar.
+    const shifts = DataStore.shifts;
+    if (DataStore._validatieIndexBron !== shifts) {
+        const index = new Map();
+        for (const s of shifts) {
+            let lijst = index.get(s.employeeId);
+            if (!lijst) { lijst = []; index.set(s.employeeId, lijst); }
+            lijst.push(s);
+        }
+        DataStore._validatieIndex = index;
+        DataStore._validatieIndexBron = shifts;
+    }
+
+    const vanMedewerker = DataStore._validatieIndex.get(employeeId) || [];
+    return vanMedewerker.filter(s =>
+        s.date >= vanStr && s.date <= totStr && !excludeIds.includes(s.id));
+}
+
 function validateShiftOverlap(employeeId, newShift, excludeShiftId = null) {
     const errors = [];
 
-    // excludeShiftId can be a single ID or an array of IDs
-    const excludeIds = Array.isArray(excludeShiftId) ? excludeShiftId : (excludeShiftId ? [excludeShiftId] : []);
-    const employeeShifts = DataStore.shifts.filter(s =>
-        s.employeeId === employeeId && !excludeIds.includes(s.id)
-    );
+    // #257: zie de toelichting bij dienstenRondDatum.
+    const employeeShifts = dienstenRondDatum(employeeId, newShift.date, excludeShiftId);
 
     employeeShifts.forEach(existingShift => {
         if (shiftsOverlap(existingShift, newShift)) {
@@ -99,6 +171,10 @@ function validateShiftOverlap(employeeId, newShift, excludeShiftId = null) {
             const employeeName = employee?.name || `Medewerker #${employeeId}`;
             errors.push({
                 type: ValidationRules.ERROR,
+                // #247: een overlap is nooit te overrulen, iemand kan niet op
+                // twee plekken tegelijk staan. De backend weigert hem ook met
+                // force: true.
+                code: 'overlap',
                 rule: 'Overlappende diensten',
                 message: `${employeeName} heeft al een dienst op ${formatDate(existingShift.date)} van ${existingShift.startTime} tot ${existingShift.endTime}`,
                 shift1: existingShift,
@@ -225,6 +301,11 @@ function validateAvailability(employeeId, date, startTime = null, endTime = null
         return { warnings };
     }
 
+    // vrij is puur informatief — geen conflict met een shift (#173)
+    if (absence.type === 'vrij') {
+        return { warnings };
+    }
+
     // Medewerker is afwezig
     const absenceLabels = {
         'verlof': 'Verlof',
@@ -265,20 +346,23 @@ function validateMaxConsecutiveDays(employeeId, newShift, excludeShiftId = null)
     const targetStr = newShift.date;
     let consecutiveCount = 1;
 
+    // #296: ook hier formatDateYYYYMMDD. Het middaguur maskeerde de
+    // tijdzoneverschuiving alleen zolang de gebruiker dicht bij UTC zit; de
+    // lokale helper heeft die aanname niet nodig.
     // Count backwards
-    let checkDate = new Date(targetStr + 'T12:00:00');
+    let checkDate = parseDateOnly(targetStr);
     while (true) {
         checkDate.setDate(checkDate.getDate() - 1);
-        const dateStr = checkDate.toISOString().split('T')[0];
+        const dateStr = formatDateYYYYMMDD(checkDate);
         if (uniqueDates.includes(dateStr)) consecutiveCount++;
         else break;
     }
 
     // Count forwards
-    checkDate = new Date(targetStr + 'T12:00:00');
+    checkDate = parseDateOnly(targetStr);
     while (true) {
         checkDate.setDate(checkDate.getDate() + 1);
-        const dateStr = checkDate.toISOString().split('T')[0];
+        const dateStr = formatDateYYYYMMDD(checkDate);
         if (uniqueDates.includes(dateStr)) consecutiveCount++;
         else break;
     }
@@ -298,6 +382,31 @@ function validateMaxConsecutiveDays(employeeId, newShift, excludeShiftId = null)
 // validateRestAfterNight and validateMinFreeWeekends removed per user request
 
 // ===== VOLLEDIGE VALIDATIE =====
+
+// #228: renderPlanning() valideert elke zichtbare dienst twee keer. Eerst via
+// renderValidationAlerts -> getValidationSummary voor de meldingenbalk, en
+// direct daarna nog eens tijdens het renderen van het raster. Beide draaien
+// binnen dezelfde render met dezelfde data, dus het antwoord kan niet
+// verschillen. Gemeten: 250 validaties per render bij 125 zichtbare diensten.
+//
+// De cache leeft alleen binnen een render en enkel voor de vorm
+// validateShift(dienst, dienst.id). Aanroepen met gewijzigde gegevens, zoals
+// vanuit het dienstvenster of tijdens het slepen, gaan langs validateShift
+// zelf en raken deze cache niet.
+let _validatieRonde = null;
+
+function beginValidatieRonde() { _validatieRonde = new Map(); }
+function eindValidatieRonde() { _validatieRonde = null; }
+
+function validateBestaandeDienst(shift) {
+    if (!_validatieRonde) return validateShift(shift, shift.id);
+    let uitkomst = _validatieRonde.get(shift.id);
+    if (!uitkomst) {
+        uitkomst = validateShift(shift, shift.id);
+        _validatieRonde.set(shift.id, uitkomst);
+    }
+    return uitkomst;
+}
 
 function validateShift(shiftData, excludeShiftId = null) {
     const allErrors = [];
@@ -361,9 +470,15 @@ function generateSuggestions(error, shiftData) {
                 }
 
                 // Suggest the next day
+                // #296: formatDateYYYYMMDD, niet toISOString. parseDateOnly geeft
+                // lokale middernacht terug, en in Belgische tijd draait
+                // toISOString die dag weer een dag terug. De plus één en de min
+                // één hieven elkaar op, dus de knop "Verplaats naar" zette het
+                // datumveld op de dag waar de dienst al stond. Opslaan gaf dan
+                // exact dezelfde elf-uursfout, en de gebruiker draaide rondjes.
                 const nextDay = new Date(shiftDate);
                 nextDay.setDate(nextDay.getDate() + 1);
-                const nextDayStr = nextDay.toISOString().split('T')[0];
+                const nextDayStr = formatDateYYYYMMDD(nextDay);
                 suggestions.push({
                     label: `Verplaats naar ${formatDate(nextDayStr)}`,
                     field: 'date',
@@ -486,7 +601,7 @@ function getValidationSummary(startDate, endDate) {
         };
 
         shiftsOnDate.forEach(shift => {
-            const validation = validateShift(shift, shift.id);
+            const validation = validateBestaandeDienst(shift);
 
             if (!validation.isValid) {
                 const uniqueErrors = validation.errors.filter(err => {
@@ -596,9 +711,11 @@ function validateSwapRequest(swapData) {
 
     const requesterValidation = validateShift(requesterPostSwapShift, excludeShiftIds);
 
+    // Regel-overtredingen na ruilen (11-uur, bezetting, overlap) blokkeren niet:
+    // ze worden waarschuwingen zodat je toch kunt indienen — de verantwoordelijke keurt goed.
     if (!requesterValidation.isValid) {
-        result.isValid = false;
-        result.errors.push(`Na ruilen zou jij een probleem hebben: ${requesterValidation.errors.map(e => e.message).join(', ')}`);
+        result.hasWarnings = true;
+        result.warnings.push(`Na ruilen zou jij een regelprobleem hebben (vereist goedkeuring): ${requesterValidation.errors.map(e => e.message).join(', ')}`);
     }
 
     if (requesterValidation.hasWarnings) {
@@ -616,9 +733,9 @@ function validateSwapRequest(swapData) {
     const targetValidation = validateShift(targetPostSwapShift, excludeShiftIds);
 
     if (!targetValidation.isValid) {
-        result.isValid = false;
-        result.errors.push(
-            `Na ruilen zou ${DataStore.users.find(u => u.id === targetUserId)?.name || 'de ander'} een probleem hebben: ${targetValidation.errors.map(e => e.message).join(', ')}`
+        result.hasWarnings = true;
+        result.warnings.push(
+            `Na ruilen zou ${DataStore.users.find(u => u.id === targetUserId)?.name || 'de ander'} een regelprobleem hebben (vereist goedkeuring): ${targetValidation.errors.map(e => e.message).join(', ')}`
         );
     }
 
@@ -632,10 +749,11 @@ function validateSwapRequest(swapData) {
     return result;
 }
 
-console.log('Validation systeem geladen');
 
 // Allow pure utility functions to be imported in Node.js (for unit tests)
 // This does not affect browser behavior since `module` is not defined there.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseDateTime, getShiftEndDateTime, getHoursBetweenShifts, shiftsOverlap };
+  module.exports = { parseDateTime, getShiftEndDateTime, getHoursBetweenShifts, shiftsOverlap,
+                     _schuifDatum, dienstenRondDatum, VALIDATIE_MARGE_DAGEN,
+                     beschrijfRustPaar };
 }

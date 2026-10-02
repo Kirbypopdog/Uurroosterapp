@@ -1,5 +1,14 @@
 // HET VLOT ROOSTERPLANNING - MEDEWERKERS, PROFIEL EN BASISROOSTER
 
+// #230: het label zei "Deze maand" terwijl de noemer contractHours * 4 is, dus
+// een periode van vier weken. Erbij zetten welke periode het is maakt meteen
+// duidelijk dat het niet om de kalendermaand gaat.
+function formatPeriodeBereik(periode) {
+    if (!periode) return '';
+    const kort = (d) => parseDateOnly(d).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
+    return `${kort(periode.startDate)} t/m ${kort(periode.endDate)}`;
+}
+
 function renderEmployees() {
     renderEmployeeTeamToggles();
     const role = getEffectiveRole();
@@ -32,6 +41,14 @@ function renderEmployees() {
         employeesByTeam[teamKey] = teamEmps;
     });
 
+    // #231: wie geen team heeft, of een team dat niet meer in de instellingen
+    // staat, viel hier volledig weg. De planner heeft hier al een bak voor
+    // ("Geen Team", app-planner.js), dus die aanpak overgenomen zodat de twee
+    // schermen dezelfde medewerkers tonen.
+    const zonderTeam = employees
+        .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
+
     let html = '';
 
     // Render per team
@@ -41,9 +58,11 @@ function renderEmployees() {
 
         const team = teams[teamKey];
         const teamName = escapeHtml(team.name);
+        const teamColor = team?.color || '#8d897c';
 
         html += `<div class="employees-team-section">
             <div class="employees-team-header team-${teamKey}">
+                <span class="team-header-dot" style="background:${teamColor}"></span>
                 <span class="team-header-name">${teamName}</span>
                 <span class="team-header-count">${teamEmployees.length} medewerker${teamEmployees.length !== 1 ? 's' : ''}</span>
             </div>
@@ -56,7 +75,23 @@ function renderEmployees() {
         html += `</div></div>`;
     });
 
-    if (employees.length === 0 || teamOrder.length === 0) {
+    if (zonderTeam.length > 0) {
+        html += `<div class="employees-team-section">
+            <div class="employees-team-header">
+                <span class="team-header-dot" style="background:var(--ink-3)"></span>
+                <span class="team-header-name">Geen team</span>
+                <span class="team-header-count">${zonderTeam.length} medewerker${zonderTeam.length !== 1 ? 's' : ''}</span>
+            </div>
+            <div class="employees-team-grid">`;
+        zonderTeam.forEach(emp => { html += renderEmployeeCard(emp); });
+        html += `</div></div>`;
+    }
+
+    // #231: de lege tekst hing aan "nul medewerkers of nul teams". Bij
+    // medewerkers die allemaal buiten de zichtbare teams vielen was geen van
+    // beide waar, bleef html een lege string, en toonde het scherm enkel de
+    // teamchips zonder enige uitleg. Nu is de voorwaarde wat je feitelijk ziet.
+    if (!html.trim()) {
         html = '<p>Nog geen medewerkers toegevoegd.</p>';
     }
 
@@ -68,6 +103,15 @@ function renderEmployees() {
         const employee = employees.find(e => e.id === employeeId);
         if (employee && canManageEmployee(employee)) {
             card.style.cursor = 'pointer';
+            // #275: de kaart is een div en stond dus niet in de tabvolgorde;
+            // het basisrooster van een medewerker was zonder muis niet te
+            // bereiken. Hier gezet en niet in de template, zodat de
+            // rechtencheck hierboven blijft gelden: een kaart die je niet mag
+            // openen wordt ook geen tabstop. Enter en spatie lopen via de
+            // gedeelde handler in app-ui.js.
+            card.setAttribute('role', 'button');
+            card.setAttribute('tabindex', '0');
+            card.setAttribute('aria-label', `${employee.name} bewerken`);
             card.addEventListener('click', () => {
                 openEditEmployeeModal(employeeId);
             });
@@ -103,9 +147,45 @@ function renderEmployees() {
     });
 }
 
+// De drie velden horen bij elkaar: een nieuw token betekent een nieuwe
+// aanmaakdatum en een leeg gebruik. Ze los bijwerken liet het scherm eerder
+// "vorige week opgehaald" tonen over een link die net gemaakt was.
+function onthoudAgendalink(data) {
+    AppState.currentUser.icalFeedToken = data.token;
+    AppState.currentUser.icalTokenCreated = data.icalTokenCreated || null;
+    AppState.currentUser.icalLastAccess = data.icalLastAccess || null;
+    sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+}
+
+// #154: een agendalink blijft geldig tot iemand hem intrekt. De medewerker kan
+// dat alleen beoordelen als hij ziet wat ermee gebeurt. Vandaar twee feiten en
+// geen geschiedenis: sinds wanneer de link bestaat, en wanneer hij voor het
+// laatst opgehaald is. Wie zijn agendakoppeling maanden geleden verwijderd
+// heeft en hier toch "vandaag opgehaald" ziet staan, weet genoeg.
+function icalGebruikTekst(user) {
+    const gemaakt = user.icalTokenCreated ? new Date(user.icalTokenCreated) : null;
+    const laatst = user.icalLastAccess ? new Date(user.icalLastAccess) : null;
+    const kort = d => d.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    const delen = [];
+    if (gemaakt && !isNaN(gemaakt)) delen.push(`Aangemaakt op ${kort(gemaakt)}.`);
+    if (laatst && !isNaN(laatst)) {
+        delen.push(`Voor het laatst opgehaald op ${kort(laatst)}.`);
+    } else {
+        // Hier hoort de opruimregel bij: een link die nooit opgehaald wordt,
+        // vervalt na 60 dagen. Dat mag geen verrassing zijn.
+        delen.push('Nog nooit opgehaald. Een link die twee maanden ongebruikt blijft, vervalt vanzelf.');
+    }
+    return escapeHtml(delen.join(' '));
+}
+
 function renderProfile() {
     const user = AppState.currentUser;
     if (!user) return;
+
+    // Update eyebrow h2 with user name
+    const profileTitle = document.getElementById('profile-view-title');
+    if (profileTitle) profileTitle.textContent = user.name || 'Mijn profiel';
 
     const roleLabels = {
         admin: 'Admin',
@@ -134,22 +214,39 @@ function renderProfile() {
     const weekStart = getEmployeeWeekStart(resolvedId);
     const weekDates = getWeekDates(weekStart);
     const hoursWeek = getEmployeeHoursThisWeek(resolvedId, weekDates[0]);
-    const hoursMonth = getEmployeeHoursThisMonth(resolvedId, weekDates[0]);
+    // #230: dit was getEmployeeHoursThisMonth, de KALENDERMAAND, terwijl de
+    // noemer contractHours * 4 is en dus een periode van vier weken. De
+    // planning toont voor dezelfde persoon wél de echte periode, dus stonden er
+    // twee verschillende getallen bij dezelfde noemer op twee schermen.
+    const hoursPeriode = getEmployeeHoursThisPeriod(resolvedId, weekDates[0]);
+    const periode = getFourWeekPeriodDates(weekDates[0]);
 
     const canEditContract = ['admin', 'roosterverantwoordelijke'].includes(user.role);
 
     // Build hours card content
     // Color: green = ≥90% contract (op schema), orange = 60–90% (licht onder), red = <60% (ver onder)
-    function hoursColor(actual, target) {
+    function hoursColor(actual, target, heeftDiensten) {
+        // #351: zonder geplande diensten is er niets om tegen af te zetten. Rood
+        // zou een tekort suggereren dat er niet is.
+        if (heeftDiensten === false) return 'var(--ink-3)';
         if (target <= 0) return '#10b981';
         const pct = actual / target;
         return pct >= 0.9 ? '#10b981' : pct >= 0.6 ? '#f59e0b' : '#ef4444';
     }
-    function saldoLabel(actual, target) {
+    // #351: zonder rooster stond hier een rood tekort van de volle
+    // contractnorm, bijvoorbeeld "-128.0u t.o.v. contract" bij een nieuw
+    // account. Dat gaat over loon en prestaties, dus dat is precies het soort
+    // cijfer waarover mensen meteen bellen, terwijl het enkel betekent dat het
+    // rooster nog niet gemaakt is. Een saldo tegenover nul geplande diensten
+    // zegt niets, dus dan komt er een neutrale regel in de plaats.
+    function saldoLabel(actual, target, heeftDiensten) {
+        if (!heeftDiensten) return '<span class="hours-saldo neutraal">nog geen rooster</span>';
         const diff = actual - target;
         if (Math.abs(diff) < 0.1) return '';
+        // #230: "t.o.v. contract" stond alleen bij een tekort, waardoor een
+        // overschot als een los getal zonder noemer las.
         return diff > 0
-            ? `<span class="hours-saldo positive">+${diff.toFixed(1)}u</span>`
+            ? `<span class="hours-saldo positive">+${diff.toFixed(1)}u t.o.v. contract</span>`
             : `<span class="hours-saldo negative">${diff.toFixed(1)}u t.o.v. contract</span>`;
     }
 
@@ -173,28 +270,38 @@ function renderProfile() {
             </div>`;
         }).join('');
 
+    // #351: "nul uur" en "geen rooster" zijn niet hetzelfde. Het aantal diensten
+    // bepaalt of een saldo iets betekent, niet het aantal uren.
+    const weekHeeftDiensten = currentWeekShifts.length > 0;
+    const periodeHeeftDiensten = !periode ? weekHeeftDiensten : DataStore.shifts.some(s => {
+        const d = (s.date || '').split('T')[0];
+        return Number(s.employeeId || s.userId) === resolvedId
+            && d >= periode.startDate && d <= periode.endDate;
+    });
+
     let hoursCardContent = '';
     if (contractHours > 0) {
-        const monthContract = contractHours * 4;
+        const periodeContract = contractHours * 4;
         const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
-        const monthPct = Math.min((hoursMonth / monthContract) * 100, 100);
-        const weekClr = hoursColor(hoursWeek, contractHours);
-        const monthClr = hoursColor(hoursMonth, monthContract);
+        const periodePct = Math.min((hoursPeriode / periodeContract) * 100, 100);
+        const weekClr = hoursColor(hoursWeek, contractHours, weekHeeftDiensten);
+        const periodeClr = hoursColor(hoursPeriode, periodeContract, periodeHeeftDiensten);
         hoursCardContent = `
             <div class="profile-hours-section">
                 <div class="profile-hours-row">
                     <span class="profile-hours-label">Deze week</span>
-                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u / ${contractHours}u ${saldoLabel(hoursWeek, contractHours)}</span>
+                    <span class="profile-hours-value">${hoursWeek.toFixed(1)}u / ${contractHours}u ${saldoLabel(hoursWeek, contractHours, weekHeeftDiensten)}</span>
                 </div>
                 <div class="progress-bar mb-sm">
                     <div class="progress-fill" style="width:${weekPct}%;background:${weekClr}"></div>
                 </div>
                 <div class="profile-hours-row">
-                    <span class="profile-hours-label">Deze maand</span>
-                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u / ${monthContract.toFixed(0)}u ${saldoLabel(hoursMonth, monthContract)}</span>
+                    <span class="profile-hours-label">Deze periode (4 weken)</span>
+                    <span class="profile-hours-value">${hoursPeriode.toFixed(1)}u / ${periodeContract.toFixed(0)}u ${saldoLabel(hoursPeriode, periodeContract, periodeHeeftDiensten)}</span>
                 </div>
+                ${periode ? `<div class="profile-hours-periode">${formatPeriodeBereik(periode)}</div>` : ''}
                 <div class="progress-bar mb-md">
-                    <div class="progress-fill" style="width:${monthPct}%;background:${monthClr}"></div>
+                    <div class="progress-fill" style="width:${periodePct}%;background:${periodeClr}"></div>
                 </div>
                 <div class="profile-week-shifts">${weekShiftRows}</div>
             </div>`;
@@ -206,8 +313,8 @@ function renderProfile() {
                     <span class="profile-hours-value">${hoursWeek.toFixed(1)}u</span>
                 </div>
                 <div class="profile-hours-row mb-md">
-                    <span class="profile-hours-label">Deze maand</span>
-                    <span class="profile-hours-value">${hoursMonth.toFixed(1)}u</span>
+                    <span class="profile-hours-label">Deze periode (4 weken)</span>
+                    <span class="profile-hours-value">${hoursPeriode.toFixed(1)}u</span>
                 </div>
                 <div class="profile-week-shifts">${weekShiftRows}</div>
                 <p class="form-hint mt-sm">Geen contracturen ingesteld.</p>
@@ -227,7 +334,7 @@ function renderProfile() {
     DOM.profileContent.innerHTML = `
         <!-- Hero header -->
         <div class="profile-hero">
-            <div class="profile-hero-avatar" style="background:${teamColor}">${escapeHtml(initials)}</div>
+            ${avatarHtml(user.name, teamColor, teamName)}
             <div class="profile-hero-info">
                 <h2 class="profile-hero-name">${escapeHtml(user.name)}</h2>
                 <div class="profile-hero-meta">
@@ -260,7 +367,7 @@ function renderProfile() {
 
             <div class="settings-card">
                 <div class="settings-card-header">
-                    <h3><span class="settings-icon">${IconHelper.html(ICONS.clock, 'md')}</span> Uren overzicht</h3>
+                    <h3><span class="settings-icon">${IconHelper.html(ICONS.clock, 'md')}</span> Urenoverzicht</h3>
                 </div>
                 <div class="settings-card-body">
                     ${hoursCardContent}
@@ -268,10 +375,10 @@ function renderProfile() {
             </div>
         </div>
 
-        <!-- Account overzicht (full width) -->
+        <!-- Accountoverzicht over de volle breedte -->
         <div class="settings-card">
             <div class="settings-card-header">
-                <h3><span class="settings-icon">${IconHelper.html(ICONS.info, 'md')}</span> Account overzicht</h3>
+                <h3><span class="settings-icon">${IconHelper.html(ICONS.info, 'md')}</span> Accountoverzicht</h3>
             </div>
             <div class="settings-card-body">
                 <div class="profile-meta profile-meta-inline">
@@ -295,9 +402,9 @@ function renderProfile() {
                         </span>
                     </div>
                     <div class="profile-meta-row">
-                        <span class="profile-meta-label">Email notificaties</span>
+                        <span class="profile-meta-label">E-mailmeldingen</span>
                         <span class="profile-meta-value">
-                            <label class="toggle-switch" title="Ontvang email meldingen bij ruilverzoeken, overnames en ziekmeldingen">
+                            <label class="toggle-switch" data-tooltip="Ontvang email meldingen bij ruilverzoeken, overnames en ziekmeldingen">
                                 <input type="checkbox" id="email-notifications-toggle" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
                                 <span class="toggle-slider"></span>
                             </label>
@@ -314,6 +421,11 @@ function renderProfile() {
                                     </button>
                                 </div>
                                 <div class="profile-ical-help">Plak deze URL in Google Calendar, Apple Agenda of Outlook als "Abonneren op agenda".</div>
+                                <div class="profile-ical-waarschuwing">
+                                    ${IconHelper.html('lock', 'xs')}
+                                    Deel deze link met niemand. Wie hem heeft, ziet je diensten van het voorbije jaar en het komende jaar, zonder in te loggen. Deel je hem per ongeluk, genereer dan hieronder een nieuwe.
+                                </div>
+                                <div class="profile-ical-gebruik">${icalGebruikTekst(user)}</div>
                                 <button type="button" class="btn btn-ghost btn-xs profile-ical-reset" id="profile-ical-reset">
                                     ${IconHelper.html('refresh-cw', 'xs')} Nieuwe link genereren
                                 </button>
@@ -321,7 +433,7 @@ function renderProfile() {
                                 <button type="button" class="btn btn-secondary btn-xs" id="profile-ical-activate">
                                     ${IconHelper.html('calendar-plus', 'xs')} Agenda koppeling activeren
                                 </button>
-                                <div class="profile-ical-help">Synchroniseer je shifts naar Google Calendar, Apple Agenda of Outlook.</div>
+                                <div class="profile-ical-help">Synchroniseer je diensten naar Google Agenda, Apple Agenda of Outlook. Je krijgt een persoonlijke link die je niet mag delen.</div>
                             `}
                         </span>
                     </div>
@@ -339,7 +451,7 @@ function renderProfile() {
     // Edit button opens modal
     document.getElementById('profile-edit-btn')?.addEventListener('click', openProfileEditModal);
 
-    // Email notifications toggle
+    // Schakelaar voor de e-mailmeldingen
     const emailToggle = document.getElementById('email-notifications-toggle');
     if (emailToggle) {
         emailToggle.addEventListener('change', async () => {
@@ -350,7 +462,7 @@ function renderProfile() {
                 });
                 AppState.currentUser.emailNotificationsEnabled = data.emailNotificationsEnabled;
                 sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
-                showToast(emailToggle.checked ? 'Email notificaties ingeschakeld' : 'Email notificaties uitgeschakeld', 'success');
+                showToast(emailToggle.checked ? 'E-mailmeldingen ingeschakeld' : 'E-mailmeldingen uitgeschakeld', 'success');
             } catch (error) {
                 emailToggle.checked = !emailToggle.checked;
                 showToast('Kon voorkeur niet opslaan: ' + error.message, 'error');
@@ -365,8 +477,7 @@ function renderProfile() {
             icalActivateBtn.disabled = true;
             try {
                 const data = await dataApiFetch('/me/ical-token', { method: 'POST' });
-                AppState.currentUser.icalFeedToken = data.token;
-                sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+                onthoudAgendalink(data);
                 renderProfile();
                 showToast('Agenda koppeling geactiveerd', 'success');
             } catch (e) {
@@ -392,8 +503,7 @@ function renderProfile() {
             icalResetBtn.disabled = true;
             try {
                 const data = await dataApiFetch('/me/ical-token', { method: 'POST' });
-                AppState.currentUser.icalFeedToken = data.token;
-                sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+                onthoudAgendalink(data);
                 renderProfile();
                 showToast('Nieuwe link gegenereerd', 'success');
             } catch (e) {
@@ -491,7 +601,15 @@ function openProfileEditModal() {
 
     const form = document.getElementById('profile-edit-form');
     const message = document.getElementById('profile-message');
+    // #182: de Escape-luisteraar hing aan document en verwijderde zichzelf
+    // alleen bij Escape. Sluiten via het kruisje of de achtergrond liet hem
+    // staan, en elke heropening stapelde er een bij. Na vijf keer openen en
+    // sluiten sloot één druk op Escape dus vijf keer een venster dat er niet
+    // meer is. Het opruimen hoort bij het sluiten, niet bij één van de manieren
+    // waarop je kan sluiten.
+    const escHandler = (e) => { if (e.key === 'Escape') closeModal(); };
     const closeModal = () => {
+        document.removeEventListener('keydown', escHandler);
         overlay.classList.remove('active');
         setTimeout(() => overlay.remove(), 200);
     };
@@ -504,10 +622,10 @@ function openProfileEditModal() {
     // Close handlers
     overlay.querySelector('.modal-close').addEventListener('click', closeModal);
     overlay.querySelector('.profile-edit-cancel').addEventListener('click', closeModal);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
-    document.addEventListener('keydown', function escHandler(e) {
-        if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', escHandler); }
-    });
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeModal(); });
+    document.addEventListener('keydown', escHandler);
 
     // Focus first field
     document.getElementById('profile-name')?.focus();
@@ -680,23 +798,25 @@ function renderEmployeeCard(emp) {
     const contractHours = emp.contractHours || 0;
     const teamName = (DataStore.settings.teams || {})[emp.mainTeam]?.name || emp.mainTeam || '';
     const teamColor = (DataStore.settings.teams || {})[emp.mainTeam]?.color || '#94a3b8';
-    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" title="Geen e-mail — voeg toe om welkomstmail te sturen">Geen email</span>` : '';
+    const noEmailBadge = !emp.email ? `<span class="employee-status no-email" data-tooltip="Geen e-mail, voeg er een toe om een welkomstmail te sturen">Geen email</span>` : '';
 
     // Hours for admin/planner view
     const weekStart = getEmployeeWeekStart(emp.id);
     const weekDates = getWeekDates(weekStart);
     const hoursWeek = getEmployeeHoursThisWeek(emp.id, weekDates[0]);
-    const hoursMonth = getEmployeeHoursThisMonth(emp.id, weekDates[0]);
+    // #230: zie het profiel hierboven. Dezelfde noemer hoort hetzelfde getal
+    // te geven als in de planning.
+    const hoursPeriode = getEmployeeHoursThisPeriod(emp.id, weekDates[0]);
     let hoursHtml = '';
     if (contractHours > 0) {
-        const monthContract = contractHours * 4;
+        const periodeContract = contractHours * 4;
         const weekPct = Math.min((hoursWeek / contractHours) * 100, 100);
         const weekClr = hoursWeek >= contractHours * 0.9 ? '#10b981' : hoursWeek >= contractHours * 0.6 ? '#f59e0b' : '#ef4444';
         hoursHtml = `
             <div class="emp-card-hours">
                 <div class="emp-card-hours-row">
                     <span>${hoursWeek.toFixed(1)}u / ${contractHours}u week</span>
-                    <span class="emp-card-hours-month">${hoursMonth.toFixed(1)}u / ${monthContract.toFixed(0)}u maand</span>
+                    <span class="emp-card-hours-month">${hoursPeriode.toFixed(1)}u / ${periodeContract.toFixed(0)}u periode</span>
                 </div>
                 <div class="progress-bar progress-bar--xs">
                     <div class="progress-fill" style="width:${weekPct}%;background:${weekClr}"></div>
@@ -706,14 +826,20 @@ function renderEmployeeCard(emp) {
         hoursHtml = `<div class="emp-card-hours"><span>${hoursWeek.toFixed(1)}u deze week</span></div>`;
     }
 
+    const initials = escapeHtml(getInitials(emp.name || ''));
+    const subLine = contractHours > 0 ? `${contractHours}u/week` : 'Geen contracturen';
+
     return `
         <div class="employee-card" data-employee-id="${emp.id}">
             <div class="employee-header">
-                <span class="team-color-dot" style="background: ${teamColor}" title="${escapeHtml(teamName)}"></span>
-                <div class="employee-name">${employeeName}</div>
-                ${noEmailBadge}
+                ${avatarHtml(emp.name, teamColor, teamName)}
+                <div class="employee-card-info">
+                    <div class="employee-name">${employeeName}</div>
+                    <div class="employee-card-sub">${subLine}</div>
+                </div>
                 <span class="employee-status ${statusClass}">${statusText}</span>
             </div>
+            ${noEmailBadge ? `<div class="employee-card-badges">${noEmailBadge}</div>` : ''}
             ${hoursHtml}
         </div>
     `;
@@ -745,7 +871,7 @@ function openAddEmployeeModal() {
 
     generateWeekScheduleHTML();
     resetWeekScheduleForm();
-    DOM.employeeModal.classList.remove('hidden');
+    toonModal(DOM.employeeModal);
 }
 
 function openEditEmployeeModal(employeeId) {
@@ -783,7 +909,11 @@ function openEditEmployeeModal(employeeId) {
     const modalActions = DOM.employeeModal.querySelector('.modal-actions');
     if (modalActions) modalActions.classList.toggle('hidden', !canEdit);
 
-    DOM.employeeDeleteBtn.classList.toggle('hidden', !canEdit);
+    // #341: deze knop hing aan canEdit, dus ook een roosterverantwoordelijke
+    // zag hem. DELETE /admin/users/:id staat achter requireAdmin, dus die kreeg
+    // eerst een bevestiging over zevenentwintig te verwijderen diensten en
+    // daarna een 403. Een knop die nooit kan slagen hoort er niet te staan.
+    DOM.employeeDeleteBtn.classList.toggle('hidden', getEffectiveRole() !== 'admin');
 
     // Show read-only schedule from active concept
     generateReadOnlyWeekScheduleHTML(employee);
@@ -805,7 +935,7 @@ function openEditEmployeeModal(employeeId) {
         IconHelper.init(viewBtn);
     }
 
-    DOM.employeeModal.classList.remove('hidden');
+    toonModal(DOM.employeeModal);
 }
 
 function generateReadOnlyWeekScheduleHTML(employee) {
@@ -820,7 +950,7 @@ function generateReadOnlyWeekScheduleHTML(employee) {
     if (!container) return;
 
     let html = '<div class="read-only-schedule">';
-    html += '<p class="form-hint mb-sm">Het basisrooster wordt beheerd via Rooster Bouwen.</p>';
+    html += '<p class="form-hint mb-sm">Het basisrooster wordt beheerd via Rooster bouwen.</p>';
 
     const dayOrder = [1, 2, 3, 4, 5, 6, 0];
     const prevDayMap = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6 };
@@ -883,13 +1013,15 @@ function generateReadOnlyWeekScheduleHTML(employee) {
 }
 
 function closeEmployeeModal() {
-    DOM.employeeModal.classList.add('hidden');
+    verbergModal(DOM.employeeModal);
     DOM.employeeForm.reset();
     AppState.editingEmployeeId = null;
     DOM.employeeDeleteBtn.classList.add('hidden');
     // Restore modal-actions visibility for next open (add mode needs it)
     const modalActions = DOM.employeeModal.querySelector('.modal-actions');
     if (modalActions) modalActions.classList.remove('hidden');
+    // #233: noodklep, zie closeShiftModal in app-shifts.js voor de toelichting.
+    hideSectionLoading('employees-view');
 }
 
 async function handleEmployeeSubmit(e) {
@@ -908,7 +1040,7 @@ async function handleEmployeeSubmit(e) {
             await updateEmployee(AppState.editingEmployeeId, employeeData);
         } else {
             await addEmployee(employeeData);
-            showToast('Medewerker aangemaakt. Stel het basisrooster in via Rooster Bouwen.', 'success');
+            showToast('Medewerker aangemaakt. Stel het basisrooster in via Rooster bouwen.', 'success');
         }
         closeEmployeeModal();
         renderEmployees();
@@ -933,7 +1065,8 @@ async function handleEmployeeDelete() {
     const relatedShifts = getShiftsByEmployee(employee.id).length;
     const confirmMsg = `Weet je zeker dat je ${employee.name} wilt verwijderen?\n\nDit verwijdert ook ${relatedShifts} dienst${relatedShifts !== 1 ? 'en' : ''} en eventuele afwezigheden.`;
 
-    if (!await showConfirm(confirmMsg, 'Medewerker verwijderen')) return;
+    if (!await showConfirm(confirmMsg, 'Medewerker verwijderen',
+        { danger: true, confirmText: 'Medewerker verwijderen' })) return;
 
     showSectionLoading('employees-view', 'Medewerker verwijderen...');
     try {

@@ -22,6 +22,11 @@ function renderSettings() {
         tab.onclick = () => switchSettingsTab(tab.dataset.settingsTab);
     });
 
+    // Update view title
+    const activeTabConfig = allowedTabs.find(t => t.id === AppState.activeSettingsTab);
+    const titleEl = document.getElementById('settings-view-title');
+    if (titleEl && activeTabConfig) titleEl.textContent = activeTabConfig.label;
+
     // Scroll active tab into view
     const activeTab = document.querySelector('.settings-tab.active');
     if (activeTab) {
@@ -47,11 +52,12 @@ async function switchSettingsTab(tabName) {
 
     // Track onboarding: mark planning tab as visited
     if (tabName === 'planning' && AppState.currentUser && !AppState.currentUser.onboardingFlags?.planning_visited) {
-        fetch(`${window.API_BASE}/me/onboarding-flags`, {
+        // #171: via dataApiFetch, zoals CLAUDE.md regel 9 voorschrijft. Die
+        // zet de Authorization-header, de tijdslimiet en de 401-afhandeling zelf.
+        dataApiFetch('/me/onboarding-flags', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionStorage.getItem('hetvlot_token')}` },
             body: JSON.stringify({ planning_visited: true })
-        }).catch(e => console.error('Failed to save onboarding flag:', e));
+        }).catch(e => console.error('Onboardingvlag opslaan mislukt:', e));
         if (!AppState.currentUser.onboardingFlags) AppState.currentUser.onboardingFlags = {};
         AppState.currentUser.onboardingFlags.planning_visited = true;
     }
@@ -59,11 +65,16 @@ async function switchSettingsTab(tabName) {
     document.querySelectorAll('.settings-tab').forEach(tab => {
         const isActive = tab.dataset.settingsTab === tabName;
         tab.classList.toggle('active', isActive);
-        // Scroll active tab into view on mobile
         if (isActive) {
             tab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
         }
     });
+
+    // Update view title
+    const activeTabConfig = SETTINGS_TAB_CONFIG.find(t => t.id === tabName);
+    const titleEl = document.getElementById('settings-view-title');
+    if (titleEl && activeTabConfig) titleEl.textContent = activeTabConfig.label;
+
     renderSettingsTabContent(tabName);
 }
 
@@ -118,6 +129,15 @@ function trackSettingsDirty(container) {
     }, true);
 }
 
+// #273: het tegenovergestelde van markSettingsSaved. Nodig wanneer het opslaan
+// mislukt: de waarden in DataStore gaan terug naar wat de server heeft, maar wat
+// de gebruiker intikte blijft in het formulier staan zodat hij het opnieuw kan
+// proberen zonder alles over te typen.
+function markSettingsUnsaved() {
+    AppState.settingsDirty = true;
+    document.querySelectorAll('.settings-dirty-indicator').forEach(el => el.classList.remove('hidden'));
+}
+
 function markSettingsSaved() {
     AppState.settingsDirty = false;
     document.querySelectorAll('.settings-dirty-indicator').forEach(el => el.classList.add('hidden'));
@@ -154,12 +174,15 @@ function renderSettingsAccounts(container) {
                 <div class="admin-users-intro">
                     <p>Beheer rollen en teams per gebruiker. Gebruik "Reset wachtwoord" enkel wanneer nodig.</p>
                 </div>
+                <!-- #366: deze drie velden hadden geen enkel opschrift. Bij
+                     het zoekveld stond wel een placeholder, maar die verdwijnt
+                     zodra je typt en telt sowieso niet als naam. -->
                 <div class="admin-filter-bar">
-                    <input type="text" id="admin-user-search" class="form-input" placeholder="Zoek op naam of email" />
-                    <select id="admin-team-filter" class="form-input">
+                    <input type="text" id="admin-user-search" class="form-input" placeholder="Zoek op naam of email" aria-label="Zoek accounts op naam of e-mail" />
+                    <select id="admin-team-filter" class="form-input" aria-label="Filter op team">
                         <option value="">Alle teams</option>
                     </select>
-                    <select id="admin-status-filter" class="form-input">
+                    <select id="admin-status-filter" class="form-input" aria-label="Filter op status">
                         <option value="active" selected>Actief</option>
                         <option value="inactive">Inactief</option>
                         <option value="">Alle</option>
@@ -193,12 +216,17 @@ async function loadAdminUsers(container) {
         const rows = users.map(user => {
             const isInactive = user.active === false;
             return `
-            <div class="admin-user-row${isInactive ? ' admin-user-inactive' : ''}" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email)}" data-team="${user.team_id || ''}" data-role="${user.role}" data-active="${user.active !== false}">
+            <div class="admin-user-row${isInactive ? ' admin-user-inactive' : ''}" data-user-id="${user.id}" data-name="${escapeHtml(user.name)}" data-email="${escapeHtml(user.email || '')}" data-team="${user.team_id || ''}" data-role="${user.role}" data-active="${user.active !== false}">
                 ${isInactive ? '<span class="status-badge inactive">Inactief</span>' : ''}
                 <div class="admin-user-header">
                     <div>
                         <div class="admin-user-name">${escapeHtml(user.name)}</div>
-                        <div class="admin-user-email">${escapeHtml(user.email)}</div>
+                        <!-- #353: hier stond escapeHtml(user.email) zonder terugval, en
+                             escapeHtml doet String(null), dus stond er letterlijk "null"
+                             onder de naam van een account zonder e-mailadres. Het veld is
+                             uitdrukkelijk optioneel, dus dat is een gewone toestand.
+                             Dezelfde terugval als op de medewerkerskaart. -->
+                        <div class="admin-user-email${user.email ? '' : ' admin-user-email-leeg'}">${user.email ? escapeHtml(user.email) : 'Geen e-mail'}</div>
                     </div>
                     <div class="admin-user-header-actions">
                         <div class="admin-user-role-pill">${escapeHtml(user.role)}</div>
@@ -283,12 +311,14 @@ function showAddUserModal(teams) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'add-user-modal';
-    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    modal.onmousedown = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2>Nieuwe gebruiker</h2>
-                <button class="modal-close" onclick="document.getElementById('add-user-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
+                <button type="button" class="modal-close" aria-label="Sluiten" onclick="document.getElementById('add-user-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <form id="add-user-form">
@@ -297,12 +327,12 @@ function showAddUserModal(teams) {
                         <input type="text" id="new-user-name" class="form-input" required />
                     </div>
                     <div class="form-group">
-                        <label for="new-user-email">Email</label>
-                        <input type="email" id="new-user-email" class="form-input" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen" />
+                        <label for="new-user-email">E-mail</label>
+                        <input type="email" id="new-user-email" class="form-input" placeholder="Optioneel, welkomstmail wordt gestuurd bij invullen" />
                     </div>
                     <div class="form-group">
                         <label for="new-user-password">Wachtwoord</label>
-                        <input type="password" id="new-user-password" class="form-input" placeholder="Laat leeg voor standaard wachtwoord" minlength="6" />
+                        <input type="password" id="new-user-password" class="form-input" placeholder="Laat leeg om er een te laten genereren" minlength="6" />
                     </div>
                     <div class="form-group">
                         <label for="new-user-password-confirm">Bevestig wachtwoord</label>
@@ -359,6 +389,12 @@ function showAddUserModal(teams) {
             return;
         }
 
+        // #387: zelfde verhaal als bij de reset. Hier wordt óók gehasht, dus ook
+        // hier zat een stille wachttijd voor een venster dat je maar één keer
+        // ziet.
+        const verzendKnop = form.querySelector('button[type="submit"]');
+        if (verzendKnop) verzendKnop.disabled = true;
+        showDataLoading('Account aanmaken...');
         try {
             const response = await dataApiFetch('/admin/users', {
                 method: 'POST',
@@ -377,11 +413,27 @@ function showAddUserModal(teams) {
                 DataStore.users.push(response.user);
             }
             modal.remove();
-            showToast('Gebruiker aangemaakt', 'success');
             // Refresh accounts list
             renderSettingsAccounts(document.querySelector('#settings-tab-content'));
+            // #379: liet je het wachtwoordveld leeg, dan heeft de server er een
+            // gemaakt. De welkomstmail bevat geen wachtwoord, dus dit venster is
+            // de enige plek waar je het te zien krijgt. Een toast verdwijnt na
+            // een paar seconden en is daar dus de verkeerde vorm voor.
+            if (response.newPassword) {
+                hideDataLoading();
+                await toonNieuwWachtwoord(
+                    response.newPassword,
+                    'Gebruiker aangemaakt',
+                    `Account aangemaakt voor ${name}. Geef dit wachtwoord persoonlijk door; de welkomstmail bevat het niet.`
+                );
+            } else {
+                showToast('Gebruiker aangemaakt', 'success');
+            }
         } catch (err) {
             showToast('Fout bij aanmaken: ' + (err.message || 'Onbekende fout'), 'error');
+        } finally {
+            hideDataLoading();
+            if (verzendKnop) verzendKnop.disabled = false;
         }
     });
 }
@@ -394,12 +446,14 @@ function showEditAccountModal(user, teams, onSave) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'edit-account-modal';
-    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    modal.onmousedown = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
         <div class="modal-content modal-content--md">
             <div class="modal-header">
                 <h2>Account bewerken</h2>
-                <button class="modal-close" onclick="document.getElementById('edit-account-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
+                <button type="button" class="modal-close" aria-label="Sluiten" onclick="document.getElementById('edit-account-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body modal-body-sm">
                 <form id="edit-account-form">
@@ -409,8 +463,8 @@ function showEditAccountModal(user, teams, onSave) {
                             <input type="text" id="edit-user-name" class="form-input" value="${escapeHtml(user.name)}" required />
                         </div>
                         <div class="form-group flex-1">
-                            <label for="edit-user-email">Email</label>
-                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email || '')}" placeholder="Optioneel — welkomstmail wordt gestuurd bij invullen" />
+                            <label for="edit-user-email">E-mail</label>
+                            <input type="email" id="edit-user-email" class="form-input" value="${escapeHtml(user.email || '')}" placeholder="Optioneel, welkomstmail wordt gestuurd bij invullen" />
                         </div>
                     </div>
                     <div class="form-row d-flex gap-10">
@@ -436,7 +490,7 @@ function showEditAccountModal(user, teams, onSave) {
                             <input type="checkbox" id="edit-user-email-notif" ${user.emailNotificationsEnabled !== false ? 'checked' : ''} />
                             <span class="toggle-slider"></span>
                         </label>
-                        <label for="edit-user-email-notif" class="text-xs cursor-pointer">Email notificaties</label>
+                        <label for="edit-user-email-notif" class="text-xs cursor-pointer">E-mailmeldingen</label>
                     </div>
                     <div class="modal-actions modal-actions-split">
                         <div class="modal-actions-left">
@@ -512,15 +566,51 @@ function showEditAccountModal(user, teams, onSave) {
 
     // Reset password button
     modal.querySelector('#edit-account-reset-btn').addEventListener('click', async () => {
-        if (!await showConfirm('Wachtwoord resetten naar standaard?')) return;
+        // #379: "naar standaard" klopt niet meer; er wordt een nieuw
+        // wachtwoord gemaakt dat alleen voor dit account geldt.
+        if (!await showConfirm(
+            'Er wordt een nieuw wachtwoord gemaakt voor deze medewerker. Zijn huidige wachtwoord werkt daarna niet meer.',
+            'Wachtwoord resetten')) return;
+        // #387: hier gebeurde er vier à vijf seconden zichtbaar niets. De hashing
+        // kost tijd, zeker op een trage server, en die tijd hoort zichtbaar te
+        // zijn. De overlay dekt bovendien het scherm af, zodat je niet in die
+        // stilte wegklikt en het wachtwoord kwijtspeelt.
+        const knop = modal.querySelector('#edit-account-reset-btn');
+        if (knop) knop.disabled = true;
+        showDataLoading('Nieuw wachtwoord aanmaken...');
         try {
             const result = await dataApiFetch(`/admin/users/${user.id}/reset-password`, {
                 method: 'POST'
             });
-            const newPw = result.newPassword || '(standaard)';
-            showToast(`Wachtwoord gereset naar: ${newPw}`, 'success', 8000);
+            // #322: hier werd het wachtwoord verzwegen zodra er een e-mailadres
+            // was, met de belofte dat de medewerker het per mail zou krijgen.
+            // Die mail bevat geen wachtwoord en verwijst juist terug naar de
+            // beheerder. Het wachtwoord wordt nu altijd één keer getoond, en de
+            // tekst zegt eerlijk of er daarnaast een bericht is vertrokken.
+            if (result.newPassword) {
+                const mailregel = result.emailSent
+                    ? 'De medewerker krijgt een bericht dat het wachtwoord gereset is. Dat bericht bevat het wachtwoord niet, dus geef het hieronder persoonlijk door.'
+                    : 'Er vertrekt geen bericht, dus geef het wachtwoord hieronder persoonlijk door.';
+                // #154: een reset trekt ook de agendalink in. De medewerker
+                // merkt dat anders pas als zijn agenda stilletjes achterloopt,
+                // dus de beheerder hoort het te weten en te kunnen zeggen.
+                const agendaregel = result.agendalinkIngetrokken
+                    ? '\n\nZijn agendalink is uit voorzorg ingetrokken. Hij moet de koppeling opnieuw activeren via zijn profiel.'
+                    : '';
+                hideDataLoading();
+                await toonNieuwWachtwoord(
+                    result.newPassword,
+                    'Wachtwoord gereset',
+                    `${mailregel}${agendaregel}`
+                );
+            } else {
+                showToast('Wachtwoord gereset.', 'success');
+            }
         } catch (error) {
             showToast(`Reset mislukt: ${error.message}`, 'error');
+        } finally {
+            hideDataLoading();
+            if (knop) knop.disabled = false;
         }
     });
 
@@ -567,21 +657,28 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         `<option value="${u.id}">${escapeHtml(u.name)} (${escapeHtml(u.role)})</option>`
     ).join('');
 
-    const today = new Date().toISOString().split('T')[0];
+    // #299: formatDateYYYYMMDD, niet toISOString. Tussen middernacht en 01:00
+    // (winter) of 02:00 (zomer) geeft toISOString de datum van gisteren, en die
+    // waarde wordt hier zowel value als min van het veld. De formuliervalidatie
+    // blokkeert die te vroege datum dan niet, en er gaat een extra dag aan
+    // diensten mee over naar de nieuwe medewerker.
+    const today = formatDateYYYYMMDD(new Date());
 
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'replace-employee-modal';
-    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    modal.onmousedown = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
         <div class="modal-content modal-content--md">
             <div class="modal-header">
                 <h2>${IconHelper.html('user-round-plus', 'md')} Medewerker vervangen</h2>
-                <button class="modal-close" onclick="document.getElementById('replace-employee-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
+                <button type="button" class="modal-close" aria-label="Sluiten" onclick="document.getElementById('replace-employee-modal').remove()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
-                <div class="info-box neutral mb-md">
-                    <p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster wordt gekopieerd naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>
+                <div class="info-box neutral mb-md" id="replace-intro">
+                    <p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster, het team en de contracturen gaan naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>
                 </div>
                 <form id="replace-employee-form">
                     <div class="form-group">
@@ -601,7 +698,14 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                     <div class="form-group hidden" id="replace-date-group">
                         <label for="replace-from-date">Overnemen vanaf *</label>
                         <input type="date" id="replace-from-date" class="form-input" value="${today}" min="${today}" />
+                        <small class="text-muted">Ligt deze datum in de toekomst, dan blijft ${escapeHtml(departingUser.name)} tot dan gewoon werken. De diensten verhuizen meteen; team, uren en de deactivatie volgen op die dag.</small>
                     </div>
+                    <div class="form-group hidden" id="replace-eigen-group">
+                        <label>Eigen diensten van de vervanger vanaf die datum</label>
+                        <label class="radio-label"><input type="radio" name="replace-eigen" value="behouden" checked> Behouden — waarschuw me als ze botsen</label>
+                        <label class="radio-label"><input type="radio" name="replace-eigen" value="verwijderen"> Verwijderen — het contract wordt volledig overgenomen</label>
+                    </div>
+                    <div id="replace-botsingen" class="hidden mt-sm"></div>
                     <div id="replace-summary" class="hidden mt-sm"></div>
                     <div class="modal-actions">
                         <button type="button" class="btn btn-secondary" onclick="document.getElementById('replace-employee-modal').remove()">Annuleren</button>
@@ -618,14 +722,24 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
     // Toggle date picker
     const transferCheckbox = modal.querySelector('#replace-transfer-shifts');
     const dateGroup = modal.querySelector('#replace-date-group');
+    const eigenGroup = modal.querySelector('#replace-eigen-group');
+    const botsingenEl = modal.querySelector('#replace-botsingen');
     transferCheckbox.addEventListener('change', () => {
         dateGroup.classList.toggle('hidden', !transferCheckbox.checked);
+        eigenGroup.classList.toggle('hidden', !transferCheckbox.checked);
         updateReplaceSummary();
     });
 
     // Update summary on changes
     modal.querySelector('#replace-new-user').addEventListener('change', updateReplaceSummary);
     modal.querySelector('#replace-from-date').addEventListener('change', updateReplaceSummary);
+    modal.querySelectorAll('input[name="replace-eigen"]').forEach(r =>
+        r.addEventListener('change', updateReplaceSummary));
+
+    function gekozenEigenDiensten() {
+        const gekozen = modal.querySelector('input[name="replace-eigen"]:checked');
+        return gekozen ? gekozen.value : 'behouden';
+    }
 
     function updateReplaceSummary() {
         const summaryEl = modal.querySelector('#replace-summary');
@@ -634,25 +748,55 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         const transfer = transferCheckbox.checked;
         const fromDate = modal.querySelector('#replace-from-date').value;
 
+        // Een ingangsdatum in de toekomst betekent dat de vertrekker tot dan
+        // blijft werken. Zowel de inleiding als de samenvatting moet dat
+        // zeggen: laat je de inleiding op "wordt gedeactiveerd" staan, dan
+        // spreekt ze de samenvatting eronder tegen en gelooft de beheerder de
+        // bovenste.
+        const gaatLaterIn = !!(transfer && fromDate && fromDate > today);
+        modal.querySelector('#replace-intro').innerHTML = gaatLaterIn
+            ? `<p><strong>${escapeHtml(departingUser.name)}</strong> wordt vanaf <strong>${fromDate}</strong> vervangen. Tot dan blijft zij gewoon werken.</p>`
+            : `<p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster, het team en de contracturen gaan naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>`;
+
         if (!newUser) {
             summaryEl.classList.add('hidden');
             return;
         }
 
         let summaryHtml = '<div class="info-box warning"><strong>Samenvatting:</strong><ul class="summary-list">';
-        summaryHtml += `<li>Basisrooster van <strong>${escapeHtml(departingUser.name)}</strong> wordt gekopieerd naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
+
+        if (gaatLaterIn) {
+            summaryHtml += `<li>Basisrooster, team en contracturen van <strong>${escapeHtml(departingUser.name)}</strong> gaan <strong>op ${fromDate}</strong> naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
+        } else {
+            summaryHtml += `<li>Basisrooster, team en contracturen van <strong>${escapeHtml(departingUser.name)}</strong> gaan naar <strong>${escapeHtml(newUser.name)}</strong></li>`;
+        }
 
         if (transfer && fromDate) {
             const futureShifts = DataStore.shifts.filter(s =>
                 String(s.employeeId) === String(departingUser.id) && s.date >= fromDate
             );
             summaryHtml += `<li><strong>${futureShifts.length}</strong> toekomstige diensten worden overgedragen (vanaf ${fromDate})`;
-            summaryHtml += `<br><small class="text-muted">Telling op basis van geladen planning — werkelijk aantal kan hoger zijn</small></li>`;
+            summaryHtml += `<br><small class="text-muted">Telling op basis van de geladen planning, het werkelijke aantal kan hoger zijn</small></li>`;
+
+            const eigenDiensten = DataStore.shifts.filter(s =>
+                String(s.employeeId) === String(newUser.id) && s.date >= fromDate
+            );
+            if (eigenDiensten.length > 0) {
+                if (gekozenEigenDiensten() === 'verwijderen') {
+                    summaryHtml += `<li><strong>${eigenDiensten.length}</strong> eigen diensten van <strong>${escapeHtml(newUser.name)}</strong> worden verwijderd</li>`;
+                } else {
+                    summaryHtml += `<li><strong>${escapeHtml(newUser.name)}</strong> heeft zelf nog <strong>${eigenDiensten.length}</strong> diensten vanaf die datum; die blijven staan. Botsen ze, dan stopt de vervanging en krijg je te zien welke</li>`;
+                }
+            }
         } else {
-            summaryHtml += `<li>Geen diensten overgedragen — pas het actief concept opnieuw toe via Rooster Bouwen</li>`;
+            summaryHtml += `<li>Geen diensten overgedragen. Pas het actieve concept opnieuw toe via Rooster bouwen</li>`;
         }
 
-        summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
+        if (gaatLaterIn) {
+            summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> blijft werken tot ${fromDate} en wordt dan pas gedeactiveerd</li>`;
+        } else {
+            summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
+        }
         summaryHtml += '</ul></div>';
 
         summaryEl.innerHTML = summaryHtml;
@@ -678,12 +822,23 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         }
 
         const newUser = activeUsers.find(u => String(u.id) === String(newUserId));
-        const confirmMsg = `Weet je zeker dat je ${departingUser.name} wilt vervangen door ${newUser.name}?\n\nDeze actie kan niet ongedaan worden gemaakt.`;
+        const eigenDienstenVervanger = gekozenEigenDiensten();
+        const gaatLaterIn = !!(fromDate && fromDate > today);
+
+        let confirmMsg = gaatLaterIn
+            ? `Weet je zeker dat je ${departingUser.name} vanaf ${fromDate} wilt vervangen door ${newUser.name}?\n\nDe diensten verhuizen meteen. ${departingUser.name} blijft werken tot ${fromDate}.`
+            : `Weet je zeker dat je ${departingUser.name} wilt vervangen door ${newUser.name}?\n\nDeze actie kan niet ongedaan worden gemaakt.`;
+        if (fromDate && eigenDienstenVervanger === 'verwijderen') {
+            confirmMsg += `\n\nDe eigen diensten van ${newUser.name} vanaf ${fromDate} worden verwijderd.`;
+        }
 
         if (!await showConfirm(confirmMsg, 'Medewerker vervangen', { danger: true, confirmText: 'Vervangen' })) return;
 
+        botsingenEl.classList.add('hidden');
+        botsingenEl.innerHTML = '';
+
         try {
-            const result = await replaceEmployee(Number(departingUser.id), Number(newUserId), fromDate);
+            const result = await replaceEmployee(Number(departingUser.id), Number(newUserId), fromDate, eigenDienstenVervanger);
             modal.remove();
 
             // Weekendverantwoordelijkheid overerven
@@ -699,7 +854,11 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 if (rotation.assignments) {
                     for (const [dateKey, assignedId] of Object.entries(rotation.assignments)) {
                         if (String(assignedId) === String(departingUser.id)) {
-                            rotation.assignments[dateKey] = String(newUserId);
+                            // Als GETAL wegschrijven, net als setWeekendResponsible
+                            // doet. Hier stond String(), en zolang getEmployee met
+                            // === vergeleek verdween de weekendverantwoordelijke
+                            // van die week na een vervanging stilletjes.
+                            rotation.assignments[dateKey] = Number(newUserId);
                             rotationChanged = true;
                         }
                     }
@@ -709,7 +868,9 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 }
             }
 
-            let msg = `${departingUser.name} vervangen door ${newUser.name}`;
+            let msg = result.gaatLaterIn
+                ? `${departingUser.name} wordt op ${result.ingangsdatum} vervangen door ${newUser.name}`
+                : `${departingUser.name} vervangen door ${newUser.name}`;
             if (result.shiftsTransferred > 0) {
                 msg += ` (${result.shiftsTransferred} diensten overgedragen)`;
             }
@@ -718,12 +879,43 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             }
             showToast(msg, 'success');
 
+            if (result.gaatLaterIn) {
+                showToast(`${departingUser.name} blijft actief tot ${result.ingangsdatum}. Team en contracturen gaan op die dag naar ${newUser.name}.`, 'info', 8000);
+            }
+            if (result.eigenDienstenVerwijderd > 0) {
+                showToast(`${result.eigenDienstenVerwijderd} eigen diensten van ${newUser.name} verwijderd`, 'info', 6000);
+            }
+            if (result.verzoekenGeannuleerd > 0) {
+                showToast(`${result.verzoekenGeannuleerd} openstaande ruil- of overnameverzoeken van ${departingUser.name} geannuleerd`, 'info', 6000);
+            }
+
             if (result.hint === 'apply_concept') {
-                showToast(`${newUser.name} heeft nog geen diensten. Pas het actief concept opnieuw toe via Rooster Bouwen.`, 'info', 6000);
+                showToast(`${newUser.name} heeft nog geen diensten. Pas het actieve concept opnieuw toe via Rooster bouwen.`, 'info', 6000);
             }
 
             if (onComplete) onComplete();
         } catch (error) {
+            // De backend weigert met 409 en een lijst botsingen als de vervanger
+            // zelf al diensten heeft die in de weg zitten. Die lijst hoort in het
+            // venster en niet in een toast: het zijn datums die je naast elkaar
+            // wil kunnen lezen, en het venster moet openblijven zodat je meteen
+            // op "Verwijderen" kunt overschakelen.
+            const botsingen = error.data && error.data.botsingen;
+            if (error.status === 409 && Array.isArray(botsingen) && botsingen.length > 0) {
+                const rijen = botsingen.map(b => `<li><strong>${escapeHtml(b.datum)}</strong> — ${escapeHtml(departingUser.name)} ${escapeHtml(b.vertrekker)} tegenover ${escapeHtml(newUser.name)} ${escapeHtml(b.vervanger)}${b.zelfdeStart ? ' (zelfde starttijd)' : ''}</li>`).join('');
+                botsingenEl.innerHTML = `<div class="alert alert-error">
+                    ${IconHelper.html(ICONS.error, 'sm')}
+                    <div>
+                        <strong>${escapeHtml(error.message)}</strong>
+                        <ul class="summary-list">${rijen}</ul>
+                        <small>Kies hierboven "Verwijderen" om de eigen diensten van ${escapeHtml(newUser.name)} te laten vervallen, of pas de ingangsdatum aan. Er is nog niets gewijzigd.</small>
+                    </div>
+                </div>`;
+                botsingenEl.classList.remove('hidden');
+                IconHelper.init(botsingenEl);
+                botsingenEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                return;
+            }
             showToast(`Vervanging mislukt: ${error.message}`, 'error');
         }
     });
@@ -738,10 +930,10 @@ function renderClosedDatesList() {
     const items = closedDates.map(cd => {
         const d = parseDateOnly(cd.date);
         const label = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const reasonHtml = cd.reason ? ' — ' + escapeHtml(cd.reason) : '';
+        const reasonHtml = cd.reason ? ' · ' + escapeHtml(cd.reason) : '';
         return `<li class="closed-date-item">
             <span>${IconHelper.html(ICONS.lock,'xs')} <strong>${escapeHtml(label)}</strong>${reasonHtml}</span>
-            <button class="btn btn-sm btn-danger" onclick="handleRemoveClosedDate('${cd.date}')" title="Verwijder">
+            <button class="btn btn-sm btn-danger" onclick="handleRemoveClosedDate('${cd.date}')" data-tooltip="Verwijder">
                 ${IconHelper.html(ICONS.delete,'xs')}
             </button>
         </li>`;
@@ -782,19 +974,27 @@ async function openAddClosedDateDialog() {
         if (shiftsOnDate.length > 0) {
             const dateLabel = new Date(date + 'T12:00:00').toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' });
             const ok = await showConfirm(
-                `Er staan ${shiftsOnDate.length} shift(s) ingepland op ${dateLabel}. Deze worden verwijderd bij het sluiten.`,
+                `Er staan ${shiftsOnDate.length} dienst(en) ingepland op ${dateLabel}. Deze worden verwijderd bij het sluiten.`,
                 'Dag sluiten'
             );
             if (!ok) return;
-            for (const shift of shiftsOnDate) {
-                await deleteShift(shift.id);
-            }
         }
 
-        await addClosedDate(date, reason);
-        renderPlanning();
-        const listEl = document.getElementById('closed-dates-list');
-        if (listEl) { listEl.innerHTML = renderClosedDatesList(); IconHelper.init(listEl); }
+        // #189: zonder foutafhandeling waren de diensten weg terwijl de dag
+        // niet gesloten raakte, en zag de gebruiker daar niets van.
+        try {
+            for (const shift of shiftsOnDate) {
+                await deleteShift(shift.id, true);
+            }
+            await addClosedDate(date, reason);
+            showToast('Dag gesloten', 'success');
+        } catch (error) {
+            showToast('Dag sluiten mislukt: ' + getUserFriendlyError(error), 'error');
+        } finally {
+            renderPlanning();
+            const listEl = document.getElementById('closed-dates-list');
+            if (listEl) { listEl.innerHTML = renderClosedDatesList(); IconHelper.init(listEl); }
+        }
     });
 }
 
@@ -810,7 +1010,9 @@ function renderSettingsPlanning(container) {
 
     // Check if a holiday period is currently active or upcoming
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    // #299: idem. Rond middernacht toonde de banner "Vakantiewerking actief"
+    // anders de vakantieperiode van gisteren.
+    const todayStr = formatDateYYYYMMDD(today);
     const activeHoliday = getHolidayPeriod(todayStr);
     const upcomingHoliday = !activeHoliday ? (DataStore.settings.holidayPeriods || []).find(p => {
         const start = parseDateOnly(p.startDate);
@@ -840,11 +1042,11 @@ function renderSettingsPlanning(container) {
 
     container.innerHTML = `
         ${holidayBanner}
-        <!-- Planning regels -->
+        <!-- Planningsregels -->
         <div class="settings-card mt-lg" id="settings-rules">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Planning regels</h3>
+                    <h3>Planningsregels</h3>
                     <p class="settings-card-subtitle">Regels voor rust en minimale bezetting.</p>
                 </div>
             </div>
@@ -902,7 +1104,7 @@ function renderSettingsPlanning(container) {
             <div class="settings-card-header">
                 <div class="settings-card-title">
                     <h3>Manueel gesloten datums</h3>
-                    <p class="settings-card-subtitle">Brugdagen en uitzonderlijke sluitingen. Op deze datums kunnen geen nieuwe shifts worden aangemaakt.</p>
+                    <p class="settings-card-subtitle">Brugdagen en uitzonderlijke sluitingen. Op deze datums kunnen geen nieuwe diensten worden aangemaakt.</p>
                 </div>
                 <div class="settings-card-actions">
                     <button class="btn btn-sm btn-secondary" onclick="openAddClosedDateDialog()">+ Datum toevoegen</button>
@@ -917,57 +1119,9 @@ function renderSettingsPlanning(container) {
 }
 
 // ===== SETTINGS TAB: ROOSTER =====
-async function saveSchedulePattern() {
-    const cycleLengthInput = document.getElementById('schedule-cycle-length');
-    const refDateInput = document.getElementById('schedule-reference-date');
-
-    const cycleLength = Math.max(1, Math.min(8, parseInt(cycleLengthInput?.value) || 2));
-    const referenceDate = refDateInput?.value;
-
-    if (!referenceDate) {
-        showToast('Selecteer een referentie datum', 'warning');
-        return;
-    }
-
-    // Check if it's a Monday
-    const date = parseDateOnly(referenceDate);
-    if (date.getDay() !== 1) {
-        showToast('De referentie datum moet een maandag zijn', 'warning');
-        return;
-    }
-
-    // Collect closed days per week
-    const weeks = {};
-    for (let w = 1; w <= cycleLength; w++) {
-        const closedDays = [];
-        document.querySelectorAll(`.pattern-closed-day[data-week="${w}"]`).forEach(cb => {
-            if (cb.checked) {
-                closedDays.push(parseInt(cb.dataset.day));
-            }
-        });
-        const label = closedDays.length > 0 ? formatClosedDays(closedDays) : 'alle dagen open';
-        weeks[String(w)] = { closedDays, label };
-    }
-
-    const newPattern = { cycleLength, referenceDate, weeks };
-
-    // Save to backend
-    try {
-        await saveSettings('schedule_pattern', newPattern);
-
-        // Update local state
-        DataStore.settings.schedulePattern = newPattern;
-        // Backward compat: sync biWeeklyReferenceDate
-        DataStore.settings.biWeeklyReferenceDate = referenceDate;
-
-        saveToStorage();
-        renderPlanning();
-        showToast('Roosterpatroon opgeslagen', 'success');
-    } catch (err) {
-        console.error('Error saving schedule pattern:', err);
-        showToast('Fout bij opslaan van roosterpatroon', 'error');
-    }
-}
+// #182: saveSchedulePattern is hier verwijderd. Hij werd nergens aangeroepen
+// en las #schedule-cycle-length en #schedule-reference-date, twee velden die
+// niet bestaan. Het roosterpatroon wordt nu via de roosterbouwer gezet.
 
 // ===== SETTINGS TAB: TEAMS =====
 function renderSettingsTeams(container) {
@@ -994,11 +1148,11 @@ function renderSettingsTeams(container) {
             </div>
         </div>
 
-        <!-- Dienst templates -->
+        <!-- Dienstsjablonen -->
         <div class="settings-card mt-lg" id="settings-templates">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Dienst templates</h3>
+                    <h3>Dienstsjablonen</h3>
                     <p class="settings-card-subtitle">Standaard diensten voor snelle planning.</p>
                 </div>
                 <div class="settings-card-actions">
@@ -1091,8 +1245,25 @@ async function deleteTeam(teamId) {
         return;
     }
 
-    const confirmed = await showConfirm(`Weet je zeker dat je team "${team.name}" wilt verwijderen?`);
+    const confirmed = await showConfirm(`Weet je zeker dat je team "${team.name}" wilt verwijderen?`,
+        'Team verwijderen', { danger: true, confirmText: 'Team verwijderen' });
     if (!confirmed) return;
+
+    // #256: dit verwijderde het team eerst uit de instellingen en probeerde
+    // pas daarna de rij in de teams-tabel weg te halen, met een leeg
+    // catch-blok eromheen. Een team met historische diensten gaf daar een
+    // FK-fout, die in de console verdween: het team was weg uit de
+    // instellingen maar stond nog in de tabel, en oude diensten toonden
+    // "Onbekend". Zelfde volgorde-fout als #221.
+    //
+    // De tabel is nu leidend. Lukt het daar niet, dan blijven de instellingen
+    // staan en weet de gebruiker waarom.
+    try {
+        await dataApiFetch(`/teams/${teamId}`, { method: 'DELETE' });
+    } catch (error) {
+        showToast('Team niet verwijderd: ' + getUserFriendlyError(error), 'error');
+        return;
+    }
 
     try {
         delete DataStore.settings.teams[teamId];
@@ -1101,17 +1272,12 @@ async function deleteTeam(teamId) {
         AppState.apiTeams = null;
         syncTeamFilters();
 
-        try {
-            await dataApiFetch(`/teams/${teamId}`, { method: 'DELETE' });
-        } catch (e) {
-            console.warn('Teams DB delete skipped:', e.message);
-        }
-
         showToast(`Team "${team.name}" verwijderd`, 'success');
         renderSettings();
     } catch (error) {
         DataStore.settings.teams[teamId] = team;
-        showToast(error.message || 'Fout bij verwijderen team', 'error');
+        showToast('Team is uit de database verwijderd, maar de instellingen zijn niet bijgewerkt: '
+            + getUserFriendlyError(error), 'error');
     }
 }
 
@@ -1135,6 +1301,22 @@ async function openAddTeamModal() {
     const color = '#64748b'; // Default gray
 
     try {
+        // #221: hier stond eerst settings.teams geschreven en pas daarna de
+        // teams-tabel, met de tweede schrijfactie in een eigen try die alleen
+        // console.warn deed. Faalde die tweede, dan kreeg de gebruiker toch
+        // "Team aangemaakt" te zien, terwijl het team in elk keuzemenu
+        // verscheen zonder dat er iemand aan toe te wijzen was: PUT /users/:id
+        // faalde dan met een kale 500 op de foreign key.
+        //
+        // De teams-tabel is de kant met de foreign key, dus die schrijven we
+        // nu eerst. Faalt dat, dan raken settings.teams en de rest van de UI
+        // niet aan en krijgt de gebruiker een echte foutmelding in plaats van
+        // een valse succesmelding. Er is dan geen half aangemaakt team.
+        await dataApiFetch('/teams', {
+            method: 'POST',
+            body: JSON.stringify({ id: teamId, name, color })
+        });
+
         // Update settings (primary source of truth for frontend)
         const existingOrders = Object.values(DataStore.settings.teams).map(t => t.sort_order ?? 0);
         const nextOrder = existingOrders.length ? Math.max(...existingOrders) + 1 : 0;
@@ -1151,20 +1333,10 @@ async function openAddTeamModal() {
         applyTeamColors();
         AppState.apiTeams = null; // Invalidate cache
 
-        // Also create in teams DB table (for FK constraints)
-        try {
-            await dataApiFetch('/teams', {
-                method: 'POST',
-                body: JSON.stringify({ id: teamId, name, color })
-            });
-        } catch (e) {
-            console.warn('Teams DB insert skipped:', e.message);
-        }
-
         showToast(`Team "${name}" aangemaakt`, 'success');
         renderSettings();
     } catch (error) {
-        showToast(error.message || 'Fout bij aanmaken team', 'error');
+        showToast('Team aanmaken mislukt: ' + getUserFriendlyError(error), 'error');
     }
 }
 
@@ -1186,7 +1358,8 @@ function renderSettingsEmail(container) {
             swap_rejected: true,
             takeover_accepted: true,
             request_cancelled: true,
-            welcome: true
+            welcome: true,
+            password_reset: true
         }
     };
 
@@ -1198,7 +1371,10 @@ function renderSettingsEmail(container) {
         { key: 'swap_rejected', label: 'Ruil afgewezen', desc: 'Aanvrager wordt gemaild bij afwijzing' },
         { key: 'takeover_accepted', label: 'Dienst overgenomen', desc: 'Oorspronkelijke eigenaar wordt gemaild' },
         { key: 'request_cancelled', label: 'Verzoek geannuleerd', desc: 'Betrokkenen worden gemaild bij annulering' },
-        { key: 'welcome', label: 'Welkomst-email', desc: 'Nieuwe medewerker ontvangt inloggegevens per mail' }
+        { key: 'welcome', label: 'Welkomstmail', desc: 'Nieuwe medewerker ontvangt zijn inloggegevens per e-mail' },
+        // #323: de resetmail hing aan de schakelaar hierboven. Wie de
+        // welkomstmail uitzette, zette daarmee ongemerkt ook dit bericht uit.
+        { key: 'password_reset', label: 'Wachtwoord gereset', desc: 'Medewerker krijgt bericht dat een beheerder het wachtwoord heeft gereset' }
     ];
 
     const typeToggles = emailTypes.map(t => `
@@ -1207,8 +1383,10 @@ function renderSettingsEmail(container) {
                 <span class="email-setting-label">${t.label}</span>
                 <span class="email-setting-desc">${t.desc}</span>
             </div>
+            <!-- #366: het omhullende label bevat alleen het schuifje en dus geen
+                 tekst, waardoor het vinkje geen naam had. -->
             <label class="toggle-switch">
-                <input type="checkbox" data-email-type="${t.key}" ${emailSettings.types?.[t.key] !== false ? 'checked' : ''} ${!emailSettings.globalEnabled ? 'disabled' : ''} />
+                <input type="checkbox" data-email-type="${t.key}" aria-label="${escapeHtml(t.label)}" ${emailSettings.types?.[t.key] !== false ? 'checked' : ''} ${!emailSettings.globalEnabled ? 'disabled' : ''} />
                 <span class="toggle-slider"></span>
             </label>
         </div>
@@ -1218,18 +1396,18 @@ function renderSettingsEmail(container) {
         <div class="settings-card">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Email & Notificaties</h3>
-                    <p class="settings-card-subtitle">Beheer welke emails automatisch verstuurd worden.</p>
+                    <h3>E-mail en meldingen</h3>
+                    <p class="settings-card-subtitle">Beheer welke e-mails automatisch verstuurd worden.</p>
                 </div>
             </div>
             <div class="settings-card-body">
                 <div class="email-setting-row email-setting-global">
                     <div class="email-setting-info">
-                        <span class="email-setting-label fw-600">Alle email notificaties</span>
-                        <span class="email-setting-desc">Schakel alle email notificaties in of uit</span>
+                        <span class="email-setting-label fw-600">Alle e-mailmeldingen</span>
+                        <span class="email-setting-desc">Schakel alle e-mailmeldingen in of uit</span>
                     </div>
                     <label class="toggle-switch">
-                        <input type="checkbox" id="email-global-toggle" ${emailSettings.globalEnabled ? 'checked' : ''} />
+                        <input type="checkbox" id="email-global-toggle" aria-label="Alle e-mailmeldingen" ${emailSettings.globalEnabled ? 'checked' : ''} />
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -1246,7 +1424,7 @@ function renderSettingsEmail(container) {
         <div class="settings-card mt-lg">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Email configuratie</h3>
+                    <h3>E-mailconfiguratie</h3>
                     <p class="settings-card-subtitle">Status van de e-mailservice en verificatie.</p>
                 </div>
             </div>
@@ -1256,7 +1434,7 @@ function renderSettingsEmail(container) {
                     <span id="email-status-badge" class="email-status-badge">Laden...</span>
                 </div>
                 <div class="form-group mb-md">
-                    <label class="form-label">Afzenderadres</label>
+                    <label class="form-label" for="email-from-display">Afzenderadres</label>
                     <input type="text" id="email-from-display" class="form-input" readonly />
                     <span class="form-hint">Stel in via de <code>EMAIL_FROM</code> omgevingsvariabele op de server.</span>
                 </div>
@@ -1340,11 +1518,11 @@ function renderSettingsEmail(container) {
             saveBtn.textContent = 'Opslaan...';
             await saveSettings('email_notifications', settings);
             DataStore.settings.emailNotifications = settings;
-            msg.textContent = 'Email instellingen opgeslagen.';
+            msg.textContent = 'E-mailinstellingen opgeslagen.';
             msg.className = 'form-message success';
             msg.classList.remove('hidden');
             markSettingsSaved();
-            showToast('Email instellingen opgeslagen', 'success');
+            showToast('E-mailinstellingen opgeslagen', 'success');
         } catch (err) {
             msg.textContent = 'Opslaan mislukt: ' + (err.message || 'Onbekende fout');
             msg.className = 'form-message error';
@@ -1361,11 +1539,11 @@ function renderSettingsSystem(container) {
     const isAdmin = getEffectiveRole() === 'admin';
 
     container.innerHTML = `
-        <!-- Data beheer -->
+        <!-- Databeheer -->
         <div class="settings-card" id="settings-data">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Data beheer</h3>
+                    <h3>Databeheer</h3>
                     <p class="settings-card-subtitle">Backup, import en reset van de data.</p>
                 </div>
             </div>
@@ -1373,6 +1551,7 @@ function renderSettingsSystem(container) {
                 <div class="info-box neutral">
                     <p>Alle data wordt opgeslagen in de PostgreSQL database.</p>
                     <p>Exporteer regelmatig een backup om dataverlies te voorkomen.</p>
+                    <p class="text-muted">De backup bevat medewerkers, diensten, afwezigheden en instellingen. Roosterconcepten, verlofrondes en ruilverzoeken zitten er niet in.</p>
                 </div>
                 <div class="data-stats">
                     <div class="stat-item">
@@ -1389,8 +1568,8 @@ function renderSettingsSystem(container) {
                     </div>
                 </div>
                 <div class="button-group">
-                    <button class="btn btn-secondary" onclick="exportData()">Exporteer</button>
-                    <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeer</button>
+                    <button class="btn btn-secondary" onclick="exportData()">Exporteren</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeren</button>
                     <input type="file" id="import-file" accept=".json" class="hidden" onchange="importData(event)">
                 </div>
                 ${isAdmin && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:') ? `
@@ -1445,11 +1624,11 @@ function renderSettingsBeheer(container) {
     }
 
     container.innerHTML = `
-        <!-- Data beheer -->
+        <!-- Databeheer -->
         <div class="settings-card" id="settings-data">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Data beheer</h3>
+                    <h3>Databeheer</h3>
                     <p class="settings-card-subtitle">Backup, import en reset van de data.</p>
                 </div>
             </div>
@@ -1457,6 +1636,7 @@ function renderSettingsBeheer(container) {
                 <div class="info-box neutral">
                     <p>Alle data wordt opgeslagen in de PostgreSQL database.</p>
                     <p>Exporteer regelmatig een backup om dataverlies te voorkomen.</p>
+                    <p class="text-muted">De backup bevat medewerkers, diensten, afwezigheden en instellingen. Roosterconcepten, verlofrondes en ruilverzoeken zitten er niet in.</p>
                 </div>
                 <div class="data-stats">
                     <div class="stat-item">
@@ -1473,8 +1653,8 @@ function renderSettingsBeheer(container) {
                     </div>
                 </div>
                 <div class="button-group">
-                    <button class="btn btn-secondary" onclick="exportData()">Exporteer</button>
-                    <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeer</button>
+                    <button class="btn btn-secondary" onclick="exportData()">Exporteren</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">Importeren</button>
                     <input type="file" id="import-file" accept=".json" class="hidden" onchange="importData(event)">
                 </div>
             </div>
@@ -1484,7 +1664,7 @@ function renderSettingsBeheer(container) {
         <div class="settings-card mt-lg">
             <div class="settings-card-header">
                 <div class="settings-card-title">
-                    <h3>Audit Log</h3>
+                    <h3>Auditlog</h3>
                     <p class="settings-card-subtitle">Overzicht van alle wijzigingen in het systeem.</p>
                 </div>
             </div>
@@ -1492,15 +1672,17 @@ function renderSettingsBeheer(container) {
                 <div class="audit-filters">
                     <div class="audit-filter-row">
                         <div class="form-group">
-                            <label>Van</label>
+                            <!-- #366: deze labels stonden zonder for-attribuut en hoorden
+                                 dus bij geen enkel veld. -->
+                            <label for="audit-start-date">Van</label>
                             <input type="date" id="audit-start-date" class="form-input" value="${getDefaultAuditStartDate()}">
                         </div>
                         <div class="form-group">
-                            <label>Tot</label>
+                            <label for="audit-end-date">Tot</label>
                             <input type="date" id="audit-end-date" class="form-input" value="${formatDateYYYYMMDD(new Date())}">
                         </div>
                         <div class="form-group">
-                            <label>Actie</label>
+                            <label for="audit-action-filter">Actie</label>
                             <select id="audit-action-filter" class="form-input">
                                 <option value="">Alle</option>
                                 <option value="CREATE">Aangemaakt</option>
@@ -1512,11 +1694,10 @@ function renderSettingsBeheer(container) {
                                 <option value="REPLACE">Vervangen</option>
                                 <option value="IMPORT">Geïmporteerd</option>
                                 <option value="MIGRATE">Gemigreerd</option>
-                                <option value="LOGIN">Login</option>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>Type</label>
+                            <label for="audit-resource-filter">Type</label>
                             <select id="audit-resource-filter" class="form-input">
                                 <option value="">Alle</option>
                                 <option value="shift">Diensten</option>
@@ -1564,6 +1745,12 @@ function renderSettingsBeheer(container) {
     loadAuditLog(1);
 }
 
+// #373: REPLACE, IMPORT en MIGRATE stonden wel in de keuzelijst maar niet
+// hier, en verschenen dus als ruw REPLACE tussen Nederlandse deelwoorden.
+// LOGIN stond er wél in, maar de backend logt die actie nergens: nagegaan
+// met een inventaris van alle logAudit-aanroepen in server.js, en op de
+// productiedatabank komt de actie niet voor. De optie is uit de keuzelijst
+// gehaald, want ze gaf altijd nul resultaten.
 const AUDIT_ACTION_LABELS = {
     CREATE: 'Aangemaakt',
     UPDATE: 'Bijgewerkt',
@@ -1571,15 +1758,22 @@ const AUDIT_ACTION_LABELS = {
     APPROVE: 'Goedgekeurd',
     REJECT: 'Afgewezen',
     CANCEL: 'Geannuleerd',
-    LOGIN: 'Login'
+    REPLACE: 'Vervangen',
+    IMPORT: 'Geïmporteerd',
+    MIGRATE: 'Gemigreerd'
 };
 
+// De backend logt ook system, shift_block en shift_activity. Die stonden hier
+// niet en verschenen dus als ruwe tabelnaam.
 const AUDIT_RESOURCE_LABELS = {
     shift: 'Dienst',
     availability: 'Afwezigheid',
     swap_request: 'Ruilverzoek',
     user: 'Gebruiker',
-    settings: 'Instelling'
+    settings: 'Instelling',
+    shift_block: 'Geblokkeerde dag',
+    shift_activity: 'Activiteit',
+    system: 'Systeem'
 };
 
 const AUDIT_SYSTEM_ACTIONS = new Set(['MIGRATE', 'IMPORT']);
@@ -1651,8 +1845,13 @@ async function loadAuditLog(page) {
             const groupLogs = groups[groupName];
             if (!groupLogs || groupLogs.length === 0) return;
 
+            // #264: de tabel is bijna 800 pixels breed en de omhullende
+            // settings-card heeft overflow: hidden. Op een telefoon vielen de
+            // kolommen Type en Details daardoor buiten beeld zonder dat je er
+            // met vegen bij kon. Dezelfde wikkel als de verlofmatrix gebruikt.
             html += `<div class="audit-date-group">
                 <h4 class="audit-date-group-title">${groupName} <span class="text-muted fw-500">(${groupLogs.length})</span></h4>
+                <div class="audit-log-scroll">
                 <table class="audit-log-table"><thead><tr>
                     <th>Tijdstip</th><th>Gebruiker</th><th>Actie</th><th>Type</th><th>Details</th>
                 </tr></thead><tbody>`;
@@ -1665,25 +1864,7 @@ async function loadAuditLog(page) {
                 const resourceLabel = AUDIT_RESOURCE_LABELS[log.resource_type] || log.resource_type;
                 const actionClass = log.action.toLowerCase();
 
-                let detailStr = '';
-                if (log.details && typeof log.details === 'object') {
-                    if (log.details.before && log.details.after) {
-                        detailStr = formatAuditDiff(log.details.before, log.details.after);
-                    } else if (log.details.shift) {
-                        const s = log.details.shift;
-                        detailStr = `${s.date || ''} ${s.startTime || s.start_time || ''}-${s.endTime || s.end_time || ''}`;
-                    } else if (log.details.availability) {
-                        const a = log.details.availability;
-                        detailStr = `${a.date || ''} ${a.type || ''}`;
-                    } else if (log.details.key) {
-                        detailStr = log.details.key;
-                    } else if (log.details.user) {
-                        detailStr = log.details.user.name || log.details.user.email || '';
-                    } else {
-                        const keys = Object.keys(log.details);
-                        if (keys.length > 0) detailStr = keys.join(', ');
-                    }
-                }
+                const detailStr = formatAuditDetails(log.details, log.resource_type);
 
                 html += `<tr>
                     <td class="audit-time">${escapeHtml(timeStr)}</td>
@@ -1694,7 +1875,7 @@ async function loadAuditLog(page) {
                 </tr>`;
             });
 
-            html += '</tbody></table></div>';
+            html += '</tbody></table></div></div>';
         });
 
         resultsEl.innerHTML = html;
@@ -1716,41 +1897,171 @@ async function loadAuditLog(page) {
     }
 }
 
+// #369: viel een logregel niet in een van de bekende vormen, dan zette de code
+// Object.keys(details).join(', ') in de kolom en las de beheerder een rij
+// Engelse variabelenamen: "type, userId, endDate, startDate, absenceType,
+// daysCreated, conflictingShifts, takeoverRequestsCreated".
+//
+// De vormen hieronder zijn niet bedacht maar afgelezen uit de echte audit_log
+// op productie, per combinatie van actie en resourcetype. Wat er dan nog
+// overblijft valt terug op de oude lijst met sleutels, zodat een nieuwe vorm
+// zichtbaar blijft in plaats van te verdwijnen.
+function formatAuditDetails(details, resourceType) {
+    if (!details || typeof details !== 'object') return '';
+
+    // Een gewijzigde instelling. Staat vóór de diff hieronder, want sinds #328
+    // draagt zo'n regel ook before en after, en die zijn hier vaak een lijst
+    // waarvoor een veld-voor-veld-diff niets zegt.
+    if (details.key) {
+        const telOp = w => Array.isArray(w) ? `${w.length} ${w.length === 1 ? 'item' : 'items'}` : null;
+        const voor = details.before, na = details.after;
+        if (voor && voor.tekort) return `${details.key} gewijzigd (vorige waarde te groot om te bewaren)`;
+        if (voor === null || voor === undefined) return `${details.key} voor het eerst ingesteld`;
+        const vT = telOp(voor), nT = telOp(na);
+        if (vT && nT) return vT === nT ? `${details.key}: ${nT}` : `${details.key}: ${vT} → ${nT}`;
+        const diff = formatAuditDiff(voor, na);
+        return diff ? `${details.key}: ${diff}` : `${details.key} gewijzigd`;
+    }
+
+    // Voor- en natoestand: de bestaande diff.
+    if (details.before && details.after) return formatAuditDiff(details.before, details.after);
+
+    // Eén dienst.
+    if (details.shift) {
+        const sh = details.shift;
+        const van = sh.startTime || sh.start_time;
+        const tot = sh.endTime || sh.end_time;
+        const tijd = van && tot ? ` ${String(van).slice(0,5)} tot ${String(tot).slice(0,5)}` : '';
+        return `${sh.date || ''}${tijd}`.trim();
+    }
+
+    // Eén activiteit binnen een dienst.
+    if (details.activity) {
+        const a = details.activity;
+        const tijd = a.startTime && a.endTime
+            ? ` ${String(a.startTime).slice(0,5)} tot ${String(a.endTime).slice(0,5)}` : '';
+        return `${a.date || ''}${tijd}${a.description ? ` · ${a.description}` : ''}`.trim();
+    }
+
+    // Eén gebruiker.
+    if (details.user) return details.user.name || details.user.email || '';
+
+    // Een ruil of overname in een omhullend object.
+    if (details.swap) return formatAuditDetails(details.swap, 'swap_request');
+
+    // Ziek- of verlofmelding met automatische overnameverzoeken.
+    if (details.type === 'bulk_sick_with_takeover') {
+        const soort = details.absenceType === 'ziek' ? 'Ziekmelding' : 'Afwezigheid';
+        const periode = details.startDate === details.endDate
+            ? details.startDate
+            : `${details.startDate} t/m ${details.endDate}`;
+        const stukken = [`${soort} ${periode}`];
+        if (details.daysCreated) stukken.push(`${details.daysCreated} ${details.daysCreated === 1 ? 'dag' : 'dagen'}`);
+        if (details.takeoverRequestsCreated) {
+            stukken.push(`${details.takeoverRequestsCreated} ${details.takeoverRequestsCreated === 1 ? 'dienst' : 'diensten'} aangeboden voor overname`);
+        }
+        return stukken.join(', ');
+    }
+
+    // Een concept toepassen op een datumbereik.
+    if (details.type === 'draft_apply') {
+        const stukken = [`Concept "${details.draftName || 'onbekend'}" toegepast`];
+        if (Array.isArray(details.weekNumbers) && details.weekNumbers.length) {
+            stukken.push(`week ${details.weekNumbers.join(' en ')}`);
+        }
+        if (details.employeesApplied) stukken.push(`${details.employeesApplied} medewerkers`);
+        if (details.shiftsCreated || details.shiftsDeleted) {
+            stukken.push(`${details.shiftsCreated || 0} diensten erbij, ${details.shiftsDeleted || 0} weg`);
+        }
+        return stukken.join(', ');
+    }
+
+    // Een basisrooster toepassen bij één medewerker.
+    if (details.action === 'apply_schedule') {
+        const stukken = [`Basisrooster toegepast op ${details.userName || 'medewerker'}`];
+        const bereik = details.dateRange;
+        if (bereik && bereik.start && bereik.end) stukken.push(`${bereik.start} t/m ${bereik.end}`);
+        stukken.push(`${details.created || 0} diensten erbij, ${details.deleted || 0} weg`);
+        return stukken.join(', ');
+    }
+
+    // Een concept: aangemaakt, hernoemd of verwijderd.
+    if (details.type === 'schedule_draft') {
+        const soort = details.draftType === 'vakantie' ? 'Vakantieconcept' : 'Concept';
+        return `${soort} "${details.name || 'zonder naam'}"`;
+    }
+
+    // Een team bijwerken.
+    if (details.action === 'update_team') {
+        return `Team "${details.name || ''}"${details.color ? ` · kleur ${details.color}` : ''}`;
+    }
+
+    // Losse benoemde acties zonder verdere inhoud.
+    const LOSSE_ACTIES = {
+        password_reset: 'Wachtwoord gereset',
+        ical_token_reset: 'Agenda-koppeling opnieuw ingesteld',
+        reset_data: 'Gegevens gewist'
+    };
+    if (details.action && LOSSE_ACTIES[details.action]) {
+        let tekst = LOSSE_ACTIES[details.action];
+        if (Array.isArray(details.tables)) tekst += ` (${details.tables.length} tabellen)`;
+        return tekst;
+    }
+
+    // Een ruil- of overnameverzoek.
+    if (details.type === 'swap' || details.type === 'takeover') {
+        return details.type === 'swap' ? 'Ruilverzoek' : 'Overnameverzoek';
+    }
+
+    // Een afwezigheid die verwijderd is.
+    if (resourceType === 'availability' && details.date) {
+        return `Afwezigheid ${details.date}`;
+    }
+
+    // Onbekende vorm: liever de ruwe sleutels dan niets, zodat een nieuwe vorm
+    // opvalt in plaats van stil te verdwijnen.
+    const sleutels = Object.keys(details);
+    return sleutels.length > 0 ? sleutels.join(', ') : '';
+}
+
+// Leesbare namen voor de velden die in een voor- en natoestand voorkomen.
+const AUDIT_VELD_LABELS = {
+    date: 'datum', startTime: 'begint', endTime: 'eindigt', team: 'team',
+    notes: 'notitie', userId: 'medewerker', employeeId: 'medewerker',
+    isReserve: 'reserve', source: 'herkomst', name: 'naam', email: 'e-mail',
+    role: 'rol', mainTeam: 'team', contractHours: 'contracturen'
+};
+
 function formatAuditDiff(before, after) {
     const changes = [];
     const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
     for (const key of keys) {
         if (key === 'createdAt' || key === 'id') continue;
-        const oldVal = before?.[key];
-        const newVal = after?.[key];
-        if (String(oldVal) !== String(newVal)) {
-            changes.push(`${key}: ${oldVal || '-'} -> ${newVal || '-'}`);
-        }
+        // #369: hier stond alleen een vergelijking van de waarden, dus een veld
+        // dat in het ene object ontbrak en in het andere false was, gaf
+        // "isReserve: - -> -": een wijziging waarin niets wijzigt. Een veld dat
+        // maar aan één kant bestaat is geen wijziging.
+        const inVoor = Object.prototype.hasOwnProperty.call(before || {}, key);
+        const inNa = Object.prototype.hasOwnProperty.call(after || {}, key);
+        if (!inVoor || !inNa) continue;
+        const oldVal = before[key];
+        const newVal = after[key];
+        if (String(oldVal) === String(newVal)) continue;
+        const label = AUDIT_VELD_LABELS[key] || key;
+        const toon = v => (v === null || v === undefined || v === '') ? 'leeg' : String(v);
+        changes.push(`${label}: ${toon(oldVal)} → ${toon(newVal)}`);
     }
     return changes.slice(0, 3).join(', ');
 }
 
-function formatAuditDetailsForCSV(details) {
-    if (!details || typeof details !== 'object') return '';
-    if (details.before && details.after) {
-        return formatAuditDiff(details.before, details.after);
-    } else if (details.shift) {
-        const s = details.shift;
-        return `${s.date || ''} ${s.startTime || s.start_time || ''}-${s.endTime || s.end_time || ''} ${s.team || ''}`.trim();
-    } else if (details.availability) {
-        const a = details.availability;
-        return `${a.date || ''} ${a.type || ''}`.trim();
-    } else if (details.key) {
-        return details.key;
-    } else if (details.user) {
-        return details.user.name || details.user.email || '';
-    }
-    const keys = Object.keys(details);
-    return keys.length > 0 ? keys.join(', ') : '';
+// #369: de export gebruikt dezelfde vertaling als de tabel. Voordien stonden
+// hier twee bijna gelijke lijsten die apart konden gaan afwijken.
+function formatAuditDetailsForCSV(details, resourceType) {
+    return formatAuditDetails(details, resourceType);
 }
 
 async function exportAuditLog() {
-    showToast('Audit log exporteren...', 'info');
+    showToast('Auditlog exporteren...', 'info');
     try {
         const filters = {
             page: 1,
@@ -1773,7 +2084,7 @@ async function exportAuditLog() {
                 log.actor_name || '',
                 AUDIT_ACTION_LABELS[log.action] || log.action,
                 AUDIT_RESOURCE_LABELS[log.resource_type] || log.resource_type,
-                formatAuditDetailsForCSV(log.details)
+                formatAuditDetailsForCSV(log.details, log.resource_type)
             ]);
         });
         const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
@@ -1786,7 +2097,7 @@ async function exportAuditLog() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        showToast(`${logs.length} regels geexporteerd`, 'success');
+        showToast(`${logs.length} regels geëxporteerd`, 'success');
     } catch (err) {
         showToast('Export mislukt: ' + (err.message || 'Onbekende fout'), 'error');
     }
@@ -1833,26 +2144,26 @@ function renderTeamsConfig() {
         const inWeekend = eligibleTeams.includes(teamId);
         html += `
         <div class="team-config-item" data-team-id="${teamId}" draggable="true">
-            <span class="team-drag-handle" title="Versleep om volgorde te wijzigen">&#8942;</span>
+            <span class="team-drag-handle" data-tooltip="Versleep om volgorde te wijzigen">&#8942;</span>
             <div class="team-color-dot" style="background: ${team.color}"></div>
             <div class="team-info">
                 <span class="team-name">${teamName}</span>
                 <div class="settings-team-toggles">
-                    <label class="team-toggle-label" title="Telt mee in bezettingsberekening">
+                    <label class="team-toggle-label" data-tooltip="Telt mee in bezettingsberekening">
                         <input type="checkbox" class="coverage-team-cb" data-team-id="${teamId}" ${inCoverage ? 'checked' : ''} onchange="saveTeamToggles()" />
                         <span>Bezetting</span>
                     </label>
-                    <label class="team-toggle-label" title="Draait mee in weekendverantwoordelijke rotatie">
+                    <label class="team-toggle-label" data-tooltip="Draait mee in weekendverantwoordelijke rotatie">
                         <input type="checkbox" class="eligible-team-cb" data-team-id="${teamId}" ${inWeekend ? 'checked' : ''} onchange="saveTeamToggles()" />
                         <span>Weekend</span>
                     </label>
                 </div>
             </div>
             <div class="team-actions">
-                <button class="btn-icon-only" onclick="editTeam('${teamId}')" title="Naam bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
+                <button type="button" class="btn-icon-only" onclick="editTeam('${teamId}')" data-tooltip="Naam bewerken" aria-label="Naam van ${teamName} bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
                 <input type="color" class="color-picker" value="${team.color}"
-                       onchange="updateTeamColor('${teamId}', this.value)" title="Kleur wijzigen"/>
-                <button class="btn-icon-only danger" onclick="deleteTeam('${teamId}')" title="Verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
+                       onchange="updateTeamColor('${teamId}', this.value)" data-tooltip="Kleur wijzigen" aria-label="Kleur van ${teamName} wijzigen"/>
+                <button type="button" class="btn-icon-only danger" onclick="deleteTeam('${teamId}')" data-tooltip="Verwijderen" aria-label="Team ${teamName} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
             </div>
         </div>`;
     });
@@ -1924,8 +2235,8 @@ function renderTemplatesConfig() {
                 <span class="template-times">${template.start} - ${template.end} (${duration})</span>
             </div>
             <div class="template-actions">
-                <button class="btn-icon-only" onclick="editTemplate('${templateId}')" title="Bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
-                <button class="btn-icon-only danger" onclick="deleteTemplate('${templateId}')" title="Verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
+                <button type="button" class="btn-icon-only" onclick="editTemplate('${templateId}')" data-tooltip="Bewerken" aria-label="Sjabloon ${templateName} bewerken">${IconHelper.html(ICONS.edit, 'sm')}</button>
+                <button type="button" class="btn-icon-only danger" onclick="deleteTemplate('${templateId}')" data-tooltip="Verwijderen" aria-label="Sjabloon ${templateName} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
             </div>
         </div>`;
     });
@@ -1969,19 +2280,27 @@ function calculateTemplateDuration(start, end) {
 }
 
 async function updateTeamColor(teamId, color) {
-    if (DataStore.settings.teams[teamId]) {
-        DataStore.settings.teams[teamId].color = color;
-        saveToStorage();
-        applyTeamColors();
+    if (!DataStore.settings.teams[teamId]) return;
 
-        // Save to backend
-        try {
-            await saveSettings('teams', DataStore.settings.teams);
-            showToast('Teamkleur opgeslagen', 'success');
-        } catch (error) {
-            console.error('Error saving team color to backend:', error);
-            showToast('Kleur is lokaal opgeslagen maar backend sync mislukt. Vernieuw de pagina om te synchroniseren.', 'warning');
-        }
+    // #273: de oude melding zei "lokaal opgeslagen maar backend sync mislukt,
+    // vernieuw de pagina om te synchroniseren". Er werd niets lokaal bewaard
+    // (saveToStorage is sinds de overstap naar de API een lege functie), en
+    // vernieuwen was juist wat de wijziging weggooide. We zetten de kleur nu
+    // terug zodra de server hem weigert, zodat het scherm niet iets anders
+    // toont dan wat er opgeslagen staat.
+    const vorigeKleur = DataStore.settings.teams[teamId].color;
+    DataStore.settings.teams[teamId].color = color;
+    applyTeamColors();
+
+    try {
+        await saveSettings('teams', DataStore.settings.teams);
+        showToast('Teamkleur opgeslagen', 'success');
+    } catch (error) {
+        console.error('Error saving team color to backend:', error);
+        DataStore.settings.teams[teamId].color = vorigeKleur;
+        applyTeamColors();
+        renderSettings();
+        showToast('Teamkleur niet opgeslagen: ' + getUserFriendlyError(error), 'error');
     }
 }
 
@@ -1989,36 +2308,30 @@ async function saveRules() {
     const minHours = parseInt(document.getElementById('rule-min-hours').value) || 11;
     const maxConsecutive = parseInt(document.getElementById('rule-max-consecutive')?.value) || 6;
 
+    // #273: "Regels lokaal opgeslagen, maar sync naar server mislukt" was een
+    // valse belofte: saveToStorage bewaart niets. Erger nog, zolang het tabblad
+    // openbleef rekende de validatie met de nieuwe regel terwijl de server en
+    // alle andere gebruikers de oude aanhielden. Bij een mislukking zetten we
+    // de waarden nu terug en blijft de knop op "niet opgeslagen" staan.
+    const vorigeRegels = { ...DataStore.settings.rules };
     DataStore.settings.rules.minHoursBetweenShifts = minHours;
     DataStore.settings.rules.maxConsecutiveDays = maxConsecutive;
 
-    saveToStorage();
     try {
         await saveSettings('rules', DataStore.settings.rules);
         markSettingsSaved();
-        showToast('Planning regels zijn opgeslagen', 'success');
+        showToast('Planningsregels zijn opgeslagen', 'success');
     } catch (err) {
         console.error('Error saving rules to backend:', err);
-        showToast('Regels lokaal opgeslagen, maar sync naar server mislukt', 'warning');
+        DataStore.settings.rules = vorigeRegels;
+        markSettingsUnsaved();
+        showToast('Regels niet opgeslagen: ' + getUserFriendlyError(err), 'error');
     }
 }
 
-async function handleSaveSchoolYear() {
-    const input = document.getElementById('school-year-start-input');
-    const date = input.value;
-    if (!date) {
-        showToast('Selecteer een startdatum', 'warning');
-        return;
-    }
-    try {
-        await saveSchoolYearStart(date);
-        markSettingsSaved();
-        showToast('Schooljaar startdatum opgeslagen', 'success');
-    } catch (error) {
-        console.error('Fout bij opslaan schooljaar:', error);
-        showToast('Fout bij opslaan schooljaar', 'error');
-    }
-}
+// #182: handleSaveSchoolYear is hier verwijderd. Hij werd nergens
+// aangeroepen en las #school-year-start-input, een veld dat niet bestaat,
+// dus hij zou meteen zijn gestruikeld als iemand hem ooit had gebruikt.
 
 
 function openAddTemplateModal() {
@@ -2036,10 +2349,24 @@ async function deleteTemplate(templateId) {
     const template = DataStore.settings.shiftTemplates[templateId];
     if (!template) return;
 
-    if (await showConfirm(`Weet je zeker dat je de template "${template.name}" wilt verwijderen?`)) {
+    if (await showConfirm(`Weet je zeker dat je de template "${template.name}" wilt verwijderen?`,
+        'Sjabloon verwijderen', { danger: true, confirmText: 'Sjabloon verwijderen' })) {
+        // #333: het sjabloon werd eerst lokaal verwijderd en de fout van het
+        // opslaan verdween in een console.error. Het sjabloon was dus weg uit
+        // de lijst maar stond er na een herlading weer, zonder dat iemand iets
+        // te zien kreeg. Nu wordt de verwijdering teruggedraaid en gemeld,
+        // zoals deleteTeam() dat al doet.
         delete DataStore.settings.shiftTemplates[templateId];
-        saveToStorage();
-        try { await saveSettings('shiftTemplates', DataStore.settings.shiftTemplates); } catch (e) { console.error('Error saving templates:', e); }
+        try {
+            await saveSettings('shiftTemplates', DataStore.settings.shiftTemplates);
+        } catch (e) {
+            console.error('Error saving templates:', e);
+            DataStore.settings.shiftTemplates[templateId] = template;
+            showToast(`Template "${template.name}" niet verwijderd: ${getUserFriendlyError(e)}`, 'error');
+            renderSettings();
+            return;
+        }
+        showToast(`Template "${template.name}" verwijderd`, 'success');
         renderSettings();
     }
 }
@@ -2068,7 +2395,7 @@ function openTemplateModal(templateId = null, template = null) {
     let iconPickerHtml = '<div class="template-icon-picker">';
     iconOptions.forEach(opt => {
         const selected = currentIcon === opt.id ? 'selected' : '';
-        iconPickerHtml += `<button type="button" class="template-icon-option ${selected}" data-icon="${opt.id}" title="${opt.label}" onclick="selectTemplateIcon(this)">
+        iconPickerHtml += `<button type="button" class="template-icon-option ${selected}" data-icon="${opt.id}" data-tooltip="${opt.label}" onclick="selectTemplateIcon(this)">
             ${IconHelper.html(opt.id, 'md')}
             <span class="template-icon-label">${opt.label}</span>
         </button>`;
@@ -2080,7 +2407,7 @@ function openTemplateModal(templateId = null, template = null) {
         <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <h2>${title}</h2>
-                <button class="modal-close" onclick="closeTemplateModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
+                <button type="button" class="modal-close" aria-label="Sluiten" onclick="closeTemplateModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="template-id" value="${escapeHtml(templateId || '')}" />
@@ -2169,7 +2496,6 @@ async function saveTemplate(originalId) {
     }
 
     DataStore.settings.shiftTemplates[id] = { name, start, end, icon };
-    saveToStorage();
     try {
         await saveSettings('shiftTemplates', DataStore.settings.shiftTemplates);
     } catch (e) {
@@ -2197,7 +2523,7 @@ function renderHolidayPeriods() {
     return sorted.map(period => {
         const start = parseDateOnly(period.startDate);
         const end = parseDateOnly(period.endDate);
-        const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+        const days = aantalDagenInclusief(start, end);
         const today = parseDateOnly(new Date());
         const isActive = today >= start && today <= end;
         const isPast = end < today;
@@ -2209,23 +2535,31 @@ function renderHolidayPeriods() {
         // Calculate weeks in this period
         const periodMonday = getMondayOfWeek(start);
         const periodEndMonday = getMondayOfWeek(end);
-        const totalWeeks = Math.floor((periodEndMonday - periodMonday) / (7 * 86400000)) + 1;
+        // Math.round, niet floor — zie de toelichting bij initCycleLength in
+        // app-builder-drafts.js. Over de zomertijdgrens telde dit een week te weinig.
+        const totalWeeks = Math.round((periodEndMonday - periodMonday) / (7 * 86400000)) + 1;
 
         return `
         <div class="holiday-period-item ${statusClass}">
             <div class="holiday-period-info">
                 <span class="holiday-period-name">${escapeHtml(period.name)}</span>
                 <span class="holiday-period-dates">
-                    ${formatDateShort(period.startDate)} - ${formatDateShort(period.endDate)}
+                    ${formatDateShortMetJaar(period.startDate)} - ${formatDateShortMetJaar(period.endDate)}
                     <span class="holiday-period-days">(${days} dagen, ${totalWeeks} ${totalWeeks === 1 ? 'week' : 'weken'})</span>
                 </span>
             </div>
-            <button class="btn-icon-only danger" onclick="deleteHolidayPeriod(${period.id})" title="Verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
+            <button type="button" class="btn-icon-only danger" onclick="deleteHolidayPeriod(${period.id})" data-tooltip="Verwijderen" aria-label="Vakantieperiode ${escapeHtml(period.name || '')} verwijderen">${IconHelper.html(ICONS.delete, 'sm')}</button>
         </div>`;
     }).join('');
 }
 
-function formatDateShort(date) {
+// #278 en #297: dit heette ook formatDateShort, net als de functie in
+// app-nav.js, en omdat dit bestand later laadt won deze. Daardoor stond er een
+// jaartal in de waarschuwingen op het startscherm, waar dat niet hoort. De twee
+// verschillen echt: die in app-nav.js verwacht een Date en laat het jaar weg,
+// deze verwacht een datumtekst en zet het jaar er wel bij. Een naam die zegt
+// wat hij doet, want in een vakantieperiodelijst is dat jaartal juist nuttig.
+function formatDateShortMetJaar(date) {
     const d = parseDateOnly(date);
     return d.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
 }
@@ -2253,13 +2587,123 @@ async function setHolidayWeekResponsible(periodId, weekNum, employeeId) {
     showToast(`Verantwoordelijke week ${weekNum} ingesteld`, 'success');
 }
 
-function openAddHolidayModal() {
+/**
+ * De vijf Belgische schoolvakanties van één schooljaar, afgeleid uit het
+ * startjaar en de paasdatum.
+ *
+ * #352: deze vijf stonden hard in de code met vaste datums. Herfst en Kerst
+ * waren bijgewerkt naar 2026-2027, Krokus, Pasen en Zomer niet, en de kop
+ * beloofde "schooljaar 2025-2026". Klikken op Zomer gaf 1 juli tot 31 augustus
+ * 2026, dus het verleden. De vakantieperiodes zijn de basis van elke
+ * verlofronde, en deze lijst verouderde elk jaar opnieuw.
+ *
+ * De regels volgen de Vlaamse vakantieregeling:
+ *  - herfst: de maandag van de week waarin 1 november valt, één week. Valt
+ *    1 november op een zaterdag of zondag, dan de maandag erna
+ *  - kerst: idem rond 25 december, twee weken
+ *  - krokus: de zevende week vóór Pasen, één week
+ *  - pasen: twee weken vanaf de maandag na Paaszondag
+ *  - zomer: 1 juli tot en met 31 augustus
+ *
+ * Nagerekend tegen de datums die hier eerder hard stonden en die klopten:
+ * krokus 2026 (16 t/m 22 feb), pasen 2026 (6 t/m 19 apr), herfst 2026
+ * (2 t/m 8 nov, want 1 november viel op een zondag) en kerst 2026
+ * (21 dec t/m 3 jan). Alle vier komen ze hieruit.
+ *
+ * Bij een uitzonderlijk late Pasen kent de regeling een uitzondering die hier
+ * niet in zit. De datums blijven zichtbaar en bewerkbaar vóór het opslaan, dus
+ * dit is een voorzet en geen laatste woord.
+ *
+ * @param {number} startJaar   het jaar waarin het schooljaar begint
+ * @param {string} paaszondag  'YYYY-MM-DD' van Pasen in startJaar + 1
+ */
+function belgischeSchoolvakanties(startJaar, paaszondag) {
+    const eindJaar = startJaar + 1;
+    const plus = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+    const maandagVanWeek = (d) => plus(d, -((d.getDay() + 6) % 7));
+    const maandagNa = (d) => { const r = plus(d, 1); return plus(r, (8 - r.getDay()) % 7); };
+    const inWeekend = (d) => d.getDay() === 0 || d.getDay() === 6;
+    // Een vakantie die "rond" een vaste dag ligt, begint op de maandag van die
+    // week. Valt de ankerdag zelf in het weekend, dan schuift ze een week op.
+    const startRond = (anker) => inWeekend(anker) ? maandagNa(anker) : maandagVanWeek(anker);
+
+    // `kort` is het opschrift van de knop, `naam` wat er in het naamveld komt.
+    const periode = (kort, naam, start, dagen) => ({
+        kort,
+        naam: `${naam} ${start.getFullYear()}`,
+        start: formatDateYYYYMMDD(start),
+        eind: formatDateYYYYMMDD(plus(start, dagen - 1)),
+    });
+
+    const paasmaandag = plus(parseDateOnly(paaszondag), 1);
+    const zomerStart = new Date(eindJaar, 6, 1);
+
+    return [
+        periode('Herfst', 'Herfstvakantie', startRond(new Date(startJaar, 10, 1)), 7),
+        periode('Kerst',  'Kerstvakantie',  startRond(new Date(startJaar, 11, 25)), 14),
+        periode('Krokus', 'Krokusvakantie', plus(paasmaandag, -49), 7),
+        periode('Pasen',  'Paasvakantie',   paasmaandag, 14),
+        periode('Zomer',  'Zomervakantie',  zomerStart, 62),
+    ];
+}
+
+/**
+ * Haalt Paaszondag op voor een jaar. De backend rekent Pasen al uit voor de
+ * feestdagenlijst, dus we leiden het daaruit af in plaats van de berekening
+ * een tweede keer te schrijven.
+ */
+async function paaszondagVan(jaar) {
+    const feestdagen = await fetchPublicHolidays(jaar);
+    const paasmaandag = (feestdagen || []).find(h => h.name === 'Paasmaandag');
+    if (!paasmaandag) return null;
+    const d = parseDateOnly(paasmaandag.date);
+    d.setDate(d.getDate() - 1);
+    return formatDateYYYYMMDD(d);
+}
+
+async function openAddHolidayModal() {
+    // #352: het schooljaar komt uit de instellingen in plaats van uit de code.
+    // Loopt die instelling achter, dan nemen we het schooljaar waarin vandaag
+    // valt, anders zijn alle vijf de knoppen verleden tijd. Staat de instelling
+    // juist vooruit, dan volgen we die: de beheerder is dan al met volgend jaar
+    // bezig.
+    const nu = new Date();
+    const schooljaarVanVandaag = nu.getMonth() >= 8 ? nu.getFullYear() : nu.getFullYear() - 1;
+    const startJaar = Math.max(
+        parseDateOnly(getSchoolYearStart()).getFullYear(),
+        schooljaarVanVandaag
+    );
+
+    let vakanties = [];
+    try {
+        const paas = await paaszondagVan(startJaar + 1);
+        if (paas) vakanties = belgischeSchoolvakanties(startJaar, paas);
+    } catch (err) {
+        // Zonder feestdagen geen krokus en pasen. Liever geen knoppen dan
+        // knoppen met verkeerde datums.
+        console.error('Schoolvakanties berekenen mislukt:', err);
+    }
+
+    const vandaag = formatDateYYYYMMDD(new Date());
+    const snelleSelectie = vakanties.length === 0 ? '' : `
+                <div class="quick-select-section">
+                    <h4>Snelle selectie (schooljaar ${startJaar}-${startJaar + 1})</h4>
+                    <div class="quick-select-buttons">
+                        ${vakanties.map(v => `
+                            <button type="button" class="btn btn-sm btn-outline"
+                                data-tooltip="${escapeHtml(v.start)} tot en met ${escapeHtml(v.eind)}"
+                                onclick="prefillHoliday('${escapeHtml(v.naam)}', '${v.start}', '${v.eind}')">
+                                ${escapeHtml(v.kort)}${v.eind < vandaag ? ' (voorbij)' : ''}
+                            </button>`).join('')}
+                    </div>
+                </div>`;
+
     const modalHtml = `
     <div class="modal" id="holiday-modal" onclick="closeHolidayModal()">
         <div class="modal-content modal-content--sm" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <h2>Vakantieperiode toevoegen</h2>
-                <button class="modal-close" onclick="closeHolidayModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
+                <button type="button" class="modal-close" aria-label="Sluiten" onclick="closeHolidayModal()">${IconHelper.html(ICONS.close, 'sm')}</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
@@ -2278,17 +2722,8 @@ function openAddHolidayModal() {
                 </div>
                 <div id="holiday-date-info" class="date-range-info"></div>
 
-                <!-- Snelle selectie voor Belgische schoolvakanties -->
-                <div class="quick-select-section">
-                    <h4>Snelle selectie (schooljaar 2025-2026)</h4>
-                    <div class="quick-select-buttons">
-                        <button type="button" class="btn btn-sm btn-outline" onclick="prefillHoliday('Krokusvakantie', '2026-02-16', '2026-02-22')">Krokus</button>
-                        <button type="button" class="btn btn-sm btn-outline" onclick="prefillHoliday('Paasvakantie', '2026-04-06', '2026-04-19')">Pasen</button>
-                        <button type="button" class="btn btn-sm btn-outline" onclick="prefillHoliday('Zomervakantie', '2026-07-01', '2026-08-31')">Zomer</button>
-                        <button type="button" class="btn btn-sm btn-outline" onclick="prefillHoliday('Herfstvakantie', '2026-11-02', '2026-11-08')">Herfst</button>
-                        <button type="button" class="btn btn-sm btn-outline" onclick="prefillHoliday('Kerstvakantie', '2026-12-21', '2027-01-03')">Kerst</button>
-                    </div>
-                </div>
+                <!-- Snelle selectie voor Belgische schoolvakanties (#352) -->
+                ${snelleSelectie}
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeHolidayModal()">Annuleren</button>
@@ -2322,7 +2757,7 @@ function updateHolidayDateInfo() {
         const endDate = parseDateOnly(end);
 
         if (endDate >= startDate) {
-            const days = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+            const days = aantalDagenInclusief(startDate, endDate);
             infoDiv.innerHTML = `<span class="info-badge">${days} dagen geselecteerd</span>`;
         } else {
             infoDiv.innerHTML = '<span class="error-text">Einddatum moet na startdatum liggen</span>';
@@ -2393,15 +2828,44 @@ async function deleteHolidayPeriod(id) {
 
 // ===== TEAM TOGGLES (bezetting + weekend rotatie) =====
 
+// #330: deze functie muteerde eerst DataStore, ving daarna elke fout op met
+// alleen een console.error, en meldde vervolgens onvoorwaardelijk groen
+// "Teaminstellingen opgeslagen". De beheerder zag een valse bevestiging tot hij
+// herlaadde, en dan was de wijziging weg.
+//
+// Nu wordt de oude waarde bewaard, bij een fout teruggezet, en verschijnt de
+// succesmelding alleen als er ook echt iets bewaard is. updateTeamColor() deed
+// dat al goed en diende als voorbeeld.
 async function saveTeamToggles() {
+    const mislukt = [];
+
     // Coverage teams
     const coverageTeams = [];
     document.querySelectorAll('.coverage-team-cb').forEach(cb => {
         if (cb.checked) coverageTeams.push(cb.dataset.teamId);
     });
-    if (coverageTeams.length > 0) {
-        DataStore.settings.coverageTeams = coverageTeams;
-        try { await saveSettings('coverageTeams', coverageTeams); } catch (e) { console.error('Error saving coverageTeams:', e); }
+    // Alles uitvinken kan niet: zonder bezettingsteams valt de hele
+    // bezettingsberekening weg. Voordien werd er dan stil niets opgeslagen
+    // terwijl dezelfde groene melding verscheen.
+    if (coverageTeams.length === 0) {
+        showToast('Er moet minstens één team meetellen voor de bezetting. De bezettingsvinkjes zijn teruggezet.', 'error');
+        // Alleen de bezettingsvinkjes terugzetten, niet het hele scherm
+        // hertekenen: een wijziging aan de weekendrotatie in dezelfde
+        // bewerking mag niet verloren gaan doordat wij hier ingrijpen.
+        const bewaard = DataStore.settings.coverageTeams || [];
+        document.querySelectorAll('.coverage-team-cb').forEach(cb => {
+            cb.checked = bewaard.includes(cb.dataset.teamId);
+        });
+        return;
+    }
+    const vorigeCoverage = DataStore.settings.coverageTeams;
+    DataStore.settings.coverageTeams = coverageTeams;
+    try {
+        await saveSettings('coverageTeams', coverageTeams);
+    } catch (e) {
+        console.error('Error saving coverageTeams:', e);
+        DataStore.settings.coverageTeams = vorigeCoverage;
+        mislukt.push('bezettingsteams');
     }
 
     // Eligible teams for weekend rotation
@@ -2412,10 +2876,23 @@ async function saveTeamToggles() {
     if (!DataStore.settings.responsibleRotation) {
         DataStore.settings.responsibleRotation = { eligibleTeams: [], assignments: {} };
     }
+    const vorigeEligible = DataStore.settings.responsibleRotation.eligibleTeams;
     DataStore.settings.responsibleRotation.eligibleTeams = eligibleTeams;
 
-    try { await saveSettings('responsibleRotation', DataStore.settings.responsibleRotation); } catch (e) { console.error('Error saving responsibleRotation:', e); }
-    saveToStorage();
+    try {
+        await saveSettings('responsibleRotation', DataStore.settings.responsibleRotation);
+    } catch (e) {
+        console.error('Error saving responsibleRotation:', e);
+        DataStore.settings.responsibleRotation.eligibleTeams = vorigeEligible;
+        mislukt.push('weekendrotatie');
+    }
+
+    if (mislukt.length > 0) {
+        showToast(`Niet opgeslagen: ${mislukt.join(' en ')}. De vinkjes zijn teruggezet naar de bewaarde waarde.`, 'error');
+        // Opnieuw tekenen vanuit DataStore, dat nu weer de serverwaarde bevat.
+        renderSettings();
+        return;
+    }
 
     showToast('Teaminstellingen opgeslagen', 'success');
 
@@ -2591,7 +3068,7 @@ function showWeekendResponsiblePicker(mondayKey) {
         <div class="modal-content modal-content--xs">
             <div class="modal-header">
                 <h3>Weekendverantwoordelijke</h3>
-                <span class="modal-close" id="weekend-picker-close">&times;</span>
+                <button type="button" class="modal-close" id="weekend-picker-close" aria-label="Sluiten">&times;</button>
             </div>
             <div class="modal-body modal-body-md">
                 <p class="text-sm text-muted mb-md">${dateLabel}</p>
@@ -2649,7 +3126,9 @@ function showWeekendResponsiblePicker(mondayKey) {
 
     overlay.querySelector('#weekend-picker-close').addEventListener('click', () => overlay.remove());
     overlay.querySelector('#weekend-picker-cancel').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
 
     overlay.querySelector('#weekend-picker-save').addEventListener('click', async () => {
         const selected = overlay.querySelector('input[name="weekend-responsible"]:checked')?.value;
@@ -2732,20 +3211,41 @@ function setupSettingsCollapsibles(scope = document) {
             closeBtn.addEventListener('click', async () => {
                 closeDayContextMenu();
                 const shiftsOnDate = DataStore.shifts.filter(s => s.date === dateStr);
+
+                // #189: hier werd eerst verwijderd en pas daarna om een reden
+                // gevraagd. Wie op Annuleer klikte, was zijn diensten kwijt
+                // terwijl de dag niet gesloten werd, zonder enige melding en
+                // zonder dat het scherm werd bijgewerkt.
+                //
+                // Alle vragen komen nu vóór de eerste wijziging, zodat afbreken
+                // op elk moment betekent dat er niets gebeurd is.
+                const reason = await promptReason('Reden (optioneel):');
+                if (reason === null) return;
+
                 if (shiftsOnDate.length > 0) {
                     const ok = await showConfirm(
-                        `Er staan ${shiftsOnDate.length} shift(s) ingepland op ${label}. Deze worden verwijderd bij het sluiten.`,
+                        `Er staan ${shiftsOnDate.length} dienst(en) ingepland op ${label}. Deze worden verwijderd bij het sluiten.`,
                         'Dag sluiten'
                     );
                     if (!ok) return;
+                }
+
+                try {
                     for (const shift of shiftsOnDate) {
+                        // skipBlock: het sluiten van de dag houdt hem al leeg,
+                        // een blokkade per medewerker is overbodig en blijft
+                        // achter als de dag later heropend wordt.
                         await deleteShift(shift.id, true);
                     }
+                    await addClosedDate(dateStr, reason);
+                    showToast(`Dag gesloten: ${label}`, 'success');
+                } catch (error) {
+                    showToast('Dag sluiten mislukt: ' + getUserFriendlyError(error), 'error');
+                } finally {
+                    // Ook in het foutpad, anders toont het scherm diensten die
+                    // er niet meer zijn.
+                    renderPlanning();
                 }
-                const reason = await promptReason('Reden (optioneel):');
-                if (reason === null) return;
-                await addClosedDate(dateStr, reason);
-                renderPlanning();
             });
             menu.appendChild(closeBtn);
         } else {
@@ -2798,25 +3298,10 @@ function setupSettingsCollapsibles(scope = document) {
         });
     }
 
-    function showConfirmDialog(message, confirmLabel, altLabel) {
-        return new Promise(resolve => {
-            const overlay = document.createElement('div');
-            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
-            overlay.innerHTML = `
-                <div class="quick-dialog quick-dialog-confirm">
-                    <div class="mb-md">${escapeHtml(message)}</div>
-                    <div class="quick-dialog-actions flex-wrap">
-                        <button id="_conf-cancel" class="btn btn-secondary">Annuleer</button>
-                        <button id="_conf-alt" class="btn btn-secondary">${escapeHtml(altLabel)}</button>
-                        <button id="_conf-ok" class="btn btn-danger">${escapeHtml(confirmLabel)}</button>
-                    </div>
-                </div>`;
-            document.body.appendChild(overlay);
-            overlay.querySelector('#_conf-ok').addEventListener('click', () => { overlay.remove(); resolve(true); });
-            overlay.querySelector('#_conf-alt').addEventListener('click', () => { overlay.remove(); resolve(false); });
-            overlay.querySelector('#_conf-cancel').addEventListener('click', () => { overlay.remove(); resolve(null); });
-        });
-    }
+    // showConfirmDialog stond hier: een driewegdialoog die nergens werd
+    // aangeroepen, zonder Escape en zonder klik-buiten. Verwijderd als dode
+    // code. Wie ooit een echte driewegvraag nodig heeft, bouwt hem beter in
+    // app-ui.js naast showConfirm, zodat er één plek is voor dialogen.
 
     document.addEventListener('contextmenu', (e) => {
         const header = e.target.closest('.timeline-day-header, .month-day-header');
@@ -2837,3 +3322,9 @@ function setupSettingsCollapsibles(scope = document) {
     });
 })();
 
+// De berekening van de schoolvakanties heeft geen DOM nodig en wordt in Node
+// getest (#352). In de browser bestaat `module` niet, dus deze guard verandert
+// daar niets.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { belgischeSchoolvakanties };
+}

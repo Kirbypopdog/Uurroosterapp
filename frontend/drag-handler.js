@@ -28,7 +28,7 @@ const DragHandler = {
 
     // Initialize drag handlers on timeline
     init() {
-        console.log('[DragHandler] Initializing drag & drop handlers');
+        if (DEBUG) console.log('[DragHandler] Initializing drag & drop handlers');
 
         // Clean up existing listeners first
         this.cleanup();
@@ -59,14 +59,14 @@ const DragHandler = {
         this.state.timeline = timeline;
         this.state.initialized = true;
 
-        console.log('[DragHandler] Initialized successfully');
+        if (DEBUG) console.log('[DragHandler] Initialized successfully');
     },
 
     // Clean up event listeners
     cleanup() {
         if (!this.state.initialized) return;
 
-        console.log('[DragHandler] Cleaning up event listeners');
+        if (DEBUG) console.log('[DragHandler] Cleaning up event listeners');
 
         const timeline = this.state.timeline;
         if (timeline && this._boundMouseDown) {
@@ -102,14 +102,14 @@ const DragHandler = {
 
             // Check permissions
             if (!canUserEditShift(shift)) {
-                console.log('[DragHandler] User cannot edit this shift');
-                showToast('Je hebt geen rechten om deze shift te bewerken', 'warning');
+                if (DEBUG) console.log('[DragHandler] User cannot edit this shift');
+                showToast('Je hebt geen rechten om deze dienst te bewerken', 'warning');
                 return;
             }
 
             // Check if shift has pending swap request
             if (this.hasPendingSwapRequest(shiftId)) {
-                showToast('Deze shift heeft een openstaande ruil/afstaan aanvraag. Annuleer eerst de aanvraag voordat je de shift kan verplaatsen.', 'warning');
+                showToast('Deze dienst heeft een openstaand ruil- of afstaanverzoek. Annuleer dat eerst voor je de dienst verplaatst.', 'warning');
                 return;
             }
 
@@ -138,7 +138,7 @@ const DragHandler = {
 
             // Prevent default to avoid text selection
             e.preventDefault();
-        } else if (emptyCell && !emptyCell.classList.contains('closed')) {
+        } else if (emptyCell && !emptyCell.classList.contains('closed') && !e.target.closest('.shift-block-indicator')) {
             // Clicked on empty cell - record for potential shift creation
             this.state.startX = e.clientX;
             this.state.startY = e.clientY;
@@ -170,9 +170,18 @@ const DragHandler = {
             if (this.state.dragType === 'transfer') {
                 const shift = getShift(this.state.shiftId);
                 if (shift && !canUserTransferShift(shift)) {
-                    console.log('[DragHandler] User cannot transfer shifts - cancelling drag');
-                    showToast('Je kunt alleen je eigen shift tijden aanpassen, niet naar anderen verplaatsen. Gebruik "Shift afstaan" om je shift over te dragen.', 'warning');
-                    this.cleanup();
+                    if (DEBUG) console.log('[DragHandler] User cannot transfer shifts - cancelling drag');
+                    showToast('Je kunt alleen de tijden van je eigen dienst aanpassen, niet naar anderen verplaatsen. Gebruik "Dienst afstaan" om je dienst over te dragen.', 'warning');
+                    // #212: hier stond cleanup(), en die verwijdert ALLE
+                    // listeners, ook die voor gewone klikken. De tijdlijn
+                    // reageerde daarna nergens meer op: een dienst openen loopt
+                    // via handleMouseUp, en die listener was weg. De gebruiker
+                    // klikte tevergeefs verder tot een hertekening alles
+                    // toevallig herstelde.
+                    //
+                    // reset() wist alleen de sleepstatus en laat de listeners
+                    // staan. Dat is wat je wil bij het afbreken van één poging.
+                    this.reset();
                     return;
                 }
             }
@@ -229,7 +238,7 @@ const DragHandler = {
     // Handle keyboard events
     handleKeyDown(e) {
         if (e.key === 'Escape' && this.state.isDragging) {
-            console.log('[DragHandler] Drag cancelled by user (Escape key)');
+            if (DEBUG) console.log('[DragHandler] Drag cancelled by user (Escape key)');
             this.cancelDrag();
         }
     },
@@ -250,13 +259,14 @@ const DragHandler = {
     hasPendingSwapRequest(shiftId) {
         const swapRequests = DataStore.swapRequests || [];
         return swapRequests.some(
-            req => req.shift_id === shiftId && req.status === 'pending'
+            req => (req.requester_shift_id === shiftId || req.target_shift_id === shiftId) &&
+                   req.status === 'pending'
         );
     },
 
     // Start transfer drag operation
     startTransferDrag() {
-        console.log('[DragHandler] Starting transfer drag for shift', this.state.shiftId);
+        if (DEBUG) console.log('[DragHandler] Starting transfer drag for shift', this.state.shiftId);
         this.state.isDragging = true;
 
         // Capture original dimensions and position BEFORE making it position:fixed
@@ -313,6 +323,54 @@ const DragHandler = {
         }
     },
 
+    // #248: één plek waar de sleepwegen met een validatiemelding omgaan,
+    // zodat ze zich net zo gedragen als het dienstenformulier.
+    //
+    // Geeft terug of er doorgegaan mag worden, en of de bevestigde afwijking
+    // als force meegestuurd moet worden. Een overlap krijgt geen bevestiging
+    // aangeboden: de backend weigert die ook met force, want force slaat
+    // uitsluitend de rustcontrole over. Een keuze tonen die niet bestaat
+    // levert alleen een tweede foutmelding op.
+    async vraagOverride(validation, vraag) {
+        if (!validation || (validation.isValid && !validation.hasWarnings)) {
+            return { doorgaan: true, force: false };
+        }
+        const overlap = (validation.errors || []).find(e => e.code === 'overlap');
+        if (overlap) {
+            showToast(`${overlap.message}. Iemand kan niet op twee plaatsen tegelijk staan.`, 'error');
+            return { doorgaan: false, force: false };
+        }
+        const issues = [...(validation.errors || []), ...(validation.warnings || [])]
+            .map(i => `- ${i.message}`).join('\n');
+        const confirmed = await showConfirm(
+            `Er zijn opmerkingen:\n\n${issues}\n\n${vraag}`,
+            'Validatie opmerkingen'
+        );
+        return { doorgaan: confirmed, force: confirmed };
+    },
+
+    // Opslaan, en als de backend alsnog 422 met canOverride geeft, de
+    // bevestiging daar vragen en het één keer opnieuw proberen. De
+    // frontendcontrole kijkt namelijk alleen naar de diensten die geladen
+    // zijn; de backend kijkt naar alles.
+    async slaOpMetOverride(shiftId, data, alBevestigd, vraag) {
+        try {
+            return await updateShift(shiftId, alBevestigd ? { ...data, force: true } : data);
+        } catch (fout) {
+            if (fout.status !== 422 || !fout.data?.canOverride || alBevestigd) throw fout;
+            const confirmed = await showConfirm(
+                `Er zijn opmerkingen:\n\n- ${fout.message}\n\n${vraag}`,
+                'Validatie opmerkingen'
+            );
+            if (!confirmed) {
+                const gestopt = new Error('geannuleerd');
+                gestopt.stilGeannuleerd = true;
+                throw gestopt;
+            }
+            return await updateShift(shiftId, { ...data, force: true });
+        }
+    },
+
     // Complete transfer drag
     async completeTransferDrag(e) {
         // 1. Capture all needed state SYNCHRONOUSLY before any async work
@@ -327,19 +385,19 @@ const DragHandler = {
 
         // 3. Validate using captured data
         if (!dayCell) {
-            console.log('[DragHandler] Invalid drop target - cancelling');
-            showToast('Ongeldige locatie. Sleep de shift naar een dag in de planner.', 'warning');
+            if (DEBUG) console.log('[DragHandler] Invalid drop target - cancelling');
+            showToast('Ongeldige locatie. Sleep de dienst naar een dag in de planner.', 'warning');
             return;
         }
 
         if (dayCell.classList.contains('closed')) {
-            console.log('[DragHandler] Drop target is closed day');
-            showToast('Deze dag is gesloten. Je kunt hier geen shift toewijzen.', 'warning');
+            if (DEBUG) console.log('[DragHandler] Drop target is closed day');
+            showToast('Deze dag is gesloten. Je kunt hier geen dienst toewijzen.', 'warning');
             return;
         }
 
         if (!targetEmployee || !targetDate) {
-            console.log('[DragHandler] Could not determine target employee/date');
+            if (DEBUG) console.log('[DragHandler] Could not determine target employee/date');
             showToast('Kon de medewerker of datum niet bepalen. Probeer opnieuw.', 'warning');
             return;
         }
@@ -347,20 +405,10 @@ const DragHandler = {
         // Permission check handled by canUserTransferShift() at drag start
 
         // Check if employee has availability/absence on this date - warn but allow override
-        const availability = getAvailability(targetEmployee.id, targetDate);
-        if (availability && availability.type) {
-            const absenceLabels = {
-                'verlof': 'verlof heeft',
-                'ziek': 'ziek is',
-                'overuren': 'overuren opneemt',
-                'vorming': 'vorming heeft',
-                'andere': 'afwezig is'
-            };
-            const reason = absenceLabels[availability.type] || 'afwezig is';
-            const confirmed = await showConfirm(
-                `${targetEmployee.name} ${reason} op ${formatDate(targetDate)}.\n\nToch shift toewijzen?`,
-                'Medewerker afwezig'
-            );
+        const afwezigheidsVraag = this.afwezigheidsVraag(
+            getAvailability(targetEmployee.id, targetDate), targetEmployee.name, targetDate);
+        if (afwezigheidsVraag) {
+            const confirmed = await showConfirm(afwezigheidsVraag, 'Medewerker afwezig');
             if (!confirmed) return;
         }
 
@@ -371,25 +419,23 @@ const DragHandler = {
             date: targetDate
         };
         const validation = validateShift(testShift, shiftId);
-        if (!validation.isValid || validation.hasWarnings) {
-            const issues = [...validation.errors, ...validation.warnings].map(i => `- ${i.message}`).join('\n');
-            const confirmed = await showConfirm(
-                `Er zijn opmerkingen:\n\n${issues}\n\nToch shift toewijzen?`,
-                'Validatie opmerkingen'
-            );
-            if (!confirmed) return;
-        }
+        const uitkomst = await this.vraagOverride(validation, 'Toch dienst toewijzen?');
+        if (!uitkomst.doorgaan) return;
+        const forceerRust = uitkomst.force;
 
-        console.log(`[DragHandler] Transferring shift ${shiftId} to ${targetEmployee.name} on ${targetDate}`);
+        if (DEBUG) console.log(`[DragHandler] Transferring shift ${shiftId} to ${targetEmployee.name} on ${targetDate}`);
 
         // 4. Update shift via API (using captured data, not this.state)
-        showSectionLoading('planning-view', 'Shift verplaatsen...');
+        showSectionLoading('planning-view', 'Dienst verplaatsen...');
         try {
             const originalEmployeeId = originalData.employeeId;
             const originalDate2 = originalData.date;
 
             // Update shift - mark as manual to prevent auto-schedule from replacing it
-            await updateShift(shiftId, {
+            // #248: de bevestigde rustafwijking moet ook mee naar de backend.
+            // Zonder force weigert die alsnog met 422 en sprong de dienst terug,
+            // terwijl dezelfde wijziging via het dienstenformulier wél lukte.
+            await this.slaOpMetOverride(shiftId, {
                 employeeId: targetEmployee.id,
                 date: targetDate,
                 team: originalData.team,
@@ -397,7 +443,20 @@ const DragHandler = {
                 endTime: originalData.endTime,
                 notes: originalData.notes || '',
                 source: 'manual' // Mark as manual so it persists
-            });
+            }, forceerRust, 'Toch dienst toewijzen?');
+
+            // Als de shift van dag of medewerker is veranderd, bescherm de originele
+            // cel met een shift_block zodat het concept haar niet opnieuw vult (#146).
+            const cellChanged = originalData.employeeId !== targetEmployee.id || originalData.date !== targetDate;
+            if (cellChanged) {
+                try {
+                    await dataApiFetch(`/shift-blocks`, {
+                        method: 'POST',
+                        body: JSON.stringify({ user_id: originalData.employeeId, date: originalData.date, reason: 'drag_move' })
+                    });
+                    await fetchShiftBlocks();
+                } catch (_) { /* block aanmaken is best-effort */ }
+            }
 
             // Record undo action for drag transfer (using captured shiftId)
             if (typeof UndoManager !== 'undefined') {
@@ -412,10 +471,16 @@ const DragHandler = {
             // Refresh view
             renderPlanning();
 
-            showToast(`Shift overgedragen aan ${targetEmployee.name}`, 'success');
+            showToast(`Dienst overgedragen aan ${targetEmployee.name}`, 'success');
         } catch (error) {
+            // De gebruiker heeft de bevestiging afgewezen; dat is geen fout.
+            if (error.stilGeannuleerd) {
+                try { await refreshShifts(); renderPlanning(); } catch (_) {}
+                return; // finally hieronder ruimt de laadindicator op
+
+            }
             console.error('[DragHandler] Error transferring shift:', error);
-            showToast(`Fout bij overdragen shift: ${error.message}`, 'error');
+            showToast(`Fout bij overdragen dienst: ${error.message}`, 'error');
             // Re-sync from server to ensure UI matches DB
             try { await refreshShifts(); renderPlanning(); } catch (_) {}
         } finally {
@@ -425,7 +490,7 @@ const DragHandler = {
 
     // Start resize drag operation
     startResizeDrag() {
-        console.log('[DragHandler] Starting resize drag (type:', this.state.dragType + ')');
+        if (DEBUG) console.log('[DragHandler] Starting resize drag (type:', this.state.dragType + ')');
         this.state.isDragging = true;
 
         // Store original styles to restore on cancel
@@ -536,14 +601,49 @@ const DragHandler = {
             newEndTime = newTime;
         }
 
-        // Validate duration (minimum 1 hour)
-        const duration = this.calculateDuration(newStartTime, newEndTime);
-        if (duration < 1) {
-            showToast('Een shift moet minimaal 1 uur duren', 'warning');
+        // #216: het handvat mag niet voorbij het andere schieten.
+        //
+        // calculateDuration telt er 24 uur bij op zodra de eindtijd vóór de
+        // starttijd ligt, want dat is hoe een echte nachtdienst eruitziet.
+        // Sleepte je het beginhandvat voorbij de eindtijd, dan sprong de duur
+        // dus van nul naar ongeveer 23 uur en greep de controle hieronder nooit
+        // in. Bij een blok van één uur gebeurt dat snel, want dat is ongeveer
+        // even breed als de handvatzone zelf.
+        //
+        // "eindtijd vóór starttijd" afwijzen kan niet: een nachtdienst is dat
+        // ook. Wat wel klopt: binnen de tijdlijn, die van 07:00 tot 24:00 loopt,
+        // kan een gewone dienst nooit legitiem een nachtdienst worden of
+        // omgekeerd. Verandert de aard van de dienst, dan is het handvat
+        // doorgeschoten.
+        const naarMinuten = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+        const wasNacht = naarMinuten(originalData.endTime) <= naarMinuten(originalData.startTime);
+        const wordtNacht = naarMinuten(newEndTime) <= naarMinuten(newStartTime);
+        if (wasNacht !== wordtNacht) {
+            showToast('Het begin van een dienst kan niet voorbij het einde liggen', 'warning');
             return;
         }
 
-        console.log(`[DragHandler] Resizing shift ${shiftId} to ${newStartTime} - ${newEndTime}`);
+        // Validate duration (minimum 1 hour)
+        const duration = this.calculateDuration(newStartTime, newEndTime);
+        if (duration < 1) {
+            showToast('Een dienst moet minimaal 1 uur duren', 'warning');
+            return;
+        }
+
+        // #248: hier werd helemaal niets gecontroleerd. Een dienst langer
+        // slepen kan de rust van de dag ervoor of erna opeten, en dan weigerde
+        // de backend met een rode foutmelding zonder dat de planner ooit de
+        // kans kreeg om de afwijking te aanvaarden.
+        const controle = validateShift({
+            ...originalData,
+            startTime: newStartTime,
+            endTime: newEndTime
+        }, shiftId);
+        const uitkomstResize = await this.vraagOverride(controle, 'Toch aanpassen?');
+        if (!uitkomstResize.doorgaan) return;
+        const forceerRustResize = uitkomstResize.force;
+
+        if (DEBUG) console.log(`[DragHandler] Resizing shift ${shiftId} to ${newStartTime} - ${newEndTime}`);
 
         // 3. Update shift via API (using captured data, not this.state)
         try {
@@ -566,7 +666,7 @@ const DragHandler = {
             };
 
             // Mark as manual so resized shifts persist across auto-schedule regeneration
-            await updateShift(shiftId, newData);
+            await this.slaOpMetOverride(shiftId, newData, forceerRustResize, 'Toch aanpassen?');
 
             // Record undo action for drag resize (using captured shiftId)
             if (typeof UndoManager !== 'undefined') {
@@ -581,18 +681,33 @@ const DragHandler = {
             // Refresh view
             renderPlanning();
 
-            showToast('Shift aangepast', 'success');
+            showToast('Dienst aangepast', 'success');
         } catch (error) {
+            if (error.stilGeannuleerd) {
+                try { await refreshShifts(); renderPlanning(); } catch (_) {}
+                return;
+            }
             console.error('[DragHandler] Error resizing shift:', error);
-            showToast(`Fout bij aanpassen shift: ${error.message}`, 'error');
+            showToast(`Fout bij aanpassen dienst: ${error.message}`, 'error');
             // Re-sync from server to ensure UI matches DB
             try { await refreshShifts(); renderPlanning(); } catch (_) {}
         }
     },
 
-    // Handle tap/click on mobile (mousedown is disabled on ≤767px)
+    // Handle tap/click on mobile (mousedown is disabled on ≤767px), en
+    // toetsenbordactivering op elk formaat.
+    //
+    // #274: dienstblokken en lege dagcellen zijn divs. Op desktop opent een
+    // dienst via mousedown/mouseup in deze handler, dus een synthetische klik
+    // (zoals Enter of spatie er een stuurt) deed daar helemaal niets. De
+    // gedeelde toetsenbordhandler in app-ui.js roept el.click() aan, en die
+    // klik herkennen we hier aan detail === 0: echte muis- en tikklikken
+    // hebben detail >= 1. Zo werkt het toetsenbord op elk schermformaat
+    // zonder dat een muisklik op desktop twee keer wordt afgehandeld.
     handleMobileClick(e) {
-        if (!window.matchMedia('(max-width: 767px)').matches) return;
+        const vanToetsenbord = e.detail === 0;
+        const opMobiel = window.matchMedia('(max-width: 767px)').matches;
+        if (!vanToetsenbord && !opMobiel) return;
 
         const shiftBlock = e.target.closest('.timeline-block');
         const dayCell = e.target.closest('.timeline-day-cell');
@@ -601,14 +716,14 @@ const DragHandler = {
             const shiftId = parseInt(shiftBlock.dataset.shiftId, 10);
             const shift = shiftId ? getShift(shiftId) : null;
             if (shift && canUserEditShift(shift)) openEditShiftModal(shiftId);
-        } else if (dayCell && !dayCell.classList.contains('closed')) {
+        } else if (dayCell && !dayCell.classList.contains('closed') && !e.target.closest('.shift-block-indicator')) {
             this.handleCellClick(dayCell);
         }
     },
 
     // Handle cell click (create shift)
     handleCellClick(dayCell) {
-        console.log('[DragHandler] Cell clicked - opening shift creation modal');
+        if (DEBUG) console.log('[DragHandler] Cell clicked - opening shift creation modal');
 
         // Get employee and date from cell
         const employee = this.getEmployeeFromRow(dayCell);
@@ -625,7 +740,7 @@ const DragHandler = {
         if (role === 'medewerker') {
             // Medewerkers can only create shifts for themselves
             if (employee.id !== AppState.currentUser.id) {
-                showToast('Je kan alleen shifts voor jezelf aanmaken', 'warning');
+                showToast('Je kunt alleen diensten voor jezelf aanmaken', 'warning');
                 return;
             }
         }
@@ -653,18 +768,21 @@ const DragHandler = {
         } else {
             // Fallback: open normal modal and manually fill
             openAddShiftModal();
-            // TODO: Pre-fill form fields
             document.getElementById('shift-employee').value = employee.id;
             document.getElementById('shift-date').value = date;
             document.getElementById('shift-team').value = employee.mainTeam;
             document.getElementById('shift-start').value = defaultStartTime;
             document.getElementById('shift-end').value = defaultEndTime;
+            // Velden worden hier met .value gezet, wat géén change-event vuurt.
+            // De melding "dag handmatig leeggemaakt" moet dus expliciet opnieuw
+            // bepaald worden nu medewerker én datum bekend zijn.
+            if (typeof updateShiftBlockNotice === 'function') updateShiftBlockNotice();
         }
     },
 
     // Cancel drag operation
     cancelDrag() {
-        console.log('[DragHandler] Cancelling drag');
+        if (DEBUG) console.log('[DragHandler] Cancelling drag');
 
         // Remove visual feedback
         if (this.state.targetElement) {
@@ -725,6 +843,29 @@ const DragHandler = {
     },
 
     // Helper: Get day cell from mouse coordinates
+    // #314: dit waarschuwde bij elk gevuld type, dus ook bij 'vrij'. Dat is puur
+    // informatief en levert nergens anders in de app een conflict op;
+    // validateAvailability sluit het expliciet uit (#173). Bovendien stond
+    // 'vrij' niet in het eigen lijstje labels dat hier stond, dus de tekst viel
+    // terug op "afwezig is" en beweerde iets dat niet klopte.
+    //
+    // De labels komen nu uit ABSENCE_TYPES, zodat dit lijstje niet opnieuw
+    // achterop kan raken. Aparte functie zodat de beslissing los van een sleep
+    // na te rekenen is; completeTransferDrag is anders alleen met een echte
+    // muisbeweging te bereiken.
+    //
+    // Geeft de vraagtekst terug, of null wanneer er niets te vragen valt.
+    afwezigheidsVraag(availability, naam, datum) {
+        if (!availability || !availability.type) return null;
+        const telt = typeof teltAlsAfwezigheid === 'function'
+            ? teltAlsAfwezigheid(availability.type)
+            : true;
+        if (!telt) return null;
+        const reden = (typeof ABSENCE_TYPES !== 'undefined'
+            && ABSENCE_TYPES[availability.type]?.werkwoord) || 'afwezig is';
+        return `${naam} ${reden} op ${formatDate(datum)}.\n\nToch dienst toewijzen?`;
+    },
+
     getDayCellFromPoint(x, y) {
         const elements = document.elementsFromPoint(x, y);
         return elements.find(el => el.classList.contains('timeline-day-cell'));
@@ -787,7 +928,14 @@ const DragHandler = {
         hours = Math.max(this.constants.START_HOUR, Math.min(this.constants.END_HOUR, hours));
 
         // Format as HH:MM
-        const wholeHours = Math.floor(hours);
+        // #246: op de rechterrand klemde dit op END_HOUR (24) en leverde het de
+        // tekst '24:00' op. De backend aanvaardde die (isValidTime kijkt alleen
+        // naar het patroon HH:MM), maar <input type="time"> weigert hem, want
+        // geldige waarden lopen tot 23:59. Het veld Eindtijd bleef dan leeg en
+        // opslaan gaf "Vul start- en eindtijd in". Middernacht heet in deze app
+        // '00:00'; calculateDuration en de validatie rekenen dat al correct om
+        // naar de volgende dag.
+        const wholeHours = Math.floor(hours) % 24;
         const minutes = Math.round((hours % 1) * 60);
 
         return `${String(wholeHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
@@ -1085,7 +1233,11 @@ const BuilderDragHandler = {
         if (!AppState.builderGrid[targetEmpId]) AppState.builderGrid[targetEmpId] = {};
         AppState.builderGrid[targetEmpId][targetDay] = assignment;
 
-        AppState.builderIsDirty = true;
+        // #210: hier stond `AppState.builderIsDirty = true`. Dat zet wel de
+        // vlag maar plant geen automatische opslag in en werkt de statusregel
+        // niet bij, terwijl slepen juist de voornaamste manier van werken in de
+        // bouwer is. Je sleepte een uur lang en las ondertussen "bewaard".
+        setBuilderDirty();
         renderBuilder();
         if (validation.level !== 'ok') showToast(validation.message, 'warning');
         else showToast('Dienst verplaatst', 'success');
@@ -1109,14 +1261,14 @@ const BuilderDragHandler = {
         const prev = grid[targetDay - 1];
         if (prev?.endTime) {
             const gap = gapHours(toMin(prev.endTime), startMin);
-            if (gap < 11) return { level: 'error', message: `Onvoldoende rust — ${gap.toFixed(1)}u na vorige dienst (min. 11u)` };
+            if (gap < 11) return { level: 'error', message: `Onvoldoende rust: ${gap.toFixed(1)}u na vorige dienst (min. 11u)` };
         }
 
         // Check rest gap with next day's assignment
         const next = grid[targetDay + 1];
         if (next?.startTime) {
             const gap = gapHours(endMin, toMin(next.startTime));
-            if (gap < 11) return { level: 'error', message: `Onvoldoende rust — ${gap.toFixed(1)}u voor volgende dienst (min. 11u)` };
+            if (gap < 11) return { level: 'error', message: `Onvoldoende rust: ${gap.toFixed(1)}u voor volgende dienst (min. 11u)` };
         }
 
         return { level: 'ok', message: '' };
@@ -1194,7 +1346,8 @@ const BuilderDragHandler = {
             endTime: newEnd
         };
 
-        AppState.builderIsDirty = true;
+        // #210: zie het verplaatsen hierboven, zelfde reden.
+        setBuilderDirty();
         renderBuilder();
         showToast(`Dienst aangepast: ${newStart}-${newEnd}`, 'success');
     },
@@ -1256,7 +1409,8 @@ const BuilderDragHandler = {
         hours = snappedMinutes / 60;
         hours = Math.max(this.constants.START_HOUR, Math.min(this.constants.END_HOUR, hours));
 
-        const wholeHours = Math.floor(hours);
+        // #246: zie de toelichting bij de andere getTimeFromX hierboven.
+        const wholeHours = Math.floor(hours) % 24;
         const minutes = Math.round((hours % 1) * 60);
         return `${String(wholeHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
     },

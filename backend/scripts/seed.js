@@ -11,11 +11,11 @@ async function run() {
   }
 
   const teams = [
-    { id: 'vlot1', name: 'Vlot 1 (Begeleiding)', color: '#3b82f6' },
-    { id: 'vlot2', name: 'Vlot 2 (Begeleiding)', color: '#8b5cf6' },
-    { id: 'cargo', name: 'Cargo (Dagbesteding)', color: '#10b981' },
-    { id: 'overkoepelend', name: 'Overkoepelend (Kantoor)', color: '#f59e0b' },
-    { id: 'jobstudent', name: 'Jobstudenten/Stagiairs', color: '#ec4899' }
+    { id: 'vlot1', name: 'Vlot 1 (Begeleiding)', color: '#4a7c6f' },
+    { id: 'vlot2', name: 'Vlot 2 (Begeleiding)', color: '#c08a4a' },
+    { id: 'cargo', name: 'Cargo (Dagbesteding)', color: '#5b7fa6' },
+    { id: 'overkoepelend', name: 'Overkoepelend (Kantoor)', color: '#9a6a9e' },
+    { id: 'jobstudent', name: 'Jobstudenten/Stagiairs', color: '#b9656a' }
   ];
 
   await pool.query('BEGIN');

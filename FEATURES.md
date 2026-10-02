@@ -218,7 +218,7 @@
 ### Architectuur
 - Vanilla JS frontend — geen framework, geen build stap
 - Single server.js met alle endpoints
-- Auto-migratie via ensureSchema() bij elke startup
+- Geversioneerd migratiesysteem via runMigrations() bij elke startup (zelf-initialiserend op een verse database)
 - Transacties voor kritieke multi-step operaties
 - Atomic draft-apply met overlap detectie
 

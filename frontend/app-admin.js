@@ -1,27 +1,60 @@
 // HET VLOT ROOSTERPLANNING - ADMIN TOOLS EN DATA IMPORT/EXPORT
 
-function exportData() {
-    // Export users (with schedule data) - also include as 'employees' for backward compatibility
-    const users = DataStore.employees; // Gets non-admin users via getter
-    const dataToExport = {
-        users: users,
-        employees: users, // Backward compatibility
-        shifts: DataStore.shifts,
-        settings: DataStore.settings,
-        exportDate: new Date().toISOString()
-    };
-    const dataStr = JSON.stringify(dataToExport, null, 2);
-    const dataBlob = new Blob([dataStr], {type: 'application/json'});
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `hetvlot-backup-${new Date().toISOString().split('T')[0]}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+// Een backup hoort alles te bevatten, niet alleen wat toevallig in beeld staat.
+//
+// Dit las DataStore.shifts en DataStore.availability rechtstreeks, maar de app
+// laadt diensten in een venster van drie maanden terug tot drie vooruit. Een
+// export bevatte dus alleen dat venster, zonder dat er iets aan te zien was.
+// Gemeten op een kleine testdatabase: 10 van de 21 diensten in het bestand.
+// Bij een vol schooljaar mist een backup zo het grootste deel van het jaar.
+//
+// Daarom halen we de gegevens hier expliciet op met een ruim bereik, in plaats
+// van de store te vertrouwen. Mislukt dat, dan komt er geen half bestand maar
+// een foutmelding.
+const EXPORT_VAN = '2000-01-01';
+const EXPORT_TOT = '2099-12-31';
+
+async function exportData() {
+    const knoppen = document.querySelectorAll('[onclick="exportData()"]');
+    knoppen.forEach(b => { b.disabled = true; b.dataset.vorigeTekst = b.textContent; b.textContent = 'Bezig...'; });
+    try {
+        const [shiftsData, availabilityData] = await Promise.all([
+            dataApiFetch(`/shifts?startDate=${EXPORT_VAN}&endDate=${EXPORT_TOT}`),
+            dataApiFetch(`/availability?startDate=${EXPORT_VAN}&endDate=${EXPORT_TOT}`)
+        ]);
+
+        // Export users (with schedule data) - also include as 'employees' for backward compatibility
+        const users = DataStore.employees; // Gets non-admin users via getter
+        const dataToExport = {
+            users: users,
+            employees: users, // Backward compatibility
+            shifts: shiftsData.shifts || [],
+            // #206: afwezigheid ontbrak volledig in de backup. Dat is precies de
+            // data die niemand achteraf uit zijn hoofd kan reconstrueren: wie
+            // wanneer ziek was of verlof had.
+            availability: availabilityData.availability || [],
+            settings: DataStore.settings,
+            exportDate: new Date().toISOString()
+        };
+        const dataStr = JSON.stringify(dataToExport, null, 2);
+        const dataBlob = new Blob([dataStr], {type: 'application/json'});
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `hetvlot-backup-${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        showToast(`Backup gemaakt: ${dataToExport.shifts.length} diensten, ${dataToExport.availability.length} afwezigheden, ${users.length} medewerkers`, 'success');
+    } catch (error) {
+        console.error('Export mislukt:', error);
+        showToast('Backup mislukt: ' + getUserFriendlyError(error) + '. Er is geen bestand gemaakt.', 'error');
+    } finally {
+        knoppen.forEach(b => { b.disabled = false; if (b.dataset.vorigeTekst) b.textContent = b.dataset.vorigeTekst; });
+    }
 }
 
 async function runMigration() {
-    if (!await showConfirm('VOLLEDIGE DATABASE MIGRATIE\n\nDit zal:\n- Employees tabel samenvoegen met users\n- Shifts migreren (employee_id -> user_id)\n- Availability migreren (employee_id -> user_id)\n- Employees tabel verwijderen\n- Weekroosters repareren\n\nDit is een grote wijziging, maar 100% veilig:\n- Gebruikt transactions (bij error: automatisch ROLLBACK)\n- Alle data blijft behouden\n- Foreign key mappings correct uitgevoerd\n\nDoorgaan?', 'Database Migratie')) {
+    if (!await showConfirm('VOLLEDIGE DATABASE MIGRATIE\n\nDit zal:\n- Employees tabel samenvoegen met users\n- Shifts migreren (employee_id -> user_id)\n- Availability migreren (employee_id -> user_id)\n- Employees tabel verwijderen\n- Weekroosters repareren\n\nDit is een grote wijziging, maar 100% veilig:\n- Gebruikt transactions (bij error: automatisch ROLLBACK)\n- Alle data blijft behouden\n- Foreign key mappings correct uitgevoerd\n\nDoorgaan?', 'Databasemigratie')) {
         return;
     }
 
@@ -38,7 +71,7 @@ async function runMigration() {
         }
 
         if (result.results.migrations.length === 0 && result.results.fixes.length === 0) {
-            message += 'Geen wijzigingen nodig - database is up-to-date.';
+            message += 'Geen wijzigingen nodig, de database is bijgewerkt.';
         }
 
         showToast(message.substring(0, 200), 'success');
@@ -87,8 +120,8 @@ async function showDebugInfo() {
             message += `  weekScheduleWeek2: type=${w2?.type || typeof w2}, isArray=${w2?.isArray || Array.isArray(w2)}, length=${w2?.length || 0}\n`;
         });
 
-        console.log(message);
-        console.log('Full debug result:', result);
+        if (DEBUG) console.log(message);
+        if (DEBUG) console.log('Full debug result:', result);
         showToast(message.length > 200 ? 'Debug info getoond in console (F12)' : message, 'info');
     } catch (error) {
         showToast('Debug info ophalen mislukt: ' + error.message, 'error');
@@ -293,34 +326,51 @@ function sanitizeImportedData(rawData) {
 async function importData(event) {
     const file = event.target.files[0];
     if (!file) {
-        console.log('Geen bestand geselecteerd');
+        if (DEBUG) console.log('Geen bestand geselecteerd');
         return;
     }
 
-    console.log('Bestand geselecteerd:', file.name);
+    if (DEBUG) console.log('Bestand geselecteerd:', file.name);
 
     const reader = new FileReader();
     reader.onload = async (e) => {
         try {
-            console.log('Bestand gelezen, parsing JSON...');
+            if (DEBUG) console.log('Bestand gelezen, parsing JSON...');
             const data = JSON.parse(e.target.result);
-            console.log('Data parsed:', data);
+            if (DEBUG) console.log('Data parsed:', data);
 
             // Support both old (employees) and new (users) format
             const usersToImport = data.users || data.employees || [];
-            console.log('Gevonden gebruikers/medewerkers:', usersToImport.length);
+            if (DEBUG) console.log('Gevonden gebruikers/medewerkers:', usersToImport.length);
 
             if (usersToImport.length === 0) {
-                showToast('Geen medewerkers gevonden in backup bestand', 'warning');
+                showToast('Geen medewerkers gevonden in het back-upbestand', 'warning');
                 return;
             }
 
-            if (!await showConfirm(`${usersToImport.length} medewerkers gevonden. Importeren naar de database?\n\nNieuwe medewerkers krijgen het standaard wachtwoord (DEFAULT_RESET_PASSWORD — stel in via Render).`, 'Backup importeren')) {
+            // #217: hier ging alleen `users` mee. Diensten, afwezigheid en
+            // instellingen stonden wel in het bestand maar werden nooit
+            // verstuurd, dus na een reset kwamen vakantieperiodes, gesloten
+            // dagen, roosterregels en dienstsjablonen niet terug.
+            const shiftsToImport = Array.isArray(data.shifts) ? data.shifts : [];
+            const availabilityToImport = Array.isArray(data.availability) ? data.availability : [];
+            const settingsToImport = (data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings))
+                ? data.settings : null;
+
+            const onderdelen = [`${usersToImport.length} medewerkers`];
+            if (shiftsToImport.length) onderdelen.push(`${shiftsToImport.length} diensten`);
+            if (availabilityToImport.length) onderdelen.push(`${availabilityToImport.length} afwezigheden`);
+            if (settingsToImport) onderdelen.push(`${Object.keys(settingsToImport).length} instellingen`);
+
+            if (!await showConfirm(`Gevonden in de backup:\n${onderdelen.map(o => '• ' + o).join('\n')}\n\nImporteren naar de database?\n\nNieuwe medewerkers krijgen het standaard wachtwoord (DEFAULT_RESET_PASSWORD, in te stellen via Render).`, 'Backup importeren')) {
                 return;
             }
 
             // Import via bulk API endpoint
             const importPayload = {
+                shifts: shiftsToImport,
+                availability: availabilityToImport,
+                ...(settingsToImport ? { settings: settingsToImport } : {}),
                 users: usersToImport.map(emp => ({
                     name: emp.name || 'Onbekend',
                     email: emp.email || null,

@@ -23,7 +23,7 @@ function renderShiftCard(shift) {
     let availabilityIcon = '';
     if (availability && !availability.available) {
         const reason = escapeHtml(availability.reason || 'Geen reden opgegeven');
-        availabilityIcon = `<span class="shift-availability-indicator unavailable" title="Medewerker niet beschikbaar: ${reason}">${IconHelper.html(ICONS.warning, 'xs')}</span>`;
+        availabilityIcon = `<span class="shift-availability-indicator unavailable" data-tooltip="Medewerker niet beschikbaar: ${reason}">${IconHelper.html(ICONS.warning, 'xs')}</span>`;
     } else if (availability && availability.shiftTypes && availability.shiftTypes.length > 0) {
         // Check if shift matches availability
         let shiftType = null;
@@ -33,14 +33,14 @@ function renderShiftCard(shift) {
 
         if (shiftType && !availability.shiftTypes.includes(shiftType)) {
             const shiftTypes = escapeHtml(availability.shiftTypes.join(', '));
-            availabilityIcon = `<span class="shift-availability-indicator partial" title="Alleen beschikbaar voor: ${shiftTypes}">${IconHelper.html(ICONS.zap, 'xs')}</span>`;
+            availabilityIcon = `<span class="shift-availability-indicator partial" data-tooltip="Alleen beschikbaar voor: ${shiftTypes}">${IconHelper.html(ICONS.zap, 'xs')}</span>`;
         }
     }
 
     // Activity count for card view
     const activities = getActivitiesByEmployee(shift.employeeId, shift.date);
     const activityBadge = activities.length > 0
-        ? `<span class="activity-count-badge" title="${activities.map(a => a.type).join(', ')}">${IconHelper.html('calendar-plus', 'xs')} ${activities.length}</span>`
+        ? `<span class="activity-count-badge" data-tooltip="${activities.map(a => a.type).join(', ')}">${IconHelper.html('calendar-plus', 'xs')} ${activities.length}</span>`
         : '';
 
     const employeeName = escapeHtml(employee.name);
@@ -48,7 +48,7 @@ function renderShiftCard(shift) {
         <div class="shift-employee-name">${employeeName}${availabilityIcon}</div>
         <div class="shift-time">${shift.startTime} - ${shift.endTime}</div>
         <div class="shift-card-footer">
-            <span class="shift-team-badge team-${shift.team}">${escapeHtml(DataStore.settings.teams?.[shift.team]?.name || shift.team || 'Onbekend')}</span>
+            <span class="shift-team-badge team-${shift.team}">${escapeHtml(getTeamName(shift.team) || 'Onbekend')}</span>
             ${activityBadge}
             ${hasPermission('MANAGE_SHIFTS') ? `<button class="shift-delete-btn" data-shift-id="${shift.id}">${IconHelper.html(ICONS.close, 'xs')}</button>` : ''}
         </div>
@@ -70,6 +70,63 @@ function populateShiftTemplateDropdown() {
     });
 }
 
+// Een handmatig leeggemaakte dag is "beschermd": het concept vult hem niet
+// opnieuw. Dat was alleen af te leiden uit een klein icoontje met tooltip —
+// op een telefoon dus onzichtbaar. Bij het toevoegen van een dienst zeggen
+// we het daarom expliciet, net zoals een handmatig aangepaste dienst dat doet.
+function updateShiftBlockNotice() {
+    if (!DOM.shiftValidationErrors) return;
+    const bestaand = DOM.shiftValidationErrors.querySelector('.shift-block-notice');
+    if (bestaand) bestaand.remove();
+
+    if (AppState.editingShiftId) return; // enkel bij toevoegen
+    const empId = DOM.shiftEmployee?.value;
+    const datum = DOM.shiftDate?.value;
+    if (!empId || !datum) return;
+
+    const block = (DataStore.shiftBlocks || []).find(
+        b => String(b.user_id) === String(empId) && b.date === datum
+    );
+    if (!block) return;
+
+    const wie = getEmployee(Number(empId))?.name || 'deze medewerker';
+    const melding = document.createElement('div');
+    melding.className = 'shift-source-info shift-block-notice';
+    melding.innerHTML = `
+        <span class="source-icon">${IconHelper.html('circle-slash', 'sm')}</span>
+        <span class="source-text">
+            ${escapeHtml(blockReasonLabel(block.reason))} voor ${escapeHtml(wie)}.
+            Het basisrooster vult deze dag daarom niet meer automatisch in.
+        </span>`;
+    DOM.shiftValidationErrors.prepend(melding);
+    IconHelper.init(melding);
+}
+
+// #178: de teamlijst stond hardgecodeerd in index.html, terwijl teams
+// instelbaar zijn en overal elders uit DataStore.settings.teams komen. Een
+// nieuw team verscheen er dus niet in, en een hernoemd team hield zijn oude
+// naam. Deze functie bouwt de lijst op uit dezelfde bron als de rest.
+//
+// Een dienst kan nog naar een team verwijzen dat sindsdien uit de
+// instellingen is gehaald. Dat team wordt er als losse optie bij gezet, met
+// het label "(niet meer in gebruik)". Zonder die optie zou de keuzelijst
+// stilletjes op de eerste regel springen en zou opslaan het team van de
+// dienst veranderen zonder dat iemand daarom vroeg.
+function populateShiftTeamDropdown(huidigTeam) {
+    const teams = DataStore.settings.teams || {};
+    const ids = Object.keys(teams);
+
+    let html = '<option value="">-- Selecteer team --</option>';
+    ids.forEach(id => {
+        html += `<option value="${escapeHtml(id)}">${escapeHtml(teams[id].name || id)}</option>`;
+    });
+    if (huidigTeam && !ids.includes(huidigTeam)) {
+        html += `<option value="${escapeHtml(huidigTeam)}">${escapeHtml(huidigTeam)} (niet meer in gebruik)</option>`;
+    }
+    DOM.shiftTeam.innerHTML = html;
+    DOM.shiftTeam.value = huidigTeam || '';
+}
+
 function openAddShiftModal() {
     AppState.editingShiftId = null;
     DOM.shiftModalTitle.textContent = 'Dienst toevoegen';
@@ -78,6 +135,7 @@ function openAddShiftModal() {
     DOM.shiftDate.value = formatDateYYYYMMDD(new Date());
     DOM.shiftDeleteBtn.classList.add('hidden');
     populateShiftTemplateDropdown();
+    populateShiftTeamDropdown();
 
     // Populate dropdown with filtered employees
     populateEmployeeDropdown();
@@ -97,7 +155,8 @@ function openAddShiftModal() {
     DOM.shiftSubmitBtn.classList.remove('hidden');
     resetShiftSubmitBtn();
 
-    DOM.shiftModal.classList.remove('hidden');
+    toonModal(DOM.shiftModal);
+    updateShiftBlockNotice();
 }
 
 function openAddShiftForEmployee(employeeId, date) {
@@ -109,7 +168,12 @@ function openAddShiftForEmployee(employeeId, date) {
     DOM.shiftDeleteBtn.classList.add('hidden');
     populateEmployeeDropdown();
     DOM.shiftEmployee.value = employeeId;
-    DOM.shiftModal.classList.remove('hidden');
+    // Je voegt hier een dienst toe bij een bepaalde medewerker, dus het team
+    // waar die thuishoort is de enige zinnige beginwaarde.
+    const emp = getEmployee(employeeId);
+    populateShiftTeamDropdown(emp ? (emp.mainTeam || emp.main_team) : '');
+    toonModal(DOM.shiftModal);
+    updateShiftBlockNotice();
 }
 
 function canUserEditShift(shift) {
@@ -164,10 +228,10 @@ function openShiftModal(shift, canEdit) {
     // Populate dropdowns
     populateEmployeeDropdown();
     populateShiftTemplateDropdown();
+    populateShiftTeamDropdown(shift.team);
 
     // Fill form with shift data
     DOM.shiftEmployee.value = shift.employeeId;
-    DOM.shiftTeam.value = shift.team;
     DOM.shiftDate.value = shift.date;
     DOM.shiftStart.value = shift.startTime;
     DOM.shiftEnd.value = shift.endTime;
@@ -195,12 +259,28 @@ function openShiftModal(shift, canEdit) {
         }
     });
 
+    // #262: het teamveld bleef bewerkbaar voor de eigenaar van de dienst,
+    // waardoor een medewerker zichzelf in een ander team kon schrijven. Wie
+    // geen diensten mag beheren, mag ook het team niet wijzigen. De backend
+    // weigert die wissel nu ook, dus dit is de zichtbare helft van dezelfde
+    // grens.
+    if (!hasPermission('MANAGE_SHIFTS')) {
+        DOM.shiftTeam.disabled = true;
+        DOM.shiftTeam.classList.add('readonly');
+        // Om dezelfde reden mag de dienst niet aan een collega worden
+        // toegewezen. De toevoegmodal doet dit al; het bewerkpad deed het niet,
+        // terwijl de backend die wissel nu wel weigert. Wie zijn dienst kwijt
+        // wil gebruikt 'Dienst afstaan'.
+        DOM.shiftEmployee.disabled = true;
+        DOM.shiftEmployee.classList.add('readonly');
+    }
+
     // Show/hide action buttons
     DOM.shiftSubmitBtn.classList.toggle('hidden', !canEdit);
     DOM.shiftDeleteBtn.classList.toggle('hidden', !canEdit);
     resetShiftSubmitBtn();
 
-    // Add combined "Shift afstaan" button if user can request swap
+    // Add combined "Dienst afstaan" button if user can request swap
     const existingAfstaanBtn = document.getElementById('shift-afstaan-btn');
     if (existingAfstaanBtn) existingAfstaanBtn.remove();
 
@@ -209,7 +289,7 @@ function openShiftModal(shift, canEdit) {
         afstaanBtn.type = 'button';
         afstaanBtn.id = 'shift-afstaan-btn';
         afstaanBtn.className = 'btn btn-primary';
-        afstaanBtn.textContent = 'Shift afstaan';
+        afstaanBtn.textContent = 'Dienst afstaan';
         afstaanBtn.style.marginRight = 'auto';
         afstaanBtn.addEventListener('click', () => {
             closeShiftModal();
@@ -255,7 +335,7 @@ function openShiftModal(shift, canEdit) {
             activitiesListHtml += '<div class="shift-activities-list">';
             shiftActivities.forEach(act => {
                 const label = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
-                const desc = act.description ? ` - ${escapeHtml(act.description)}` : '';
+                const desc = act.description ? ` · ${escapeHtml(act.description)}` : '';
                 activitiesListHtml += `<div class="shift-activity-item activity-badge activity-badge--list" data-activity-id="${act.id}">
                     <span class="activity-type-${escapeHtml(act.type)} activity-type-bar"></span>
                     <span><strong>${escapeHtml(label)}</strong> ${act.startTime.substring(0,5)}-${act.endTime.substring(0,5)}${desc}</span>
@@ -289,7 +369,7 @@ function openShiftModal(shift, canEdit) {
     DOM.shiftValidationErrors.innerHTML = issuesHtml;
     IconHelper.init(DOM.shiftValidationErrors);
 
-    DOM.shiftModal.classList.remove('hidden');
+    toonModal(DOM.shiftModal);
 }
 
 function resetShiftSubmitBtn() {
@@ -301,10 +381,16 @@ function resetShiftSubmitBtn() {
 }
 
 function closeShiftModal() {
-    DOM.shiftModal.classList.add('hidden');
+    verbergModal(DOM.shiftModal);
     DOM.shiftForm.reset();
     AppState.editingShiftId = null;
     resetShiftSubmitBtn();
+    // #233: noodklep. Sluit je de modal terwijl een opslag nog in de lucht
+    // hangt (bv. via Annuleren, of de klik buiten de modal), dan bleef de
+    // sectie-overlay op de planning anders staan tot het verzoek zelf
+    // afloopt. hideSectionLoading is veilig aan te roepen als er niets te
+    // verbergen is.
+    hideSectionLoading('planning-view');
 }
 
 async function handleShiftDelete(shiftId = null) {
@@ -317,20 +403,45 @@ async function handleShiftDelete(shiftId = null) {
 
     // Get shift details for confirmation message
     const shift = getShift(idToDelete);
+    // #343: hier stond shift.employeeName, een veld dat niet bestaat, dus las
+    // er altijd "de dienst van deze medewerker". En shift.date is een ruwe
+    // ISO-datum, terwijl de app overal formatDate gebruikt.
     const shiftDescription = shift
-        ? `de dienst van ${shift.employeeName || 'deze medewerker'} op ${shift.date}`
+        ? `de dienst van ${getEmployee(shift.employeeId)?.name || 'deze medewerker'} op ${formatDate(shift.date)}`
         : 'deze dienst';
 
-    if (await showConfirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?`, 'Dienst verwijderen', { danger: true, confirmText: 'Verwijderen' })) {
-        // Wait for deletion to complete before re-rendering
-        await deleteShift(idToDelete);
+    // #301: het slepen weigerde al bij een openstaand verzoek, het
+    // verwijderpad in het formulier controleerde niets. De backend annuleert
+    // het verzoek nu netjes en verwittigt iedereen, maar dat is niets wat je
+    // per ongeluk wil doen, dus het staat in de vraag.
+    const openVerzoeken = (DataStore.swapRequests || []).filter(r =>
+        (Number(r.requester_shift_id) === Number(idToDelete) || Number(r.target_shift_id) === Number(idToDelete))
+        && r.status === 'pending');
+    const verzoekWaarschuwing = openVerzoeken.length > 0
+        ? `\n\nLet op: er ${openVerzoeken.length === 1 ? 'staat nog een verzoek' : `staan nog ${openVerzoeken.length} verzoeken`} open op deze dienst. ${openVerzoeken.length === 1 ? 'Dat wordt' : 'Die worden'} geannuleerd en de betrokkenen krijgen bericht.`
+        : '';
 
-        // Close modal only if deleting from modal (when shiftId is event or null)
-        if (isEvent || !shiftId) {
-            closeShiftModal();
+    if (await showConfirm(`Weet je zeker dat je ${shiftDescription} wilt verwijderen?${verzoekWaarschuwing}`, 'Dienst verwijderen', { danger: true, confirmText: 'Verwijderen' })) {
+        // #270: zonder try/catch verdween een mislukte verwijdering spoorloos.
+        // De modal bleef openstaan zoals hij was, er kwam geen toast, geen
+        // rode regel, geen spinner. De beheerder dacht dat zijn klik niet was
+        // aangekomen en klikte opnieuw, of sloot de modal in de overtuiging
+        // dat de dienst weg was terwijl hij nog gewoon in de planning stond.
+        try {
+            // Wait for deletion to complete before re-rendering
+            await deleteShift(idToDelete);
+
+            // Close modal only if deleting from modal (when shiftId is event or null)
+            if (isEvent || !shiftId) {
+                closeShiftModal();
+            }
+
+            renderPlanning();
+        } catch (error) {
+            console.error('Fout bij verwijderen dienst:', error);
+            showToast('Verwijderen mislukt: ' + getUserFriendlyError(error), 'error');
+            // Modal blijft open zodat de gebruiker het opnieuw kan proberen
         }
-
-        renderPlanning();
     }
 }
 
@@ -364,7 +475,7 @@ function openSwapRequestModal(shift) {
 
     // Clear target preview
     const targetPreview = document.getElementById('swap-target-shift-preview');
-    targetPreview.innerHTML = '<p class="text-muted">Selecteer eerst een collega en shift</p>';
+    targetPreview.innerHTML = '<p class="text-muted">Selecteer eerst een collega en dienst</p>';
 
     // Populate employee dropdown (exclude current user)
     const employeeSelect = document.getElementById('swap-target-employee');
@@ -385,18 +496,18 @@ function openSwapRequestModal(shift) {
     document.getElementById('swap-validation-display').classList.add('hidden');
 
     // Show modal
-    document.getElementById('swap-request-modal').classList.remove('hidden');
+    toonModal(document.getElementById('swap-request-modal'));
 }
 
 function closeSwapRequestModal() {
-    document.getElementById('swap-request-modal').classList.add('hidden');
+    verbergModal(document.getElementById('swap-request-modal'));
     swapRequestState = { requesterShift: null, targetEmployeeId: null, targetShiftId: null };
 }
 
 function formatShiftPreview(shift) {
     const employee = getEmployee(shift.employeeId || shift.userId);
     const employeeName = employee ? escapeHtml(employee.name) : 'Onbekend';
-    const team = escapeHtml(shift.team || shift.teamId || '');
+    const team = escapeHtml(getTeamName(shift.team || shift.teamId));
     const date = formatDate(shift.date);
     const time = `${shift.startTime} - ${shift.endTime}`;
 
@@ -418,7 +529,7 @@ async function handleSwapTargetEmployeeChange() {
         shiftSelect.disabled = true;
         swapRequestState.targetEmployeeId = null;
         swapRequestState.targetShiftId = null;
-        document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer eerst een collega en shift</p>';
+        document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer eerst een collega en dienst</p>';
         return;
     }
 
@@ -433,16 +544,16 @@ async function handleSwapTargetEmployeeChange() {
         .sort((a, b) => new Date(a.date) - new Date(b.date));
 
     if (employeeShifts.length === 0) {
-        shiftSelect.innerHTML = '<option value="">Geen toekomstige shifts beschikbaar</option>';
+        shiftSelect.innerHTML = '<option value="">Geen toekomstige diensten beschikbaar</option>';
         shiftSelect.disabled = true;
         return;
     }
 
-    let html = '<option value="">-- Selecteer shift --</option>';
+    let html = '<option value="">-- Selecteer dienst --</option>';
     employeeShifts.forEach(shift => {
         const dateStr = formatDate(shift.date);
         const timeStr = `${shift.startTime} - ${shift.endTime}`;
-        html += `<option value="${shift.id}">${dateStr} | ${timeStr} | ${shift.team || shift.teamId}</option>`;
+        html += `<option value="${shift.id}">${dateStr} | ${timeStr} | ${escapeHtml(getTeamName(shift.team || shift.teamId))}</option>`;
     });
 
     shiftSelect.innerHTML = html;
@@ -454,7 +565,7 @@ function handleSwapTargetShiftChange() {
 
     if (!shiftId) {
         swapRequestState.targetShiftId = null;
-        document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer een shift</p>';
+        document.getElementById('swap-target-shift-preview').innerHTML = '<p class="text-muted">Selecteer een dienst</p>';
         document.getElementById('swap-validation-display').classList.add('hidden');
         return;
     }
@@ -507,7 +618,7 @@ function runSwapValidation() {
                 <strong>${IconHelper.html(ICONS.warning, 'sm')} Waarschuwingen:</strong>
                 <ul>${validation.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
             </div>
-            <p class="validation-hint text-warning">Je kunt dit verzoek indienen, maar een verantwoordelijke moet het goedkeuren.</p>
+            <p class="validation-hint text-warning">Je kunt dit verzoek indienen. Je collega moet het nog accepteren.</p>
         `;
     } else {
         validationDisplay.classList.add('is-valid');
@@ -523,7 +634,7 @@ function runSwapValidation() {
 
 async function handleSwapRequestSubmit() {
     if (!swapRequestState.requesterShift || !swapRequestState.targetShiftId) {
-        showToast('Selecteer eerst een collega en een shift om te ruilen', 'warning');
+        showToast('Selecteer eerst een collega en een dienst om te ruilen', 'warning');
         return;
     }
 
@@ -571,7 +682,7 @@ let shiftAfstaanChoiceState = {
 
 function openShiftAfstaanChoiceModal(shift) {
     shiftAfstaanChoiceState.shift = shift;
-    document.getElementById('shift-afstaan-choice-modal').classList.remove('hidden');
+    toonModal(document.getElementById('shift-afstaan-choice-modal'));
 
     // Add click handlers for the choice buttons
     document.getElementById('choice-swap-btn').onclick = () => {
@@ -586,7 +697,7 @@ function openShiftAfstaanChoiceModal(shift) {
 }
 
 function closeShiftAfstaanChoiceModal() {
-    document.getElementById('shift-afstaan-choice-modal').classList.add('hidden');
+    verbergModal(document.getElementById('shift-afstaan-choice-modal'));
     shiftAfstaanChoiceState.shift = null;
 }
 
@@ -600,8 +711,8 @@ function openTakeoverRequestModal(shift) {
     takeoverRequestState.shiftToGiveAway = shift;
 
     // Get team name
-    const teamName = shift.team && DataStore.settings.teams?.[shift.team]
-        ? DataStore.settings.teams[shift.team].name
+    const teamName = shift.team
+        ? getTeamName(shift.team)
         : shift.team || 'Onbekend team';
 
     // Show shift preview
@@ -623,17 +734,17 @@ function openTakeoverRequestModal(shift) {
     document.getElementById('takeover-message').value = '';
 
     // Show modal
-    document.getElementById('takeover-request-modal').classList.remove('hidden');
+    toonModal(document.getElementById('takeover-request-modal'));
 }
 
 function closeTakeoverRequestModal() {
-    document.getElementById('takeover-request-modal').classList.add('hidden');
+    verbergModal(document.getElementById('takeover-request-modal'));
     takeoverRequestState.shiftToGiveAway = null;
 }
 
 async function handleTakeoverRequestSubmit() {
     if (!takeoverRequestState.shiftToGiveAway) {
-        showToast('Geen shift geselecteerd', 'warning');
+        showToast('Geen dienst geselecteerd', 'warning');
         return;
     }
 
@@ -641,7 +752,7 @@ async function handleTakeoverRequestSubmit() {
 
     try {
         await createTakeoverRequest(takeoverRequestState.shiftToGiveAway.id, message || null);
-        showToast('Verzoek succesvol ingediend! Collega\'s kunnen deze shift nu overnemen.', 'success');
+        showToast('Verzoek succesvol ingediend! Collega\'s kunnen deze dienst nu overnemen.', 'success');
         closeTakeoverRequestModal();
 
         // Switch to swaps view to show the new request
@@ -684,7 +795,6 @@ function handleShiftTemplateChange() {
 
 async function handleShiftSubmit(e) {
     e.preventDefault();
-    console.log('Shift submit clicked');
 
     // Check required fields
     if (!DOM.shiftEmployee.value) {
@@ -734,8 +844,13 @@ async function handleShiftSubmit(e) {
                     // Combine errors and warnings into one overview
                     let html = '<div class="conflict-resolution">';
 
-                    // Show errors
-                    validation.errors.forEach(error => {
+                    // Show errors. #247: een overlap eerst, want die is de
+                    // echte blokkade. Bij twee diensten op dezelfde dag volgt
+                    // de rustmelding er automatisch uit (0 uur rust), en die
+                    // bovenaan zetten leidt de aandacht weg van de oorzaak.
+                    const gesorteerd = [...validation.errors].sort(
+                        (a, b) => (b.code === 'overlap') - (a.code === 'overlap'));
+                    gesorteerd.forEach(error => {
                         const suggestions = generateSuggestions(error, shiftData);
                         html += `<div class="conflict-item">
                             <div class="conflict-error">${escapeHtml(error.message)}</div>`;
@@ -760,9 +875,30 @@ async function handleShiftSubmit(e) {
                         </div>`;
                     });
 
+                    // #247: een overlap is een harde regel. De backend weigert
+                    // hem ook met force: true, want die slaat alleen de
+                    // rustcontrole over. "Toch opslaan" aanbieden beloofde dus
+                    // een uitweg die niet bestaat: je klikte, kreeg een andere
+                    // foutmelding, klikte nog eens en zat weer bij het eerste
+                    // overzicht. Bij een overlap tonen we alleen de melding en
+                    // de suggestieknoppen.
+                    const harteRegel = validation.errors.some(e => e.code === 'overlap');
+                    if (harteRegel) {
+                        html += `<p class="conflict-uitleg">Een overlap kan niet opgeslagen worden:
+                            iemand kan niet op twee plaatsen tegelijk staan. Pas de tijden aan of
+                            verwijder eerst de andere dienst.</p>`;
+                    }
                     html += '</div>';
                     DOM.shiftValidationErrors.innerHTML = html;
                     IconHelper.init(DOM.shiftValidationErrors);
+
+                    if (harteRegel) {
+                        DOM.shiftSubmitBtn.textContent = 'Opslaan';
+                        DOM.shiftSubmitBtn.classList.add('btn-primary');
+                        DOM.shiftSubmitBtn.classList.remove('btn-warning');
+                        AppState._shiftForceOverride = false;
+                        return;
+                    }
 
                     // Change submit button to indicate override
                     DOM.shiftSubmitBtn.textContent = 'Toch opslaan';
@@ -793,8 +929,11 @@ async function handleShiftSubmit(e) {
         }
     } catch (error) {
         const msg = getUserFriendlyError(error);
-        // 422 = backend 11-uur validatie — geef "Toch opslaan" optie
-        if (error.status === 422 || (error.message && error.message.includes('11-uur'))) {
+        // #247: dit testte op status 422, en sinds die status er werkelijk op
+        // staat ving die tak ook de overlap af. De backend zegt nu zelf of de
+        // regel te overrulen is (canOverride), dus daar testen we op. Alleen de
+        // rusttijd komt met true terug.
+        if (error.status === 422 && error.data?.canOverride) {
             DOM.shiftValidationErrors.innerHTML =
                 `<div class="conflict-resolution"><div class="conflict-item"><div class="conflict-warning">${escapeHtml(msg)}</div></div></div>`;
             IconHelper.init(DOM.shiftValidationErrors);
@@ -804,7 +943,15 @@ async function handleShiftSubmit(e) {
             AppState._shiftBackendForce = true;
         } else {
             AppState._shiftBackendForce = false;
-            DOM.shiftValidationErrors.innerHTML = '<ul><li>Er is een fout opgetreden: ' + escapeHtml(msg) + '</li></ul>';
+            AppState._shiftForceOverride = false;
+            DOM.shiftSubmitBtn.textContent = 'Opslaan';
+            DOM.shiftSubmitBtn.classList.add('btn-primary');
+            DOM.shiftSubmitBtn.classList.remove('btn-warning');
+            const uitleg = error.data?.rule === 'overlap'
+                ? '<p class="conflict-uitleg">Een overlap kan niet opgeslagen worden: iemand kan niet op twee plaatsen tegelijk staan. Pas de tijden aan of verwijder eerst de andere dienst.</p>'
+                : '';
+            DOM.shiftValidationErrors.innerHTML =
+                `<div class="conflict-resolution"><div class="conflict-item"><div class="conflict-error">${escapeHtml(msg)}</div></div>${uitleg}</div>`;
         }
     }
 }
@@ -836,7 +983,7 @@ function applySuggestion(btn) {
 
     DOM.shiftValidationErrors.innerHTML = '';
     resetShiftSubmitBtn();
-    showToast('Suggestie toegepast - controleer en klik Opslaan', 'info');
+    showToast('Suggestie toegepast. Controleer en klik Opslaan', 'info');
 }
 
 // ===== ACTIVITY MODAL =====
@@ -854,7 +1001,7 @@ function openAddActivityModal(userId, date, shiftStart, shiftEnd, shiftId) {
     document.getElementById('activity-end').value = '';
     document.getElementById('activity-description').value = '';
     document.getElementById('activity-delete-btn').classList.add('hidden');
-    document.getElementById('activity-modal').classList.remove('hidden');
+    toonModal(document.getElementById('activity-modal'));
     IconHelper.init(document.getElementById('activity-modal'));
 }
 
@@ -878,12 +1025,12 @@ function openEditActivityModal(activityId) {
     document.getElementById('activity-end').value = activity.endTime;
     document.getElementById('activity-description').value = activity.description || '';
     document.getElementById('activity-delete-btn').classList.remove('hidden');
-    document.getElementById('activity-modal').classList.remove('hidden');
+    toonModal(document.getElementById('activity-modal'));
     IconHelper.init(document.getElementById('activity-modal'));
 }
 
 function closeActivityModal() {
-    document.getElementById('activity-modal').classList.add('hidden');
+    verbergModal(document.getElementById('activity-modal'));
 }
 
 async function handleActivitySubmit(e) {
@@ -937,7 +1084,8 @@ async function handleActivitySubmit(e) {
 async function handleActivityDelete() {
     const id = document.getElementById('activity-id').value;
     if (!id) return;
-    if (!await showConfirm('Activiteit verwijderen?')) return;
+    if (!await showConfirm('Activiteit verwijderen?', 'Activiteit verwijderen',
+        { danger: true, confirmText: 'Activiteit verwijderen' })) return;
 
     try {
         await deleteActivity(parseInt(id, 10));

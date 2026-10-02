@@ -7,7 +7,7 @@ jest.mock('../src/db', () => ({
   }
 }));
 
-const { _helpers } = require('../src/email');
+const { _helpers, sendEmail } = require('../src/email');
 const { escapeHtml, formatDate, formatTime, shiftDetailBox, baseTemplate } = _helpers;
 
 // ===== escapeHtml =====
@@ -182,5 +182,26 @@ describe('baseTemplate', () => {
   test('includes the app link button', () => {
     const html = baseTemplate('X', 'Y');
     expect(html).toContain('Bekijk in de app');
+  });
+});
+
+
+// ===== sendEmail =====
+
+// Regressie #195: sendEmail gaf niets terug en ving alleen echte crashes op.
+// De Resend-bibliotheek gooit niet bij een mislukking maar levert
+// { data, error }, dus een geweigerd adres of een onverifieerd domein verdween
+// spoorloos. Nu geeft de functie altijd een resultaat terug en gooit ze nooit,
+// zodat de aanroeper kan antwoorden op wat er echt gebeurd is.
+describe('sendEmail', () => {
+  test('returns a result object instead of undefined when email is not configured', async () => {
+    // In de testomgeving staat er geen RESEND_API_KEY, dus resend is null.
+    const result = await sendEmail('iemand@hetvlot.be', 'Onderwerp', '<p>Body</p>');
+    expect(result).toEqual(expect.objectContaining({ ok: false, skipped: true }));
+    expect(typeof result.error).toBe('string');
+  });
+
+  test('never throws', async () => {
+    await expect(sendEmail(null, null, null)).resolves.toBeDefined();
   });
 });

@@ -1,6 +1,72 @@
 // ===== ROOSTERBOUWER: CONCEPTEN (opslaan, laden, toepassen, vergelijken) =====
 
+/**
+ * #227: is de GET /schedule-drafts echt mislukt bij het opstarten (niet zomaar
+ * "geen rechten"), blokkeer dan elke schrijfactie op concepten. Zonder deze
+ * controle schrijft de bouwer stilzwijgend naar de oude settings-opslag in
+ * plaats van naar de echte tabel, en dat concept is na een geslaagde herlaad
+ * onvindbaar voor de rest van de app.
+ * @returns {boolean} true als de aanroeper moet stoppen
+ */
+function blokkeerBijMislukteDraftLoad() {
+    if (!DataStore._draftsLoadFailed) return false;
+    showToast('Concepten konden niet geladen worden bij het opstarten. Herlaad de pagina voor je een concept aanmaakt, wijzigt of verwijdert.', 'error');
+    return true;
+}
+
+// #383: welk concept openstaat woonde op twee plekken die los van elkaar
+// bijgewerkt werden: AppState (wat het scherm toont) en localStorage (wat een
+// herlading terugzet). Het aanmaken van een nieuw concept schreef alleen het
+// eerste, het sluiten van een concept wiste alleen het eerste. Daardoor kon je
+// na een herlading in het overzicht belanden terwijl je in een concept zat, of
+// omgekeerd terug in een concept dat je net gesloten had. Deze twee functies
+// zijn sindsdien de enige plek waar dat paar verandert, zodat het niet meer
+// uiteen kan lopen.
+function onthoudActiefConcept(id, naam) {
+    AppState.builderLoadedDraftId = id;
+    AppState.builderLoadedDraftName = naam;
+    try {
+        localStorage.setItem('hetvlot_activeDraftId', String(id));
+    } catch (e) { /* privémodus of volle opslag: het scherm klopt nog wel */ }
+}
+
+function vergeetActiefConcept() {
+    AppState.builderLoadedDraftId = null;
+    AppState.builderLoadedDraftName = null;
+    try {
+        localStorage.removeItem('hetvlot_activeDraftId');
+    } catch (e) { /* zie hierboven */ }
+}
+
+// Een concept is meer dan zijn diensten: gesloten dagen, bezettingsregels en
+// vergaderingen tellen evengoed. Deze ene bron bepaalt zowel of de
+// opslaanknoppen aan staan als of opslaan zin heeft — anders raken die twee
+// uit elkaar, zoals eerder gebeurde: een concept met enkel gesloten dagen kon
+// je niet opslaan én de knop stond grijs.
+function builderHeeftIets() {
+    const vulling = g => g && Object.keys(g).length > 0
+        && Object.values(g).some(d => d && Object.keys(d).length > 0);
+
+    if (vulling(AppState.builderGrid)) return true;
+    if (Object.values(AppState.builderGridByWeek || {}).some(vulling)) return true;
+    if (Object.values(AppState.builderPattern?.weeks || {})
+        .some(w => Array.isArray(w?.closedDays) && w.closedDays.length > 0)) return true;
+    if (Object.keys(AppState.builderStaffingRulesByWeek || {}).length > 0
+        || Object.keys(AppState.builderStaffingRules || {}).length > 0) return true;
+    if (Object.values(AppState.builderMeetings || {})
+        .some(v => Array.isArray(v) && v.length > 0)) return true;
+    return false;
+}
+
+function builderHeeftInhoud() {
+    if (builderHeeftIets()) return true;
+    showToast('Er valt nog niets op te slaan.\nVul een dienst in, sluit een dag of stel bezetting in.', 'warning');
+    return false;
+}
+
 async function saveBuilderDraft() {
+    if (blokkeerBijMislukteDraftLoad()) return;
+
     // Sync current week to cache before saving
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
 
@@ -13,40 +79,26 @@ async function saveBuilderDraft() {
             hasAnyData = true;
         }
     }
-    if (!hasAnyData) return;
+
+    if (!builderHeeftInhoud()) return;
 
     // If a draft is loaded, UPDATE it directly (no modal needed)
     if (AppState.builderLoadedDraftId) {
         try {
-            const updateData = {
-                grid: JSON.parse(JSON.stringify(multiGrid)),
-                weekNumber: AppState.builderWeekNumber,
-                teamFilter: AppState.builderTeamFilter,
-                type: AppState.builderConceptType || 'basis',
-                holidayPeriodId: AppState.builderHolidayPeriodId || null
-            };
-            // Include pattern + rotation + staffing rules in grid metadata
-            if (AppState.builderPattern) updateData.grid._pattern = AppState.builderPattern;
-            // Sync staffing rules cache and save
-            AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules));
-            if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
-                updateData.grid._staffingRules = AppState.builderStaffingRulesByWeek;
-            }
-            // Save team meetings in draft
-            updateData.grid._teamMeetings = AppState.builderMeetings || {};
-            // Rotation is managed via Settings, not stored in draft
+            // #148: hier stond dezelfde opbouw van het volledige raster als in
+            // autoSaveBuilderDraft, met dezelfde PUT die alle weken verving.
+            // Twee plekken die hetzelfde doen is er een te veel, en de tweede
+            // wordt vergeten. Bewaren gaat nu overal via die ene functie, die
+            // per week wegschrijft.
             const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
             if (cached) cached._previousGrid = JSON.parse(JSON.stringify(cached.grid || {}));
-            await updateScheduleDraft(AppState.builderLoadedDraftId, updateData);
-            // Update local cache
-            if (cached) {
-                cached.grid = updateData.grid;
-                cached.weekNumber = AppState.builderWeekNumber;
-                cached.teamFilter = AppState.builderTeamFilter;
-                cached.updatedAt = new Date().toISOString();
-                cached.updatedByName = AppState.currentUser?.name || 'Onbekend';
+
+            const gelukt = await autoSaveBuilderDraft();
+            if (!gelukt) {
+                showToast('Fout bij bijwerken concept', 'error');
+                return;
             }
-            AppState.builderIsDirty = false;
+
             await unlockScheduleDraft(AppState.builderLoadedDraftId);
             AppState.builderScreen = 'overview';
             renderBuilder();
@@ -55,7 +107,7 @@ async function saveBuilderDraft() {
             // If this draft is currently active AND grid actually changed, ask to re-apply
             const newestActiveId = findNewestActiveDraftId(DataStore.settings.schedule_drafts || []);
             const previousGrid = cached ? JSON.stringify(cached._previousGrid) : null;
-            const newGrid = JSON.stringify(updateData.grid);
+            const newGrid = cached ? JSON.stringify(cached.grid) : null;
             if (newestActiveId === AppState.builderLoadedDraftId && previousGrid !== newGrid) {
                 const wantsApply = await showReapplyAfterEditModal(AppState.builderLoadedDraftName);
                 if (wantsApply) {
@@ -100,8 +152,7 @@ async function saveBuilderDraft() {
             const apiResult = await createScheduleDraft(draftData);
             DataStore.settings.schedule_drafts.push(apiResult.draft);
             // Track as loaded draft
-            AppState.builderLoadedDraftId = apiResult.draft.id;
-            AppState.builderLoadedDraftName = apiResult.draft.name;
+            onthoudActiefConcept(apiResult.draft.id, apiResult.draft.name);
         } else {
             const drafts = [...(DataStore.settings.schedule_drafts || [])];
             draftData.createdBy = AppState.currentUser?.id;
@@ -111,8 +162,7 @@ async function saveBuilderDraft() {
             drafts.push(draftData);
             await saveSettings('schedule_drafts', drafts);
             DataStore.settings.schedule_drafts = drafts;
-            AppState.builderLoadedDraftId = draftData.id;
-            AppState.builderLoadedDraftName = draftData.name;
+            onthoudActiefConcept(draftData.id, draftData.name);
         }
     } catch (err) {
         console.error('Error saving draft:', err);
@@ -127,6 +177,8 @@ async function saveBuilderDraft() {
 }
 
 async function saveBuilderDraftAs() {
+    if (blokkeerBijMislukteDraftLoad()) return;
+
     // Force "Save As": always show modal and create new draft
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
 
@@ -138,7 +190,7 @@ async function saveBuilderDraftAs() {
             hasAnyData = true;
         }
     }
-    if (!hasAnyData) return;
+    if (!builderHeeftInhoud()) return;
 
     const result = await showDraftSaveModal();
     if (!result) return;
@@ -168,8 +220,7 @@ async function saveBuilderDraftAs() {
         if (DataStore._draftsFromTable) {
             const apiResult = await createScheduleDraft(draftData);
             DataStore.settings.schedule_drafts.push(apiResult.draft);
-            AppState.builderLoadedDraftId = apiResult.draft.id;
-            AppState.builderLoadedDraftName = apiResult.draft.name;
+            onthoudActiefConcept(apiResult.draft.id, apiResult.draft.name);
         } else {
             const drafts = [...(DataStore.settings.schedule_drafts || [])];
             draftData.createdBy = AppState.currentUser?.id;
@@ -179,8 +230,7 @@ async function saveBuilderDraftAs() {
             drafts.push(draftData);
             await saveSettings('schedule_drafts', drafts);
             DataStore.settings.schedule_drafts = drafts;
-            AppState.builderLoadedDraftId = draftData.id;
-            AppState.builderLoadedDraftName = draftData.name;
+            onthoudActiefConcept(draftData.id, draftData.name);
         }
     } catch (err) {
         console.error('Error saving draft as:', err);
@@ -204,7 +254,7 @@ function showNewConceptTypeModal() {
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2>Nieuw concept</h2>
-                <span class="modal-close">&times;</span>
+                <button type="button" class="modal-close" aria-label="Sluiten">&times;</button>
             </div>
             <div class="modal-body modal-body-padded">
                 <p class="text-sm text-muted mb-md">Kies het type concept dat je wilt aanmaken.</p>
@@ -254,17 +304,24 @@ function showNewConceptTypeModal() {
     IconHelper.init(overlay);
 
     // Toggle highlight + vakantie period select
+    //
+    // #363: dit hing alleen aan click. Nu de keuzerondjes weer focusbaar zijn
+    // (ze stonden op display:none) kiest de gebruiker met de pijltjestoetsen,
+    // en dat geeft change, geen click. Beide gebeurtenissen lopen daarom door
+    // dezelfde functie.
+    const kiesType = (opt) => {
+        overlay.querySelectorAll('.concept-type-option').forEach(o => o.classList.remove('selected'));
+        opt.classList.add('selected');
+        opt.querySelector('input').checked = true;
+        const periodSelect = overlay.querySelector('#vakantie-period-select');
+        const isVakantie = opt.dataset.value === 'vakantie';
+        periodSelect.classList.toggle('hidden', !isVakantie);
+        const nameInput = overlay.querySelector('#concept-name-input');
+        if (!isVakantie) nameInput.value = 'Basisrooster';
+    };
     overlay.querySelectorAll('.concept-type-option').forEach(opt => {
-        opt.addEventListener('click', () => {
-            overlay.querySelectorAll('.concept-type-option').forEach(o => o.classList.remove('selected'));
-            opt.classList.add('selected');
-            opt.querySelector('input').checked = true;
-            const periodSelect = overlay.querySelector('#vakantie-period-select');
-            const isVakantie = opt.dataset.value === 'vakantie';
-            periodSelect.classList.toggle('hidden', !isVakantie);
-            const nameInput = overlay.querySelector('#concept-name-input');
-            if (!isVakantie) nameInput.value = 'Basisrooster';
-        });
+        opt.addEventListener('click', () => kiesType(opt));
+        opt.querySelector('input')?.addEventListener('change', () => kiesType(opt));
     });
 
     // Auto-fill name when a vakantie period is selected
@@ -275,9 +332,38 @@ function showNewConceptTypeModal() {
 
     overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
     overlay.querySelector('#concept-type-cancel').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+    // en de muis buiten het kader loslaat.
+    overlay.addEventListener('mousedown', (e) => {
+        // #359: niet wegklikken terwijl het concept wordt aangemaakt, anders
+        // verdwijnt de dialoog alsnog voor de server geantwoord heeft.
+        if (e.target === overlay && !overlay.querySelector('#concept-type-confirm').disabled) overlay.remove();
+    });
 
-    overlay.querySelector('#concept-type-confirm').addEventListener('click', async () => {
+    // #359: de dialoog sloot vroeger meteen, nog voor de POST vertrok. Bij een
+    // trage aanmaak (een koude Render-instantie) gebeurde er zichtbaar niets,
+    // en bij een fout was de ingevulde naam weg. De dialoog blijft nu staan tot
+    // het concept er echt is. De fout komt in de dialoog zelf, niet als toast
+    // op een scherm waar de gebruiker niet meer is.
+    const bevestigKnop = overlay.querySelector('#concept-type-confirm');
+    const annuleerKnop = overlay.querySelector('#concept-type-cancel');
+    const sluitKnop = overlay.querySelector('.modal-close');
+    const foutVak = document.createElement('p');
+    foutVak.className = 'text-sm text-danger mt-md hidden';
+    foutVak.setAttribute('role', 'alert');
+    overlay.querySelector('.modal-body').appendChild(foutVak);
+
+    const zetBezig = (bezig) => {
+        bevestigKnop.disabled = bezig;
+        annuleerKnop.disabled = bezig;
+        sluitKnop.disabled = bezig;
+        bevestigKnop.textContent = bezig ? 'Aanmaken…' : 'Aanmaken';
+    };
+
+    bevestigKnop.addEventListener('click', async () => {
+        if (blokkeerBijMislukteDraftLoad()) return;
+        if (bevestigKnop.disabled) return;
+
         const type = overlay.querySelector('input[name="concept-type"]:checked')?.value || 'basis';
         let holidayPeriodId = null;
 
@@ -293,19 +379,6 @@ function showNewConceptTypeModal() {
         const nameInputEl = overlay.querySelector('#concept-name-input');
         const conceptName = (nameInputEl?.value || '').trim() || (type === 'vakantie' ? 'Vakantieconcept' : 'Basisrooster');
 
-        overlay.remove();
-
-        // Initialize new concept in AppState
-        AppState.builderGrid = {};
-        AppState.builderGridByWeek = {};
-        AppState.builderStaffingRules = {};
-        AppState.builderStaffingRulesByWeek = {};
-        AppState.builderShowStaffingEditor = false;
-        AppState.builderShowMeetingsEditor = false;
-        AppState.builderMeetings = {};
-        AppState.builderLoadedDraftId = null;
-        AppState.builderLoadedDraftName = conceptName;
-
         // Determine cycle length: for vakantie concepts, calculate from period dates
         let initCycleLength = 1;
         if (type === 'vakantie' && holidayPeriodId) {
@@ -315,7 +388,11 @@ function showNewConceptTypeModal() {
                 const pEnd = parseDateOnly(period.endDate);
                 const pMonday = getMondayOfWeek(pStart);
                 const pEndMonday = getMondayOfWeek(pEnd);
-                initCycleLength = Math.floor((pEndMonday - pMonday) / (7 * 86400000)) + 1;
+                // Afronden, niet afkappen: over de overgang naar zomertijd liggen
+                // twee lokale middernachten 6,958 dagen uit elkaar, en Math.floor
+                // maakt daar een week te weinig van. Een vakantie die die grens
+                // overspant kreeg dan een concept met één week te weinig.
+                initCycleLength = Math.round((pEndMonday - pMonday) / (7 * 86400000)) + 1;
             }
         }
 
@@ -324,15 +401,11 @@ function showNewConceptTypeModal() {
         for (let w = 1; w <= initCycleLength; w++) {
             weeksInit[String(w)] = { closedDays: [], label: 'alle dagen open' };
         }
-        AppState.builderPattern = {
+        const nieuwPatroon = {
             cycleLength: initCycleLength,
             referenceDate: getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '',
             weeks: weeksInit
         };
-        AppState.builderIsDirty = false;
-        AppState.builderWeekNumber = 1;
-        AppState.builderConceptType = type;
-        AppState.builderHolidayPeriodId = holidayPeriodId;
 
         // Immediately save new empty concept to DB so auto-save has a valid ID
         const newDraftId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -341,20 +414,28 @@ function showNewConceptTypeModal() {
             name: conceptName,
             teamFilter: AppState.builderTeamFilter,
             weekNumber: 1,
-            grid: { _multiWeek: true, _pattern: AppState.builderPattern },
+            grid: { _multiWeek: true, _pattern: nieuwPatroon },
             validFrom: null,
             validUntil: null,
             type,
             holidayPeriodId: holidayPeriodId || null
         };
+
+        // #359: de AppState pas aanraken als het concept er is. Voorheen werd
+        // het raster al leeggemaakt voor de POST, dus een mislukte aanmaak liet
+        // de bouwer leeg achter met de naam van een concept dat niet bestaat.
+        let draftId = newDraftId;
+        let draftNaam = conceptName;
+        foutVak.classList.add('hidden');
+        zetBezig(true);
         try {
             if (DataStore._draftsFromTable) {
                 const apiResult = await createScheduleDraft(draftData);
                 const savedDraft = apiResult.draft;
                 if (!DataStore.settings.schedule_drafts) DataStore.settings.schedule_drafts = [];
                 DataStore.settings.schedule_drafts.push(savedDraft);
-                AppState.builderLoadedDraftId = savedDraft.id;
-                AppState.builderLoadedDraftName = savedDraft.name;
+                draftId = savedDraft.id;
+                draftNaam = savedDraft.name;
             } else {
                 draftData.createdBy = AppState.currentUser?.id;
                 draftData.createdByName = AppState.currentUser?.name || 'Onbekend';
@@ -363,13 +444,41 @@ function showNewConceptTypeModal() {
                 const drafts = [...(DataStore.settings.schedule_drafts || []), draftData];
                 await saveSettings('schedule_drafts', drafts);
                 DataStore.settings.schedule_drafts = drafts;
-                AppState.builderLoadedDraftId = newDraftId;
-                AppState.builderLoadedDraftName = conceptName;
             }
         } catch (err) {
             console.error('Error creating draft:', err);
-            showToast('Fout bij aanmaken concept', 'error');
+            zetBezig(false);
+            foutVak.textContent = `${getUserFriendlyError(err)} Je invulling blijft staan.`;
+            foutVak.classList.remove('hidden');
             return;
+        }
+
+        overlay.remove();
+
+        // Initialize new concept in AppState
+        AppState.builderGrid = {};
+        AppState.builderGridByWeek = {};
+    AppState.builderVuileWeken = new Set();
+        AppState.builderVuileWeken = new Set();
+        AppState.builderStaffingRules = {};
+        AppState.builderStaffingRulesByWeek = {};
+        AppState.builderShowStaffingEditor = false;
+        AppState.builderShowMeetingsEditor = false;
+        AppState.builderMeetings = {};
+        AppState.builderPattern = nieuwPatroon;
+        AppState.builderIsDirty = false;
+        AppState.builderWeekNumber = 1;
+        AppState.builderConceptType = type;
+        AppState.builderHolidayPeriodId = holidayPeriodId;
+        onthoudActiefConcept(draftId, draftNaam);
+
+        // #304: een nieuw concept nam de vergrendeling niet, terwijl elk concept
+        // dat je via de lijst opent dat wel doet. Zonder lock kan een tweede
+        // beheerder er meteen in, en ontbreekt de badge "In bewerking door X".
+        if (DataStore._draftsFromTable) {
+            lockScheduleDraft(draftId, false).catch(fout => {
+                console.error('Vergrendelen van het nieuwe concept mislukt:', fout);
+            });
         }
 
         AppState.builderScreen = 'editor';
@@ -386,7 +495,7 @@ function showDraftSaveModal() {
             <div class="modal-content modal-content--xs">
                 <div class="modal-header">
                     <h2>Concept opslaan</h2>
-                    <span class="modal-close" id="draft-save-close"><i data-lucide="x"></i></span>
+                    <button type="button" class="modal-close" id="draft-save-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
                 </div>
                 <div class="modal-body">
                     <div class="form-group">
@@ -432,26 +541,51 @@ function showDraftSaveModal() {
             if (e.key === 'Enter') overlay.querySelector('#draft-save-confirm').click();
             if (e.key === 'Escape') cleanup(null);
         });
-        overlay.addEventListener('click', (e) => {
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => {
             if (e.target === overlay) cleanup(null);
         });
     });
 }
 
+// #332: elk vroeg-returnpad hieronder laat de bouwer staan waar hij stond.
+// De aanroepers zetten builderScreen niet meer vooraf op 'editor'; dat doet
+// doLoadDraft pas als het laden echt doorgaat. Anders bleef er een spookeditor
+// achter met de titel "Nieuw concept" en het raster van het vorige concept.
 async function loadBuilderDraft(draftId) {
     const drafts = DataStore.settings.schedule_drafts || [];
     const draft = drafts.find(d => d.id === draftId);
-    if (!draft) return;
+    if (!draft) {
+        showToast('Dit concept bestaat niet meer. Ververs de lijst.', 'error');
+        return;
+    }
 
     // Try to acquire lock
-    const lockResult = await lockScheduleDraft(draftId, false);
+    // #332: lockScheduleDraft gebruikt een kale fetch en gooit dus bij een
+    // netwerkfout. Zonder deze catch werd dat een stille onbehandelde rejection
+    // en gebeurde er op het scherm niets.
+    let lockResult;
+    try {
+        lockResult = await lockScheduleDraft(draftId, false);
+    } catch (fout) {
+        console.error('Vergrendelen van het concept mislukt:', fout);
+        showToast('Het concept kon niet vergrendeld worden. Controleer je verbinding en probeer opnieuw.', 'error');
+        return;
+    }
     if (!lockResult.ok && lockResult.status === 423) {
         const force = await showConfirm(
-            `Dit concept wordt momenteel bewerkt door ${escapeHtml(lockResult.lockedByName || 'iemand anders')}. Wil je het toch openen? De andere bewerker verliest dan zijn vergrendeling.`,
+            `Dit concept wordt momenteel bewerkt door ${lockResult.lockedByName || 'iemand anders'}. Wil je het toch openen? De andere bewerker verliest dan zijn vergrendeling.`,
             'Concept in gebruik'
         );
         if (!force) return;
-        await lockScheduleDraft(draftId, true);
+        try {
+            await lockScheduleDraft(draftId, true);
+        } catch (fout) {
+            console.error('Vergrendeling overnemen mislukt:', fout);
+            showToast('De vergrendeling kon niet overgenomen worden. Controleer je verbinding en probeer opnieuw.', 'error');
+            return;
+        }
     }
 
     if (AppState.builderIsDirty) {
@@ -465,6 +599,10 @@ async function loadBuilderDraft(draftId) {
 }
 
 function doLoadDraft(draft) {
+    // #305: de bewaarstatus hoort bij het concept dat je verlaat, niet bij het
+    // concept dat je opent. Wissen vóór de render, anders toont de statusregel
+    // van B meteen "Bewaard om 14:30" van A.
+    startBuilderAutoSave();
     const grid = draft.grid || {};
     AppState.builderTeamFilter = draft.teamFilter || null;
     AppState.builderGridByWeek = {};
@@ -507,19 +645,38 @@ function doLoadDraft(draft) {
     AppState.builderMeetings = grid._teamMeetings ? JSON.parse(JSON.stringify(grid._teamMeetings)) : {};
     AppState.builderShowMeetingsEditor = false;
 
-    AppState.builderLoadedDraftId = draft.id;
-    AppState.builderLoadedDraftName = draft.name;
-    localStorage.setItem('hetvlot_activeDraftId', String(draft.id));
+    onthoudActiefConcept(draft.id, draft.name);
     AppState.builderConceptType = draft.type || 'basis';
     AppState.builderHolidayPeriodId = draft.holidayPeriodId || null;
     AppState.builderIsDirty = false;
     AppState.builderScreen = 'editor';
     renderBuilder();
     showToast(`Concept "${draft.name}" geladen`, 'info');
+
+    // #378: de afwezigheden zitten in een venster. Een vakantieconcept kijkt
+    // naar een periode die maanden vooruit kan liggen, en de filter "Verberg
+    // verlof" leest die afwezigheden. Buiten het venster zou die filter stil
+    // niemand verbergen, wat eruitziet als "niemand heeft verlof" in plaats van
+    // "we weten het niet".
+    const hp = AppState.builderHolidayPeriodId
+        ? (DataStore.settings.holidayPeriods || []).find(x => String(x.id) === String(AppState.builderHolidayPeriodId))
+        : null;
+    if (hp && typeof zorgAfwezigheidVoorBereik === 'function') {
+        zorgAfwezigheidVoorBereik(hp.startDate, hp.endDate).then(gelukt => {
+            if (!gelukt) {
+                showToast('De afwezigheden voor deze vakantieperiode konden niet geladen worden. "Verberg verlof" is daardoor onbetrouwbaar.', 'error');
+                return;
+            }
+            if (AppState.builderScreen === 'editor') renderBuilder();
+        });
+    }
 }
 
 async function deleteBuilderDraft(draftId) {
-    const confirmed = await showConfirm('Dit concept verwijderen?');
+    if (blokkeerBijMislukteDraftLoad()) return;
+
+    const confirmed = await showConfirm('Dit concept verwijderen?', 'Concept verwijderen',
+        { danger: true, confirmText: 'Concept verwijderen' });
     if (!confirmed) return;
 
     try {
@@ -541,6 +698,8 @@ async function deleteBuilderDraft(draftId) {
 }
 
 async function renameBuilderDraft(draftId) {
+    if (blokkeerBijMislukteDraftLoad()) return;
+
     const drafts = DataStore.settings.schedule_drafts || [];
     const draft = drafts.find(d => d.id === draftId);
     if (!draft) return;
@@ -611,7 +770,7 @@ async function deactivateBuilderDraft(draftId) {
                 cached.lastAppliedUntil = null;
             }
             renderBuilder();
-            showToast('Concept uitgeplanend', 'success');
+            showToast('Concept uitgepland', 'success');
         } catch (err) {
             console.error('Error unscheduling draft:', err);
             showToast('Fout bij uitplannen: ' + err.message, 'error');
@@ -629,19 +788,19 @@ async function deactivateBuilderDraft(draftId) {
             <div class="modal-content modal-content--sm">
                 <div class="modal-header">
                     <h2>Concept deactiveren</h2>
-                    <span class="modal-close" id="deactivate-close"><i data-lucide="x"></i></span>
+                    <button type="button" class="modal-close" id="deactivate-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-sm"><strong>${escapeHtml(draft.name)}</strong> deactiveren?</p>
                     <div class="form-group">
-                        <label>Einddatum (shifts na deze datum worden verwijderd)</label>
+                        <label>Einddatum (diensten na deze datum worden verwijderd)</label>
                         <input type="date" id="deactivate-end-date" class="form-input" value="${todayStr}">
                     </div>
                     <label class="checkbox-label-row">
                         <input type="checkbox" id="deactivate-delete-manual">
                         Verwijder ook handmatig aangemaakte shifts
                     </label>
-                    <span class="form-hint form-hint-block mt-sm">Auto-gegenereerde shifts na de einddatum worden altijd verwijderd.</span>
+                    <span class="form-hint form-hint-block mt-sm">Automatisch aangemaakte diensten na de einddatum worden altijd verwijderd.</span>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary btn-sm" id="deactivate-cancel">Annuleren</button>
@@ -663,7 +822,9 @@ async function deactivateBuilderDraft(draftId) {
         });
         overlay.querySelector('#deactivate-cancel').addEventListener('click', () => { cleanup(); resolve(null); });
         overlay.querySelector('#deactivate-close').addEventListener('click', () => { cleanup(); resolve(null); });
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
     });
 
     if (!result) return;
@@ -689,13 +850,33 @@ async function deactivateBuilderDraft(draftId) {
     }
 }
 
+/**
+ * Past een concept toe, met bescherming tegen dubbel klikken.
+ *
+ * #303: die bescherming zat vroeger in de functie zelf, en één van de zeven
+ * vroege returns zette de vlag niet terug. Dat was de tak "gekoppelde
+ * vakantieperiode niet gevonden". Vanaf dat moment was élke volgende
+ * toepassing een stille no-op tot de pagina herladen werd, ook bij een ander
+ * concept en zonder enige melding: je klikte op Toepassen en er gebeurde
+ * niets.
+ *
+ * De vlag wordt nu hier beheerd, in een try/finally rond het geheel. Zo kan
+ * een nieuwe vroege return dit niet opnieuw veroorzaken.
+ */
 async function applyBuilderDraft(draftId) {
     if (AppState._applyingDraft) return;
     AppState._applyingDraft = true;
+    try {
+        return await voerConceptToepassenUit(draftId);
+    } finally {
+        AppState._applyingDraft = false;
+    }
+}
 
+async function voerConceptToepassenUit(draftId) {
     const drafts = DataStore.settings.schedule_drafts || [];
     const draft = drafts.find(d => d.id === draftId);
-    if (!draft) { AppState._applyingDraft = false; return; }
+    if (!draft) return;
 
     const isVakantie = draft.type === 'vakantie';
 
@@ -719,31 +900,35 @@ async function applyBuilderDraft(draftId) {
             Object.keys(draftGrid).filter(k => !k.startsWith('_')).forEach(id => empIds.add(id));
         }
 
+        // #263: hetzelfde geval aan de vakantiekant. Dit liep niet vast, maar
+        // een leeg concept toepassen wist met clearBlocks wel de blokkades en
+        // levert nul shifts op. De melding zei dan "0 medewerkers krijgen een
+        // vakantie-shift", wat eruitziet als een geldige keuze in plaats van
+        // een concept dat nog niet is ingevuld.
+        if (empIds.size === 0) {
+            showToast('Dit vakantieconcept bevat nog geen ingevulde dagen. Open het, vul het rooster in en sla het op voor je het toepast.', 'warning');
+            return;
+        }
+
         const confirmed = await showConfirm(
             `Vakantieconcept "${draft.name}" toepassen?\n\n` +
             `Periode: ${fromStr} – ${untilStr}\n` +
-            `${empIds.size} medewerkers krijgen een vakantie-shift.\n` +
-            `Overige medewerkers krijgen GEEN shift tijdens deze periode.`,
+            `${empIds.size} medewerkers krijgen een vakantiedienst.\n` +
+            `Overige medewerkers krijgen GEEN dienst tijdens deze periode.`,
             'Vakantieconcept toepassen'
         );
-        if (!confirmed) { AppState._applyingDraft = false; return; }
+        if (!confirmed) return;
 
         showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
         try {
-            let result = await applyScheduleDraft(draftId, { clearBlocks: true });
-
-            // Handmatige wijzigingen detectie
-            if (result.needsManualConfirmation) {
-                hideSectionLoading('planning-view');
-                const overwrite = await showConfirm(
-                    `Er zijn ${result.manualShiftCount} handmatige diensten in de vakantieperiode.\n\nOK — Alles verwijderen (handmatige aanpassingen gaan verloren)\nAnnuleren — Alleen automatische diensten verwijderen`,
-                    'Handmatige diensten gevonden'
-                );
-                showSectionLoading('planning-view', 'Vakantieconcept toepassen...');
-                result = await applyScheduleDraft(draftId, { clearBlocks: true, confirmOverwrite: overwrite });
-            }
-
-            showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt)`, 'success');
+            const result = await applyScheduleDraft(draftId, { clearBlocks: true });
+            // Overgeslagen dagen expliciet melden: die komen uit gridcellen die
+            // je in de bouwer niet meer ziet omdat de dag intussen gesloten is.
+            const gesloten = result.closedDaySkips
+                ? `, ${result.closedDaySkips} overgeslagen op gesloten dagen` : '';
+            const dicht = result.conceptClosedCount
+                ? `, ${result.conceptClosedCount} dagen gesloten in de planning` : '';
+            showToast(`Vakantieconcept "${draft.name}" toegepast (${result.shifts.created} shifts aangemaakt${gesloten}${dicht})`, 'success');
 
             const draftToMark = drafts.find(d => d.id === draftId);
             if (draftToMark) {
@@ -753,14 +938,14 @@ async function applyBuilderDraft(draftId) {
                 draftToMark.lastAppliedUntil = hp.endDate;
             }
 
-            await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshActivities()]);
+            // settings mee: de gesloten dagen van dit concept komen daarvandaan
+            await Promise.all([refreshShifts(), fetchShiftBlocks(), refreshActivities(), refreshSettings()]);
             renderBuilder();
         } catch (error) {
             console.error('Error applying vakantie draft:', error);
             showToast('Fout bij toepassen vakantieconcept: ' + getUserFriendlyError(error), 'error');
         } finally {
             hideSectionLoading('planning-view');
-            AppState._applyingDraft = false;
         }
         return;
     }
@@ -779,6 +964,20 @@ async function applyBuilderDraft(draftId) {
         weeksToApply.sort((a, b) => a.weekNumber - b.weekNumber);
     } else {
         weeksToApply.push({ weekNumber: draft.weekNumber || 1, grid: draftGrid });
+    }
+
+    // #263: een pas aangemaakt basisconcept heeft wel _multiWeek en _pattern,
+    // maar nog geen genummerde weken. weeksToApply bleef dan leeg en verderop
+    // liep weeksToApply[0].weekNumber stuk op undefined. De fout kwam in de
+    // console terecht, er verscheen geen venster en geen melding, dus voor de
+    // gebruiker deed Toepassen gewoon niets. Dat is precies de handeling die de
+    // installatiechecklist aanraadt.
+    //
+    // Bewust niet stilletjes doorgaan met een leeg rooster: dat zou ieders
+    // basisrooster wissen. Zeggen wat er ontbreekt is de enige zinnige uitweg.
+    if (weeksToApply.length === 0) {
+        showToast('Dit concept bevat nog geen ingevulde weken. Open het, vul het rooster in en sla het op voor je het toepast.', 'warning');
+        return;
     }
 
     // Build preview of changes for ALL employees (not just those in the grid)
@@ -833,7 +1032,7 @@ async function applyBuilderDraft(draftId) {
 
     // Show apply modal with editable dates + changes preview
     const applyResult = await showDraftApplyModal(draft, weekLabel, changesCount, allEmployees.length, changesSummary);
-    if (!applyResult) { AppState._applyingDraft = false; return; }
+    if (!applyResult) return;
 
     showSectionLoading('planning-view', 'Concept toepassen...');
     try {
@@ -841,7 +1040,8 @@ async function applyBuilderDraft(draftId) {
         let result = await applyScheduleDraft(draftId, {
             clearBlocks: true,
             applyStartDate: applyResult.startDate,
-            applyEndDate: applyResult.endDate
+            applyEndDate: applyResult.endDate,
+            confirmOverwrite: applyResult.confirmOverwrite ? true : null
         });
 
         // Overlap detectie — ander actief concept overlapt
@@ -853,30 +1053,14 @@ async function applyBuilderDraft(draftId) {
                 `De volgende actieve concepten overlappen met deze periode:\n\n• ${overlapNames}\n\nDeze concepten worden ingekort tot ${result.newStartDate}. Doorgaan?`,
                 'Concepten overlappen'
             );
-            if (!confirmed) { AppState._applyingDraft = false; return; }
-            showSectionLoading('planning-view', 'Concept toepassen...');
-            result = await applyScheduleDraft(draftId, {
-                clearBlocks: true,
-                applyStartDate: applyResult.startDate,
-                applyEndDate: applyResult.endDate,
-                confirmOverlap: true
-            });
-        }
-
-        // Handmatige wijzigingen detectie
-        if (result.needsManualConfirmation) {
-            hideSectionLoading('planning-view');
-            const overwrite = await showConfirm(
-                `Er zijn ${result.manualShiftCount} diensten die handmatig zijn aangepast (bijv. geruild, tijden gewijzigd of handmatig toegevoegd).\n\nWat wil je doen?\n\n• OK — Alles overschrijven met het concept (handmatige aanpassingen gaan verloren)\n• Annuleren — Alleen automatische diensten vervangen, handmatige aanpassingen behouden`,
-                'Handmatige diensten gevonden'
-            );
+            if (!confirmed) return;
             showSectionLoading('planning-view', 'Concept toepassen...');
             result = await applyScheduleDraft(draftId, {
                 clearBlocks: true,
                 applyStartDate: applyResult.startDate,
                 applyEndDate: applyResult.endDate,
                 confirmOverlap: true,
-                confirmOverwrite: overwrite
+                confirmOverwrite: applyResult.confirmOverwrite ? true : null
             });
         }
 
@@ -888,7 +1072,12 @@ async function applyBuilderDraft(draftId) {
             return;
         }
 
-        showToast(`Basisrooster ${weekLabel} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt)`, 'success');
+        const preservedNote = result.manualShiftsPreserved > 0
+            ? ` · ${result.manualShiftsPreserved} manuele diensten behouden`
+            : '';
+        const geslotenNote = result.closedDaySkips
+            ? `, ${result.closedDaySkips} overgeslagen op gesloten dagen` : '';
+        showToast(`Basisrooster ${weekLabel} toegepast voor ${result.applied} medewerkers (${result.shifts.created} shifts aangemaakt${preservedNote}${geslotenNote})`, 'success');
 
         // Update local draft cache with applied dates
         const draftToMark = (DataStore.settings.schedule_drafts || []).find(d => d.id === draftId);
@@ -899,8 +1088,19 @@ async function applyBuilderDraft(draftId) {
             draftToMark.lastAppliedUntil = applyResult.endDate;
         }
 
-        // Auto-update school year start for week numbering
-        await saveSchoolYearStart(applyResult.startDate);
+        // #207: hier stond `await saveSchoolYearStart(applyResult.startDate)`,
+        // onvoorwaardelijk, dus ook voor een vakantieconcept en ook voor een
+        // toepassing midden in het jaar.
+        //
+        // De schooljaarstart is niet zomaar een etiket: getFourWeekPeriodDates
+        // verankert er de vaste vierwekenperiodes aan, en die bepalen het getal
+        // "X/152u" dat in de planning onder elke naam staat. Een concept
+        // toepassen op 17 november verschoof de periodegrenzen een week en
+        // veranderde ieders periodetotaal, zonder dat er één dienst was
+        // bijgekomen of verdwenen. De knop "Vanaf nu" maakte dat één klik weg.
+        //
+        // De schooljaarstart wordt voortaan alleen nog handmatig gezet, in
+        // Instellingen, waar hij toch al te zetten is.
 
         // Apply pattern + rotation from draft globally (date-aware)
         {
@@ -911,9 +1111,17 @@ async function applyBuilderDraft(draftId) {
 
             if (applyGrid._pattern) {
                 const currentPattern = getSchedulePattern();
-                // Auto-set referentiedatum op maandag van apply-from datum
-                const applyMonday = getMonday(applyFromDate);
-                const autoRefDate = formatDateYYYYMMDD(applyMonday);
+                // #211: hier werd zelf een anker berekend, de maandag van de
+                // startdatum, terwijl de backend met het anker uit het concept
+                // genereerde. Die twee liepen uiteen en dan stond het rooster
+                // een cycluspositie verschoven ten opzichte van wat je zag.
+                //
+                // De backend geeft nu terug welk anker hij écht gebruikt heeft.
+                // Dat publiceren we, zodat er maar één waarheid is. De oude
+                // berekening blijft als terugval voor een backend die het veld
+                // nog niet meestuurt.
+                const autoRefDate = result.referenceDate
+                    || formatDateYYYYMMDD(getMonday(applyFromDate));
 
                 let newPatternSetting;
 
@@ -938,7 +1146,6 @@ async function applyBuilderDraft(draftId) {
                 DataStore.settings.schedulePattern = newPatternSetting;
                 DataStore.settings.biWeeklyReferenceDate = applyGrid._pattern.referenceDate;
 
-                saveToStorage();
             }
         }
         // Rotation is managed via Settings > Planning, not per concept
@@ -950,7 +1157,6 @@ async function applyBuilderDraft(draftId) {
         showToast('Fout bij toepassen concept: ' + getUserFriendlyError(error), 'error');
     } finally {
         hideSectionLoading('planning-view');
-        AppState._applyingDraft = false;
     }
 }
 
@@ -987,16 +1193,16 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
             <div class="modal-content modal-content--md">
                 <div class="modal-header">
                     <h2>Concept toepassen</h2>
-                    <span class="modal-close" id="draft-apply-close"><i data-lucide="x"></i></span>
+                    <button type="button" class="modal-close" id="draft-apply-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-sm"><strong>${escapeHtml(draft.name)}</strong> toepassen als basisrooster ${weekLabel}?</p>
+                    <p class="mb-sm text-secondary">Periode kiezen voor <strong>${escapeHtml(draft.name)}</strong>:</p>
                     <div class="apply-presets">
-                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetSchoolStart}" data-end="${presetSchoolEnd}">Dit schooljaar (sep – aug)</button>
-                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetTodayStr}" data-end="${presetSchoolEnd}">Vanaf nu tot aug</button>
-                        <button class="btn btn-secondary btn-sm apply-preset" data-start="" data-end="">Aangepaste periode</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetSchoolStart}" data-end="${presetSchoolEnd}">Dit schooljaar</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="${presetTodayStr}" data-end="${presetSchoolEnd}">Vanaf nu</button>
+                        <button class="btn btn-secondary btn-sm apply-preset" data-start="" data-end="">Aangepast</button>
                     </div>
-                    <div class="form-row form-row-gap">
+                    <div class="form-row form-row-gap mt-sm">
                         <div class="form-group flex-1">
                             <label>Van</label>
                             <input type="date" id="draft-apply-start-date" class="form-input" value="${defaultStart}" required>
@@ -1006,10 +1212,13 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                             <input type="date" id="draft-apply-end-date" class="form-input" value="${defaultEnd}" required>
                         </div>
                     </div>
-                    <span class="form-hint form-hint-block mt-xs">Shifts worden alleen gegenereerd binnen deze periode. Bestaande shifts buiten deze periode blijven ongewijzigd.</span>
-                    <div class="code-block">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
+                    <p class="form-hint mt-xs">Manuele aanpassingen worden bewaard. Diensten buiten deze periode blijven ongewijzigd.</p>
+                    <div class="apply-changes-summary mt-sm">Wijzigingen voor ${changesCount} van ${empCount} medewerkers:${escapeHtml(changesSummary)}</div>
                 </div>
                 <div class="modal-footer">
+                    <span class="modal-footer-left">
+                        <button class="btn btn-ghost btn-sm" id="draft-apply-reset" data-tooltip="Verwijdert ook manuele aanpassingen en zet alles terug naar het concept" data-tooltip-pos="top" style="color:var(--color-danger,#dc2626)">Reset alles</button>
+                    </span>
                     <button class="btn btn-secondary btn-sm" id="draft-apply-cancel">Annuleren</button>
                     <button class="btn btn-primary btn-sm" id="draft-apply-confirm">Toepassen</button>
                 </div>
@@ -1039,24 +1248,52 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
             });
         });
 
-        overlay.querySelector('#draft-apply-confirm').addEventListener('click', () => {
+        function validateDates() {
             const startDate = overlay.querySelector('#draft-apply-start-date').value;
             const endDate = overlay.querySelector('#draft-apply-end-date').value;
-            if (!startDate || !endDate) {
-                showToast('Vul beide datums in', 'warning');
-                return;
-            }
-            if (startDate >= endDate) {
-                showToast('Startdatum moet voor einddatum liggen', 'warning');
-                return;
-            }
+            if (!startDate || !endDate) { showToast('Vul beide datums in', 'warning'); return null; }
+            if (startDate >= endDate) { showToast('Startdatum moet voor einddatum liggen', 'warning'); return null; }
+            return { startDate, endDate };
+        }
+
+        overlay.querySelector('#draft-apply-confirm').addEventListener('click', () => {
+            const dates = validateDates();
+            if (!dates) return;
             cleanup();
-            resolve({ startDate, endDate });
+            resolve({ ...dates, confirmOverwrite: false });
+        });
+
+        overlay.querySelector('#draft-apply-reset').addEventListener('click', async () => {
+            // #250: hier stond escapeHtml(draftName). Die variabele bestaat in
+            // deze functie niet; ze is een parameter van showReapplyAfterEditModal
+            // verderop. De sjabloonstring wordt pas bij de klik uitgevoerd, dus
+            // het werd een ReferenceError in een async handler: geen zichtbare
+            // fout, geen bevestigingsvraag, de knop deed simpelweg niets.
+            //
+            // escapeHtml hoort hier sowieso niet: showConfirm zet de boodschap
+            // als textContent, dus een concept "Vlot 1 & 2" werd "Vlot 1 &amp; 2".
+            try {
+                const dates = validateDates();
+                if (!dates) return;
+                const confirmed = await showConfirm(
+                    `Dit verwijdert ALLE diensten in de periode ${dates.startDate} – ${dates.endDate} en zet alles terug naar het concept "${draft.name}", inclusief manuele aanpassingen en leeggemaakte dagen.\n\nDoorgaan?`,
+                    'Reset alles naar concept'
+                );
+                if (!confirmed) return;
+                cleanup();
+                resolve({ ...dates, confirmOverwrite: true });
+            } catch (fout) {
+                // Een fout hier bleef stil in een afgewezen promise hangen.
+                console.error('Reset alles mislukt:', fout);
+                showToast('Reset alles mislukt: ' + getUserFriendlyError(fout), 'error');
+            }
         });
 
         overlay.querySelector('#draft-apply-cancel').addEventListener('click', () => { cleanup(); resolve(null); });
         overlay.querySelector('#draft-apply-close').addEventListener('click', () => { cleanup(); resolve(null); });
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
     });
 }
 
@@ -1068,7 +1305,7 @@ function showReapplyAfterEditModal(draftName) {
             <div class="modal-content modal-content--xs">
                 <div class="modal-header">
                     <h2>Wijzigingen toepassen?</h2>
-                    <span class="modal-close" id="reapply-close"><i data-lucide="x"></i></span>
+                    <button type="button" class="modal-close" id="reapply-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-xs">Het concept <strong>"${escapeHtml(draftName)}"</strong> is momenteel actief.</p>
@@ -1087,7 +1324,9 @@ function showReapplyAfterEditModal(draftName) {
         overlay.querySelector('#reapply-yes').addEventListener('click', () => { cleanup(); resolve(true); });
         overlay.querySelector('#reapply-no').addEventListener('click', () => { cleanup(); resolve(false); });
         overlay.querySelector('#reapply-close').addEventListener('click', () => { cleanup(); resolve(false); });
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(false); } });
+        // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert
+        // en de muis buiten het kader loslaat.
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) { cleanup(); resolve(false); } });
     });
 }
 
@@ -1146,11 +1385,12 @@ function uploadBuilderDraft() {
     input.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        if (blokkeerBijMislukteDraftLoad()) return;
         try {
             const text = await file.text();
             const data = JSON.parse(text);
             if (!data.grid || !data.name) {
-                showToast('Ongeldig concept bestand', 'error');
+                showToast('Ongeldig conceptbestand', 'error');
                 return;
             }
             // Strip _employeeName fields added during export
@@ -1228,7 +1468,7 @@ function openCopyWeekModal() {
     targetSelect.value = AppState.builderWeekNumber === cycleLength ? 1 : AppState.builderWeekNumber + 1;
 
     updateCopyWeekConflictWarning();
-    document.getElementById('copy-week-modal').classList.remove('hidden');
+    toonModal(document.getElementById('copy-week-modal'));
 }
 
 function updateCopyWeekConflictWarning() {
@@ -1282,9 +1522,11 @@ function executeCopyWeek() {
     AppState.builderGridByWeek[targetWeek] = newTargetGrid;
     AppState.builderWeekNumber = targetWeek;
     AppState.builderGrid = JSON.parse(JSON.stringify(newTargetGrid));
-    AppState.builderIsDirty = true;
+    // #210: via setBuilderDirty, anders wordt er geen automatische opslag
+    // ingepland en blijft de statusregel "bewaard" tonen.
+    setBuilderDirty();
 
-    document.getElementById('copy-week-modal').classList.add('hidden');
+    verbergModal(document.getElementById('copy-week-modal'));
     renderBuilder();
     showToast(`Week ${sourceWeek} gekopieerd naar week ${targetWeek}`, 'success');
 }
@@ -1303,7 +1545,7 @@ function openDraftDiffModal() {
     if (drafts.length >= 2) selB.selectedIndex = 1;
 
     document.getElementById('draft-diff-result').innerHTML = '';
-    document.getElementById('draft-diff-modal').classList.remove('hidden');
+    toonModal(document.getElementById('draft-diff-modal'));
 }
 
 function diffDrafts(draftA, draftB) {

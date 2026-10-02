@@ -7,7 +7,7 @@ function initDOM() {
     DOM.loginForm = document.getElementById('login-form');
     DOM.usernameInput = document.getElementById('username');
     DOM.passwordInput = document.getElementById('password');
-    DOM.navButtons = document.querySelectorAll('.nav-center .nav-btn');
+    DOM.navButtons = document.querySelectorAll('#nav-menu .nav-btn');
     DOM.logoutBtn = document.getElementById('logout-btn');
     DOM.homeView = document.getElementById('home-view');
     DOM.planningView = document.getElementById('planning-view');
@@ -17,12 +17,15 @@ function initDOM() {
     DOM.availabilityView = document.getElementById('availability-view');
     DOM.builderView = document.getElementById('builder-view');
     DOM.swapsView = document.getElementById('swaps-view');
+    DOM.leaveView = document.getElementById('leave-view');
     DOM.settingsView = document.getElementById('settings-view');
-    DOM.addShiftBtn = document.getElementById('add-shift-btn');
+    DOM.addShiftBtn = null; // button removed from UI
     DOM.prevWeekBtn = document.getElementById('prev-week');
     DOM.nextWeekBtn = document.getElementById('next-week');
     DOM.todayBtn = document.getElementById('today-btn');
     DOM.currentPeriod = document.getElementById('current-period-text');
+    // #182: DOM.currentWeekLabel stond hier, maar #current-week-label bestaat
+    // niet in de markup. Hij was dus altijd null en werd nergens gelezen.
     DOM.viewToggleBtns = document.querySelectorAll('.view-toggle-btn');
     DOM.rosterCalendar = document.getElementById('roster-calendar');
     DOM.validationAlerts = document.getElementById('validation-alerts');
@@ -72,24 +75,18 @@ function initDOM() {
 
 function init() {
     try {
-        console.log('Het Vlot Roosterplanning start...');
-        console.log('Data loaded:', DataStore);
         initDOM();
         initModalFocusTrap();
         applyTeamColors();
-        console.log('DOM initialized');
         document.body.setAttribute('data-view-mode', AppState.viewMode);
         setCurrentWeek(new Date());
         // Set initial mobile day to today's day of the week
         const today = new Date();
         const dayOfWeek = today.getDay();
         AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        console.log('Current week set');
         setupEventListeners();
         setupAvailabilityModal();
-        console.log('Event listeners set up');
         checkSession();
-        console.log('Session checked');
     } catch (error) {
         console.error('Error during initialization:', error);
         showToast('Er is een fout opgetreden bij het starten van de applicatie. Probeer de pagina te herladen.', 'error');
@@ -113,18 +110,94 @@ function setupEventListeners() {
             switchView('planning');
             // Re-render current view
             renderPlanning();
-            console.log(`[Test Mode] Nu werkend als: ${newRole}`);
+            if (DEBUG) console.log(`[Test Mode] Nu werkend als: ${newRole}`);
         });
     }
 
-    // Mobile menu toggle
+    // Mobile menu toggle — schuift de sidebar in/uit met backdrop
     const mobileMenuBtn = document.getElementById('mobile-menu-btn');
     const navMenu = document.getElementById('nav-menu');
+    const sidebarScrim = document.getElementById('sidebar-scrim');
+    const closeSidebar = () => {
+        mobileMenuBtn?.classList.remove('active');
+        navMenu?.classList.remove('open');
+        document.body.classList.remove('nav-open');
+    };
     if (mobileMenuBtn && navMenu) {
         mobileMenuBtn.addEventListener('click', () => {
             mobileMenuBtn.classList.toggle('active');
             navMenu.classList.toggle('open');
+            document.body.classList.toggle('nav-open');
         });
+    }
+    if (sidebarScrim) {
+        sidebarScrim.addEventListener('click', closeSidebar);
+    }
+
+    // Desktop sidebar collapse
+    const collapseBtn = document.getElementById('sidebar-collapse-btn');
+    if (collapseBtn) {
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            document.body.classList.add('nav-collapsed');
+        }
+        collapseBtn.addEventListener('click', () => {
+            const collapsed = document.body.classList.toggle('nav-collapsed');
+            localStorage.setItem('sidebarCollapsed', collapsed);
+            const icon = collapseBtn.querySelector('[data-lucide]');
+            if (icon) {
+                icon.setAttribute('data-lucide', collapsed ? 'panel-left-open' : 'panel-left-close');
+                IconHelper.init(collapseBtn);
+            }
+        });
+        // Sync icon on load if already collapsed
+        if (document.body.classList.contains('nav-collapsed')) {
+            const icon = collapseBtn.querySelector('[data-lucide]');
+            if (icon) icon.setAttribute('data-lucide', 'panel-left-open');
+        }
+    }
+
+    // Dark mode toggle
+    //
+    // #340: het TOEPASSEN van het thema gebeurt niet meer hier maar in een
+    // klein script direct na <body> in index.html, vóór de eerste paint.
+    // Hier bleef het onzichtbaar tot alle scripts geladen waren, en dat is
+    // precies de flits die we wilden weghalen. Wat hier overblijft is de knop
+    // en het pictogram.
+    const darkBtn = document.getElementById('dark-mode-btn');
+    if (darkBtn) {
+        const zetPictogram = (isDark) => {
+            const icon = darkBtn.querySelector('[data-lucide]');
+            if (!icon) return;
+            icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+            IconHelper.init(darkBtn);
+        };
+        // De klasse staat er al; het pictogram moet daar alleen bij kloppen.
+        zetPictogram(document.body.classList.contains('dark-mode'));
+
+        darkBtn.addEventListener('click', () => {
+            const isDark = document.body.classList.toggle('dark-mode');
+            // Pas hier wordt de keuze vastgelegd. Zolang dat niet gebeurd is,
+            // volgt de app de systeemvoorkeur; daarna is de gebruiker leidend.
+            localStorage.setItem('darkMode', isDark);
+            zetPictogram(isDark);
+        });
+    }
+
+    // #340: de systeemvoorkeur blijven volgen zolang de gebruiker zelf niets
+    // koos. Wie 's avonds zijn telefoon op donker zet, ziet de app meeschakelen
+    // zonder de app te hoeven heropenen.
+    if (window.matchMedia) {
+        const donkerVraag = window.matchMedia('(prefers-color-scheme: dark)');
+        const volgSysteem = (e) => {
+            if (localStorage.getItem('darkMode') !== null) return;  // eigen keuze wint
+            document.body.classList.toggle('dark-mode', e.matches);
+            const icon = darkBtn?.querySelector('[data-lucide]');
+            if (icon) {
+                icon.setAttribute('data-lucide', e.matches ? 'sun' : 'moon');
+                IconHelper.init(darkBtn);
+            }
+        };
+        if (donkerVraag.addEventListener) donkerVraag.addEventListener('change', volgSysteem);
     }
 
     // Avatar trigger → navigeer direct naar profiel
@@ -136,31 +209,32 @@ function setupEventListeners() {
     DOM.navButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             // Close mobile menu on navigation
-            if (mobileMenuBtn && navMenu) {
-                mobileMenuBtn.classList.remove('active');
-                navMenu.classList.remove('open');
-            }
+            closeSidebar();
             switchView(btn.dataset.view);
         });
     });
-    DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
-    DOM.prevWeekBtn.addEventListener('click', () => {
-        if (AppState.viewMode === 'month') {
-            changeMonth(-1);
-        } else if (AppState.viewMode === 'day') {
-            changeMobileDay(-1);
+    // Collapsible team cards — delegate from stable roster container
+    DOM.rosterCalendar.addEventListener('click', (e) => {
+        const head = e.target.closest('.tcard-head');
+        if (!head) return;
+        const card = head.closest('.tcard');
+        if (!card) return;
+        const teamKey = card.dataset.tcardTeam;
+        if (card.classList.toggle('collapsed')) {
+            AppState.collapsedTeams.add(teamKey);
         } else {
-            changeWeek(-1);
+            AppState.collapsedTeams.delete(teamKey);
         }
     });
+
+    if (DOM.addShiftBtn) DOM.addShiftBtn.addEventListener('click', openAddShiftModal);
+    DOM.prevWeekBtn.addEventListener('click', () => {
+        if (AppState.viewMode === 'day') changeMobileDay(-1);
+        else changeWeek(-1);
+    });
     DOM.nextWeekBtn.addEventListener('click', () => {
-        if (AppState.viewMode === 'month') {
-            changeMonth(1);
-        } else if (AppState.viewMode === 'day') {
-            changeMobileDay(1);
-        } else {
-            changeWeek(1);
-        }
+        if (AppState.viewMode === 'day') changeMobileDay(1);
+        else changeWeek(1);
     });
     DOM.todayBtn.addEventListener('click', jumpToToday);
 
@@ -227,11 +301,12 @@ function setupEventListeners() {
         btn.addEventListener('click', () => changeViewMode(btn.dataset.mode));
     });
 
-    // Team toggle buttons for planning view — attached dynamically via renderTeamToggles()
-
     // Team toggle buttons for employees view — attached dynamically via renderEmployeeTeamToggles()
 
     DOM.addEmployeeBtn.addEventListener('click', openAddEmployeeModal);
+    // Melding "dag handmatig leeggemaakt" bijwerken zodra medewerker of datum wijzigt
+    DOM.shiftEmployee?.addEventListener('change', () => { if (typeof updateShiftBlockNotice === 'function') updateShiftBlockNotice(); });
+    DOM.shiftDate?.addEventListener('change', () => { if (typeof updateShiftBlockNotice === 'function') updateShiftBlockNotice(); });
     DOM.shiftForm.addEventListener('submit', handleShiftSubmit);
     DOM.shiftForm.addEventListener('input', () => {
         if (AppState._shiftForceOverride) {
@@ -258,17 +333,19 @@ function setupEventListeners() {
         btn.addEventListener('click', closeEmployeeModal);
     });
     DOM.warningDetailsClose.addEventListener('click', closeWarningDetailsModal);
-    DOM.warningDetailsModal.addEventListener('click', (e) => {
+    // mousedown i.p.v. click: anders sluit de modal als je tekst selecteert en
+    // de muis buiten het kader loslaat (click-target wordt dan de backdrop).
+    DOM.warningDetailsModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.warningDetailsModal) closeWarningDetailsModal();
     });
     DOM.errorDetailsClose.addEventListener('click', closeErrorDetailsModal);
-    DOM.errorDetailsModal.addEventListener('click', (e) => {
+    DOM.errorDetailsModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.errorDetailsModal) closeErrorDetailsModal();
     });
-    DOM.shiftModal.addEventListener('click', (e) => {
+    DOM.shiftModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.shiftModal) closeShiftModal();
     });
-    DOM.employeeModal.addEventListener('click', (e) => {
+    DOM.employeeModal.addEventListener('mousedown', (e) => {
         if (e.target === DOM.employeeModal) closeEmployeeModal();
     });
 
@@ -303,6 +380,16 @@ function setupEventListeners() {
     });
 
     DOM.validationAlerts.addEventListener('click', (event) => {
+        // #331: de knop van de balk "Deze week kon niet geladen worden".
+        // Gedelegeerd, want de balk wordt bij elke render opnieuw opgebouwd.
+        if (event.target.closest('#week-laadfout-opnieuw')) {
+            AppState.weekLaadFout = null;
+            renderPlanning();
+            // updateShiftRefreshRange haalt de week opnieuw op zolang er geen
+            // data voor is, en die is er na de mislukte poging nog altijd niet.
+            updateShiftRefreshRange();
+            return;
+        }
         const chip = event.target.closest('.validation-chip');
         if (chip) openValidationDetailsModal(chip.dataset.rule || null);
     });
@@ -360,7 +447,7 @@ function setupEventListeners() {
     });
 
     // Copy-week modal (builder)
-    const closeModal = () => document.getElementById('copy-week-modal')?.classList.add('hidden');
+    const closeModal = () => verbergModal(document.getElementById('copy-week-modal'));
     document.getElementById('copy-week-modal-close')?.addEventListener('click', closeModal);
     document.getElementById('copy-week-cancel')?.addEventListener('click', closeModal);
     document.getElementById('copy-week-modal')?.addEventListener('click', (e) => {
@@ -371,15 +458,14 @@ function setupEventListeners() {
     document.getElementById('copy-week-target')?.addEventListener('change', updateCopyWeekConflictWarning);
 
     // Draft diff modal
-    const closeDiff = () => document.getElementById('draft-diff-modal')?.classList.add('hidden');
+    const closeDiff = () => verbergModal(document.getElementById('draft-diff-modal'));
     document.getElementById('draft-diff-modal-close')?.addEventListener('click', closeDiff);
     document.getElementById('draft-diff-close')?.addEventListener('click', closeDiff);
     document.getElementById('draft-diff-modal')?.addEventListener('click', (e) => { if (e.target.id === 'draft-diff-modal') closeDiff(); });
     document.getElementById('draft-diff-run')?.addEventListener('click', runDraftDiff);
 
-    // Undo/Redo buttons
-    document.getElementById('undo-btn')?.addEventListener('click', () => UndoManager.undo());
-    document.getElementById('redo-btn')?.addEventListener('click', () => UndoManager.redo());
+    // #182: de luisteraars op #undo-btn en #redo-btn zijn weg. Die knoppen
+    // staan niet meer in de markup, dus ze hingen nergens aan.
 
     // Undo/Redo keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -430,6 +516,32 @@ function setupEventListeners() {
             const { userId, date, shiftStart, shiftEnd, shiftId } = addActivityBtn.dataset;
             if (userId && date) openAddActivityModal(parseInt(userId, 10), date, shiftStart, shiftEnd, shiftId ? parseInt(shiftId, 10) : null);
         }
+
+        // Shift-block indicator click → release the cell back to the concept (#146)
+        const blockIndicator = e.target.closest('.shift-block-indicator--clickable');
+        if (blockIndicator) {
+            e.stopPropagation();
+            const blockId = parseInt(blockIndicator.dataset.blockId, 10);
+            const emp = getEmployee(parseInt(blockIndicator.dataset.employee, 10));
+            const date = blockIndicator.dataset.date;
+            if (!blockId || !emp || !date) return;
+
+            const d = new Date(date + 'T00:00:00');
+            const dateLabel = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' });
+            const confirmed = await showConfirm(
+                `${emp.name} · ${dateLabel}\n\nDe dag wordt teruggegeven aan het concept. Bij de volgende concepttoepassing krijgt ${emp.name} hier opnieuw een dienst.\n\nDoorgaan?`,
+                'Dag vrijgeven aan concept'
+            );
+            if (!confirmed) return;
+
+            try {
+                await deleteShiftBlock(blockId);
+                renderPlanning();
+                showToast(`${emp.name}: ${dateLabel} teruggegeven aan het concept`, 'success');
+            } catch (err) {
+                showToast('Fout bij vrijgeven: ' + (err.message || 'onbekende fout'), 'error');
+            }
+        }
     });
 }
 
@@ -437,10 +549,8 @@ function setupEventListeners() {
 
 document.addEventListener('DOMContentLoaded', () => {
     init();
-    // Aria-labels op icon-only knoppen (accessibility)
-    document.querySelectorAll('.modal-close:not([aria-label])').forEach(el => {
-        el.setAttribute('aria-label', 'Sluiten');
-        el.setAttribute('role', 'button');
-    });
-    console.log('Het Vlot Roosterplanning is gestart!');
+    // #234: de sluitkruisjes staan nu als echte button met aria-label in
+    // index.html, dus hier hoeft niets meer bijgezet te worden. Deze lus liep
+    // ook maar een keer, bij het laden, en raakte de vensters die later door
+    // JavaScript worden opgebouwd dus sowieso niet.
 });

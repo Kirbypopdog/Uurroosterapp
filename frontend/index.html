@@ -2,76 +2,176 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- #235: hier stond maximum-scale=1.0, user-scalable=no. Dat verhindert
+         knijpzoomen, en juist deze app toont op een telefoon dichte
+         roostertabellen met kleine cijfers. Weglaten is de hele fix. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- #159: op het beginscherm zetten. Bewust GEEN service worker en GEEN
+         push: Victor wil alleen dat de app als app opent. Een service worker
+         zou hier bovendien risico geven, want deze app heeft geen bouwstap en
+         versiebeheer gebeurt met ?v= achter de scripts; een cachende worker kan
+         mensen vastzetten op een versie die ze er met verversen niet uit
+         krijgen. -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4a7c6f">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <!-- iOS leest nog altijd de apple-variant; de andere is de opvolger. -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Het Vlot">
     <title>Het Vlot - Roosterplanning</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232d6a4f'/><text x='16' y='23' font-size='20' text-anchor='middle' fill='white'>📋</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=20260830g">
+    <!-- #156: foutmonitoring. Inert zolang er geen DSN in config/monitoring.js
+         staat; dan wordt er ook niets van een CDN gehaald. Staat bewust vóór de
+         app-bestanden, zodat een fout tijdens het opstarten ook gemeld wordt. -->
+    <script src="config/monitoring.js?v=20260921a"></script>
     <script src="https://unpkg.com/lucide@0.577.0" onerror="
         var s=document.createElement('script');
         s.src='https://cdn.jsdelivr.net/npm/lucide@0.577.0';
         s.onerror=function(){document.documentElement.classList.add('no-lucide')};
         document.head.appendChild(s);
     "></script>
+    <script>
+        // Voorkomt een flits van het loginscherm bij herladen met een actieve
+        // sessie: #login-container staat zichtbaar in de HTML en werd pas
+        // verborgen NADAT de /me-sessiecheck terugkwam (lokaal ~130ms, op een
+        // trage mobiele verbinding een stuk langer en duidelijk zichtbaar).
+        // Deze check leest de opslag synchroon vóór de eerste paint.
+        // showLogin() haalt de klasse weer weg als de sessie ongeldig blijkt.
+        //
+        // #159: allebei de opslagen nakijken. Het token staat sindsdien in
+        // localStorage, maar er kan er nog een in sessionStorage zitten van
+        // daarvoor. leesToken() in data.js doet hetzelfde; dat bestand is hier
+        // nog niet geladen, want dit moet vóór de eerste paint.
+        try {
+            if (localStorage.getItem('hetvlot_token') || sessionStorage.getItem('hetvlot_token')) {
+                document.documentElement.classList.add('session-restoring');
+            }
+        } catch (e) { /* opslag geblokkeerd — dan gewoon login tonen */ }
+    </script>
 </head>
 <body>
-    <!-- Login Scherm -->
-    <div id="login-container" class="container">
-        <div class="login-box">
-            <div class="logo">
-                <h1>Het Vlot</h1>
-                <p class="subtitle">Roosterplanning</p>
+    <script>
+        // #340: het thema vóór de eerste paint zetten, en de systeemvoorkeur
+        // volgen zolang de gebruiker zelf niets gekozen heeft.
+        //
+        // Dit stond in app-init.js, dus pas nadat alle scripts geladen waren.
+        // Wie zijn telefoon op donker heeft, kreeg eerst een fel wit
+        // inlogscherm. Bij avonddiensten is dat net het scherm dat het vaakst
+        // opengaat.
+        //
+        // Hier en niet in <head>, want de klasse hoort op <body> en die bestaat
+        // daar nog niet. 308 CSS-regels hangen aan body.dark-mode; die
+        // verhuizen zou een veel grotere ingreep zijn voor hetzelfde resultaat.
+        (function () {
+            try {
+                var gekozen = localStorage.getItem('darkMode');
+                var donker = gekozen === null
+                    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+                    : gekozen === 'true';
+                if (donker) document.body.classList.add('dark-mode');
+            } catch (e) { /* localStorage geblokkeerd, dan gewoon licht */ }
+        })();
+    </script>
+
+    <!-- #389: tot de gegevens binnen zijn stond hier NIETS. De klasse
+         session-restoring verbergt het loginscherm (zodat dat niet voorbijflitst
+         bij wie al ingelogd is) en #app-container staat nog op hidden. Tussen
+         die twee momenten keek je naar een leeg wit scherm: gemeten 518 ms met
+         een snelle server, 6457 ms met een trage, en tientallen seconden bij een
+         koude start. Een leeg scherm leest als "stuk".
+
+         Dit is geen spinner maar het KADER van de app: dezelfde zijbalk op
+         dezelfde plek, met vlakken waar de inhoud komt. Daardoor verschuift er
+         niets wanneer de echte app verschijnt, en zie je meteen dat je in de
+         app zit en niet in een fout.
+
+         Puur markup en CSS, zonder JavaScript: het staat er dus al bij de
+         eerste paint, nog voordat één script geladen is. Het verdwijnt vanzelf
+         zodra app-auth.js de klasse session-restoring weghaalt, wat op alle
+         drie de uitkomsten gebeurt (gelukt, mislukt, sessie ongeldig). -->
+    <div id="opstartscherm" aria-hidden="true">
+        <div class="opstart-zijbalk">
+            <div class="opstart-merk">
+                <div class="opstart-merkteken">V</div>
+                <div class="opstart-merknaam">Het Vlot</div>
             </div>
-            <form id="login-form">
-                <div class="form-group">
-                <label for="username">Email</label>
-                <input type="email" id="username" required autocomplete="username">
+            <div class="opstart-navrij"></div>
+            <div class="opstart-navrij"></div>
+            <div class="opstart-navrij"></div>
+            <div class="opstart-navrij"></div>
+            <div class="opstart-navrij"></div>
+        </div>
+        <div class="opstart-inhoud">
+            <div class="opstart-vlak opstart-eyebrow"></div>
+            <div class="opstart-vlak opstart-titel"></div>
+            <div class="opstart-vlak opstart-kaart"></div>
+            <div class="opstart-vlak opstart-kaart"></div>
+        </div>
+    </div>
+
+    <!-- Login Scherm -->
+    <div id="login-container">
+        <div class="login-brandside">
+            <div class="login-brand-top">
+                <div class="login-brand-mark">V</div>
+                <div>
+                    <div class="login-brand-name">Het Vlot</div>
                 </div>
-                <div class="form-group">
-                    <label for="password">Wachtwoord</label>
-                    <input type="password" id="password" required autocomplete="current-password">
-                </div>
-                <button type="submit" class="btn btn-primary">Inloggen</button>
-            </form>
-            <p class="info-text">Gebruik je eigen accountgegevens om in te loggen</p>
-            <p class="info-text text-muted" style="font-size:12px;margin-top:8px">Wachtwoord vergeten? Neem contact op met je leidinggevende.</p>
+            </div>
+            <div class="login-brand-mid">
+                <div class="login-bigline">Roosters die <em>werken.</em></div>
+            </div>
+        </div>
+        <div class="login-formside">
+            <div class="login-box">
+                <h1 class="login-title">Welkom terug</h1>
+                <p class="login-lead">Log in om je rooster te bekijken</p>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="username">E-mail</label>
+                        <input type="email" id="username" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Wachtwoord</label>
+                        <input type="password" id="password" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Inloggen</button>
+                </form>
+                <p class="info-text">Gebruik je eigen accountgegevens om in te loggen</p>
+                <p class="info-text text-muted" style="font-size:12px;margin-top:8px">Wachtwoord vergeten? Neem contact op met je leidinggevende.</p>
+            </div>
         </div>
     </div>
 
     <!-- Hoofdapplicatie -->
     <div id="app-container" class="container hidden">
-        <!-- Sidebar toggle (CSS-only) -->
-        <input type="checkbox" id="sidebar-toggle" class="sidebar-toggle-input" aria-hidden="true">
-
-        <!-- Navigatie -->
-        <nav class="main-nav">
-            <div class="nav-left">
-                <label for="sidebar-toggle" class="sidebar-toggle-label" aria-label="Sidebar inklappen">
-                    <span class="sidebar-toggle-icon"></span>
-                </label>
-                <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu">
-                    <span class="hamburger-line"></span>
-                    <span class="hamburger-line"></span>
-                    <span class="hamburger-line"></span>
-                </button>
-                <h1 class="app-title">Het Vlot</h1>
-            </div>
-            <div class="nav-center" id="nav-menu">
-                <div class="nav-group-primary">
-                    <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i> Home</button>
-                    <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i> Planning</button>
-                    <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i> Afwezigheid</button>
-                    <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i> Ruilen</button>
-                </div>
-                <div class="nav-group-admin">
-                    <button class="nav-btn" data-view="employees"><i data-lucide="users" class="nav-icon"></i> Medewerkers</button>
-                    <button class="nav-btn" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i> Rooster Bouwen</button>
-                    <button class="nav-btn" data-view="settings"><i data-lucide="settings" class="nav-icon"></i> Instellingen</button>
+        <!-- Sidebar (linkernavigatie) -->
+        <aside class="app-sidebar" id="nav-menu">
+            <div class="sidebar-brand">
+                <div class="sidebar-brand-mark">V</div>
+                <div class="sidebar-brand-text">
+                    <div class="sidebar-brand-name">Het Vlot</div>
                 </div>
             </div>
-            <div class="nav-right">
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-view="home"><i data-lucide="house" class="nav-icon"></i><span class="nav-label"> Home</span></button>
+                <button class="nav-btn" data-view="planning"><i data-lucide="calendar-days" class="nav-icon"></i><span class="nav-label"> Planning</span></button>
+                <button class="nav-btn" data-view="availability"><i data-lucide="calendar-off" class="nav-icon"></i><span class="nav-label"> Afwezigheid</span></button>
+                <button class="nav-btn" data-view="swaps"><i data-lucide="arrow-left-right" class="nav-icon"></i><span class="nav-label"> Ruilen</span></button>
+                <button class="nav-btn" data-view="leave"><i data-lucide="palmtree" class="nav-icon"></i><span class="nav-label"> Verlof</span></button>
+                <div class="sidebar-nav-label nav-group-admin">Beheer</div>
+                <button class="nav-btn nav-group-admin" data-view="employees"><i data-lucide="users" class="nav-icon"></i><span class="nav-label"> Medewerkers</span></button>
+                <button class="nav-btn nav-group-admin" data-view="builder"><i data-lucide="wrench" class="nav-icon"></i><span class="nav-label"> Rooster bouwen</span></button>
+                <button class="nav-btn nav-group-admin" data-view="settings"><i data-lucide="settings" class="nav-icon"></i><span class="nav-label"> Instellingen</span></button>
+            </nav>
+            <div class="sidebar-foot">
                 <div id="role-switcher" class="role-switcher hidden">
                     <i data-lucide="flask-conical" class="lucide-sm role-switcher-icon"></i>
                     <select id="role-switch-select">
@@ -82,15 +182,43 @@
                 </div>
                 <div class="user-menu" id="user-menu">
                     <button class="user-menu-trigger" id="user-menu-trigger" aria-label="Ga naar profiel">
-                        <span class="avatar-circle" id="avatar-circle"></span>
+                        <span class="avatar" id="avatar-circle"></span>
                         <span class="user-menu-name" id="user-menu-name"></span>
                     </button>
-                    <button class="nav-logout-btn" id="logout-btn" aria-label="Uitloggen" title="Uitloggen">
+                    <button class="nav-logout-btn" id="logout-btn" aria-label="Uitloggen" data-tooltip="Uitloggen">
                         <i data-lucide="log-out" class="lucide-sm"></i>
                     </button>
                 </div>
+                <div class="sidebar-foot-actions">
+                    <button class="sidebar-icon-btn" id="dark-mode-btn" aria-label="Donker thema" data-tooltip="Donker/licht thema">
+                        <i data-lucide="moon" class="lucide-sm"></i>
+                    </button>
+                    <button class="sidebar-icon-btn" id="sidebar-collapse-btn" aria-label="Zijbalk inklappen" data-tooltip="Inklappen">
+                        <i data-lucide="panel-left-close" class="lucide-sm"></i>
+                    </button>
+                </div>
             </div>
-        </nav>
+        </aside>
+
+        <!-- Mobiele backdrop voor sidebar -->
+        <div class="sidebar-scrim" id="sidebar-scrim"></div>
+
+        <!-- Hoofdinhoud -->
+        <main class="app-main">
+            <!-- Mobiele topbar (enkel < 860px) -->
+            <header class="app-topbar">
+                <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu">
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                    <span class="hamburger-line"></span>
+                </button>
+                <div class="app-topbar-brand">
+                    <span class="sidebar-brand-mark sm">V</span>
+                    <span>Het Vlot</span>
+                </div>
+            </header>
+
+            <div class="app-views">
 
         <!-- Home View -->
         <div id="home-view" class="view active">
@@ -100,37 +228,37 @@
         <!-- Planning View -->
         <div id="planning-view" class="view">
             <div class="view-header">
-                <h2>Roosterplanning</h2>
-                <div class="header-actions">
-                    <button id="add-shift-btn" class="btn btn-primary btn-primary-lg"><i data-lucide="plus" class="lucide-sm"></i> Dienst toevoegen</button>
+                <div class="view-title">
+                    <span class="view-title-eyebrow">Planning</span>
+                    <!-- #289: deze kop stond vast op "Weekoverzicht", ook als de
+                         dagweergave actief was. updatePeriodDisplay zet hem mee. -->
+                    <h2 id="planning-view-title">Weekoverzicht</h2>
                 </div>
-                <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" title="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
+                <div class="header-actions"></div>
             </div>
 
             <div class="planning-controls" id="planning-controls-wrapper">
                 <div class="planning-controls-row">
                     <div class="date-navigation">
-                        <button id="prev-week" class="btn" aria-label="Vorige week"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
-                        <button id="today-btn" class="btn">Vandaag</button>
-                        <button id="next-week" class="btn" aria-label="Volgende week"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+                        <button id="prev-week" class="nav-arrow-btn" aria-label="Vorige"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
+                        <button id="today-btn" class="btn btn-secondary btn-sm">Vandaag</button>
+                        <button id="next-week" class="nav-arrow-btn" aria-label="Volgende"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
                     </div>
-                    <div id="current-period" class="period-display period-display--clickable" title="Klik om naar een datum te springen">
-                        <i data-lucide="calendar" class="lucide-xs period-calendar-icon"></i>
+                    <div id="current-period" class="period-display period-display--clickable" data-tooltip="Klik om naar een datum te springen">
                         <span id="current-period-text"></span>
                         <input type="date" id="week-jump-input" class="week-jump-input" aria-label="Spring naar week">
                     </div>
+                    <div class="controls-spacer"></div>
                     <div class="view-toggle-controls">
-                        <button class="view-toggle-btn active" data-mode="week">Week</button>
                         <button class="view-toggle-btn" data-mode="day">Dag</button>
+                        <button class="view-toggle-btn active" data-mode="week">Week</button>
                     </div>
+                    <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" data-tooltip="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
                 </div>
                 <div class="planning-controls-row hidden" id="planning-filters-row">
-                    <div class="team-toggles" id="team-toggles">
-                        <!-- Dynamisch gevuld via renderTeamToggles() -->
-                    </div>
                     <div class="planning-filter-buttons">
-                        <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" title="Team bezetting heatmap">Bezetting</button>
-                        <label class="toggle-switch-label" title="Verberg medewerkers zonder diensten">
+                        <button id="heatmap-toggle-btn" class="btn btn-sm btn-secondary" data-tooltip="Team bezetting heatmap">Bezetting</button>
+                        <label class="toggle-switch-label" data-tooltip="Verberg medewerkers zonder diensten">
                             <input type="checkbox" id="filter-shifts-toggle" class="toggle-switch-input">
                             <span class="toggle-switch-slider"></span>
                             <span class="toggle-switch-text">Verberg lege rijen</span>
@@ -144,13 +272,13 @@
 
             <!-- Mobile day navigation (alleen zichtbaar op mobiel) -->
             <div id="mobile-day-nav" class="mobile-day-nav">
-                <button id="mobile-prev-day" class="btn btn-sm" aria-label="Vorige dag"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
+                <button id="mobile-prev-day" class="btn btn-secondary btn-sm" aria-label="Vorige dag"><i data-lucide="chevron-left" class="lucide-sm"></i></button>
                 <div id="mobile-day-display" class="mobile-day-display">
                     <span class="mobile-day-name">Ma</span>
                     <span class="mobile-day-date">1 jan</span>
                     <input type="date" id="mobile-date-picker" class="mobile-date-picker">
                 </div>
-                <button id="mobile-next-day" class="btn btn-sm" aria-label="Volgende dag"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
+                <button id="mobile-next-day" class="btn btn-secondary btn-sm" aria-label="Volgende dag"><i data-lucide="chevron-right" class="lucide-sm"></i></button>
             </div>
 
             <div id="roster-calendar" class="calendar-container"></div>
@@ -181,16 +309,27 @@
         <!-- Profiel View -->
         <div id="profile-view" class="view">
             <div class="view-header">
-                <h2>Profiel</h2>
+                <div>
+                    <div class="view-title-eyebrow">Profiel</div>
+                    <h2 id="profile-view-title">Mijn profiel</h2>
+                </div>
             </div>
             <div id="profile-content"></div>
         </div>
 
         <!-- Afwezigheid View -->
         <div id="availability-view" class="view">
+            <!-- #345: de beschrijving stond als los flexkind naast de titel in een
+                 view-header met justify-content: space-between, en had bovendien
+                 margin-top: -16px uit een gestapelde opzet. Ze werd daardoor naar
+                 rechts geduwd en zestien pixels omhoog getild, boven de hoogte van
+                 de kop waar ze bij hoort. Dezelfde kolomopzet als .view-title op
+                 Planning zet ze weer onder de titel. -->
             <div class="view-header">
-                <h2>Afwezigheid</h2>
-                <p class="view-description">Registreer verlof, ziekte en andere afwezigheden</p>
+                <div class="view-title">
+                    <h2>Afwezigheid</h2>
+                    <p class="view-description">Registreer verlof, ziekte en andere afwezigheden</p>
+                </div>
             </div>
             <div id="availability-content"></div>
             <div class="section-loading-overlay hidden">
@@ -201,20 +340,65 @@
 
         <!-- Roosterbouwer View -->
         <div id="builder-view" class="view">
+            <!-- #345: de beschrijving stond als los flexkind naast de titel in een
+                 view-header met justify-content: space-between, en had bovendien
+                 margin-top: -16px uit een gestapelde opzet. Ze werd daardoor naar
+                 rechts geduwd en zestien pixels omhoog getild, boven de hoogte van
+                 de kop waar ze bij hoort. Dezelfde kolomopzet als .view-title op
+                 Planning zet ze weer onder de titel. -->
             <div class="view-header">
-                <h2>Rooster Bouwen</h2>
-                <p class="view-description">Bouw en beheer roosters en vakantieconcepten voor je team</p>
+                <div class="view-title">
+                    <h2>Rooster bouwen</h2>
+                    <p class="view-description">Bouw en beheer roosters en vakantieconcepten voor je team</p>
+                </div>
             </div>
             <div id="builder-content"></div>
+            <!-- #180: de bouwer riep showSectionLoading('builder-view') al aan,
+                 maar dit element ontbrak. Die aanroep deed dus stilletjes niets
+                 en je zag bij het laden van een concept geen enkele
+                 terugkoppeling. -->
+            <div class="section-loading-overlay hidden">
+                <div class="section-loading-spinner"></div>
+                <span class="section-loading-text"></span>
+            </div>
         </div>
 
         <!-- Dienstenruil View -->
         <div id="swaps-view" class="view">
+            <!-- #345: de beschrijving stond als los flexkind naast de titel in een
+                 view-header met justify-content: space-between, en had bovendien
+                 margin-top: -16px uit een gestapelde opzet. Ze werd daardoor naar
+                 rechts geduwd en zestien pixels omhoog getild, boven de hoogte van
+                 de kop waar ze bij hoort. Dezelfde kolomopzet als .view-title op
+                 Planning zet ze weer onder de titel. -->
             <div class="view-header">
-                <h2>Dienstenruil</h2>
-                <p class="view-description">Overzicht van dienstruilverzoeken tussen medewerkers</p>
+                <div class="view-title">
+                    <h2>Dienstenruil</h2>
+                    <p class="view-description">Overzicht van dienstruilverzoeken tussen medewerkers</p>
+                </div>
             </div>
             <div id="swaps-list"></div>
+            <div class="section-loading-overlay hidden">
+                <div class="section-loading-spinner"></div>
+                <span class="section-loading-text"></span>
+            </div>
+        </div>
+
+        <!-- Verlofplanning View -->
+        <div id="leave-view" class="view">
+            <!-- #345: de beschrijving stond als los flexkind naast de titel in een
+                 view-header met justify-content: space-between, en had bovendien
+                 margin-top: -16px uit een gestapelde opzet. Ze werd daardoor naar
+                 rechts geduwd en zestien pixels omhoog getild, boven de hoogte van
+                 de kop waar ze bij hoort. Dezelfde kolomopzet als .view-title op
+                 Planning zet ze weer onder de titel. -->
+            <div class="view-header">
+                <div class="view-title">
+                    <h2>Verlofplanning</h2>
+                    <p class="view-description" id="leave-view-description">Duid je verlof aan voor de vakantieperiodes</p>
+                </div>
+            </div>
+            <div id="leave-content"></div>
             <div class="section-loading-overlay hidden">
                 <div class="section-loading-spinner"></div>
                 <span class="section-loading-text"></span>
@@ -224,7 +408,10 @@
         <!-- Instellingen View -->
         <div id="settings-view" class="view">
             <div class="view-header">
-                <h2>Instellingen</h2>
+                <div>
+                    <div class="view-title-eyebrow">Instellingen</div>
+                    <h2 id="settings-view-title">Instellingen</h2>
+                </div>
             </div>
             <div class="settings-tabs" id="settings-tabs">
                 <!-- Dynamically rendered based on role -->
@@ -234,7 +421,8 @@
             </div>
         </div>
 
-        <!-- Footer verwijderd in redesign -->
+            </div><!-- /.app-views -->
+        </main><!-- /.app-main -->
     </div>
 
     <!-- Modal: Dienst toevoegen/bewerken -->
@@ -242,7 +430,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="shift-modal-title">Dienst toevoegen</h2>
-                <span class="modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <form id="shift-form">
                 <div class="form-row">
@@ -252,13 +440,11 @@
                     </div>
                     <div class="form-group">
                         <label for="shift-team">Team *</label>
-                        <select id="shift-team" required>
-                            <option value="vlot1">Vlot 1</option>
-                            <option value="vlot2">Vlot 2</option>
-                            <option value="cargo">Cargo</option>
-                            <option value="overkoepelend">Overkoepelend</option>
-                            <option value="jobstudent">Jobstudenten/Stagiairs</option>
-                        </select>
+                        <!-- #178: de opties werden hier vast opgesomd, waardoor een
+                             nieuw of hernoemd team niet doorkwam. De lijst wordt nu
+                             gevuld door populateShiftTeamDropdown() uit
+                             DataStore.settings.teams, net als elke andere teamkeuze. -->
+                        <select id="shift-team" required></select>
                     </div>
                 </div>
                 <div class="form-row">
@@ -312,7 +498,7 @@
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2 id="activity-modal-title">Activiteit toevoegen</h2>
-                <span class="modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <form id="activity-form">
                 <input type="hidden" id="activity-id">
@@ -365,7 +551,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Meldingen</h2>
-                <span class="modal-close" id="warning-details-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="warning-details-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div id="warning-details-list"></div>
@@ -378,7 +564,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Fouten</h2>
-                <span class="modal-close" id="error-details-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="error-details-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div id="error-details-list"></div>
@@ -391,7 +577,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="employee-modal-title">Medewerker toevoegen</h2>
-                <span class="modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <form id="employee-form">
                 <!-- Editable profile fields (shown for admin/roosterverantwoordelijke) -->
@@ -403,7 +589,7 @@
                         </div>
                         <div class="form-group">
                             <label for="employee-email">E-mail</label>
-                            <input type="email" id="employee-email" class="form-input" placeholder="Optioneel — welkomstmail wordt verzonden zodra e-mail ingevuld is">
+                            <input type="email" id="employee-email" class="form-input" placeholder="Optioneel, welkomstmail wordt verzonden zodra e-mail ingevuld is">
                         </div>
                     </div>
                     <div class="form-row">
@@ -449,7 +635,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="availability-modal-title">Afwezigheid registreren</h2>
-                <span class="modal-close" id="availability-modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="availability-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div id="availability-warning"></div>
             <div class="modal-body">
@@ -463,6 +649,8 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="absence-start-date">Van datum *</label>
+                        <!-- #310: min en max vangen de typfout 2206 in plaats van 2026 al in
+                             het veld zelf op. openAvailabilityModal zet ze bij het openen. -->
                         <input type="date" id="absence-start-date" class="form-control" required>
                     </div>
                     <div class="form-group">
@@ -476,12 +664,11 @@
 
                 <div class="form-group">
                     <label for="absence-type">Type afwezigheid *</label>
+                    <!-- #311: de keuzes worden opgebouwd uit ABSENCE_TYPES in
+                         app-availability.js, zodat deze lijst en de labels niet
+                         uiteen kunnen lopen. -->
                     <select id="absence-type" class="select-input" required>
                         <option value="">-- Selecteer type --</option>
-                        <option value="verlof">Verlof</option>
-                        <option value="ziek">Ziekte</option>
-                        <option value="overuren">Overuren opnemen</option>
-                        <option value="andere">Andere</option>
                     </select>
                 </div>
 
@@ -493,9 +680,9 @@
                 <div id="absence-takeover-toggle" class="absence-takeover-row hidden">
                     <label class="absence-takeover-label">
                         <input type="checkbox" id="absence-offer-takeover" checked>
-                        <span>Bied conflicterende shifts aan voor overname</span>
+                        <span>Bied conflicterende diensten aan voor overname</span>
                     </label>
-                    <p class="absence-takeover-hint">Collega's kunnen deze shifts overnemen via de Ruilen-pagina.</p>
+                    <p class="absence-takeover-hint">Collega's kunnen deze diensten overnemen via de pagina Ruilen.</p>
                 </div>
             </div>
             <div class="modal-actions">
@@ -506,23 +693,23 @@
         </div>
     </div>
 
-    <!-- Modal: Dienst Ruilen -->
+    <!-- Modal: dienst ruilen -->
     <div id="swap-request-modal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Dienst Ruilen</h2>
-                <span class="modal-close" id="swap-request-modal-close"><i data-lucide="x"></i></span>
+                <h2>Dienst ruilen</h2>
+                <button type="button" class="modal-close" id="swap-request-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
-                <!-- Shift Preview -->
+                <!-- Voorbeeld van de dienst -->
                 <div class="swap-shifts-preview">
                     <div class="swap-shift-card">
-                        <h3>Jouw shift</h3>
+                        <h3>Jouw dienst</h3>
                         <div id="swap-requester-shift-preview"></div>
                     </div>
                     <div class="swap-arrow"><i data-lucide="arrow-left-right"></i></div>
                     <div class="swap-shift-card">
-                        <h3>Gewenste shift</h3>
+                        <h3>Gewenste dienst</h3>
                         <div id="swap-target-shift-preview"></div>
                     </div>
                 </div>
@@ -536,7 +723,7 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="swap-target-shift">Welke shift wil je van deze collega? *</label>
+                    <label for="swap-target-shift">Welke dienst wil je van deze collega? *</label>
                     <select id="swap-target-shift" class="select-input" required disabled>
                         <option value="">-- Selecteer eerst een collega --</option>
                     </select>
@@ -558,27 +745,27 @@
         </div>
     </div>
 
-    <!-- Modal: Shift Afstaan Choice -->
+    <!-- Modal: keuze bij een dienst afstaan -->
     <div id="shift-afstaan-choice-modal" class="modal hidden">
         <div class="modal-content modal-content--md">
             <div class="modal-header">
-                <h2>Shift afstaan</h2>
-                <span class="modal-close" id="shift-afstaan-choice-close"><i data-lucide="x"></i></span>
+                <h2>Dienst afstaan</h2>
+                <button type="button" class="modal-close" id="shift-afstaan-choice-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <p class="modal-intro-text">
-                    Hoe wil je deze shift afstaan?
+                    Hoe wil je deze dienst afstaan?
                 </p>
 
                 <div class="choice-stack">
                     <button type="button" class="btn btn-primary btn-choice" id="choice-swap-btn">
                         <div class="btn-choice-title"><i data-lucide="repeat-2" class="lucide-sm icon-inline"></i> Ruilen met collega</div>
-                        <div class="btn-choice-desc">Zoek een collega om shifts te ruilen (jij neemt hun shift over)</div>
+                        <div class="btn-choice-desc">Zoek een collega om diensten te ruilen (jij neemt hun dienst over)</div>
                     </button>
 
                     <button type="button" class="btn btn-secondary btn-choice" id="choice-takeover-btn">
                         <div class="btn-choice-title"><i data-lucide="hand" class="lucide-sm icon-inline"></i> Iemand zoeken</div>
-                        <div class="btn-choice-desc">Stel je shift beschikbaar voor iedereen (zonder ruilen)</div>
+                        <div class="btn-choice-desc">Stel je dienst beschikbaar voor iedereen (zonder ruilen)</div>
                     </button>
                 </div>
             </div>
@@ -592,17 +779,17 @@
     <div id="takeover-request-modal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Iemand Zoeken voor Shift</h2>
-                <span class="modal-close" id="takeover-request-modal-close"><i data-lucide="x"></i></span>
+                <h2>Iemand zoeken voor deze dienst</h2>
+                <button type="button" class="modal-close" id="takeover-request-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <p class="modal-intro-text">
-                    Je shift wordt beschikbaar gesteld aan alle collega's. Iedereen kan deze overnemen.
+                    Je dienst wordt beschikbaar gesteld aan alle collega's. Iedereen kan die overnemen.
                 </p>
 
-                <!-- Shift Preview -->
+                <!-- Voorbeeld van de dienst -->
                 <div class="form-group">
-                    <label>Jouw shift:</label>
+                    <label>Jouw dienst:</label>
                     <div id="takeover-shift-preview"></div>
                 </div>
 
@@ -613,7 +800,7 @@
                 </div>
 
                 <p class="info-box">
-                    <i data-lucide="lightbulb" class="lucide-sm icon-inline"></i> Zodra iemand je shift accepteert, krijgt die persoon de shift toegewezen.
+                    <i data-lucide="lightbulb" class="lucide-sm icon-inline"></i> Zodra iemand je dienst accepteert, krijgt die persoon de dienst toegewezen.
                 </p>
             </div>
             <div class="modal-actions">
@@ -642,7 +829,12 @@
     <!-- Input Prompt Modal (replaces browser prompt()) -->
     <div id="input-prompt-modal" class="modal hidden">
         <div class="modal-content input-prompt-content">
-            <label id="input-prompt-message" class="input-prompt-label"></label>
+            <!-- #371: showInputPrompt en showSelectPrompt namen allebei een titel
+                 aan, maar er was hier geen element om die in te zetten, dus
+                 verdween ze. "Data wissen" boven een keuzelijst met drie
+                 onomkeerbare opties is precies het soort houvast dat je wil. -->
+            <h2 id="input-prompt-title" class="input-prompt-title hidden"></h2>
+            <label id="input-prompt-message" class="input-prompt-label" for="input-prompt-value"></label>
             <input type="text" id="input-prompt-value" class="form-input">
             <div class="input-prompt-actions">
                 <button type="button" class="btn btn-secondary btn-sm" id="input-prompt-cancel">Annuleren</button>
@@ -656,7 +848,7 @@
         <div class="modal-content modal-content--xs">
             <div class="modal-header">
                 <h2 id="builder-shift-modal-title">Dienst toewijzen</h2>
-                <span class="modal-close" id="builder-shift-modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="builder-shift-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div id="builder-shift-employee-info" class="form-group mb-md"></div>
@@ -695,7 +887,7 @@
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
                 <h2>Week kopiëren</h2>
-                <span class="modal-close" id="copy-week-modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="copy-week-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div class="form-row">
@@ -728,21 +920,21 @@
         <div class="modal-content modal-content--lg">
             <div class="modal-header">
                 <h2>Concepten vergelijken</h2>
-                <span class="modal-close" id="draft-diff-modal-close"><i data-lucide="x"></i></span>
+                <button type="button" class="modal-close" id="draft-diff-modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body">
                 <div class="form-row mb-md">
                     <div class="form-group">
-                        <label class="form-label">Concept A</label>
+                        <label class="form-label" for="draft-diff-a">Concept A</label>
                         <select id="draft-diff-a" class="form-input"></select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Concept B</label>
+                        <label class="form-label" for="draft-diff-b">Concept B</label>
                         <select id="draft-diff-b" class="form-input"></select>
                     </div>
                     <div class="form-group" style="flex:0">
                         <label class="form-label">&nbsp;</label>
-                        <button type="button" class="btn btn-primary" id="draft-diff-run">Vergelijk</button>
+                        <button type="button" class="btn btn-primary" id="draft-diff-run">Vergelijken</button>
                     </div>
                 </div>
                 <div id="draft-diff-result"></div>
@@ -753,26 +945,27 @@
         </div>
     </div>
 
-    <script src="config/settings.js"></script>
-    <script src="data.js"></script>
-    <script src="validation.js"></script>
-    <script src="drag-handler.js"></script>
-    <script src="app-globals.js"></script>
-    <script src="app-permissions.js"></script>
-    <script src="app-ui.js"></script>
-    <script src="app-auth.js"></script>
-    <script src="app-nav.js"></script>
-    <script src="app-planner.js"></script>
-    <script src="app-shifts.js"></script>
-    <script src="app-swaps.js"></script>
-    <script src="app-employees.js"></script>
-    <script src="app-availability.js"></script>
-    <script src="app-builder.js"></script>
-    <script src="app-builder-editors.js"></script>
-    <script src="app-builder-drafts.js"></script>
-    <script src="app-settings.js"></script>
-    <script src="app-admin.js"></script>
-    <script src="app-init.js"></script>
+    <script src="config/settings.js?v=20260611a"></script>
+    <script src="data.js?v=20260830a"></script>
+    <script src="validation.js?v=20260611a"></script>
+    <script src="drag-handler.js?v=20260830a"></script>
+    <script src="app-globals.js?v=20260611a"></script>
+    <script src="app-permissions.js?v=20260611a"></script>
+    <script src="app-ui.js?v=20260830a"></script>
+    <script src="app-auth.js?v=20260611a"></script>
+    <script src="app-nav.js?v=20260830a"></script>
+    <script src="app-planner.js?v=20260830a"></script>
+    <script src="app-shifts.js?v=20260611a"></script>
+    <script src="app-swaps.js?v=20260611a"></script>
+    <script src="app-leave.js?v=20260830e"></script>
+    <script src="app-employees.js?v=20260830a"></script>
+    <script src="app-availability.js?v=20260830b"></script>
+    <script src="app-builder.js?v=20260830g"></script>
+    <script src="app-builder-editors.js?v=20260830a"></script>
+    <script src="app-builder-drafts.js?v=20260830c"></script>
+    <script src="app-settings.js?v=20260830a"></script>
+    <script src="app-admin.js?v=20260830a"></script>
+    <script src="app-init.js?v=20260830a"></script>
     <script>
         if (typeof lucide !== 'undefined') {
             lucide.createIcons();

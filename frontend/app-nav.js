@@ -1,30 +1,11 @@
 // HET VLOT ROOSTERPLANNING - NAVIGATIE, HOME DASHBOARD EN DATUMNAVIGATIE
 
 
-function renderTeamToggles() {
-    const container = document.getElementById('team-toggles');
-    if (!container) return;
-    const teams = DataStore.settings.teams || {};
-    container.innerHTML = '';
-    getTeamOrder().forEach(teamId => {
-        const team = teams[teamId];
-        const isActive = AppState.visibleTeams.includes(teamId);
-        const btn = document.createElement('button');
-        btn.className = `team-toggle ${isActive ? 'active' : ''}`;
-        btn.dataset.team = teamId;
-        btn.textContent = team?.name || teamId;
-        btn.addEventListener('click', () => {
-            btn.classList.toggle('active');
-            if (btn.classList.contains('active')) {
-                if (!AppState.visibleTeams.includes(teamId)) AppState.visibleTeams.push(teamId);
-            } else {
-                AppState.visibleTeams = AppState.visibleTeams.filter(t => t !== teamId);
-            }
-            renderCalendar();
-        });
-        container.appendChild(btn);
-    });
-}
+// #182: renderTeamToggles is hier verwijderd. Zijn container #team-toggles is
+// uit de markup gehaald toen de planningsfilters werden herzien, dus de functie
+// keerde meteen terug en deed niets. De filterrij van de planning heeft nu de
+// bezettingsheatmap en "verberg lege rijen"; de teamfilter voor het
+// medewerkersscherm (#employee-team-toggles) is een andere functie en blijft.
 
 function renderEmployeeTeamToggles() {
     const container = document.getElementById('employee-team-toggles');
@@ -89,9 +70,44 @@ function updateShiftRefreshRange() {
         const weekEndStr = formatDateYYYYMMDD(weekEnd);
         const hasData = DataStore.shifts && DataStore.shifts.some(s => s.date >= weekStart && s.date <= weekEndStr);
         if (!hasData) {
+            // #331: hier stond .catch(() => {}). Mislukte de fetch, dan rendeerde
+            // de planner door met een lege week, en een lege week is niet te
+            // onderscheiden van een week waarin echt niemand staat. Een
+            // roosterverantwoordelijke leest dat als "niemand ingepland".
+            //
+            // De week wordt nu als ONBEKEND gemarkeerd in plaats van als leeg,
+            // met een balk erboven en een knop om het opnieuw te proberen.
+            AppState.weekLaadFout = null;
             refreshShifts({ startDate: startStr, endDate: endStr, merge: true })
-                .then(() => { if (AppState.currentView === 'planning') renderPlanning(); })
-                .catch(() => {});
+                .then(() => {
+                    AppState.weekLaadFout = null;
+                    if (AppState.currentView === 'planning') renderPlanning();
+                })
+                .catch(fout => {
+                    // Een verlopen sessie regelt zichzelf al: dataApiFetch stuurt
+                    // je terug naar het loginscherm. Daar hoort geen tweede
+                    // melding bij.
+                    if (fout && fout.status === 401) return;
+                    AppState.weekLaadFout = { week: weekStart, melding: getUserFriendlyError(fout) };
+                    if (AppState.currentView === 'planning') renderPlanning();
+                });
+        }
+
+        // #378: afwezigheid zit sinds die wijziging ook in een venster. Hier
+        // dezelfde afweging als bij de diensten hierboven, maar met een andere
+        // toets: de meeste weken hebben helemaal geen afwezigheden, dus
+        // "staat er iets in deze week" zou elke navigatie opnieuw laten laden.
+        // zorgAfwezigheidVoorBereik kijkt daarom naar het GELADEN BEREIK en
+        // niet naar de inhoud.
+        if (typeof zorgAfwezigheidVoorBereik === 'function') {
+            zorgAfwezigheidVoorBereik(weekStart, weekEndStr).then(gelukt => {
+                if (!gelukt) {
+                    showToast('Afwezigheden voor deze week konden niet geladen worden. De weergave kan onvolledig zijn.', 'error');
+                    return;
+                }
+                if (AppState.currentView === 'planning') renderPlanning();
+                else if (AppState.currentView === 'availability') renderAvailability();
+            });
         }
     }
 }
@@ -109,18 +125,33 @@ function renderHome() {
 
     const role = getEffectiveRole();
 
+    // De twee panelen eerst: ze zetten de tellingen die de kaarten erboven
+    // tonen (_homeAlertCount en _homeAandachtCount). De kaart is de kop van
+    // het paneel, dus het getal moet bekend zijn voor de kaart gemaakt wordt.
+    const alertsHtml = renderHomeAlerts(role);
+    const aandachtHtml = renderHomeRequests(user);
+
     let html = '';
     html += renderHomeWelcome(user, role);
     if (role === 'admin') html += renderHomeOnboarding();
-    html += renderHomeAlerts(role);
+    html += renderHomeKaarten(user, role);
+    html += alertsHtml;
+    html += aandachtHtml;
+    // De rechterkolom hield vroeger drie kaarten vast; "Vraagt je aandacht" is
+    // daar weg en zit nu in het paneel bovenaan. Dat liet een gat naast de
+    // lange lijst met komende diensten. "Nu aan het werk" stond los onder het
+    // raster en vult het nu op.
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
+    html += '<div class="home-grid-zij">';
     html += renderHomeWeekendInfo();
-    html += renderHomeRequests(user, role);
+    html += renderHomeNuAanHetWerk();
+    html += '</div>';
     html += '</div>';
 
     container.innerHTML = html;
     IconHelper.init(container);
+    meetPaneelStarts();
 
     // Attach quick action click handlers
     container.querySelectorAll('.home-action-btn').forEach(btn => {
@@ -152,6 +183,11 @@ function renderHome() {
     container.querySelectorAll('.home-request-item[data-action="view-swaps"]').forEach(item => {
         item.style.cursor = 'pointer';
         item.addEventListener('click', () => switchView('swaps'));
+    });
+
+    container.querySelectorAll('.home-request-item[data-action="view-leave"]').forEach(item => {
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', () => switchView('leave'));
     });
 
     // Alert-item header: toggle expand/collapse
@@ -191,13 +227,13 @@ function getOnboardingStatus() {
 
     return [
         { id: 'teams', label: 'Teams aanmaken', done: Object.keys(teams).length > 0, view: 'settings', tab: 'teams' },
-        { id: 'templates', label: 'Dienst templates instellen', done: Object.keys(templates).length > 0, view: 'settings', tab: 'teams' },
+        { id: 'templates', label: 'Dienstsjablonen instellen', done: Object.keys(templates).length > 0, view: 'settings', tab: 'teams' },
         { id: 'users', label: 'Medewerkers toevoegen', done: users.filter(u => u.role === 'medewerker').length > 0, view: 'settings', tab: 'accounts' },
         { id: 'rules', label: 'Planningsregels controleren', done: AppState.currentUser?.onboardingFlags?.planning_visited === true, view: 'settings', tab: 'planning',
           hint: `Stel de minimale rustperiode tussen diensten en het maximaal aantal opeenvolgende werkdagen in. Dit beschermt het welzijn van medewerkers en voldoet aan wettelijke vereisten. Huidig: ${minHours}u rust, max ${maxDays} dagen.` },
         { id: 'holidays', label: 'Vakantieperiodes invoeren', done: holidays.length > 0, view: 'settings', tab: 'planning' },
         { id: 'schedule', label: 'Basisrooster maken', done: DataStore.shifts.length > 0, view: 'builder' },
-        { id: 'email', label: 'Email notificaties configureren', done: DataStore.settings.emailNotifications?.globalEnabled === true, view: 'settings', tab: 'communicatie' }
+        { id: 'email', label: 'E-mailmeldingen instellen', done: DataStore.settings.emailNotifications?.globalEnabled === true, view: 'settings', tab: 'communicatie' }
     ];
 }
 
@@ -307,7 +343,7 @@ function renderHomeAlerts(role) {
         const emp = (DataStore.users || []).find(u => u.id === Number(empId));
         const dObj = parseDateOnly(dateStr);
         const absLabel = absenceLabels[absence.type] || 'afwezig';
-        const text = `${escapeHtml(emp?.name || 'Medewerker')}: shift op ${formatDateShort(dObj)} maar ${absLabel}`;
+        const text = `${escapeHtml(emp?.name || 'Medewerker')}: dienst op ${formatDateShort(dObj)} maar ${absLabel}`;
         const parts = [];
         if (s.startTime && s.endTime) parts.push(`Dienst: ${escapeHtml(s.startTime)}–${escapeHtml(s.endTime)}`);
         parts.push(`Afwezigheid: ${escapeHtml(absLabel)}`);
@@ -349,27 +385,40 @@ function renderHomeAlerts(role) {
         }
     }
 
-    // 5. Ruilverzoeken ouder dan 48u
+    // 5. Openstaande verzoeken ouder dan 48u
+    //
+    // #321: de tekst zei "wacht op goedkeuring", maar er is helemaal geen
+    // leadgoedkeuringsstap: een ruil handelt de doelpersoon zelf af en een
+    // overname is een aanbod waar niemand op hoeft te beslissen. De filter nam
+    // bovendien álle pending verzoeken mee, dus ook die aanbiedingen. De
+    // melding klopt nu met wat er staat: er ligt iets open, en het ligt er lang.
     const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000);
-    const oldPending = (DataStore.swapRequests || []).filter(r =>
+    const oudOpen = (DataStore.swapRequests || []).filter(r =>
         r.status === 'pending' && new Date(r.createdAt || r.created_at) < cutoff48h
     );
-    if (oldPending.length > 0) {
+    if (oudOpen.length > 0) {
         const key = 'old-swaps';
         if (!dismissedKeys.has(key)) {
-            const count = oldPending.length;
+            const aantal = oudOpen.length;
+            const ruilen = oudOpen.filter(r => (r.request_type || r.requestType) === 'swap').length;
+            const overnames = aantal - ruilen;
+            // Benoemen wat het is, zodat duidelijk is waar je moet kijken.
+            const soorten = [
+                ruilen ? `${ruilen} ruilverzoek${ruilen !== 1 ? 'en' : ''}` : null,
+                overnames ? `${overnames} overnameverzoek${overnames !== 1 ? 'en' : ''}` : null
+            ].filter(Boolean).join(' en ');
             warnings.push({ level: 'info', key,
-                text: `${count} ruilverzoek${count !== 1 ? 'en' : ''} wacht${count === 1 ? '' : 'en'} al meer dan 48u op goedkeuring` });
+                text: `${soorten} ${aantal === 1 ? 'staat' : 'staan'} al meer dan 48u open` });
         }
     }
 
+    AppState._homeAlertCount = warnings.length;
     if (warnings.length === 0) return '';
 
-    const ALERT_COLLAPSE_AT = 5;
     const alertCategoryConfig = [
         { id: 'unstaffed', label: 'Onderbezetting', icon: 'users' },
         { id: '11h', label: '11-uur schending', icon: 'clock' },
-        { id: 'conflict', label: 'Shift + afwezigheid', icon: 'calendar-x-2' },
+        { id: 'conflict', label: 'Dienst en afwezigheid', icon: 'calendar-x-2' },
         { id: 'consec', label: 'Opeenvolgende diensten', icon: 'trending-up' },
         { id: 'swaps', label: 'Ruilverzoeken', icon: 'arrow-left-right' },
         { id: 'other', label: 'Overig', icon: 'alert-triangle' },
@@ -407,14 +456,18 @@ function renderHomeAlerts(role) {
         </div>`;
     };
 
+    // Altijd per soort groeperen, ook bij twee meldingen. Hier stond een grens
+    // van vijf: daaronder kwamen de regels los onder elkaar te staan. Met veel
+    // fouten liep die lijst zo tientallen regels door, en dan zoek je in een
+    // rij regels die allemaal op elkaar lijken. Nu open je de soort die je
+    // zoekt. De prijs is één klik extra bij één enkele melding.
     let bodyHtml = '';
     for (const cat of alertCategoryConfig) {
         const catItems = alertGroups.get(cat.id);
         if (!catItems || catItems.length === 0) continue;
-        if (catItems.length >= ALERT_COLLAPSE_AT) {
-            bodyHtml += `
+        bodyHtml += `
         <div class="alert-group alert-group--collapsed">
-            <button class="alert-group-header" onclick="this.closest('.alert-group').classList.toggle('alert-group--collapsed')">
+            <button class="alert-group-header" onclick="const g=this.closest('.alert-group');this.setAttribute('aria-expanded', String(!g.classList.toggle('alert-group--collapsed')))" aria-expanded="false">
                 <i data-lucide="${cat.icon}" class="lucide-xs"></i>
                 <span class="alert-group-label">${cat.label}</span>
                 <span class="alert-group-count">${catItems.length}</span>
@@ -422,20 +475,13 @@ function renderHomeAlerts(role) {
             </button>
             <div class="alert-group-body">${catItems.map(renderAlertItem).join('')}</div>
         </div>`;
-        } else {
-            bodyHtml += catItems.map(renderAlertItem).join('');
-        }
     }
 
-    return `
-        <div class="home-alerts home-alerts--collapsed mb-md">
-            <button class="home-alerts-header" onclick="this.closest('.home-alerts').classList.toggle('home-alerts--collapsed')" aria-expanded="false">
-                <i data-lucide="bell" class="lucide-sm"></i>
-                <strong>Meldingen</strong>
-                <span class="home-alerts-count">${warnings.length}</span>
-                <i data-lucide="chevron-down" class="lucide-sm home-alerts-chevron"></i>
-            </button>
-            <div class="home-alerts-body">${bodyHtml}</div>
+    // Geen eigen kop meer. De kaart "roosterproblemen" in renderHomeStats is de
+    // kop: die toonde toch al exact hetzelfde getal, want beide lezen
+    // AppState._homeAlertCount. Twee koppen boven één lijst is er een te veel.
+    return `<div id="home-meldingen" class="home-paneel home-paneel--meldingen">
+            <div class="home-paneel-doos"><div class="home-paneel-lijst">${bodyHtml}</div></div>
         </div>`;
 }
 
@@ -472,7 +518,7 @@ function renderHomeOnboarding() {
     <div class="home-card onboarding-checklist mb-md">
         <div class="onboarding-header">
             <h3 class="onboarding-title">App instellen</h3>
-            <button class="btn btn-sm btn-ghost onboarding-dismiss" onclick="dismissOnboardingChecklist(this)" title="Verbergen">✕</button>
+            <button class="btn btn-sm btn-ghost onboarding-dismiss" onclick="dismissOnboardingChecklist(this)" data-tooltip="Verbergen">✕</button>
         </div>
         <div class="onboarding-progress">
             <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
@@ -481,7 +527,7 @@ function renderHomeOnboarding() {
         <ul class="onboarding-steps">
             ${steps.map(s => `<li class="${s.done ? 'done' : ''}">
                 <span class="step-check">${s.done ? '✓' : '○'}</span>
-                <a href="#" onclick="event.preventDefault();${s.tab ? `AppState.settingsActiveTab='${s.tab}';` : ''}switchView('${s.view}');">${s.label}</a>
+                <a href="#" onclick="event.preventDefault();${s.tab ? `AppState.activeSettingsTab='${s.tab}';` : ''}switchView('${s.view}');">${s.label}</a>
                 ${s.hint ? `<p class="onboarding-hint">${s.hint}</p>` : ''}
             </li>`).join('')}
         </ul>
@@ -491,9 +537,9 @@ function renderHomeOnboarding() {
 async function dismissOnboardingChecklist(btn) {
     btn.closest('.onboarding-checklist').remove();
     try {
-        await fetch(`${window.API_BASE}/me/onboarding-flags`, {
+        // #171: zie app-settings.js, dezelfde reden.
+        await dataApiFetch('/me/onboarding-flags', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionStorage.getItem('hetvlot_token')}` },
             body: JSON.stringify({ checklist_dismissed: true })
         });
         if (AppState.currentUser) AppState.currentUser.onboardingFlags = { ...AppState.currentUser.onboardingFlags, checklist_dismissed: true };
@@ -501,23 +547,258 @@ async function dismissOnboardingChecklist(btn) {
 }
 
 function renderHomeWelcome(user, role) {
-    const roleLabels = {
-        admin: 'Admin',
-        roosterverantwoordelijke: 'Roosterverantwoordelijke',
-        medewerker: 'Medewerker'
-    };
     const today = new Date();
-    const dateStr = today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const hour = today.getHours();
+    const greeting = hour < 12 ? 'Goeiemorgen' : hour < 18 ? 'Goeiemiddag' : 'Goeieavond';
+    const dateStr = today.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' });
+    const firstName = (user.name || '').split(' ')[0] || user.name;
 
     return `
-        <div class="home-welcome">
-            <h2>Welkom, ${escapeHtml(user.name)}</h2>
-            <div class="home-welcome-sub">
-                <span>${dateStr}</span>
-                <span class="home-role-badge">${escapeHtml(roleLabels[role] || role)}</span>
-            </div>
-        </div>
+        <div class="home-hi">${greeting}, <em>${escapeHtml(firstName)}</em></div>
+        <div class="home-hi-sub">${dateStr}</div>
     `;
+}
+
+/**
+ * #166: stat-kaarten bovenaan home.
+ *
+ * Deze gaan over JEZELF en staan daarom vóór de beheerkaarten: je uren deze
+ * week tegen je contract, je periodetotaal, en wat er op jou wacht. Die cijfers
+ * bestonden al maar stonden alleen klein onder je naam in de planning, dus je
+ * moest ernaartoe navigeren om te weten hoe je ervoor staat.
+ *
+ * Alleen voor wie meedraait in het rooster. Een adminaccount heeft geen
+ * diensten (zie isRoosterMedewerker in server.js), dus "32 van je 38 uur" zou
+ * daar altijd nul zijn.
+ *
+ * Zonder contracturen is er geen norm om tegen af te zetten. Dan geen balk en
+ * geen "van", alleen het getal; "32/0u" zou onzin zijn en delen door nul nog
+ * meer.
+ */
+function renderHomeEigenUren(user) {
+    if (!user || user.role === 'admin') return [];
+
+    const vandaag = new Date();
+    const weekStart = formatDateYYYYMMDD(getMonday(vandaag));
+    const contract = Number(user.contractHours) || 0;
+    const weekUren = getEmployeeHoursThisWeek(user.id, weekStart);
+    const periodeUren = getEmployeeHoursThisPeriod(user.id, weekStart);
+    const periodeNorm = contract > 0 ? contract * 4 : 0;
+
+    // Dezelfde regel als in de planning: rood boven de norm, oranje eronder.
+    const kaart = (icon, uren, norm, label) => {
+        const heeftNorm = norm > 0;
+        const boven = heeftNorm && uren > norm;
+        const kleur = !heeftNorm ? 'var(--info)' : (boven ? 'var(--color-danger)' : 'var(--warn)');
+        const vlak = !heeftNorm ? 'var(--info-bg)' : (boven ? 'var(--danger-bg)' : 'var(--warn-bg)');
+        const deel = heeftNorm ? Math.min(100, Math.round((uren / norm) * 100)) : 0;
+        const tekst = heeftNorm ? `${_uren(uren)}<span class="stat-card-van">/${_uren(norm)}u</span>`
+                                : `${_uren(uren)}u`;
+        return statKaart(`
+            <div class="stat-card-ic" style="background:${vlak};color:${kleur}">${IconHelper.html(icon, 'md')}</div>
+            <div class="stat-card-body">
+                <div class="stat-card-v">${tekst}</div>
+                <div class="stat-card-k">${escapeHtml(label)}</div>
+                ${heeftNorm ? `<div class="stat-balk" role="img" aria-label="${deel} procent van ${_uren(norm)} uur">
+                    <span style="width:${deel}%;background:${kleur}"></span>
+                </div>` : ''}
+            </div>`, "switchView('planning')", 'Naar je planning');
+    };
+
+    // Wat er op JOU wacht. Deze kaart telde eerst alleen de ruilverzoeken waar
+    // jij de doelpersoon van bent, en onderaan home stond een losse kaart
+    // "Vraagt je aandacht" die diezelfde verzoeken telde PLUS je andere ruilen,
+    // de overnames van je team en een verlofronde die nog op jou wacht. Twee
+    // plekken, en de kleinste stond bovenaan. Nu is het één kaart met het
+    // volledige getal, die de lijst eronder opent. Het cijfer komt uit
+    // renderHomeRequests, dat in renderHome vóór de kaarten draait.
+    const aandacht = AppState._homeAandachtCount || 0;
+
+    return [
+        kaart('clock', weekUren, contract, 'deze week'),
+        kaart('calendar-range', periodeUren, periodeNorm, 'deze periode van 4 weken'),
+        statKaart(`
+                <div class="stat-card-ic" style="background:var(--ok-bg);color:var(--sage-700)">${IconHelper.html('inbox', 'md')}</div>
+                <div class="stat-card-body">
+                    <div class="stat-card-v">${aandacht}</div>
+                    <div class="stat-card-k">vraagt je aandacht</div>
+                </div>
+                ${aandacht ? '<i data-lucide="chevron-down" class="lucide-sm stat-card-chevron"></i>' : ''}`,
+                aandacht ? 'toggleHomePaneel(this)' : '',
+                'Toon wat je aandacht vraagt', 'stat-card--aandacht',
+                'aria-expanded="false" aria-controls="home-aandacht"')
+    ];
+}
+
+// Uren zonder nodeloze decimalen: 32 in plaats van 32,0 maar wel 32,5.
+function _uren(u) {
+    const n = Math.round((Number(u) || 0) * 2) / 2;
+    return Number.isInteger(n) ? String(n) : String(n).replace('.', ',');
+}
+
+/**
+ * #166: een kaart die ergens naartoe brengt hoort een knop te zijn en geen div.
+ * Dan werkt hij ook met het toetsenbord en leest een schermlezer hem als knop.
+ * Zonder doel blijft het een div, want een knop die nergens heen gaat is een
+ * leugen tegen wie op Tab drukt.
+ */
+function statKaart(inhoud, actie, titel, extraKlasse, attrs) {
+    const klasse = `stat-card${extraKlasse ? ' ' + extraKlasse : ''}`;
+    if (!actie) return `<div class="${klasse}">${inhoud}</div>`;
+    return `<button type="button" class="${klasse}"${attrs ? ' ' + attrs : ''} onclick="${actie}" data-tooltip="${escapeHtml(titel || '')}">${inhoud}</button>`;
+}
+
+/**
+ * Een kaart met een paneel is de kop van dat paneel. De kaart toont HOEVEEL,
+ * het paneel eronder bevat WELKE. Bij de meldingen stond daar eerst een aparte
+ * balk met dezelfde kop en hetzelfde getal, bij "vraagt je aandacht" een losse
+ * kaart onderaan home. Allebei weg.
+ *
+ * Welk paneel bij welke kaart hoort staat in aria-controls, dus de koppeling
+ * die een schermlezer gebruikt is ook de koppeling die de code gebruikt.
+ *
+ * Het paneel groeit uit de kaart in de vorm van een liggende L: eerst naar
+ * onder over de breedte van de kaart, daarna naar links over de volle rij.
+ * Sluiten gaat in omgekeerde volgorde. De volgorde zit in de CSS, in twee
+ * transition-regels; hier wordt alleen het beginpunt doorgegeven, want de
+ * breedte van een kaart hangt af van hoeveel er naast elkaar passen.
+ */
+/**
+ * De L vertrekt vanaf de kaart, dus het paneel begint even breed als zij en
+ * eindigt daar weer bij het sluiten. Die breedte kan niet in de CSS staan:
+ * hoeveel kaarten er naast elkaar passen hangt af van de breedte van het
+ * scherm. Ze wordt daarom bij het renderen gemeten en in --paneel-start
+ * gezet, NIET bij het klikken: een breedte die in dezelfde tel verandert als
+ * de klasse omslaat, komt te laat om het vertrekpunt van de animatie te zijn.
+ */
+function meetPaneelStarts() {
+    (AppState._paneelMeters || []).forEach(m => m.disconnect());
+    AppState._paneelMeters = [];
+    document.querySelectorAll('#home-content .stat-card[aria-controls]').forEach(kaart => {
+        const paneel = document.getElementById(kaart.getAttribute('aria-controls'));
+        if (!paneel) return;
+        const zet = () => {
+            // Allebei ONAFGEROND. Een raster met auto-fit deelt de rij in
+            // breedtes met cijfers achter de komma, dus offsetWidth en een
+            // afgeronde afstand schelen er zo een halve pixel mee. Die zie je:
+            // de rechterrand van het paneel lag dan net naast die van de kaart.
+            const rk = kaart.getBoundingClientRect();
+            paneel.style.setProperty('--paneel-start', `${rk.width}px`);
+            // Hoever de kaart van de rechterrand af staat. Nul als ze de
+            // laatste van de rij is; anders hangt het paneel daaraan vast.
+            const rand = paneel.parentElement.getBoundingClientRect().right;
+            paneel.style.setProperty('--paneel-rechts', `${Math.max(0, rand - rk.right)}px`);
+        };
+        zet();
+        // De kaart wordt smaller of breder als het venster of de zijbalk
+        // verandert, en dan klopt het vertrekpunt niet meer.
+        if (typeof ResizeObserver === 'function') {
+            const meter = new ResizeObserver(zet);
+            meter.observe(kaart);
+            AppState._paneelMeters.push(meter);
+        }
+    });
+}
+
+function toggleHomePaneel(knop) {
+    const paneel = document.getElementById(knop.getAttribute('aria-controls'));
+    if (!paneel) return;
+    const doos = paneel.firstElementChild;
+    const open = !paneel.classList.contains('home-paneel--open');
+    clearTimeout(AppState._paneelTimer);
+
+    // Hoogstens één paneel tegelijk. Twee L-en onder elkaar, elk wijzend naar
+    // een andere kaart, leest als twee losse blokken.
+    document.querySelectorAll('#home-content .stat-card--open').forEach(k => {
+        if (k === knop) return;
+        k.classList.remove('stat-card--open');
+        k.setAttribute('aria-expanded', 'false');
+        const p = document.getElementById(k.getAttribute('aria-controls'));
+        if (p) { p.classList.remove('home-paneel--open'); p.style.maxHeight = ''; }
+    });
+
+    // max-height moet de ECHTE hoogte van de lijst zijn. Met een ruime vaste
+    // bovengrens staat de lijst er na een paar milliseconden al, want de
+    // animatie is dan grotendeels lege ruimte, en bij meer meldingen dan die
+    // grens wordt de onderste afgeknipt.
+    if (open) {
+        paneel.style.maxHeight = `${doos.offsetHeight}px`;
+        paneel.classList.add('home-paneel--open');
+        // Daarna de grens loslaten: een regel die je uitklapt maakt de lijst
+        // langer en mag niet tegen die hoogte aanlopen.
+        AppState._paneelTimer = setTimeout(() => { paneel.style.maxHeight = 'none'; }, 280);
+    } else {
+        // Vanaf 'none' valt niets te animeren, dus eerst de hoogte vastzetten.
+        paneel.style.maxHeight = `${doos.offsetHeight}px`;
+        void paneel.offsetHeight;
+        paneel.classList.remove('home-paneel--open');
+        paneel.style.maxHeight = '';
+    }
+    knop.classList.toggle('stat-card--open', open);
+    knop.setAttribute('aria-expanded', String(open));
+}
+
+function renderHomeStats(user, role) {
+    if (!['admin', 'roosterverantwoordelijke'].includes(role)) return [];
+
+    // Hier stonden ook "diensten deze week" en "medewerkers actief". Die zijn
+    // eruit: het zijn getallen waar niets uit volgt. Dat er deze week 52
+    // diensten staan zegt niets zonder te weten hoeveel het er horen te zijn,
+    // en hoeveel medewerkers actief zijn verandert een paar keer per jaar. Op
+    // een kaart hoort iets waar je naar handelt.
+
+    // Open ruilverzoeken. Deze kaart is er ALLEEN voor wie geen eigen rij
+    // kaarten heeft, dus voor een adminaccount. Een roosterverantwoordelijke
+    // draait mee in het rooster en ziet hierboven al "verzoeken wachten op
+    // jou"; twee kaarten die allebei over ruilverzoeken gaan lezen als
+    // dubbelop, zeker als er van beide nul zijn. Van die twee is de eigen
+    // kaart de belangrijkste: sinds #114 keurt een lead geen ruil meer goed,
+    // dus een openstaand verzoek is niemands taak behalve die van de
+    // doelpersoon. Het totaal is informatie, geen werk.
+    const eigenRij = user && user.role !== 'admin';
+    const openSwaps = (DataStore.swapRequests || []).filter(r =>
+        r.status === 'pending'
+    ).length;
+
+    // Problemen in het rooster: onderbezetting, te weinig rust, een dienst op
+    // een dag dat iemand afwezig is. Deze kaart heette "aandachtspunten", maar
+    // ernaast staat "vraagt je aandacht" en dat zijn twee heel verschillende
+    // dingen: dit gaat over het rooster dat je beheert, die over wat er op jou
+    // persoonlijk ligt te wachten. Twee labels met hetzelfde woord erin lees je
+    // als twee helften van hetzelfde.
+    const alertCount = AppState._homeAlertCount || 0;
+
+    const stat = (icon, bg, color, value, label, actie, titel) => statKaart(`
+            <div class="stat-card-ic" style="background:${bg};color:${color}">${IconHelper.html(icon, 'md')}</div>
+            <div>
+                <div class="stat-card-v">${value}</div>
+                <div class="stat-card-k">${label}</div>
+            </div>`, actie, titel);
+
+    return [
+        eigenRij ? '' : stat('arrow-left-right', 'var(--warn-bg)', 'var(--warn)', openSwaps, 'open ruilverzoeken', "switchView('swaps')", 'Naar de ruilverzoeken'),
+        statKaart(`
+                <div class="stat-card-ic" style="background:var(--danger-bg);color:var(--danger-color)">${IconHelper.html('alert-triangle', 'md')}</div>
+                <div>
+                    <div class="stat-card-v">${alertCount}</div>
+                    <div class="stat-card-k">roosterproblemen</div>
+                </div>
+                ${alertCount ? '<i data-lucide="chevron-down" class="lucide-sm stat-card-chevron"></i>' : ''}`,
+                alertCount ? 'toggleHomePaneel(this)' : '',
+                'Toon de problemen in het rooster', 'stat-card--meldingen',
+                'aria-expanded="false" aria-controls="home-meldingen"')
+    ].filter(Boolean);
+}
+
+/**
+ * Eén raster voor alle stat-kaarten. Het waren er twee: je eigen cijfers en de
+ * beheercijfers. Nu de beheerrij nog maar uit de meldingenkaart bestaat, zou
+ * die als losse rij over de volle breedte komen te staan.
+ */
+function renderHomeKaarten(user, role) {
+    const kaarten = [...renderHomeEigenUren(user), ...renderHomeStats(user, role)];
+    if (kaarten.length === 0) return '';
+    return `<div class="home-stats">${kaarten.join('')}</div>`;
 }
 
 function renderHomeShifts(user) {
@@ -631,29 +912,70 @@ function renderHomeQuickActions(role) {
     `;
 }
 
-function renderHomeRequests(user, role) {
+// `role` is geen parameter meer: sinds #197 gelden voor iedereen dezelfde
+// filterregels op de startpagina.
+function renderHomeRequests(user) {
+    // Zelfde grens als bij renderHomeEigenUren: een adminaccount draait niet
+    // mee in het rooster en krijgt dus ook de kaart niet die dit paneel opent.
+    // Een paneel zonder kaart zou onbereikbaar in de pagina staan.
+    if (!user || user.role === 'admin') { AppState._homeAandachtCount = 0; return ''; }
     const userId = Number(user.id || user.userId);
     const userTeam = user.team_id || user.mainTeam;
-    const isLeadOrAdmin = ['admin', 'roosterverantwoordelijke'].includes(role);
 
+    // #197: hier stond voor een lead `return r.status === 'pending_lead'`. Die
+    // status wordt door geen enkele regel backendcode ooit toegekend: de
+    // goedkeuringsstap door een lead is in #114 verwijderd en alleen de lege
+    // huls bleef staan. Een roosterverantwoordelijke zag dus altijd nul
+    // openstaande verzoeken, hoeveel er ook lagen.
+    //
+    // Een lead is voor ruilen gewoon een medewerker: hij ziet wat aan hem
+    // gericht is, plus de openstaande overnames van zijn team. Dat is dezelfde
+    // regel als hieronder, dus die geldt nu voor iedereen.
+    //
+    // #315: de dode pending_lead-filters zijn hier en elders weggehaald. De
+    // kolommen lead_approved, lead_response_notes en lead_responded_at en de
+    // waarde in de CHECK-constraint staan er nog; zie de toelichting bij #315.
     let pendingRequests = (DataStore.swapRequests || []).filter(r => {
-        if (r.status !== 'pending' && r.status !== 'pending_lead') return false;
-
-        if (isLeadOrAdmin) {
-            // Leads zien enkel verzoeken die hun goedkeuring vereisen (pending_lead)
-            return r.status === 'pending_lead';
-        }
-        // Medewerker: eigen requests + takeover requests van eigen team
+        if (r.status !== 'pending') return false;
         return r.requester_user_id === userId || r.target_user_id === userId ||
                (r.request_type === 'takeover' && r.requester_shift_team === userTeam);
     });
 
+    // Een lopende verlofronde die nog op jou wacht hoort hier ook thuis:
+    // anders zie je pas dat je iets moet invullen als je de verloftab opent.
+    // Geldt voor iedereen — ook een lead vult zijn eigen verlof in.
+    const verlofTaken = (AppState.leaveRounds || []).filter(r =>
+        r.status === 'open' && (!r.mySubmittedAt || r.myApproved === false)
+    );
+
+    // De kaart "vraagt je aandacht" toont dit getal; zij is de kop van dit
+    // paneel. Hier stond eerder een losse kaart onderaan home met dezelfde
+    // telling erin, naast een stat-kaart die alleen de ruilverzoeken telde.
+    AppState._homeAandachtCount = pendingRequests.length + verlofTaken.length;
+    if (AppState._homeAandachtCount === 0) return '';
+
     let requestsHtml = '';
-    if (pendingRequests.length === 0) {
-        requestsHtml = '<div class="home-card-empty"><i data-lucide="inbox" class="empty-state-icon"></i>Geen openstaande verzoeken</div>';
-    } else {
-        requestsHtml = '<div class="home-card-body">';
-        pendingRequests.slice(0, 5).forEach(req => {
+    {
+        verlofTaken.forEach(r => {
+            const afgewezen = r.myApproved === false;
+            const label = afgewezen ? 'Opnieuw invullen' : 'Invullen';
+            const deadline = r.deadline
+                ? `vóór ${parseDateOnly(r.deadline).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })}`
+                : 'nog niet ingediend';
+            requestsHtml += `
+                <div class="home-request-item" data-action="view-leave">
+                    <div class="home-request-info">
+                        <div class="home-request-type">Verlof</div>
+                        <div class="home-request-detail">${escapeHtml(r.name)} · ${escapeHtml(deadline)}</div>
+                    </div>
+                    <span class="home-request-status needs-action">${label}</span>
+                </div>
+            `;
+        });
+
+        // Geen bovengrens van vijf meer met "+ N meer..." eronder: het paneel
+        // scrollt in zichzelf, dus een lange lijst past gewoon.
+        pendingRequests.forEach(req => {
             const isSwap = req.request_type === 'swap';
             const typeLabel = isSwap ? 'Ruil' : 'Overname';
             const requesterName = escapeHtml(req.requester_name || 'Onbekend');
@@ -674,21 +996,11 @@ function renderHomeRequests(user, role) {
                 </div>
             `;
         });
-        if (pendingRequests.length > 5) {
-            requestsHtml += `<div class="home-card-empty home-card-more">+ ${pendingRequests.length - 5} meer...</div>`;
-        }
-        requestsHtml += '</div>';
     }
 
-    return `
-        <div class="home-card">
-            <div class="home-card-header">
-                Openstaande verzoeken
-                ${pendingRequests.length > 0 ? `<span class="card-count">${pendingRequests.length}</span>` : ''}
-            </div>
-            ${requestsHtml}
-        </div>
-    `;
+    return `<div id="home-aandacht" class="home-paneel home-paneel--aandacht">
+            <div class="home-paneel-doos"><div class="home-paneel-lijst">${requestsHtml}</div></div>
+        </div>`;
 }
 
 function renderHomeTeamCoverage(role, user) {
@@ -838,9 +1150,70 @@ function renderHomeWeekendInfo() {
     `;
 }
 
+function renderHomeNuAanHetWerk() {
+    const now = new Date();
+    const todayStr = formatDateYYYYMMDD(now);
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const activeShifts = (DataStore.shifts || []).filter(s => {
+        const date = (s.date || '').split('T')[0];
+        if (date !== todayStr) return false;
+        const start = (s.startTime || s.start_time || '').substring(0, 5);
+        const end = (s.endTime || s.end_time || '').substring(0, 5);
+        return start && end && currentTime >= start && currentTime < end;
+    });
+
+    if (activeShifts.length === 0) {
+        return `
+            <div class="home-card home-card-on-duty">
+                <div class="home-card-header">Nu aan het werk</div>
+                <div class="home-card-empty">
+                    <i data-lucide="moon" class="empty-state-icon"></i>
+                    Niemand is op dit moment aan het werk
+                </div>
+            </div>
+        `;
+    }
+
+    const chips = activeShifts.map(shift => {
+        const userId = shift.userId || shift.employeeId || shift.user_id;
+        const emp = (DataStore.users || []).find(u => String(u.id) === String(userId));
+        const name = emp?.name || shift.employeeName || 'Onbekend';
+        const teamId = shift.team;
+        const teamColor = DataStore.settings?.teams?.[teamId]?.color || '#64748b';
+        const initials = getInitials(name);
+        const startTime = (shift.startTime || shift.start_time || '').substring(0, 5);
+        const endTime = (shift.endTime || shift.end_time || '').substring(0, 5);
+
+        return `
+            <div class="on-duty-chip">
+                ${avatarHtml(name, teamColor)}
+                <div class="on-duty-info">
+                    <span class="on-duty-name">${escapeHtml(name)}</span>
+                    <span class="on-duty-time">${escapeHtml(startTime)} – ${escapeHtml(endTime)}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="home-card home-card-on-duty">
+            <div class="home-card-header">
+                Nu aan het werk
+                <span class="card-count">${activeShifts.length}</span>
+            </div>
+            <div class="on-duty-list">
+                ${chips}
+            </div>
+        </div>
+    `;
+}
+
 async function switchView(viewName) {
-    // Prevent medewerker from accessing settings
-    if (viewName === 'settings' && getEffectiveRole() === 'medewerker') {
+    // #294: hier stond alleen een controle op 'settings'. De roosterbouwer en
+    // het medewerkerstabblad kwamen er zo doorheen, en dit is de plek waar elke
+    // weergavewissel langskomt. Dezelfde bron als de navigatieknoppen.
+    if (!toegelatenWeergaven().has(viewName)) {
         viewName = 'home';
     }
     // Warn about unsaved settings changes
@@ -864,8 +1237,7 @@ async function switchView(viewName) {
         // Reset builder state so returning shows overview
         AppState.builderScreen = 'overview';
         AppState.builderIsDirty = false;
-        AppState.builderLoadedDraftId = null;
-        AppState.builderLoadedDraftName = null;
+        vergeetActiefConcept();
         AppState.builderPattern = null;
         AppState.builderConceptType = 'basis';
         AppState.builderHolidayPeriodId = null;
@@ -877,8 +1249,7 @@ async function switchView(viewName) {
     } else if (AppState.currentView === 'builder' && viewName !== 'builder') {
         stopBuilderAutoSave();
         await unlockScheduleDraft(AppState.builderLoadedDraftId);
-        AppState.builderLoadedDraftId = null;
-        AppState.builderLoadedDraftName = null;
+        vergeetActiefConcept();
         // Also reset when leaving builder without unsaved changes
         AppState.builderScreen = 'overview';
         AppState.builderPattern = null;
@@ -889,7 +1260,6 @@ async function switchView(viewName) {
         AppState.builderShowStaffingEditor = false;
         AppState.builderShowMeetingsEditor = false;
         AppState.builderMeetings = {};
-        localStorage.removeItem('hetvlot_activeDraftId');
     }
     // Clear undo history when switching views
     UndoManager.clear();
@@ -951,6 +1321,10 @@ async function switchView(viewName) {
             DOM.swapsView.classList.add('active');
             renderSwaps();
             break;
+        case 'leave':
+            DOM.leaveView.classList.add('active');
+            renderLeave();
+            break;
         case 'builder':
             DOM.builderView.classList.add('active');
             renderBuilder();
@@ -994,37 +1368,12 @@ function changeWeek(direction) {
     renderPlanning();
 }
 
-// Set current month
-function setCurrentMonth(date) {
-    const d = parseDateOnly(date);
-    d.setDate(1); // Set to 1st of month
-    d.setHours(0, 0, 0, 0);
-    AppState.currentMonthStart = d;
-    updatePeriodDisplay();
-}
-
-// Change month (direction: -1 for previous, 1 for next)
-function changeMonth(direction) {
-    if (!AppState.currentMonthStart) {
-        setCurrentMonth(new Date());
-        return;
-    }
-    const newDate = new Date(AppState.currentMonthStart);
-    newDate.setMonth(newDate.getMonth() + direction);
-    setCurrentMonth(newDate);
-    renderPlanning();
-}
-
-// Jump to today (unified function for both views)
+// Jump to today
 function jumpToToday() {
     const today = new Date();
-    if (AppState.viewMode === 'week' || AppState.viewMode === 'day') {
-        setCurrentWeek(today);
-        const dayOfWeek = today.getDay();
-        AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    } else {
-        setCurrentMonth(today);
-    }
+    setCurrentWeek(today);
+    const dayOfWeek = today.getDay();
+    AppState.mobileDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
     renderPlanning();
 }
 
@@ -1044,6 +1393,16 @@ function changeMobileDay(direction) {
         updateTimelineMobileDayAttribute();
         if (AppState.viewMode === 'day') {
             updatePeriodDisplay();
+            // #266: de meldingenbalk rekent in dagweergave per ZICHTBARE dag
+            // (zie renderValidationAlerts), maar deze tak werkte alleen het
+            // label en het data-attribuut bij. Na een tik op de pijl bleven de
+            // waarschuwingen van de vorige dag staan, en die gaan over rusttijd
+            // en opeenvolgende werkdagen.
+            //
+            // Alleen de balk opnieuw, niet de hele planning: het raster rendert
+            // alle zeven dagen en verbergt de rest via data-mobile-day, dus daar
+            // verandert niets aan.
+            renderValidationAlerts();
         }
     }
 }
@@ -1122,11 +1481,13 @@ function changeAvailabilityMobileDay(direction) {
         const prev = new Date(AppState.currentWeekStart);
         prev.setDate(prev.getDate() - 7);
         AppState.currentWeekStart = prev;
+        updateShiftRefreshRange();
     } else if (AppState.availabilityMobileDayIndex > 6) {
         AppState.availabilityMobileDayIndex = 0;
         const next = new Date(AppState.currentWeekStart);
         next.setDate(next.getDate() + 7);
         AppState.currentWeekStart = next;
+        updateShiftRefreshRange();
     }
 
     renderAvailability();
@@ -1143,18 +1504,7 @@ function changeViewMode(mode) {
     if (mode === AppState.viewMode) return; // Already in this mode
 
     // Store context before switching
-    if (mode === 'month' && AppState.viewMode === 'week') {
-        // Switching week → month
-        AppState.previousWeekStart = AppState.currentWeekStart;
-        setCurrentMonth(AppState.currentWeekStart || new Date());
-    } else if (mode === 'week' && AppState.viewMode === 'month') {
-        // Switching month → week
-        if (AppState.previousWeekStart) {
-            AppState.currentWeekStart = AppState.previousWeekStart;
-        } else {
-            setCurrentWeek(AppState.currentMonthStart || new Date());
-        }
-    } else if (mode === 'day') {
+    if (mode === 'day') {
         // Switching to day mode: default to today's day in current week
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
@@ -1182,15 +1532,13 @@ function changeViewMode(mode) {
 }
 
 function updatePeriodDisplay() {
-    if (AppState.viewMode === 'month') {
-        // Month view: show "februari 2026"
-        if (!AppState.currentMonthStart) {
-            setCurrentMonth(new Date());
-            return;
-        }
-        DOM.currentPeriod.textContent = formatMonthDisplay(AppState.currentMonthStart);
-    } else if (AppState.viewMode === 'day') {
-        // Day view: show "Maandag, 3 maart 2026"
+    // #289: de kop boven de planning stond vast op "Weekoverzicht", ook in de
+    // dagweergave. Hij hoort te zeggen waar je naar kijkt.
+    const kop = document.getElementById('planning-view-title');
+    if (kop) kop.textContent = AppState.viewMode === 'day' ? 'Dagoverzicht' : 'Weekoverzicht';
+
+    if (AppState.viewMode === 'day') {
+        // Day view: show "Week 6 · Maandag, 3 maart 2026"
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
             return;
@@ -1198,20 +1546,30 @@ function updatePeriodDisplay() {
         const dayNames = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
         const currentDate = new Date(AppState.currentWeekStart);
         currentDate.setDate(currentDate.getDate() + AppState.mobileDayIndex);
+        const weekNr = getISOWeekNumber(formatDateYYYYMMDD(currentDate));
         const dateStr = currentDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
-        DOM.currentPeriod.textContent = `${dayNames[AppState.mobileDayIndex]}, ${dateStr}`;
+        DOM.currentPeriod.textContent = `Week ${weekNr} · ${dayNames[AppState.mobileDayIndex]}, ${dateStr}`;
     } else {
-        // Week view: show "Week 6 | 3 februari 2026 - 9 februari 2026"
+        // Week view: "Week 24 · 8 - 14 juni 2026"
         if (!AppState.currentWeekStart) {
             setCurrentWeek(new Date());
             return;
         }
         const weekEnd = new Date(AppState.currentWeekStart);
         weekEnd.setDate(weekEnd.getDate() + 6);
-        const options = { day: 'numeric', month: 'long', year: 'numeric' };
-        const startStr = AppState.currentWeekStart.toLocaleDateString('nl-BE', options);
-        const endStr = weekEnd.toLocaleDateString('nl-BE', options);
-        DOM.currentPeriod.textContent = `${startStr} - ${endStr}`;
+        const weekNr = getISOWeekNumber(formatDateYYYYMMDD(AppState.currentWeekStart));
+        DOM.currentPeriod.textContent = `Week ${weekNr} · ${formatWeekRange(AppState.currentWeekStart, weekEnd)}`;
     }
+}
+
+// Compact datumbereik: "8 - 14 juni 2026" (zelfde maand) of "28 juni - 4 juli 2026"
+function formatWeekRange(start, end) {
+    const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+    const endStr = end.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+    if (sameMonth) {
+        return `${start.getDate()} - ${endStr}`;
+    }
+    const startStr = start.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' });
+    return `${startStr} - ${endStr}`;
 }
 

@@ -23,42 +23,56 @@ open ../frontend/index.html
 - **Frontend**: Vanilla JavaScript - GEEN framework, GEEN build step, GEEN npm
 - **Backend**: Node.js + Express, single server.js met alle endpoints
 - **Database**: PostgreSQL (Render hosted in productie)
-- **Auth**: JWT tokens (7 dagen geldig), bcrypt password hashing
+- **Auth**: JWT tokens (7 dagen geldig, vernieuwen mee zolang je bezig bent), bcrypt password hashing
 
 ## Bestandsoverzicht
 
 ### Frontend (`frontend/`)
-| Bestand | Regels | Doel |
-|---------|--------|------|
-| `app-globals.js` | ~311 | AppState, constanten, UndoManager, DOM object, IconHelper |
-| `app-permissions.js` | ~77 | Rol-checks en permissiefuncties |
-| `app-ui.js` | ~479 | Toast, modals, FocusTrap, tooltips, overlays |
-| `app-auth.js` | ~231 | Login, logout, sessiecheck, rolevisibility |
-| `app-nav.js` | ~890 | Navigatie, switchView, renderHome, week/maand/dag helpers |
-| `app-planner.js` | ~1330 | renderPlanning, timeline, maand, heatmap, validatiemeldingen, uren-per-naam |
-| `app-shifts.js` | ~1105 | Shift modals, swap modals, shift CRUD, activiteiten |
-| `app-swaps.js` | ~512 | renderSwaps, swap- en overnamekaartenrendering |
-| `app-employees.js` | ~1010 | renderEmployees, profiel, medewerker CRUD, weekrooster |
-| `app-availability.js` | ~640 | renderAvailability, afwezigheidsmodal |
-| `app-builder.js` | ~3065 | Roosterbouwer: grid, concepten, vergaderingen, staffing |
-| `app-settings.js` | ~2697 | renderSettings, alle instellingstabs |
-| `app-admin.js` | ~380 | Export/import, debug, migratie, sanitize |
-| `app-init.js` | ~472 | initDOM, setupEventListeners, init(), DOMContentLoaded entry |
-| `data.js` | ~1.840 | DataStore, API fetch wrappers, data loading |
-| `validation.js` | ~593 | Business rules: 11-uur regel, overlap, min bezetting |
-| `drag-handler.js` | ~1.201 | Drag & drop shifts tussen medewerkers |
-| `styles.css` | ~11.250 | Alle CSS inclusief responsive, themas |
-| `index.html` | ~800 | HTML markup: modals, formulieren, planning grid |
-| `config/settings.js` | ~62 | API URL auto-detect, shift templates, team kleuren |
+
+De regelaantallen stonden hier vroeger bij, maar die verouderden per week en
+zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
+
+| Bestand | Doel |
+|---------|------|
+| `app-globals.js` | AppState, constanten, UndoManager, DOM object, IconHelper |
+| `app-permissions.js` | Rol-checks en permissiefuncties |
+| `app-ui.js` | Toast, modals, FocusTrap, tooltips, overlays |
+| `app-auth.js` | Login, logout, sessiecheck, rolevisibility |
+| `app-nav.js` | Navigatie, switchView, renderHome, week/maand/dag helpers |
+| `app-planner.js` | renderPlanning, timeline, heatmap, validatiemeldingen, uren-per-naam |
+| `app-shifts.js` | Shift modals, swap modals, shift CRUD, activiteiten |
+| `app-swaps.js` | renderSwaps, swap- en overnamekaartenrendering |
+| `app-leave.js` | Verlofplanning: rondes, invullen, matrix, goedkeuren, verdelen, export |
+| `app-employees.js` | renderEmployees, profiel, medewerker CRUD, weekrooster |
+| `app-availability.js` | renderAvailability, afwezigheidsmodal, ABSENCE_TYPES |
+| `app-builder.js` | Roosterbouwer: grid, rendering, bewaarstatus, vergaderingen, staffing |
+| `app-builder-drafts.js` | Concepten: aanmaken, laden, vergrendelen, toepassen, diff, import/export |
+| `app-builder-editors.js` | Bouwer-deelschermen: staffing, vergaderingen, waarschuwingen, urenberekening |
+| `app-settings.js` | renderSettings, alle instellingstabs |
+| `app-admin.js` | Export/import, debug, migratie, sanitize |
+| `app-init.js` | initDOM, setupEventListeners, init(), DOMContentLoaded entry |
+| `data.js` | DataStore, API fetch wrappers, data loading |
+| `validation.js` | Business rules: 11-uur regel, overlap, min bezetting, datumhelpers |
+| `drag-handler.js` | Drag & drop shifts tussen medewerkers |
+| `styles.css` | Alle CSS inclusief responsive, themas |
+| `index.html` | HTML markup: modals, formulieren, planning grid |
+| `config/settings.js` | API URL auto-detect, shift templates, team kleuren |
 
 ### Backend (`backend/`)
 | Bestand | Doel |
 |---------|------|
-| `src/server.js` | Alle API endpoints + auto-migratie bij startup |
+| `src/server.js` | Express opzetten, opstarten, de routers monteren. Was 7213 regels met alle endpoints erin; sinds #157 nog 395 |
+| `src/routes/*.js` | De endpoints, één bestand per domein. Elk bestand maakt zijn router met `maakRouter()` en exporteert hem; `server.js` hangt ze met `v1.use()` op in de volgorde waarin ze vroeger stonden |
+| `src/veilige-router.js` | `maakRouter()`: een router die een afwijzende async handler naar `next(err)` stuurt (#380). Gebruik deze, nooit `express.Router()` rechtstreeks, anders krijgt een verzoek bij een fout géén antwoord |
+| `src/middleware/auth.js` | `signToken`, `requireAuth`, `requireAdmin`, `requireRole` |
+| `src/helpers/audit.js` | `logAudit`: het schrijven naar de audit log. Het LEZEN is een route en staat in `routes/audit-log.js` |
+| `src/helpers/overnames.js` | `voerGeplandeOvernamesUit()`: de overnames uit `geplande_overnames` afmaken die vandaag ingaan. Draait bij opstart en elk uur |
+| `src/helpers/dienstregels.js` | Waar een dienst aan moet voldoen: `validateShiftRules`, `blockDayIfEmpty`, `getMinRustUren`, de afwezigheidstypes en de tijdcontroles. De enige helpers die meer dan één domein deelt |
+| `src/migraties.js` | De `MIGRATIONS`-array en `runMigrations()` |
 | `src/db.js` | PostgreSQL connection pool |
 | `src/email.js` | Resend email service (9 notificatie types) |
-| `src/utils.js` | Pure datumhulpfuncties (`getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`, `getEasterDate`, `getBelgianPublicHolidays`) |
-| `sql/schema.sql` | Database schema (bron van waarheid) |
+| `src/utils.js` | Pure datumhulpfuncties (`getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`, `getEasterDate`, `getBelgianPublicHolidays`, `vandaagInBelgie`) |
+| `sql/schema.sql` | Volledig schema van de eindtoestand. Spiegelt wat de migraties samen opleveren, zodat een verse database in één keer goed staat |
 | `scripts/seed.js` | Seed teams + admin account |
 | `scripts/setup-db.js` | Voert schema.sql uit |
 | `import-backup.js` | CLI tool voor JSON backup import |
@@ -66,14 +80,32 @@ open ../frontend/index.html
 ### Tests (`backend/tests/`)
 | Bestand | Doel |
 |---------|------|
-| `utils.test.js` | Unit tests voor `src/utils.js` (33 tests) |
-| `email.test.js` | Unit tests voor email helpers: `escapeHtml`, `formatDate`, `formatTime`, `shiftDetailBox`, `baseTemplate` (31 tests) |
-| `api.test.js` | Integratietests voor API-endpoints — auth, shifts, teams, settings, swap-requests (46 tests) |
-| `validation.test.js` | Unit tests voor frontend pure functies in `validation.js` (15 tests) |
+| `api.test.js` | Integratietests voor de API-endpoints, met een volledig gemockte database |
+| `utils.test.js` | Unit tests voor `src/utils.js` |
+| `validation.test.js` | Unit tests voor de pure functies uit `frontend/validation.js` |
+| `email.test.js` | Unit tests voor de e-mailhelpers (`escapeHtml`, `formatDate`, `shiftDetailBox`, …) |
+| `email-batch.test.js` | Bulkverzending via `resend.batch.send`, inclusief de seriële terugval |
+| `email-verzending.test.js` | Wat er wel en niet verstuurd wordt, en naar wie |
+| `schooljaar.test.js` | Schooljaar- en periodeberekeningen |
+| `schema-drift.test.js` | Bewaakt dat `sql/schema.sql` niet achterloopt op de migraties (#329, #311) |
+| `monitoring.test.js` | Wat de foutmonitoring wegfiltert, op sleutelnaam én op waarde (#156) |
+| `permissies.test.js` | De pure rolchecks uit `frontend/app-permissions.js`, zoals wie een dienst mag afstaan |
+| `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
+| `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
+
+Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
+sneller dan dit bestand (#291).
+
+### MCP server (`mcp-server/`)
+| Bestand | Doel |
+|---------|------|
+| `stdio.js` | De server die `.mcp.json` start onder de naam `uurroosterapp`. Leest zijn gegevens uit `mcp-server/.env`, dat niet in git staat — zie MCP Server verderop |
+| `index.js` | Dezelfde tools als HTTP-server, voor een gehoste opzet |
+| `.env.example` | Welke variabelen `stdio.js` nodig heeft |
 
 ## Database Schema
 
-**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities
+**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions, geplande_overnames
 
 Kernrelaties:
 - `shifts.user_id` → `users.id`
@@ -97,13 +129,14 @@ Zie `backend/sql/schema.sql` voor volledige schema.
 2. **ALTIJD** `team_id` syncen met `main_team` bij user updates (anders falen permissies)
 3. **ALTIJD** parameterized queries gebruiken (nooit string concatenation in SQL)
 4. **Backend retourneert BEIDE** `userId` EN `employeeId` (backward compatibility alias)
-5. **Permissions** checken in ZOWEL frontend ALS backend
-6. **Auto-migratie**: `ensureSchema()` in server.js draait bij elke startup - voeg nieuwe schema changes daar toe
+5. **Permissions** checken in ZOWEL frontend ALS backend. Alleen de backend is veilig maar niet genoeg: staat de check daar alleen, dan biedt het scherm een actie aan die pas bij de laatste klik geweigerd wordt. Zo bood "Dienst afstaan" zich aan op een dienst uit het verleden, en liep je vier stappen door voor de backend `Shift ligt in het verleden` terugstuurde. De twee moeten dezelfde grens trekken — de backend vergelijkt met vandaag om middernacht, dus `canRequestSwap` doet dat ook, en een dienst van vandaag mag nog
+6. **Migraties**: geversioneerd via de `MIGRATIONS`-array + `runMigrations()` in `src/migraties.js` (draait bij elke startup, elke migratie exact één keer). Voeg nieuwe schema changes toe als nieuwe migratie-entry **én werk `sql/schema.sql` bij**, zodat beide wegen dezelfde database opleveren. `backend/tests/schema-drift.test.js` bewaakt dat: een kolom, index, tabel of constraint die alleen in een migratie staat laat die test falen. Die test leest `src/migraties.js` als TEKST, dus verhuist dat bestand ooit, dan moet de test mee. Migratie `000_base_schema` draait `schema.sql` idempotent, dus een verse database (bv. staging) initialiseert zichzelf; `ensureBootstrapData()` maakt standaardteams + admin-account aan zonder bestaande data te overschrijven
 7. **shift_blocks**: Bij shift delete wordt block aangemaakt (voorkomt auto-regeneratie). Manual shift create verwijdert block.
 8. **applyTeamColors()**: Niet aanroepen bij elke render — enkel na init en bij team-settings wijziging
 9. **Fetch wrapper**: Gebruik uitsluitend `dataApiFetch()` uit `data.js`. `apiFetch()` is verwijderd (issue #26 opgelost). Uitzondering: `fetchPublicHolidays()` gebruikt plain `fetch()` want `/public-holidays` vereist geen auth.
 10. **console.log**: Nooit toevoegen zonder debug-guard — `DEBUG` variabele staat bovenaan app.js en onderdrukt logs in productie automatisch
 11. **Email optioneel**: Accounts kunnen zonder e-mail worden aangemaakt. Welkomstmail wordt automatisch verstuurd zodra een e-mail voor het eerst wordt ingesteld via PATCH /admin/users of PUT /users/:id
+12. **Wachtwoorden zijn per account** (#379): `genereerWachtwoord()` maakt bij elke reset én bij elk nieuw account zonder opgegeven wachtwoord een eigen waarde. Die gaat één keer mee in het antwoord (`newPassword`) en wordt door de beheerder persoonlijk doorgegeven; geen enkele mail bevat een wachtwoord en het staat niet in de audit log. Het alfabet mijdt tekens die je bij het voorlezen verwart (geen `o`/`0`, geen `l`/`1`). `DEFAULT_RESET_PASSWORD` is daarmee teruggebracht tot de bulkimport en de oude migratiescripts, waar niemand veertig losse wachtwoorden kan uitdelen
 
 ## API Endpoints (belangrijk)
 
@@ -129,19 +162,130 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - `CRUD /api/v1/shift-activities` - Activiteiten binnen shifts
 - `CRUD /api/v1/schedule-drafts` - Roosterconcepten
 - `POST /api/v1/schedule-drafts/:id/apply` - Concept toepassen op datumbereik
-- `POST /api/v1/users/:id/apply-schedule` - Basisrooster toepassen (atomisch)
 - `POST /api/v1/availability/sick-with-takeover` - Bulk ziekmelding + auto-takeover
 
 ### Swap/Takeover
 - `POST /api/v1/swap-requests` - Ruilverzoek aanmaken
 - `POST /api/v1/shift-requests/takeover` - Overnameverzoek aanmaken
-- `PUT /api/v1/swap-requests/:id/approve` - Lead keurt goed
-- `PUT /api/v1/swap-requests/:id/reject` - Lead wijst af
+- `PUT /api/v1/swap-requests/:id/target-approve` - Doelpersoon accepteert de ruil
+- `PUT /api/v1/swap-requests/:id/target-reject` - Doelpersoon wijst de ruil af
+- `PUT /api/v1/shift-requests/:id/takeover-accept` - Collega neemt de dienst over
+
+Er is GEEN goedkeuringsstap door een lead: die is in #114 verwijderd. De
+doelpersoon handelt een ruil zelf af. De statuswaarde `pending_lead` en de
+kolommen `lead_approved`, `lead_response_notes` en `lead_responded_at` zijn in
+migratie 045 uit het schema gehaald (#315).
+
+**Bereik van een overname (#281, #283)**: een openstaande overname gaat naar
+IEDEREEN, ongeacht team. Drie plekken moeten daarover hetzelfde zeggen, anders
+ontstaat er een gat:
+
+| plek | voorwaarde |
+|------|-----------|
+| `GET /swap-requests` (wat een medewerker ziet) | elke openstaande overname |
+| `PUT /shift-requests/:id/takeover-accept` | geen teamvoorwaarde |
+| de mail bij een nieuw overnameverzoek | alle actieve niet-adminaccounts |
+
+Dit is een bewuste keuze van Victor (#283). #281 stelde vast dat de lijst en het
+aanvaarden niet hetzelfde zeiden; dat gat is eerst met een teamcontrole gedicht
+en daarna langs de ruime kant opgelost. Een dienst houdt zijn eigen team, alleen
+de persoon verandert.
+
+De enige grens die overblijft: je eigen aanbod aanvaarden kan niet. Daarvoor is
+annuleren.
+
+Wie geen overnamemail wil, zet die uit via `PUT /me/email-preferences`;
+`verstuurReeks` in `email.js` filtert daarop en laat de aanvrager zelf weg.
+Blijkt de hoeveelheid mail in de praktijk te veel, dan zijn de twee versmallingen
+uit #283 nog beschikbaar: alleen verbreden bij een dienst binnen 48 uur, of één
+dagelijkse samenvatting naast de directe mail aan het eigen team.
+
+### Verlofplanning
+- `GET /api/v1/leave-rounds` - Alle verlofrondes (concepten enkel voor beheerders)
+- `GET /api/v1/leave-rounds/:id` - Ronde met volledige matrix + indienstatus
+- `POST|PUT|DELETE /api/v1/leave-rounds[/:id]` - Ronde beheren (admin/roosterverantw.)
+- `PUT /api/v1/leave-rounds/:id/entries` - Invulling opslaan (eigen; beheerder ook voor anderen)
+- `POST /api/v1/leave-rounds/:id/submit` - Indienen
+- `PUT /api/v1/leave-rounds/:id/submissions/:userId` - Goedkeuren/afwijzen
+- `PUT /api/v1/leave-rounds/:id/blocks/:blockId` - Gesloten dagen van een blok opnieuw uit het concept overnemen (409 op een gesloten ronde zonder `?force=1`)
+- `PUT /api/v1/leave-rounds/:id/blocks/:blockId/entries` - Definitieve verdeling van een voorkeurblok vastleggen (enkel bij status `gesloten`; vervangt uitsluitend binnen het blokbereik)
+- `POST /api/v1/leave-rounds/:id/apply` - Goedgekeurd verlof → availability
 
 ### Admin
 - `GET /api/v1/audit-log` - Audit log met filters en paginatie
 - `POST /api/v1/admin/users/:id/replace` - Medewerker vervangen
 - `PUT /api/v1/me/email-preferences` - Email notificatie voorkeur
+
+**Een medewerker vervangen.** Eén verzoek, maar twee momenten. Wat de planning
+vooruit laat kloppen gebeurt METEEN: de diensten, de blokkades en de
+activiteiten vanaf `transferShiftsFrom` verhuizen naar de vervanger. Wat aan het
+CONTRACT hangt — weekrooster, team, extra teams, contracturen, en het
+deactiveren van de vertrekker — gebeurt pas op die datum.
+
+Dat onderscheid komt uit de praktijk: iemand neemt een contract over op een
+afgesproken dag, maar de vertrekker werkt tot dan gewoon door. Deed de app alles
+ineens, dan kon zij vanaf het instellen niet meer inloggen en droeg de vervanger
+een contract dat nog niet begonnen was.
+
+| ligt `transferShiftsFrom` in de toekomst? | wat er nu gebeurt |
+|---|---|
+| nee (of niet meegegeven) | alles ineens, zoals vroeger |
+| ja | diensten verhuizen; de rest komt in `geplande_overnames` te staan |
+
+`voerGeplandeOvernamesUit()` in `src/helpers/overnames.js` maakt rijpe overnames
+af. Die draait bij het opstarten en elk uur daarna, net als de bewaartermijnen.
+De server slaapt in na een kwartier stilte, dus in de praktijk voert de eerste
+die de app die dag opent de overname uit — vroeg genoeg voor een grens van een
+hele dag. Is een van de twee intussen weg of niet actief, dan vervalt de rij op
+`geannuleerd` in plaats van elk uur opnieuw te mislukken. Een partiële unieke
+index laat maar één `gepland`-rij per vertrekker toe.
+
+`eigenDienstenVervanger` zegt wat er met de EIGEN diensten van de vervanger
+gebeurt vanaf die datum: `behouden` (standaard) of `verwijderen`. Bij
+`behouden` zoekt de route eerst botsingen op en weigert met **409** plus een
+lijst `botsingen: [{datum, vertrekker, vervanger, zelfdeStart}]`. Zonder die
+controle liep de vervanging tegen de unieke index
+`idx_shifts_uniek_per_start` aan en las de beheerder alleen "Server error bij
+vervanging", zonder één aanwijzing wélke dag het probleem was. Een overlap met
+een ANDERE starttijd wordt óók gemeld: die glipt langs de index en zou de
+vervanger stilletjes twee diensten op één dag geven.
+
+Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
+ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.
+Ze laten staan betekende dat de tegenpartij een verzoek zag van iemand die weg
+is, en dat aanvaarden de dienst van de VERVANGER verzette. Meeverhuizen is geen
+alternatief: dan erft de vervanger een vraag die zij nooit gesteld heeft.
+
+### Agendakoppeling (iCal)
+- `POST /api/v1/me/ical-token` - Persoonlijke feedlink aanmaken of vervangen
+- `GET /api/v1/calendar/:token.ics` - De feed zelf (geen auth, het token ís de auth)
+
+De feed geeft dertien maanden rooster (30 dagen terug, een jaar vooruit) plus de
+naam van de medewerker en de notities per dienst, aan iedereen die de URL heeft.
+Het token is dus een geheim, en daar hangen vier regels aan (#154):
+
+| wanneer | wat er gebeurt |
+|---------|----------------|
+| eigen wachtwoord wijzigen (`PUT /users/:id`) | het token roteert |
+| beheerdersreset (`POST /admin/users/:id/reset-password`) | het token wordt **gewist**, niet vervangen |
+| elke ophaling van de feed | `ical_last_access` wordt bijgewerkt |
+| 60 dagen aangemaakt zonder één ophaling | `enforceRetentionPolicies()` trekt het in |
+
+Die laatste is met opzet géén rotatie op tijd. Een link die iemand werkelijk
+gebruikt ongeldig maken breekt zijn agenda zonder dat hij begrijpt waarom, en
+hij merkt het pas als hij een dienst mist. Een link die nooit opgehaald is, kan
+per definitie niets breken.
+
+Bij een beheerdersreset wordt het token gewist en niet vervangen: een nieuwe
+link heeft geen zin als niemand hem te zien krijgt. De medewerker activeert zelf
+opnieuw. Het antwoord draagt `agendalinkIngetrokken`, en zowel het venster bij
+de beheerder als de resetmail zegt het, anders merkt de medewerker alleen dat
+zijn agenda stilletjes achterloopt.
+
+**Geen toegangstabel.** `ical_last_access` is één tijdstempel op de gebruiker,
+geen rij per ophaling. Een agenda-app haalt elk kwartier op, dus dat zou een
+eindeloos groeiende tabel met verbindingsgegevens van medewerkers zijn: meer
+persoonsgegevens aanmaken om persoonsgegevens te beschermen.
 
 ## Frontend Patronen
 
@@ -150,15 +294,84 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 - **Modals**: `openShiftModal(shift, canEdit)` - view vs edit mode op basis van permissies
 - **Scroll preservation**: ScrollY wordt bewaard bij planner re-renders
 - **Validation**: `validation.js` draait client-side checks voor shift toewijzingen
+- **Verlofplanning**: één ronde = één SCHOOLJAAR, opgebouwd uit blokken (`leave_round_blocks`) die verwijzen naar `settings.holidayPeriods` — dus geen tweede plek waar vakantiedatums staan. Modus staat per BLOK: `binair` (kleine vakanties: werken/verlof) of `voorkeur` (zomer: werken/liever_niet/zeker_niet). De UI groepeert blokken in tabs zoals de Excel: alle binaire blokken samen onder "Kleine vakanties", de voorkeurblokken onder "Zomer". Invulling per DAG (week-snelknoppen in de UI, want de praktijk vult per werkweek + weekend apart in). Een dag moet binnen één van de blokken vallen — de schoolweken ertussen zijn geen geldige invoer. Bij een voorkeurblok legt de beheerder ná het sluiten de definitieve verdeling vast (entries op `verlof` zetten) vóór `apply`. Matrix zichtbaar voor iedereen; invullen enkel voor jezelf en enkel per WEEK — er is geen dag-modus meer, ook niet voor beheerders.
+- **Zomerronde afwerken**: `apply` neemt alleen entries met status `verlof` over, terwijl een voorkeurblok enkel `werken`/`liever_niet`/`zeker_niet` bevat. Zonder tussenstap levert een zomerronde dus niets op. De beheerder legt daarom eerst de verdeling vast via het verdeelscherm (`AppState.leaveScreen = 'verdelen'`, knop "Verlof verdelen" bij een gesloten ronde). `leaveVerdeelVoorstel()` zet een voorstel klaar: wie iets anders dan werken vroeg krijgt verlof, wie niets invulde krijgt werken. Bewust géén bezettings- of eerlijkheidsregels — die komen later. Opslaan gebeurt via het blok-scoped entries-endpoint, nooit via `PUT /leave-rounds/:id/entries`: dat vervangt álle entries van een gebruiker in de ronde en zou de kleine vakanties wissen.
+- **Statusovergangen van een ronde**: `concept` → `open` → `gesloten` → `toegepast`, en vanuit `gesloten` kan je terug naar `open` met de knop "Ronde heropenen". Terug vanuit `toegepast` kan NIET, en dat is een beslissing (#386): het verlof staat dan in de planning, en een heropende ronde zou daarvan los gaan lopen. Een fout in een toegepaste ronde herstel je via "Verlof verdelen" en opnieuw toepassen — `apply` stemt de planning dan af (#384). De knop verschijnt daarom alleen bij `gesloten`; hem ook bij `toegepast` tonen levert enkel de 409 van de backend op.
+
+- **`apply` neemt alleen GOEDGEKEURD verlof**: de query joint op `leave_round_submissions` met `s.approved IS TRUE`. Ingevulde dagen van iemand die niet heeft ingediend, of wiens indiening nog niet beoordeeld is, tellen dus niet mee. Dat is de bedoeling, maar het leverde een scherm op dat zichzelf tegensprak: een matrix vol rode cellen en een groene melding "0 verlofdagen toegepast", waarna de ronde alsnog op `toegepast` sprong. Staat er verlof klaar dat van niemand goedgekeurd is, dan weigert `apply` nu met **409** en noemt hij wie het tegenhoudt, opgesplitst naar niet ingediend / niet beoordeeld / afgewezen. Die weigering geldt alleen bij status `gesloten`: bij een ronde die al `toegepast` is moet het opruimen van #384 kunnen draaien, ook als er intussen geen goedkeuring meer over is. Zijn er helemaal geen `verlof`-dagen ingevuld, dan is nul het juiste antwoord en gaat het gewoon door.
+
+- **Gevraagd naast vastgelegd** (#377): `leave_round_entries` heeft twee kolommen. `status` is wat er GELDT, `requested_status` is wat de medewerker VROEG. Bij het invullen zijn ze gelijk; alleen het blok-scoped verdeelendpoint laat ze uiteenlopen, en dat draagt de gevraagde waarde expliciet over de DELETE heen. Het verdeelscherm kleurt de cel naar `status` en zet de letter naar `requestedStatus`, zodat de beheerder ná het vastleggen nog ziet wie "zeker niet" zei en wie alleen "liever niet". `leaveWensenBewaard()` toetst of gevraagd en geldend ergens uiteenlopen — NIET of er een gevraagde waarde bestaat, want migratie 043 heeft die voor bestaande rijen gelijkgezet aan `status`. Bij een ronde die vóór die migratie verdeeld is, valt het scherm daarom terug op de oude tekst "letter = de vastgelegde verdeling".
+- **Gesloten dagen in een verlofronde**: welke dagen tijdens een vakantie gesloten zijn, wordt beslist in het roosterconcept (`draft.grid._pattern.weeks[i].closedDays`, JS-daggetallen met 0=zo, 6=za). De ronde neemt dat bij het openen over in `leave_round_blocks.closed_dates` (absolute datums), zodat een medewerker het ziet zonder `GET /schedule-drafts` te mogen lezen én zodat later na te gaan is welke weekends toen werkweekends waren. Drie toestanden: `null` = onbekend (geen concept gekoppeld), `[]` = alles open, `[...]` = deze dagen dicht — die mogen nooit op één hoop. Bijwerken gebeurt expliciet via de knop "Gesloten dagen bijwerken uit concept", nooit automatisch. **WEEKCONVENTIE**: `_pattern.weeks["i"]` betekent "de i-de maandagweek van de vakantieperiode" — dat is wat de bouwer toont (`getBuilderVakantieWeekStart`), NIET het resultaat van `getWeekNumber()`. `closedDatesFromPattern()` in `app-leave.js` en de shiftgeneratie in `server.js` volgen die conventie.
 - **Feestdagen**: `DataStore._publicHolidaysCache` — lazy geladen via `fetchPublicHolidays(year)`. Gebruik `getPublicHoliday(date)` voor rendering. Let op: gebruik hier plain `fetch()`, niet `dataApiFetch()` (endpoint vereist geen auth)
+- **Gesloten dagen uit een vakantieconcept**: een basisrooster schrijft zijn patroon bij het toepassen naar `settings.schedule_pattern`, waardoor `isDayClosed()` het kent. Een vakantieconcept doet dat bewust NIET — zijn cyclus is vakantie-relatief en zou het jaarpatroon verzieken. Bij het toepassen worden zijn gesloten dagen daarom als absolute datums weggeschreven naar `settings.conceptClosedDates` (`[{date, reason, draftId}]`), per concept vervangen. `isDayClosed()` en `getClosedDateInfo()` lezen die mee, zodat planning, drag-drop en shift aanmaken kloppen. Ze staan apart van `closedDates` en verschijnen dus niet in het lijstje "manueel gesloten datums" in Instellingen.
+- **Meldingen** (#119): één component in `styles.css`, met vier soorten plus een neutrale. `.alert` is de canonieke naam (flex, dus met pictogram naast de tekst); `.info-box`, `.warning-banner`, `.validation-warning`, `.builder-11h-warnings` en `.leave-banner` delen dezelfde declaraties in plaats van ze te herhalen. Kleuren komen uit de `--alert-{error,warning,info,ok}-{bg,border,text}` tokens, die per thema omslaan, dus een nieuwe melding werkt automatisch in donkere modus. Voeg nooit een eigen achtergrond of rand toe aan een melding: gebruik `class="alert alert-warning"` en laat de tokens hun werk doen
+- **Kleuren** (#180): gebruik de tokens, nooit een hexwaarde. De warme palette staat bovenaan `styles.css`; voor alles wat een betekenis draagt zijn dat de `--alert-*`-tokens (zie Meldingen hierboven). Een hardgecodeerde kleur werkt per definitie maar in één thema, en dat is hoe de oude Tailwind-waarden hier binnenkwamen. Teamkleuren zijn de uitzondering: die horen bij een team en hebben hun eigen `--team-*`-tokens
+- **Zijbalk** (#162): de zijbalk is in BEIDE thema's donker, want hij is een eigen vlak en geen stuk pagina. Alles wat erin staat gebruikt daarom de `--sidebar-*`-tokens (`-bg`, `-text`, `-text-active`, `-label`, `-active-bg`, `-hover-bg`, `-line`) en nooit de tekstkleuren van de pagina zoals `--text-primary`. Een `body.dark-mode`-uitzondering op iets in de zijbalk is bijna altijd fout: die zou de zijbalk juist terug naar de paginakleuren trekken. De dekkingen zijn gemeten op contrast, niet gekozen op smaak: navigatietekst `.72` haalt 8,1 en het groepslabel `.55` haalt 5,4
+- **Dienstblok in de tijdlijn** (#163): het blok is smal, en dat bepaalt wat erin past. Nagemeten op 1440 pixels in weekweergave houdt een dienst van acht uur 59 pixels over: de tijd past daar op 9px en niet op 10. Grotere tekst knipt de tijd af, en een afgeknipte tijd leest als een ANDERE tijd. Verhoog die maten dus niet zonder opnieuw te meten. Activiteiten staan als chips met de volle afkorting op 9px (`ACTIVITY_TYPE_LABELS_SHORT`, `activiteitenChips()` in `app-planner.js`). Die ruimte komt uit de opmaak eromheen en niet uit de tekst: padding 2 in plaats van 3, linkerrand 1 in plaats van 2, tussenruimte 1 in plaats van 2. Twee chips passen daarmee in de 67 pixels van een dienst van acht uur, en ook in de smalste blok dat chips toont (zes uur). Kortere codes op een grotere letter zijn geprobeerd en afgewezen, want "Overl" lees je meteen en "OL" is een code die je eerst moet leren. De achtergronden van `.activity-type-*` zijn ondoorzichtig, want daaronder ligt de teamkleur en die verschilt per team; met doorzichtige chips hing het leescontrast dus af van wie er in welk team zit. Het verloop van het blok loopt van 78 naar 88 procent teamkleur en niet tot 100: bij de volle kleur zakte de tekst op drie van de vijf teams onder de contrasteis
+- **Hoe lang je ingelogd blijft** (#159): drie dingen die samen werken, en die je niet los van elkaar moet aanpassen.
+  1. **Waar het token staat.** Niet rechtstreeks in de opslag maar via `bewaarToken()`, `leesToken()` en `wisToken()` in `data.js`. Het staat in `localStorage`, dus het overleeft het sluiten van een tabblad. `leesToken()` kijkt in ALLEBEI de opslagen, want er kan nog een token uit `sessionStorage` staan van vroeger en de terugval bij geblokkeerde `localStorage` schrijft daar ook naartoe; `wisToken()` leegt er allebei. De controle vóór de eerste paint in `index.html` doet hetzelfde nog eens inline, want `data.js` is daar nog niet geladen.
+  2. **Het token is 7 dagen geldig en loopt mee.** `TOKEN_GELDIGHEID_UREN` in `middleware/auth.js`. Is een token over de helft, dan stuurt `requireAuth` een vers exemplaar mee in de header `X-Vernieuwd-Token` en bewaart `dataApiFetch` dat stilletjes. Die header staat in de CORS bij `exposedHeaders`; zonder dat is hij voor JavaScript onzichtbaar, zonder foutmelding. Door dat meelopen betekent dit getal alleen nog: HOE LANG JE WEG MAG BLIJVEN voor je opnieuw moet inloggen. Het heeft even op 24 uur gestaan; dat is teruggedraaid omdat een medewerker die zijn rooster één keer per week bekijkt dan élke keer opnieuw moest inloggen, en dat is de meerderheid. Verkort dit getal dus niet om een onbewaakte laptop te beschermen: daar gaat punt 3 over.
+  3. **Vier uur niets aanraken en de sessie wordt gewist.** `INACTIEF_UITLOGGEN_MS` in `app-auth.js`. Dit werkt op een TIJDSTEMPEL in `localStorage` en niet op een aflopende timer: een timer telt niet door terwijl een laptop dicht is en bestaat niet meer na een herlading. Daarom wordt hij ook bij het OPSTARTEN nagekeken in `checkSession()` en niet alleen in de minuutcontrole. De stempel wordt hoogstens eens per minuut geschreven, dus een actieve gebruiker loopt nooit meer dan die minuut achter op een grens van vier uur.
+
+  **Waarom alle drie.** De app bevat ziekmeldingen, dus gezondheidsgegevens (#152). De laptops worden gedeeld maar iedereen heeft zijn eigen login en dus zijn eigen browserprofiel, dus een collega komt niet zomaar in jouw opslag. Wat overblijft is de laptop die onbewaakt open blijft staan, en daar helpt alleen punt 3 tegen: een kortere geldigheid doet niets als het token op dat moment vers is.
+- **Opstartscherm** (#389): `index.html` zet de klasse `session-restoring` op `<html>` zodra er een token in `sessionStorage` staat. Die verbergt het loginscherm (anders flitst dat voorbij bij wie al ingelogd is) en `#app-container` staat dan nog op `hidden`. In dat gat toont `#opstartscherm` het KADER van de app: dezelfde zijbalk op dezelfde plek, met vlakken waar de inhoud komt. Puur markup en CSS, dus het staat er al bij de eerste paint. **De klasse moet op élk pad weggehaald worden**: in `showApp()` (geslaagd), in de twee foutafhandelingen van `checkSession()` en in `showLogin()`. Vergeet je er één, dan blijft het opstartscherm over de app heen staan
+- **Stat-kaarten op home** (#166): twee reeksen, elk met een eigen doelgroep. `renderHomeEigenUren()` toont JOUW uren deze week en deze periode tegen je contract, plus wat op jou wacht; alleen voor wie meedraait in het rooster, want een adminaccount heeft geen diensten. `renderHomeStats()` toont de BEHEERcijfers en is er alleen voor admin en roosterverantwoordelijke. Zonder contracturen verschijnt er geen balk en geen "van": `32/0u` zou onzin zijn. De kleurregel is dezelfde als bij de uren in de planning: rood boven de norm, oranje eronder
+- **Bezetting en activiteiten** (#145): `calcPlanningHourlyHeadcount()` in `app-planner.js` geeft `bruto` (wie een dienst heeft) en `netto` (bruto min wie op dat uur een activiteit heeft). ALLE zes de activiteittypes verminderen de netto bezetting, voor hun volle duur. Dat is nagevraagd en bevestigd: bij oudergesprek, vorming, overleg, vergadering, afspraak én andere staat de begeleider niet bij de groep. Er is bewust geen uitzondering per type en geen vinkje "ik blijf bereikbaar" per activiteit: dan moet iemand dat elke keer beoordelen en kan het vergeten worden, en te vaak waarschuwen is bij bezetting de veilige kant. Netto voedt precies drie plekken: de onderbezettingsmeldingen in `renderHomeAlerts`, de bezettingsbalk in de planning en `validateMinimumStaffing` in `validation.js`. Activiteittypes worden verder nergens in logica onderscheiden, alleen voor kleur en label
+- **Weekend- en vakantieverantwoordelijke**: je bent verantwoordelijk voor het WEEKEND, dus alleen in een week waarin het weekend open is. Staat het weekend dicht, dan is er niemand aan de beurt en toont de app niemand. Tijdens een vakantie staat de verantwoordelijke PER WEEK, aan te duiden in de roosterbouwer: in de kerstvakantie doet de ene persoon week 1 en een ander week 2. Een vakantieweek is daarmee uitgepraat — is er voor die week niemand aangeduid, dan is er niemand, en valt de app bewust NIET terug op de rotatie. Een vakantieweek verbruikt ook geen beurt, dus na de vakantie gaat de rotatie verder waar hij gebleven was.
+
+  Alles zit in de frontend: `getOrCalculateResponsible()` in `data.js` is de enige bron, de backend bewaart alleen `settings.responsibleRotation` en kent verder geen verantwoordelijke. De volgorde is: handmatige toewijzing → vakantieweek → open weekend → rotatie. De rotatie loopt alfabetisch op naam door `getEligibleEmployeesForResponsible()`.
+
+  **Drie valkuilen die hier alle drie tegelijk in zaten** en die samen twee klachten opleverden ("hij blijft hangen op X" en "de vakantieverantwoordelijke komt niet in de planning" — één gebeurtenis, twee kanten):
+  1. `getEmployee()` vergeleek met `===`. Een id komt als GETAL uit de API maar als STRING uit elke `<select>`, en `weeklyResponsibles` bewaart precies zo'n keuze. `120 === "120"` is false, dus de vakantie-override vond nooit iemand en viel zonder een spoor terug op de rotatie. Vergelijk id-s daarom altijd als tekst.
+  2. Het weeknummer binnen een vakantie werd met `Math.floor` uit een verschil in milliseconden gehaald. Over de overgang naar zomertijd liggen twee lokale middernachten 6,958 dagen uit elkaar, dus een paasvakantie toonde in week 2 de persoon van week 1. Gebruik `Math.round` voor hele weken.
+  3. De regel "alleen bij een open weekend" stond drie keer los bij de aanroepers (planning, beginscherm, instellingen) en ontbrak bij de vierde. Hij hoort in `getOrCalculateResponsible()` zelf.
+
+  `backend/tests/verantwoordelijke.test.js` bewaakt dit. Let op bij het schrijven van zo'n test: `data.js` draait in Node in een modulewrapper, dus zijn `const DataStore` is module-scoped en `global.DataStore` vullen bereikt hem NIET — stil, want de functies lezen dan de lege standaard. Importeer `DataStore` uit de module en vul die.
+
+- **Uurwisseling en "vandaag"**: twee valkuilen die er los van elkaar uitzien maar allebei één uur opleveren.
+
+  **Een week uit milliseconden halen.** Twee lokale middernachten liggen over de overgang naar ZOMERTIJD 6,958 dagen uit elkaar in plaats van 7. `Math.floor(verschil / (7 * 86400000))` telt daar een week te weinig; `Math.round` niet. Dit zat op drie plekken: het weeknummer van de vakantieverantwoordelijke, de cycluslengte van een nieuw vakantieconcept (`app-builder-drafts.js`) en het weken-label bij een vakantieperiode (`app-settings.js`). Het slaat alleen toe bij een periode die de grens OVERSPANT — een paasvakantie die eind maart begint. De overgang naar wintertijd geeft 7,042 dagen en is met afkappen toevallig ongevaarlijk; vertrouw daar niet op.
+
+  **De datum van vandaag.** De server draait in UTC, de gebruikers zitten in België. `new Date().toISOString().slice(0, 10)` geeft daardoor tussen middernacht en 01:00 (winter) of 02:00 (zomer) nog de datum van GISTEREN. In de frontend is dat #299 (gebruik daar `formatDateYYYYMMDD`); in de backend helpt die niet, want die leest de tijdzone van de SERVER. Gebruik daar `vandaagInBelgie()` uit `src/utils.js`, dat de tijdzone expliciet zet. Een tijdSTEMPEL (`createdAt`, `syncedAt`, iCal-`DTSTAMP`) is iets anders: dat is een moment en hoort wél in UTC.
+
+  **Wat hier géén probleem is:** de urenberekening. `calculateShiftHours()` rekent in verstreken milliseconden, maar de wisseling valt om 02:00 en dat ligt in het slaapvenster 23:00–07:00, dat als vast forfait telt in plaats van als verstreken tijd. De enige nachtdiensten in gebruik (18:00→09:00 en 18:00→10:00) nemen dat pad, dus geen enkele dienst verandert van lengte. Zou er ooit een dienst komen die 02:00–03:00 overspant zonder door het slaapvenster te lopen, dan telt die op de wisselnacht een uur minder of meer — fysiek correct, maar het verschilt dan van wat de klok op het rooster zegt.
+
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.
 
 ## MCP Server
 
-De MCP server is actief en verbonden met de productie-API. Dit laat Claude toe om live data te lezen tijdens development, debugging en feature-bouw.
+Live data lezen tijdens development, debugging en feature-bouw.
 
 **API URL**: `https://uurrooster-app.onrender.com/api/v1`
+
+### Er zijn er TWEE, en ze heten bijna hetzelfde
+
+Dezelfde tools, dezelfde database, maar ze halen hun gegevens ergens anders
+vandaan. Dat verschil bepaalt welke het doet.
+
+| server | waar hij vandaan komt | werkt in een cloudsessie? |
+|--------|----------------------|---------------------------|
+| **`Vlot_Dashboard`** | gehoste connector op het account | **ja, gebruik deze** |
+| `uurroosterapp` | `mcp-server/stdio.js`, via de ingecheckte `.mcp.json` | nee |
+
+**Gebruik `Vlot_Dashboard`.** De tools heten `mcp__Vlot_Dashboard__<naam>`.
+
+`uurroosterapp` is onze eigen server uit `mcp-server/`. Hij leest `API_URL`,
+`ADMIN_EMAIL`, `ADMIN_PASSWORD` en `DATABASE_URL` uit `mcp-server/.env`, en dat
+bestand staat in `.gitignore` — terecht, er zit het wachtwoord van de
+productiedatabase in. Op een eigen machine mét dat bestand werkt hij; in een
+verse kloon of een cloudsessie start hij wel op maar heeft hij niets, en
+antwoordt hij met **`DATABASE_URL niet ingesteld.`**
+
+Zie je die tekst, dan is de server niet stuk en is er niets te repareren: je
+hebt de verkeerde te pakken. Ga naar `Vlot_Dashboard` en probeer opnieuw. Zet
+dat `.env` er NIET bij om het op te lossen — dan staat het wachtwoord van de
+productiedatabase in een wegwerpcontainer.
+
+Dit is een keer misgelopen: op #392 kwam te staan dat de productiedata niet na
+te gaan was en dat de MCP stuk was. Allebei onwaar; er was alleen naar de
+verkeerde van de twee gekeken. De vraag was in één query te beantwoorden.
 
 ### Beschikbare tools
 
@@ -181,7 +394,7 @@ De MCP server is actief en verbonden met de productie-API. Dit laat Claude toe o
 
 ### Veiligheidsregel MCP
 
-> ⚠️ **Schrijf-tools** (`create_shift`, `update_shift`, `delete_shift`) raken de **productiedatabase**. Deze tools NOOIT gebruiken zonder expliciete bevestiging van Victor — ook niet als de vraag dit impliciet suggereert. Altijd eerst de actie beschrijven en wachten op "ja, doe het".
+> ⚠️ **Schrijf-tools** (`create_shift`, `update_shift`, `delete_shift`) raken de **productiedatabase**, langs WELKE van de twee servers dan ook. Deze tools NOOIT gebruiken zonder expliciete bevestiging van Victor — ook niet als de vraag dit impliciet suggereert. Altijd eerst de actie beschrijven en wachten op "ja, doe het".
 
 ### Gebruik tijdens development
 
@@ -191,25 +404,30 @@ De MCP server is actief en verbonden met de productie-API. Dit laat Claude toe o
 
 ## Deploy
 
-Zie `DEPLOY.md` voor deployment instructies (Render platform).
+Twee permanente branches, elk met een eigen Render-omgeving:
+
+| Branch | Omgeving |
+|--------|----------|
+| `main` | Productie (live data) |
+| `staging` | Testomgeving (eigen database) |
+
+Workflow: ontwikkel → `push origin staging` (test op de staging-URL) → merge naar `main` (live). Ontwikkel bij voorkeur niet rechtstreeks op `main`. De frontend kiest automatisch de juiste backend op basis van zijn hostname (`frontend/config/settings.js`: bevat "staging" → staging-backend).
+
+Zie `DEPLOY.md` voor deployment instructies en `STAGING.md` voor de eenmalige setup van de testomgeving.
 
 ## Tests
 
 ```bash
 cd backend
-npm test           # Alle tests uitvoeren (129 tests, ~3 seconden)
+npm test           # Alle tests uitvoeren, in enkele seconden
 ```
 
-Testbestanden in `backend/tests/`:
+Twaalf testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
+voor wat elk bestand dekt. Tests gebruiken Jest + Supertest en de database wordt
+volledig gemockt, dus er is geen echte databank nodig.
 
-| Bestand | Dekking |
-|---------|---------|
-| `utils.test.js` | `getMonday`, `formatDateYYYYMMDD`, `parseLocalDate`, `getEasterDate`, `getBelgianPublicHolidays` |
-| `email.test.js` | `escapeHtml`, `formatDate`, `formatTime`, `shiftDetailBox`, `baseTemplate` |
-| `api.test.js` | API-endpoints: auth, shifts, teams, settings, swap-requests |
-| `validation.test.js` | Frontend tijdfuncties: `parseDateTime`, `getShiftEndDateTime`, `getHoursBetweenShifts`, `shiftsOverlap` |
-
-Tests gebruiken Jest + Supertest. De database wordt volledig gemockt — geen echte DB vereist.
+Een nieuwe test hoort bij elke bugfix die een gedragsverandering oplevert, en
+die test moet falen tegen de oude code. Anders meet hij niets.
 
 ## GitHub Issues — Workflow
 
@@ -266,7 +484,10 @@ Controleer de open issues voor context bij het werken aan deze gebieden:
 
 | Issue | Beschrijving |
 |-------|--------------|
-| — | Geen kritieke of hoge-prioriteit problemen open |
+| #150 | `prioriteit:hoog`. Verwerkersovereenkomsten met Render, Resend en Sentry, plus het interne verwerkingsregister. Geen code: dit staat op Victor. |
+
+Geen `prioriteit:kritiek` open. Dit tabelletje veroudert; de bron is
+`gh issue list --repo Kirbypopdog/Uurroosterapp --label "prioriteit:hoog" --state open`.
 
 ## Agent Aanbevelingen
 
@@ -292,5 +513,51 @@ DATABASE_URL=postgresql://...     # PostgreSQL connection string
 JWT_SECRET=...                    # JWT signing secret
 ADMIN_EMAIL=admin@hetvlot.be     # Initieel admin account
 ADMIN_PASSWORD=...                # Admin wachtwoord
-DEFAULT_RESET_PASSWORD=...                # Reset wachtwoord voor nieuwe users (zie Render dashboard)
+DEFAULT_RESET_PASSWORD=...                # Alleen nog voor bulkimport en de oude migratiescripts (#379)
+SENTRY_DSN=https://...            # Foutmonitoring (#156). Leeg = uit.
 ```
+
+## Foutmonitoring (#156)
+
+Sentry, in de **EU-regio (Duitsland)**. Uit zolang `SENTRY_DSN` leeg is: de
+backend start dan geen SDK en de frontend haalt niets van een CDN.
+
+| kant | bestand | hoe |
+|------|---------|-----|
+| backend | `src/monitoring.js` | `@sentry/node`, geladen vóór express in `server.js` |
+| frontend | `config/monitoring.js` | SDK van een CDN, dus geen bouwstap (regel 1) |
+
+**Het belangrijkste aan deze code is wat er NIET vertrekt.** De app houdt
+ziekmeldingen bij, en gezondheidsgegevens zijn een bijzondere categorie onder de
+AVG (#152). De standaardinstellingen van de SDK zijn ruim: cookies, headers,
+verzoekinhoud en queryparameters gaan standaard mee. Die staan allemaal uit, en
+`schoonEvent` is het tweede net.
+
+Er wordt op twee manieren gefilterd, en dat onderscheid is belangrijk:
+
+- **Op sleutelnaam**, voor dingen als `reason`, `email`, `authorization`.
+- **Op waarde**, voor `ziek`, `verlof`, `zeker_niet` en de andere afwezigheids-
+  en verlofwaarden. Dat moet wel: de sleutel heet `type`, en die kan niet blind
+  verboden worden omdat Sentry hem zelf gebruikt voor de soort fout ("Error").
+
+Van de gebruiker gaat alleen het **id** mee, nooit naam of e-mail.
+`monitoringZetGebruiker()` wordt aangeroepen vanuit `showApp()` en
+`handleLogout()` in `app-auth.js`.
+
+De filtering in de frontend is een kopie van die in de backend. **Die twee horen
+gelijk te blijven**; `backend/tests/monitoring.test.js` bewaakt de backendkant.
+
+Let op bij het lezen van een melding: Sentry hangt **broncontext** aan de
+stacktrace, dus regels uit de eigen bestanden komen mee. Dat is nuttig bij het
+opsporen en bevat geen persoonsgegevens, want het is de broncode uit de repo.
+
+**De omgeving komt van `RENDER_GIT_BRANCH`, niet van `NODE_ENV`.** Render zet
+`NODE_ENV` op `production` bij élke service, dus ook bij staging. De eerste
+echte testfout kwam daardoor binnen met `environment=production` terwijl hij van
+de stagingserver kwam. `bepaalOmgeving()` vertaalt de branch: `main` wordt
+`production`, elke andere tak houdt zijn eigen naam.
+
+**Controleren of het werkt:** `POST /admin/monitoring-test` stuurt opzettelijk
+een fout, met nepgegevens erin die op echte lijken. Komt die aan met de velden
+op `[weggelaten]`, dan draait de filtering ook echt op de server. Het endpoint
+bestaat alleen als de monitoring aanstaat, en alleen voor een admin.

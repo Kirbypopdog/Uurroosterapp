@@ -1,6 +1,6 @@
 'use strict';
 
-const { getMonday, formatDateYYYYMMDD, parseLocalDate, getEasterDate, getBelgianPublicHolidays } = require('../src/utils');
+const { getMonday, formatDateYYYYMMDD, parseLocalDate, getEasterDate, getBelgianPublicHolidays, vandaagInBelgie } = require('../src/utils');
 
 // ===== getMonday =====
 
@@ -245,5 +245,37 @@ describe('getBelgianPublicHolidays', () => {
     expect(byDate['2025-04-21']).toBe('Paasmaandag');
     expect(byDate['2025-05-29']).toBe('Hemelvaartsdag');
     expect(byDate['2025-06-09']).toBe('Pinkstermaandag');
+  });
+});
+
+
+// ===== vandaagInBelgie =====
+
+describe('vandaagInBelgie', () => {
+  // De server draait in UTC. Deze tests geven een vast moment mee, zodat ze
+  // niet afhangen van wanneer ze draaien.
+
+  test('geeft de Belgische datum, niet de UTC-datum, vlak na middernacht in de zomer', () => {
+    // 22:30 UTC = 00:30 Belgische zomertijd, dus daar is het al de 3e.
+    // toISOString().slice(0,10) zou hier "2026-10-02" geven.
+    expect(vandaagInBelgie(new Date('2026-10-02T22:30:00Z'))).toBe('2026-10-03');
+  });
+
+  test('ook vlak na middernacht in de winter', () => {
+    // 23:30 UTC = 00:30 Belgische wintertijd.
+    expect(vandaagInBelgie(new Date('2026-12-31T23:30:00Z'))).toBe('2027-01-01');
+  });
+
+  test('overdag valt hij samen met de UTC-datum', () => {
+    expect(vandaagInBelgie(new Date('2026-06-15T12:00:00Z'))).toBe('2026-06-15');
+  });
+
+  test('vlak voor middernacht staat hij nog op dezelfde dag', () => {
+    // 21:30 UTC = 23:30 Belgische zomertijd.
+    expect(vandaagInBelgie(new Date('2026-06-15T21:30:00Z'))).toBe('2026-06-15');
+  });
+
+  test('levert altijd YYYY-MM-DD op', () => {
+    expect(vandaagInBelgie(new Date('2026-01-05T10:00:00Z'))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

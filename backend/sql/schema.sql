@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS users (
   email_notifications_enabled BOOLEAN DEFAULT true,
   onboarding_flags JSONB DEFAULT '{}',
   ical_feed_token TEXT UNIQUE,
+  -- #154: wanneer de agendalink gemaakt is en wanneer hij voor het laatst
+  -- opgehaald werd. Zie migratie 046 voor waarom dit twee kolommen zijn en
+  -- geen toegangstabel.
+  ical_token_created TIMESTAMPTZ,
+  ical_last_access TIMESTAMPTZ,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -41,6 +46,13 @@ CREATE TABLE IF NOT EXISTS shifts (
   notes TEXT DEFAULT '',
   source TEXT DEFAULT 'manual' CHECK (source IN ('auto', 'manual')),
   archived BOOLEAN NOT NULL DEFAULT false,
+  is_reserve BOOLEAN NOT NULL DEFAULT false,
+  -- Uit welk roosterconcept deze dienst komt. NULL voor manuele diensten en
+  -- voor auto-diensten van vóór migratie 037. Zonder deze kolom kan uitplannen
+  -- niet weten welke diensten het mag verwijderen (#185, #187).
+  -- De verwijzing naar schedule_drafts staat onderaan dit bestand, want die
+  -- tabel wordt pas verderop aangemaakt.
+  draft_id TEXT,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -49,7 +61,12 @@ CREATE TABLE IF NOT EXISTS availability (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
   date DATE NOT NULL,
-  type TEXT NOT NULL,
+  -- #311: migratie 042 zet deze CHECK op een bestaande database. Hij hoort hier
+  -- ook te staan, anders levert een verse database iets anders op dan een
+  -- gemigreerde. Het is het vangnet bij een backup-import; de routes
+  -- controleren het type al via AFWEZIGHEIDSTYPES in server.js.
+  type TEXT NOT NULL CONSTRAINT availability_type_check
+    CHECK (type IN ('verlof', 'ziek', 'overuren', 'vorming', 'andere', 'vrij')),
   reason TEXT DEFAULT '',
   updated_at TIMESTAMP DEFAULT NOW(),
   UNIQUE(user_id, date)
@@ -88,15 +105,14 @@ CREATE TABLE IF NOT EXISTS shift_swap_requests (
   target_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
   target_shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
   request_type TEXT NOT NULL DEFAULT 'swap' CHECK (request_type IN ('swap', 'takeover')),
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'pending_lead', 'expired')),
+  -- #315: 'pending_lead' is hier weg. De leadgoedkeuring is in #114 geschrapt
+  -- en migratie 045 heeft de bijhorende kolommen gedropt.
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'expired')),
   message TEXT,
   response_notes TEXT,
   target_approved BOOLEAN DEFAULT NULL,
   target_response_notes TEXT,
   target_responded_at TIMESTAMP,
-  lead_approved BOOLEAN DEFAULT NULL,
-  lead_response_notes TEXT,
-  lead_responded_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW(),
   responded_at TIMESTAMP,
   responded_by INTEGER REFERENCES users(id) ON DELETE SET NULL
@@ -122,7 +138,11 @@ CREATE TABLE IF NOT EXISTS schedule_drafts (
   type TEXT DEFAULT 'basis',
   holiday_period_id TEXT,
   created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  updated_at TIMESTAMP DEFAULT NOW(),
+  -- #329: deze drie bestonden alleen via migratie 025.
+  locked_by INTEGER,
+  locked_by_name TEXT,
+  locked_at TIMESTAMPTZ
 );
 
 -- Shift activities (activiteiten binnen shifts)
@@ -135,6 +155,11 @@ CREATE TABLE IF NOT EXISTS shift_activities (
   end_time TIME NOT NULL,
   type TEXT NOT NULL,
   description TEXT DEFAULT '',
+  -- Uit welk roosterconcept deze activiteit komt. NULL voor handmatig
+  -- ingevoerde en voor activiteiten van vóór migratie 038. Zonder deze kolom
+  -- kan de opruiming bij het toepassen niet zien welke vergaderingen ze mag
+  -- weghalen (#376). De verwijzing staat onderaan dit bestand.
+  draft_id TEXT,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -159,7 +184,29 @@ CREATE INDEX IF NOT EXISTS idx_availability_user ON availability(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_main_team ON users(main_team);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
 CREATE INDEX IF NOT EXISTS idx_shift_blocks_user_date ON shift_blocks(user_id, date);
+-- #vervangen: een overname van een contract gaat in op een DATUM. Wat er op die
+-- dag nog moet gebeuren staat hier: de vertrekker deactiveren en team, extra
+-- teams, contracturen en weekrooster naar de vervanger zetten. De diensten
+-- verhuizen wel meteen, want de planning moet vooruit kloppen.
+-- voerGeplandeOvernamesUit() in server.js werkt dit af bij het opstarten en elk
+-- uur daarna.
+CREATE TABLE IF NOT EXISTS geplande_overnames (
+  id              SERIAL PRIMARY KEY,
+  oude_gebruiker  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  nieuwe_gebruiker INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ingangsdatum    DATE NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'gepland' CHECK (status IN ('gepland', 'uitgevoerd', 'geannuleerd')),
+  aangemaakt_door INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  aangemaakt_door_naam TEXT,
+  aangemaakt_op   TIMESTAMP DEFAULT NOW(),
+  uitgevoerd_op   TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON shift_swap_requests(status);
+-- Eén openstaande overname per vertrekker: twee tegelijk zou betekenen dat
+-- niemand weet wie zijn team en uren krijgt.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_een_geplande_overname_per_persoon ON geplande_overnames (oude_gebruiker) WHERE status = 'gepland';
+CREATE INDEX IF NOT EXISTS idx_geplande_overnames_datum ON geplande_overnames (ingangsdatum) WHERE status = 'gepland';
 CREATE INDEX IF NOT EXISTS idx_swap_requests_requester ON shift_swap_requests(requester_user_id);
 CREATE INDEX IF NOT EXISTS idx_swap_requests_target ON shift_swap_requests(target_user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_id);
@@ -173,6 +220,108 @@ CREATE INDEX IF NOT EXISTS idx_availability_type ON availability(type);
 CREATE INDEX IF NOT EXISTS idx_swap_requests_type ON shift_swap_requests(request_type);
 CREATE INDEX IF NOT EXISTS idx_schedule_drafts_type ON schedule_drafts(type);
 CREATE INDEX IF NOT EXISTS idx_users_team_id ON users(team_id);
+
+-- Verlofplanning: verlofrondes per vakantieperiode.
+-- mode 'binair'   = kleine vakanties (werken / verlof)
+-- mode 'voorkeur' = zomer (werken / liever_niet / zeker_niet)
+CREATE TABLE IF NOT EXISTS leave_rounds (
+  id                SERIAL PRIMARY KEY,
+  name              TEXT NOT NULL,
+  mode              TEXT NOT NULL DEFAULT 'binair' CHECK (mode IN ('binair', 'voorkeur')),
+  start_date        DATE NOT NULL,
+  end_date          DATE NOT NULL,
+  deadline          DATE,
+  status            TEXT NOT NULL DEFAULT 'concept' CHECK (status IN ('concept', 'open', 'gesloten', 'toegepast')),
+  holiday_period_id TEXT,
+  rules             JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMP DEFAULT NOW(),
+  updated_at        TIMESTAMP DEFAULT NOW()
+);
+
+-- Een ronde dekt een heel schooljaar en bestaat uit blokken: herfst, kerst,
+-- krokus en paas (modus 'binair') plus de zomer (modus 'voorkeur').
+-- Elk blok verwijst naar een vakantieperiode uit settings.holidayPeriods.
+CREATE TABLE IF NOT EXISTS leave_round_blocks (
+  id                SERIAL PRIMARY KEY,
+  round_id          INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+  name              TEXT NOT NULL,
+  mode              TEXT NOT NULL DEFAULT 'binair' CHECK (mode IN ('binair', 'voorkeur')),
+  start_date        DATE NOT NULL,
+  end_date          DATE NOT NULL,
+  holiday_period_id TEXT,
+  sort_order        INTEGER NOT NULL DEFAULT 0,
+  -- Gesloten dagen, overgenomen uit het gekoppelde vakantieconcept bij het
+  -- openen van de ronde. NULL = onbekend, [] = alles open, [...] = dicht.
+  closed_dates      JSONB,
+  closed_source     JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_leave_blocks_round ON leave_round_blocks(round_id);
+
+CREATE TABLE IF NOT EXISTS leave_round_entries (
+  id        SERIAL PRIMARY KEY,
+  round_id  INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+  user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date      DATE NOT NULL,
+  status    TEXT NOT NULL CHECK (status IN ('werken', 'verlof', 'liever_niet', 'zeker_niet')),
+  -- #377: wat de medewerker vroeg. status is wat er geldt; bij een voorkeurblok
+  -- legt de beheerder die na het sluiten vast en loopt hij dus uiteen.
+  requested_status TEXT,
+  note      TEXT DEFAULT '',
+  UNIQUE (round_id, user_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS leave_round_submissions (
+  id            SERIAL PRIMARY KEY,
+  round_id      INTEGER NOT NULL REFERENCES leave_rounds(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  submitted_at  TIMESTAMP,
+  approved      BOOLEAN,
+  approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at   TIMESTAMP,
+  response_note TEXT DEFAULT '',
+  UNIQUE (round_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_leave_entries_round ON leave_round_entries(round_id);
+CREATE INDEX IF NOT EXISTS idx_leave_entries_user  ON leave_round_entries(user_id);
+CREATE INDEX IF NOT EXISTS idx_leave_subs_round    ON leave_round_submissions(round_id);
+CREATE INDEX IF NOT EXISTS idx_leave_rounds_status ON leave_rounds(status);
+
+-- Kolommen en indexen die eerder alleen via migraties bestonden (#329).
+CREATE INDEX IF NOT EXISTS idx_shifts_draft_id ON shifts(draft_id) WHERE draft_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_shifts_archived ON shifts(archived) WHERE archived = false;
+CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id);
+CREATE INDEX IF NOT EXISTS idx_shift_activities_draft_id ON shift_activities(draft_id) WHERE draft_id IS NOT NULL;
+
+-- #237 en #243: de vangnetten tegen dubbele diensten en dubbele
+-- overnameverzoeken. In de migraties (040 en 041) worden ze overgeslagen als er
+-- al botsende rijen staan; een verse database heeft die niet, dus daar kunnen
+-- ze onvoorwaardelijk aangemaakt worden.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shifts_uniek_per_start ON shifts(user_id, date, start_time);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_een_openstaande_overname ON shift_swap_requests(requester_shift_id)
+  WHERE request_type = 'takeover' AND status = 'pending';
+
+-- draft_id verwijst naar schedule_drafts, dat verderop in dit bestand wordt
+-- aangemaakt. Daarom staan deze verwijzingen hier en niet in de tabellen zelf.
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['shifts', 'shift_activities'] LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
+      WHERE tc.constraint_type = 'FOREIGN KEY'
+        AND tc.table_name = t AND kcu.column_name = 'draft_id'
+    ) THEN
+      EXECUTE format(
+        'ALTER TABLE %I ADD FOREIGN KEY (draft_id) REFERENCES schedule_drafts(id) ON DELETE SET NULL', t);
+    END IF;
+  END LOOP;
+END $$;
 
 -- Migration tracking table (used by runMigrations() in server.js)
 CREATE TABLE IF NOT EXISTS migrations (

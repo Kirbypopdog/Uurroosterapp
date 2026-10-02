@@ -147,12 +147,12 @@ Schema: `sql/schema.sql`
 
 Tabellen: `teams`, `users`, `shifts`, `availability`, `settings`, `shift_blocks`, `shift_swap_requests`, `audit_log`, `schedule_drafts`, `shift_activities`
 
-Auto-migratie draait bij elke server start via `ensureSchema()`.
+Geversioneerde migraties draaien bij elke server start via `runMigrations()`. Een verse database initialiseert zichzelf (basistabellen + standaardteams + admin-account).
 
 ## Tests
 
 ```bash
-npm test   # 117 tests, geen echte database vereist
+npm test   # 188 tests, geen echte database vereist
 ```
 
 Testbestanden in `tests/`:

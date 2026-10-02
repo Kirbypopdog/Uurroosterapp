@@ -32,7 +32,7 @@ De app bestaat uit 3 onderdelen op Render:
    - `ADMIN_PASSWORD` = (kies een sterk wachtwoord)
    - `DEFAULT_RESET_PASSWORD` = (kies een sterk wachtwoord voor nieuwe accounts)
    - `NODE_ENV` = `production`
-5. Deploy → Backend start, `ensureSchema()` maakt automatisch alle tabellen
+5. Deploy → Backend start en initialiseert zichzelf: migratie `000_base_schema` maakt alle tabellen, `ensureBootstrapData()` maakt standaardteams + admin-account aan
 
 ### 3. Frontend deployen
 1. Render Dashboard → New → Static Site
@@ -52,17 +52,32 @@ De app bestaat uit 3 onderdelen op Render:
 
 ## Code Updates Deployen
 
-Render deployt automatisch bij elke push naar `main`:
+Er zijn twee omgevingen, elk gekoppeld aan een eigen branch:
+
+| Branch | Omgeving |
+|--------|----------|
+| `main` | **Productie** (wat het team gebruikt) |
+| `staging` | **Testomgeving** (eigen database, veilig testen) |
+
+**Aanbevolen workflow** — eerst testen, dan live:
 
 ```bash
-git add -A
-git commit -m "beschrijving van wijziging"
-git push origin main
+# 1. Testen op staging
+git checkout staging
+git commit -am "beschrijving van wijziging"
+git push origin staging          # → staging deployt automatisch
+
+# 2. Tevreden na testen? Naar productie:
+git checkout main
+git merge staging
+git push origin main             # → productie deployt automatisch
 ```
 
 Render detecteert de push en:
 - Backend: Herbouwt + herstart (duurt ~1-2 min)
 - Frontend: Herlaadt statische bestanden (duurt ~30 sec)
+
+> Zie **STAGING.md** voor de eenmalige setup van de testomgeving.
 
 ---
 
@@ -114,9 +129,9 @@ node import-backup.js /pad/naar/hetvlot-backup-DATUM.json
 - Check of PostgreSQL instance online is
 
 ### Database is leeg na deploy
-- Normaal bij eerste deploy: `ensureSchema()` maakt tabellen, maar geen data
-- Importeer een backup of voeg handmatig medewerkers toe
-- `npm run seed` draait automatisch NIET op Render - admin account wordt aangemaakt via env vars door de auto-migratie
+- Bij de eerste deploy initialiseert de backend zichzelf: migratie `000_base_schema` maakt alle tabellen aan en `ensureBootstrapData()` maakt de standaardteams + een admin-account (uit `ADMIN_EMAIL`/`ADMIN_PASSWORD`). Geen handmatige `npm run db:setup` of shell-toegang nodig.
+- Inhoudelijke data (medewerkers, shifts) blijft leeg → importeer een backup of voeg handmatig medewerkers toe
+- De admin-bootstrap is veilig herhaalbaar: een bestaand admin-wachtwoord wordt **nooit** overschreven (`ON CONFLICT DO NOTHING`)
 
 ### Frontend toont "kan niet verbinden"
 - Check of backend online is: ga naar `https://vlot-dashboard.site/health`
@@ -129,6 +144,6 @@ node import-backup.js /pad/naar/hetvlot-backup-DATUM.json
 - Overweeg upgrade naar Starter ($7/maand) voor always-on
 
 ### Database migratie nodig
-- Schema changes worden automatisch toegepast door `ensureSchema()` in server.js
-- Voeg nieuwe kolommen/tabellen toe aan die functie
-- Backend herstart → migratie draait automatisch
+- Schema changes worden automatisch toegepast door `runMigrations()` in server.js
+- Voeg een nieuwe entry toe aan de `MIGRATIONS`-array (genummerd, idempotent)
+- Backend herstart → nieuwe migraties draaien automatisch (elke exact één keer)

@@ -102,7 +102,7 @@ function renderBuilderStaffingEditor() {
                             <span>min</span>
                             <input type="number" class="form-input staffing-min-input" data-day="${d}" data-idx="${idx}" value="${rule.min != null ? rule.min : 1}" min="0" max="10">
                         </div>
-                        <button class="staffing-rule-remove" data-day="${d}" data-idx="${idx}" title="Verwijder">×</button>
+                        <button class="staffing-rule-remove" data-day="${d}" data-idx="${idx}" data-tooltip="Verwijder">×</button>
                     </div>`;
                 });
 
@@ -154,7 +154,7 @@ function renderBuilderMeetingsEditor() {
                         <select class="meeting-day" data-team="${teamId}" data-idx="${idx}">
                             ${dayLabels.map((d, di) => `<option value="${di}" ${di === m.day ? 'selected' : ''}>${d}</option>`).join('')}
                         </select>
-                        <button class="meeting-rule-remove" data-team="${teamId}" data-idx="${idx}" title="Verwijder">&times;</button>
+                        <button class="meeting-rule-remove" data-team="${teamId}" data-idx="${idx}" data-tooltip="Verwijder">&times;</button>
                     </div>
                     <div class="meeting-rule-row">
                         <select class="meeting-from" data-team="${teamId}" data-idx="${idx}">${timeSelectOptions(m.from || 9)}</select>
@@ -261,13 +261,17 @@ function calculateBuilderShiftHours(assignment) {
     });
 }
 
+// #344: geeft null terug wanneer geen template past, niet de tijdreeks zelf.
+// Het blok in de bouwer toont daaronder al btb-time met precies diezelfde
+// tijden. Stond de tijdreeks ook boven, dan kreeg elke dienst die niet exact
+// een template is twee identieke regels in een cel van 55 pixels, waarvan de
+// bovenste afgekapt werd tot "09:00-17:...".
 function getTemplateNameForTimes(startTime, endTime) {
     const templates = DataStore.settings.shiftTemplates || {};
     const match = Object.entries(templates).find(([key, t]) =>
         t.start === startTime && t.end === endTime
     );
-    if (match) return match[1].name;
-    return `${startTime}-${endTime}`;
+    return match ? match[1].name : null;
 }
 
 function calcHoursBetweenTwoAssignments(shift1, shift2) {

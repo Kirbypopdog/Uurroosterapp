@@ -60,3 +60,19 @@ jobs:
 
       - name: Verify schema.sql exists
         run: test -f backend/sql/schema.sql && echo "Schema OK"
+
+      # #381: de kwetsbaarheden groeiden stilletjes mee omdat niemand de
+      # auditmelding in de Render-build las. Nu de lijst leeg is, bewaakt CI
+      # dat hij leeg blijft.
+      #
+      # Bewust hier en niet in de Render-build: een audit die de build breekt,
+      # blokkeert ook een spoedfix. Op een pull request is het een signaal, en
+      # dan is er tijd om te kiezen.
+      #
+      # Drempel op high. Moderate en low komen vaak uit bouwgereedschap en
+      # zouden de controle tot ruis maken, waarna niemand hem nog leest.
+      - name: Audit backend dependencies
+        run: cd backend && npm audit --audit-level=high
+
+      - name: Audit mcp-server dependencies
+        run: cd mcp-server && npm install --package-lock-only && npm audit --audit-level=high

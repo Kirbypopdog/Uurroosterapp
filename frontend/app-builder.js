@@ -27,9 +27,7 @@ function renderBuilderEditor(container) {
         </button>
         <span class="builder-editor-title">
             ${AppState.builderLoadedDraftName ? escapeHtml(AppState.builderLoadedDraftName) : 'Nieuw concept'}
-            ${AppState.builderIsDirty ? ' <span class="builder-dirty-badge">(gewijzigd)</span>' : ''}
         </span>
-        <span id="builder-autosave-status" class="builder-autosave-status">${AppState.builderAutoSavedAt ? `Automatisch opgeslagen om ${AppState.builderAutoSavedAt}` : ''}</span>
     </div>`;
 
     html += renderBuilderControls(role, userTeam);
@@ -124,10 +122,11 @@ function renderBuilderOverview(container) {
             <div class="builder-overview-header">
                 <div class="builder-overview-title-row">
                     <h3>Concepten</h3>
-                    ${getEffectiveRole() === 'admin' ? `<button class="btn btn-secondary btn-sm" id="builder-upload-concept" title="Concept importeren"><i data-lucide="upload" class="lucide-xs"></i> Importeren</button>` : ''}
+                    ${getEffectiveRole() === 'admin' ? `<button class="btn btn-secondary btn-sm" id="builder-upload-concept" data-tooltip="Concept importeren"><i data-lucide="upload" class="lucide-xs"></i> Importeren</button>` : ''}
                 </div>
                 <div class="builder-overview-filter-row">
-                    <select id="builder-overview-filter" class="form-input form-input-sm">
+                    <select id="builder-overview-filter" class="form-input form-input-sm"
+                            aria-label="Filter concepten">
                         ${filterOptions.map(o => `<option value="${o.value}" ${filter === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
                     </select>
                 </div>
@@ -135,8 +134,11 @@ function renderBuilderOverview(container) {
             ${activeSectionHtml}
             ${otherDrafts.length > 0 || activeDrafts.length > 0 ? '<div class="builder-other-label">Overige concepten</div>' : ''}
             <div class="builder-concept-grid">
-                <div class="builder-concept-card builder-concept-new" id="builder-new-concept-card">
-                    <i data-lucide="plus" class="lucide-lg"></i>
+                <!-- #363: dit was een div met alleen een click-listener, dus
+                     een nieuw concept starten kon enkel met de muis. -->
+                <div class="builder-concept-card builder-concept-new" id="builder-new-concept-card"
+                     role="button" tabindex="0" aria-label="Nieuw concept aanmaken">
+                    <i data-lucide="plus" class="lucide-lg" aria-hidden="true"></i>
                     <span class="text-xs">Nieuw concept</span>
                 </div>
                 ${cardsHtml}
@@ -160,7 +162,7 @@ function renderConceptCard(draft, newestActiveId) {
     const createdDate = draft.createdAt ? new Date(draft.createdAt) : null;
     const createdStr = createdDate ? createdDate.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
     const teamLabel = draft.teamFilter
-        ? (DataStore.settings.teams?.[draft.teamFilter]?.name || draft.teamFilter)
+        ? getTeamName(draft.teamFilter)
         : 'Alle teams';
 
     const draftGrid = draft.grid || {};
@@ -201,13 +203,31 @@ function renderConceptCard(draft, newestActiveId) {
     if (isAdmin) menuItems += `<button class="concept-menu-item concept-card-download" data-draft-id="${dId}">${IconHelper.html('download', 'xs')} Download</button>`;
     menuItems += `<hr><button class="concept-menu-item danger concept-card-delete" data-draft-id="${dId}">${IconHelper.html(ICONS.delete, 'xs')} Verwijderen</button>`;
 
+    const teamDotColor = draft.teamFilter
+        ? (DataStore.settings.teams?.[draft.teamFilter]?.color || '#8d897c')
+        : 'var(--ink-3)';
+
     return `
         <div class="builder-concept-card draft-status-${statusCls}" data-draft-id="${escapeHtml(draft.id)}">
             <div class="concept-card-header">
-                <span class="concept-card-name">${escapeHtml(draft.name)}</span>
+                <span class="concept-card-name-row">
+                    <span class="concept-card-dot" style="background:${teamDotColor}" data-tooltip="${escapeHtml(teamLabel)}"></span>
+                    <!-- #267: openen kon alleen via het kebabknopje van 30 bij
+                         26 px. De naam is nu zelf een knop met de standaardactie,
+                         en de hele kaart is aantikbaar (zie de klikafhandeling
+                         in attachConceptCardListeners). -->
+                    <button type="button" class="concept-card-name concept-card-open" data-draft-id="${dId}"
+                            data-tooltip="${isActive ? 'Bewerken' : 'Laden'}">${escapeHtml(draft.name)}</button>
+                </span>
                 <div class="concept-card-menu">
-                    <button class="concept-card-menu-trigger" data-draft-id="${dId}">
-                        <i data-lucide="more-vertical" class="lucide-sm"></i>
+                    <!-- #365: deze knop bevat alleen een icoon, dus zonder
+                         aria-label meldde een schermlezer enkel "knop", zeven
+                         keer na elkaar. De conceptnaam erin maakt elke knop
+                         uniek benoemd. -->
+                    <button type="button" class="concept-card-menu-trigger" data-draft-id="${dId}"
+                            aria-haspopup="true" aria-expanded="false"
+                            aria-label="Acties voor ${escapeHtml(draft.name)}">
+                        <i data-lucide="more-vertical" class="lucide-sm" aria-hidden="true"></i>
                     </button>
                     <div class="concept-card-menu-dropdown">
                         ${menuItems}
@@ -219,7 +239,7 @@ function renderConceptCard(draft, newestActiveId) {
                 ${status ? `<span class="concept-card-badge badge-${statusCls}">${status.label}</span>` : '<span class="concept-card-badge badge-draft">Concept</span>'}
             </div>
             <div class="concept-card-meta">
-                <span>${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers${isVakantie && holidayPeriod ? ` &middot; ${escapeHtml(holidayPeriod.name)}` : ''}</span>
+                <span>${escapeHtml(teamLabel)} &middot; ${empCount} ${empCount === 1 ? 'medewerker' : 'medewerkers'}${isVakantie && holidayPeriod ? ` &middot; ${escapeHtml(holidayPeriod.name)}` : ''}</span>
                 ${periodHtml}
                 <span>Bewerkt: ${dateStr} om ${timeStr}</span>
                 <span>Door: ${escapeHtml(draft.updatedByName || draft.createdByName || 'Onbekend')}${createdStr && createdStr !== dateStr ? ` &middot; Aangemaakt: ${createdStr}` : ''}</span>
@@ -276,10 +296,16 @@ function addBuilderWeek() {
     pattern.cycleLength = newLength;
     pattern.weeks[String(newLength)] = { closedDays: [], label: 'alle dagen open' };
     setBuilderDirty();
-    // Switch to new week
+    // Switch to new week. Raster EN bezettingsregels moeten allebei mee naar de
+    // cache, anders belanden de regels van de huidige week straks onder het
+    // nieuwe weeknummer.
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
+    AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules || {}));
     AppState.builderWeekNumber = newLength;
     AppState.builderGrid = AppState.builderGridByWeek[newLength] || {};
+    AppState.builderStaffingRules = AppState.builderStaffingRulesByWeek[newLength]
+        ? JSON.parse(JSON.stringify(AppState.builderStaffingRulesByWeek[newLength]))
+        : {};
     renderBuilder();
 }
 
@@ -289,24 +315,38 @@ function removeBuilderWeek(weekNum) {
     if (cl <= 1) return;
     // Save current week first
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
-    // Shift down weeks above the removed one
+    AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules || {}));
+    // Shift down weeks above the removed one. Het raster en de bezettingsregels
+    // horen bij elkaar en schuiven dus samen op; anders houdt week 1 het raster
+    // van oude week 2 maar de bezettingsregels van de verwijderde week.
     const newWeeks = {};
     const newGridByWeek = {};
+    const newStaffingByWeek = {};
     let newIdx = 1;
     for (let w = 1; w <= cl; w++) {
         if (w === weekNum) continue;
         newWeeks[String(newIdx)] = pattern.weeks[String(w)] || { closedDays: [], label: 'alle dagen open' };
         newGridByWeek[newIdx] = AppState.builderGridByWeek[w] || {};
+        if (AppState.builderStaffingRulesByWeek[w]) {
+            newStaffingByWeek[newIdx] = AppState.builderStaffingRulesByWeek[w];
+        }
         newIdx++;
     }
     pattern.weeks = newWeeks;
     pattern.cycleLength = cl - 1;
     AppState.builderGridByWeek = newGridByWeek;
+    // Sleutels van weggevallen weken mogen niet blijven staan: autoSaveBuilderDraft
+    // schrijft dit object ongefilterd weg naar grid._staffingRules.
+    AppState.builderStaffingRulesByWeek = newStaffingByWeek;
     // Adjust current week number
     if (AppState.builderWeekNumber > pattern.cycleLength) {
         AppState.builderWeekNumber = pattern.cycleLength;
     }
     AppState.builderGrid = AppState.builderGridByWeek[AppState.builderWeekNumber] || {};
+    // Opnieuw uit de cache laden, net als switchBuilderWeek doet.
+    AppState.builderStaffingRules = AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber]
+        ? JSON.parse(JSON.stringify(AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber]))
+        : {};
     setBuilderDirty();
     renderBuilder();
 }
@@ -331,14 +371,20 @@ function toggleBuilderClosedDay(jsDow) {
 function renderBuilderControls(role, userTeam) {
     const wn = AppState.builderWeekNumber;
 
-    // Team filter - dropdown for all roles that can access builder
+    // De teamkeuze zat in een keuzemenu; teams zijn nu inklapbare groepen in
+    // het raster zelf, net als in de planning. Je ziet dus alle teams staan en
+    // klapt weg wat je even niet nodig hebt.
+    //
+    // Oudere concepten kunnen nog een teamfilter dragen. Die beperkt óók welke
+    // medewerkers bij het toepassen een shift krijgen, dus we laten hem staan —
+    // maar zonder keuzemenu zou je eraan vastzitten. Vandaar dit chipje.
     const teams = DataStore.settings.teams || {};
-    const teamFilterHtml = `<select id="builder-team-select" class="form-input w-auto">
-        <option value="">Alle teams</option>
-        ${Object.entries(teams).map(([key, t]) =>
-            `<option value="${key}" ${AppState.builderTeamFilter === key ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
-        ).join('')}
-    </select>`;
+    const teamFilterHtml = AppState.builderTeamFilter ? `
+        <div class="builder-team-locked">
+            ${IconHelper.html('filter', 'xs')}
+            Enkel ${escapeHtml(teams[AppState.builderTeamFilter]?.name || AppState.builderTeamFilter)}
+            <button type="button" id="builder-clear-team-filter" data-tooltip="Alle teams tonen">${IconHelper.html(ICONS.close, 'xs')}</button>
+        </div>` : '';
 
     return `
         <div class="builder-controls">
@@ -366,25 +412,32 @@ function renderBuilderControls(role, userTeam) {
                             }
                             btns += `<button class="btn ${wn === w ? 'btn-primary' : 'btn-secondary'} btn-sm builder-week-btn" id="builder-week-${w}">
                                 Week ${w} (${escapeHtml(weekBtnLabel)})
-                                ${!isVakantie && cl > 1 ? `<span class="builder-week-remove" data-week="${w}" title="Week verwijderen">&times;</span>` : ''}
+                                ${!isVakantie && cl > 1 ? `<span class="builder-week-remove" data-week="${w}" data-tooltip="Week verwijderen">&times;</span>` : ''}
                             </button>`;
                         }
                         if (!isVakantie && cl < 8) {
-                            btns += `<button class="btn btn-secondary btn-sm" id="builder-add-week" title="Week toevoegen">+ Week</button>`;
+                            btns += `<button class="btn btn-secondary btn-sm" id="builder-add-week" data-tooltip="Week toevoegen">+ Week</button>`;
                         }
                         return btns;
                     })()}
                 </div>
-                <div class="builder-team-filter">
-                    ${teamFilterHtml}
-                </div>
             </div>
             <div class="builder-controls-row">
+                ${teamFilterHtml}
                 <div class="builder-load-options">
                     <button class="btn btn-secondary btn-sm" id="builder-load-base">Huidig basisrooster laden</button>
                     <button class="btn btn-secondary btn-sm" id="builder-load-blank">Leeg beginnen</button>
                     ${getBuilderCycleLength() > 1 ? `<button class="btn btn-secondary btn-sm" id="builder-copy-week"><i data-lucide="copy" class="lucide-xs"></i> Kopieer week</button>` : ''}
-                    ${AppState.builderConceptType === 'vakantie' ? `<button class="btn btn-sm ${AppState.builderHideOnLeave ? 'btn-primary' : 'btn-secondary'} builder-hide-leave-toggle" id="builder-hide-leave-toggle"><i data-lucide="${AppState.builderHideOnLeave ? 'eye-off' : 'eye'}" class="lucide-xs"></i> ${AppState.builderHideOnLeave ? 'Verlof verborgen' : 'Verberg verlof'}</button>` : ''}
+                    ${AppState.builderConceptType === 'vakantie' ? (() => {
+                        // Het verlof staat sinds kort gewoon in het raster; deze knop
+                        // kort enkel de lijst in tot wie die week beschikbaar is.
+                        const metVerlof = (AppState.builderTeamFilter ? getEmployeesByTeam(AppState.builderTeamFilter) : getAllEmployees(true))
+                            .filter(e => getBuilderLeaveDays(e.id, AppState.builderWeekNumber).length > 0).length;
+                        return `<button class="btn btn-sm ${AppState.builderHideOnLeave ? 'btn-primary' : 'btn-secondary'} builder-hide-leave-toggle" id="builder-hide-leave-toggle"
+                            data-tooltip="Verbergt wie deze week verlof heeft">
+                            <i data-lucide="${AppState.builderHideOnLeave ? 'eye-off' : 'users'}" class="lucide-xs"></i>
+                            Alleen beschikbaren${metVerlof ? ` (${metVerlof} met verlof)` : ''}</button>`;
+                    })() : ''}
                 </div>
                 ${AppState.builderLoadedDraftName ? `
                     <div class="builder-loaded-draft">
@@ -412,22 +465,23 @@ function renderBuilderGrid(role, userTeam) {
     // Filter medewerkers met verlof in de huidige vakantieweek
     let hiddenOnLeaveCount = 0;
     if (AppState.builderConceptType === 'vakantie' && AppState.builderHideOnLeave) {
-        const weekStart = getBuilderVakantieWeekStart(AppState.builderWeekNumber);
-        if (weekStart) {
-            const weekDates = Array.from({ length: 7 }, (_, i) => {
-                const d = new Date(weekStart);
-                d.setDate(d.getDate() + i);
-                return d.toISOString().slice(0, 10);
-            });
-            employees = employees.filter(emp => {
-                const hasLeave = weekDates.some(dateStr => {
-                    const avail = getAvailability(emp.id, dateStr);
-                    return avail && avail.type === 'verlof';
-                });
-                if (hasLeave) hiddenOnLeaveCount++;
-                return !hasLeave;
-            });
-        }
+        // #218 en #177: hier stond een eigen lus met d.toISOString().slice(0,10)
+        // op een LOKALE datum. In de Belgische zomertijd levert dat de dag
+        // ervoor op, dus het filter keek naar zondag tot en met zaterdag in
+        // plaats van maandag tot en met zondag. Wie op de zondag vóór de week
+        // verlof had verdween, wie op de zondag ín de week verlof had bleef
+        // staan.
+        //
+        // Erger nog: de teller "(N met verlof)" ernaast rekende met
+        // getBuilderLeaveDays, dat de juiste helper gebruikt. Teller en filter
+        // konden elkaar dus tegenspreken op hetzelfde scherm.
+        //
+        // Ze delen nu één bron, zodat ze niet opnieuw uit elkaar kunnen lopen.
+        employees = employees.filter(emp => {
+            const hasLeave = getBuilderLeaveDays(emp.id, AppState.builderWeekNumber).length > 0;
+            if (hasLeave) hiddenOnLeaveCount++;
+            return !hasLeave;
+        });
     }
 
     if (employees.length === 0 && hiddenOnLeaveCount === 0) {
@@ -456,7 +510,7 @@ function renderBuilderGrid(role, userTeam) {
             <div class="builder-vakantie-bar-inner">
                 <div>
                     <strong>Vakantieconcept voor ${hpName}</strong>${hpDates ? ` <span>(${hpDates})</span>` : ''}
-                    <div class="builder-vakantie-note">Medewerkers die niet in dit rooster staan krijgen geen shift tijdens deze vakantie.</div>
+                    <div class="builder-vakantie-note">Medewerkers die niet in dit rooster staan krijgen geen dienst tijdens deze vakantie.</div>
                 </div>
                 <div class="builder-vakantie-responsible">
                     <label class="builder-vakantie-label">Verantw. week ${wn}:</label>
@@ -484,7 +538,7 @@ function renderBuilderGrid(role, userTeam) {
 
     // Header
     html += '<div class="builder-grid-header">';
-    html += `<div class="builder-name-header">Medewerker${hiddenOnLeaveCount > 0 ? `<span class="builder-leave-hidden-badge" title="${hiddenOnLeaveCount} medewerker(s) verborgen wegens verlof">${hiddenOnLeaveCount} verlof</span>` : ''}</div>`;
+    html += `<div class="builder-name-header">Medewerker${hiddenOnLeaveCount > 0 ? `<span class="builder-leave-hidden-badge" data-tooltip="${hiddenOnLeaveCount} medewerker(s) verborgen wegens verlof">${hiddenOnLeaveCount} verlof</span>` : ''}</div>`;
     dayNames.forEach((name, i) => {
         let headerClass = 'builder-day-header builder-day-toggle';
         const jsDow = dayIndexToJsDow(i);
@@ -500,7 +554,7 @@ function renderBuilderGrid(role, userTeam) {
             d.setDate(d.getDate() + i);
             dateLabel = `<span class="builder-day-date">${d.getDate()} ${d.toLocaleDateString('nl-BE', { month: 'short' })}</span>`;
         }
-        html += `<div class="${headerClass}" data-jsdow="${jsDow}" title="Klik om ${isClosed ? 'te openen' : 'te sluiten'}"><span class="day-name">${label}${lockIcon}</span>${dateLabel}</div>`;
+        html += `<div class="${headerClass}" data-jsdow="${jsDow}" data-tooltip="Klik om ${isClosed ? 'te openen' : 'te sluiten'}"><span class="day-name">${label}${lockIcon}</span>${dateLabel}</div>`;
     });
     html += '<div class="builder-hours-header">Uren</div>';
     html += '</div>';
@@ -514,20 +568,32 @@ function renderBuilderGrid(role, userTeam) {
         if (teamEmployees.length === 0) return;
 
         const teamName = teams[teamKey]?.name || teamKey;
-        html += `<div class="builder-team-section team-${teamKey}">
+        const dicht = AppState.collapsedTeams.has(teamKey);
+        html += `<div class="builder-team-section team-${teamKey}${dicht ? ' collapsed' : ''}" data-builder-team="${teamKey}" role="button" tabindex="0"
+                      aria-expanded="${!dicht}" data-tooltip="Klik om in of uit te klappen">
             <span>${escapeHtml(teamName)} (${teamEmployees.length})</span>
+            <span class="builder-team-toggle">${IconHelper.html('chevron-up', 'sm')}</span>
         </div>`;
 
+        html += `<div class="builder-team-body${dicht ? ' collapsed' : ''}" data-builder-team-body="${teamKey}">`;
         teamEmployees.forEach(emp => {
             html += renderBuilderEmployeeRow(emp);
         });
+        html += '</div>';
     });
 
     const knownTeams = new Set(teamOrder);
     const otherEmployees = employees.filter(e => !knownTeams.has(e.mainTeam));
     if (otherEmployees.length > 0) {
-        html += `<div class="builder-team-section"><span>Overig (${otherEmployees.length})</span></div>`;
+        const overigDicht = AppState.collapsedTeams.has('_builder_overig');
+        html += `<div class="builder-team-section${overigDicht ? ' collapsed' : ''}" data-builder-team="_builder_overig" role="button" tabindex="0"
+                      aria-expanded="${!overigDicht}" data-tooltip="Klik om in of uit te klappen">
+            <span>Overig (${otherEmployees.length})</span>
+            <span class="builder-team-toggle">${IconHelper.html('chevron-up', 'sm')}</span>
+        </div>`;
+        html += `<div class="builder-team-body${overigDicht ? ' collapsed' : ''}" data-builder-team-body="_builder_overig">`;
         otherEmployees.forEach(emp => { html += renderBuilderEmployeeRow(emp); });
+        html += '</div>';
     }
 
     html += '</div>';
@@ -574,6 +640,22 @@ function isInMeeting(userId, hour, dayIndex) {
     return false;
 }
 
+// Verlof is alleen te kennen in een vakantieconcept: daar hangen de weken aan
+// echte datums. Een basisrooster is een herhalende cyclus zonder kalender.
+function getBuilderLeaveDays(employeeId, weekNumber) {
+    if (AppState.builderConceptType !== 'vakantie') return [];
+    const weekStart = getBuilderVakantieWeekStart(weekNumber);
+    if (!weekStart) return [];
+    const dagen = [];
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() + i);
+        const avail = getAvailability(employeeId, formatDateYYYYMMDD(d));
+        if (avail && avail.type === 'verlof') dagen.push(i);   // 0 = maandag
+    }
+    return dagen;
+}
+
 function renderBuilderEmployeeRow(employee) {
     const empGrid = AppState.builderGrid[employee.id] || {};
     let totalHours = 0;
@@ -581,9 +663,17 @@ function renderBuilderEmployeeRow(employee) {
 
     let html = `<div class="builder-row" data-employee-id="${employee.id}">`;
 
+    const _empColor = DataStore.settings.teams?.[employee.mainTeam]?.color || '#8d897c';
+    const _empInitials = escapeHtml(getInitials(employee.name || ''));
+    const verlofDagen = getBuilderLeaveDays(employee.id, AppState.builderWeekNumber);
     html += `<div class="builder-name-cell">
-        <span class="emp-name">${escapeHtml(employee.name)}</span>
-        <span class="emp-contract">${contractHours}u/week</span>
+        ${avatarHtml(employee.name, _empColor)}
+        <div class="builder-name-cell-text">
+            <span class="emp-name">${escapeHtml(employee.name)}</span>
+            <span class="emp-contract">${contractHours}u/week${verlofDagen.length
+                ? ` · <span class="emp-verlof">${verlofDagen.length === 7 ? 'hele week verlof' : verlofDagen.length + ' ' + (verlofDagen.length === 1 ? 'dag' : 'dagen') + ' verlof'}</span>`
+                : ''}</span>
+        </div>
     </div>`;
 
     // Gesloten dagen voor huidige builder week
@@ -604,6 +694,11 @@ function renderBuilderEmployeeRow(employee) {
         const assignment = empGrid[dayIndex];
 
         let cellClass = 'builder-cell';
+        // Verlof verbergt de medewerker niet meer, het staat gewoon in het
+        // raster. Inplannen kan nog: soms komt iemand toch, of is het verlof
+        // nog niet definitief — vandaar een markering en geen slot.
+        const heeftVerlof = verlofDagen.includes(dayIndex);
+        if (heeftVerlof) cellClass += ' has-leave';
 
         // Check 11-hour rule against adjacent days
         let hasError = false;
@@ -624,7 +719,8 @@ function renderBuilderEmployeeRow(employee) {
         }
         if (hasError) cellClass += ' has-error';
 
-        html += `<div class="${cellClass}" data-employee-id="${employee.id}" data-day="${dayIndex}">`;
+        html += `<div class="${cellClass}" data-employee-id="${employee.id}" data-day="${dayIndex}"${heeftVerlof ? ' data-verlof="1"' : ''}>`;
+        if (heeftVerlof && !assignment) html += '<span class="cell-verlof">verlof</span>';
 
         // Toon staart van nachtdienst van vorige week's zondag in maandag-cel
         if (dayIndex === 0) {
@@ -667,11 +763,12 @@ function renderBuilderEmployeeRow(employee) {
             html += `<div class="builder-timeline-block ${teamColor}${pos.isOvernight ? ' nacht' : ''}${reserveClass}"
                 style="left:${pos.leftPct.toFixed(1)}%;width:${widthStyle}"
                 data-start="${assignment.startTime}" data-end="${assignment.endTime}">
-                ${reserveBadge}<span class="btb-label">${escapeHtml(templateName)}</span>
+                ${reserveBadge}${templateName ? `<span class="btb-label">${escapeHtml(templateName)}</span>` : ''}
                 <span class="btb-time">${assignment.startTime}-${assignment.endTime}</span>
             </div>`;
 
-        } else {
+        } else if (!heeftVerlof) {
+            // Op een verlofdag staat al "verlof"; een plusje ernaast leest raar.
             html += '<span class="cell-empty">+</span>';
         }
 
@@ -811,7 +908,7 @@ function renderBuilderStaffingHeatmap() {
             const widthPct = (0.5 / 17) * 100;
             const timeLabel = formatStaffingHour(h);
             html += `<span class="${segClass}" style="left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%"
-                data-tooltip="${timeLabel} — ${actual}${required >= 0 ? '/' + required : ''} mdw${required >= 0 ? ' (min ' + required + ')' : ''}" data-tooltip-pos="top"></span>`;
+                data-tooltip="${timeLabel} · ${actual}${required >= 0 ? '/' + required : ''} mdw${required >= 0 ? ' (min ' + required + ')' : ''}" data-tooltip-pos="top"></span>`;
         }
 
         html += '</div>';
@@ -839,18 +936,20 @@ function getStaffingRequirement(dayIndex, hour) {
 
 // Convert old per-hour format to new range-based format
 function renderBuilderActions() {
-    const hasData = Object.keys(AppState.builderGrid).length > 0 &&
-        Object.values(AppState.builderGrid).some(d => Object.keys(d).length > 0);
+    // Zelfde maatstaf als het opslaan zelf: ook gesloten dagen, bezettingsregels
+    // en vergaderingen maken een concept de moeite waard. En over álle weken,
+    // niet enkel de week die je toevallig open hebt staan.
+    const hasData = builderHeeftIets();
 
-    const saveLabel = AppState.builderLoadedDraftId ? 'Opslaan' : 'Concept opslaan';
-    const showSaveAs = !!AppState.builderLoadedDraftId;
-
+    // Geen "Opslaan" meer: de autosave doet dat en de statusregel in de topbar
+    // zegt hoe het ervoor staat. "Opslaan als..." blijft wél — die maakt een
+    // kopie onder een nieuwe naam, en dat kan de autosave niet.
+    // De status hoort bij het opslaan, dus staat hij naast de knop die daarover
+    // gaat — niet los bovenaan waar hij makkelijk over het hoofd wordt gezien.
     return `
         <div class="builder-actions">
-            <button class="btn btn-primary" id="builder-save-draft" ${!hasData ? 'disabled' : ''}>
-                ${saveLabel}
-            </button>
-            ${showSaveAs ? `<button class="btn btn-secondary" id="builder-save-draft-as" ${!hasData ? 'disabled' : ''}>Opslaan als...</button>` : ''}
+            ${renderBuilderSaveStatus()}
+            <button class="btn btn-secondary" id="builder-save-draft-as" ${!hasData ? 'disabled' : ''}>Opslaan als...</button>
         </div>
     `;
 }
@@ -975,7 +1074,7 @@ function renderBuilderDrafts() {
                     const date = new Date(draft.updatedAt || draft.createdAt);
                     const dateStr = date.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
                     const teamLabel = draft.teamFilter
-                        ? (DataStore.settings.teams?.[draft.teamFilter]?.name || draft.teamFilter)
+                        ? getTeamName(draft.teamFilter)
                         : 'Alle teams';
                     const draftGrid = draft.grid || {};
                     let weekLabel, empCount;
@@ -999,12 +1098,12 @@ function renderBuilderDrafts() {
                                 <strong>${escapeHtml(draft.name)}</strong>
                                 ${status ? `<span class="builder-draft-badge draft-badge-${status.cls}">${status.label}</span>` : ''}
                                 ${isDraftLockActive(draft.lockedAt) && draft.lockedBy !== AppState.currentUser?.id ? `<span class="builder-draft-badge draft-badge-locked"><i data-lucide="lock" class="lucide-xs"></i> In bewerking door ${escapeHtml(draft.lockedByName || 'iemand')}</span>` : ''}
-                                <span class="builder-draft-meta">${weekLabel} &middot; ${escapeHtml(teamLabel)} &middot; ${empCount} medewerkers</span>
+                                <span class="builder-draft-meta">${weekLabel} &middot; ${escapeHtml(teamLabel)} &middot; ${empCount} ${empCount === 1 ? 'medewerker' : 'medewerkers'}</span>
                                 ${dateRange}
                                 <span class="builder-draft-meta">${escapeHtml(draft.createdByName || 'Onbekend')} &middot; ${dateStr}</span>
                             </div>
                             <div class="builder-draft-actions">
-                                <button class="btn btn-secondary btn-sm builder-draft-rename" data-draft-id="${escapeHtml(draft.id)}" title="Hernoemen">Hernoemen</button>
+                                <button class="btn btn-secondary btn-sm builder-draft-rename" data-draft-id="${escapeHtml(draft.id)}" data-tooltip="Hernoemen">Hernoemen</button>
                                 <button class="btn btn-secondary btn-sm builder-draft-load" data-draft-id="${escapeHtml(draft.id)}">Laden</button>
                                 <button class="btn btn-primary btn-sm builder-draft-apply" data-draft-id="${escapeHtml(draft.id)}">Toepassen</button>
                                 <button class="btn btn-danger btn-sm builder-draft-delete" data-draft-id="${escapeHtml(draft.id)}">Verwijderen</button>
@@ -1020,6 +1119,11 @@ function renderBuilderDrafts() {
 // --- Builder: Cell Editing ---
 
 function openBuilderShiftModal(employeeId, dayIndex) {
+    // Inplannen op een verlofdag mag, maar niet ongemerkt.
+    if (getBuilderLeaveDays(employeeId, AppState.builderWeekNumber).includes(dayIndex)) {
+        const naam = getEmployee(employeeId)?.name || 'Deze medewerker';
+        showToast(`${naam} heeft die dag verlof.\nJe kan hem toch inplannen.`, 'warning');
+    }
     const employee = getEmployee(employeeId);
     if (!employee) return;
 
@@ -1107,6 +1211,13 @@ function openBuilderShiftModal(employeeId, dayIndex) {
             showToast('Vul start- en eindtijd in', 'warning');
             return;
         }
+        // #295: het dienstvenster weigert gelijke tijden al, de bouwer niet.
+        // Dat was de enige weg naar een dienst van 09:00 tot 09:00, die aan de
+        // ene kant nul uur telt en aan de andere kant vierentwintig.
+        if (start === end) {
+            showToast('Begintijd en eindtijd mogen niet gelijk zijn', 'warning');
+            return;
+        }
         if (!AppState.builderGrid[employeeId]) {
             AppState.builderGrid[employeeId] = {};
         }
@@ -1118,7 +1229,7 @@ function openBuilderShiftModal(employeeId, dayIndex) {
             isReserve: isReserveChecked
         };
         setBuilderDirty();
-        modal.classList.add('hidden');
+        verbergModal(modal);
         renderBuilder();
     });
 
@@ -1134,7 +1245,7 @@ function openBuilderShiftModal(employeeId, dayIndex) {
             }
         }
         setBuilderDirty();
-        modal.classList.add('hidden');
+        verbergModal(modal);
         renderBuilder();
     });
 
@@ -1142,14 +1253,14 @@ function openBuilderShiftModal(employeeId, dayIndex) {
     const cancelBtn = document.getElementById('builder-shift-cancel');
     const newCancelBtn = cancelBtn.cloneNode(true);
     cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-    newCancelBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    newCancelBtn.addEventListener('click', () => verbergModal(modal));
 
     const closeBtn = document.getElementById('builder-shift-modal-close');
     const newCloseBtn = closeBtn.cloneNode(true);
     closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
-    newCloseBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    newCloseBtn.addEventListener('click', () => verbergModal(modal));
 
-    modal.classList.remove('hidden');
+    toonModal(modal);
 }
 
 // --- Builder: Loading ---
@@ -1201,11 +1312,12 @@ function loadBuilderFromBaseSchedules() {
     });
 
     AppState.builderGridByWeek[weekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
-    AppState.builderLoadedDraftId = null;
-    AppState.builderLoadedDraftName = null;
-    AppState.builderPattern = null;
-    AppState.builderConceptType = 'basis';
-    AppState.builderHolidayPeriodId = null;
+    // Geen reset van builderLoadedDraftId/-Name/-Pattern/-ConceptType/-HolidayPeriodId hier:
+    // zodra je in de editor bent (nieuw of bestaand concept) is er altijd al een opgeslagen
+    // concept-ID (nieuwe concepten worden meteen leeg aangemaakt in app-builder-drafts.js).
+    // Deze velden resetten koppelt het concept los, waardoor "Opslaan" verandert in
+    // "Concept opslaan" (dupliceert i.p.v. bij te werken) en een vakantieconcept stilletjes
+    // terug type 'basis' wordt.
     setBuilderDirty();
     renderBuilder();
     showToast(`Basisrooster week ${weekNumber} geladen`, 'success');
@@ -1213,8 +1325,69 @@ function loadBuilderFromBaseSchedules() {
 
 // --- Builder: Auto-save ---
 
+// Er is geen opslaanknop meer: deze regel is het enige wat vertelt of je werk
+// veilig is. Eén functie voor zowel de render als de losse bijwerking, anders
+// lopen die twee uiteen — en dan liegt het scherm.
+function renderBuilderSaveStatus() {
+    // #222: zonder geladen concept is er niets om automatisch naar te schrijven
+    // (scheduleBuilderAutoSave keert dan meteen terug). "Bewaren…" tonen is dan
+    // een belofte die niet wordt ingelost, en juist deze regel is het enige wat
+    // vertelt of je werk veilig is.
+    if (!AppState.builderLoadedDraftId) {
+        if (!AppState.builderIsDirty && !AppState.builderSaveState) {
+            return `<span id="builder-autosave-status" class="builder-autosave-status"></span>`;
+        }
+        return `<span id="builder-autosave-status" class="builder-autosave-status is-nietbewaard">
+            ${IconHelper.html('triangle-alert', 'xs')} Nog niet bewaard. Gebruik "Opslaan als…"
+        </span>`;
+    }
+
+    const state = AppState.builderSaveState
+        || (AppState.builderIsDirty ? 'bezig' : (AppState.builderAutoSavedAt ? 'bewaard' : ''));
+
+    if (state === 'mislukt') {
+        return `<button type="button" id="builder-autosave-status" class="builder-autosave-status is-mislukt">
+            ${IconHelper.html('triangle-alert', 'xs')} Niet bewaard. Opnieuw proberen
+        </button>`;
+    }
+    if (state === 'bezig' || AppState.builderIsDirty) {
+        return `<span id="builder-autosave-status" class="builder-autosave-status is-bezig">
+            <span class="builder-save-dot"></span> Bewaren…
+        </span>`;
+    }
+    if (state === 'bewaard') {
+        const tijd = AppState.builderAutoSavedAt ? ` om ${AppState.builderAutoSavedAt}` : '';
+        return `<span id="builder-autosave-status" class="builder-autosave-status is-bewaard">
+            ${IconHelper.html('check', 'xs')} Bewaard${tijd}
+        </span>`;
+    }
+    return `<span id="builder-autosave-status" class="builder-autosave-status"></span>`;
+}
+
+// Alleen dit ene element vervangen: een volledige re-render zou tijdens het
+// bewerken je scrollpositie en focus stelen.
+function updateBuilderSaveStatus(state) {
+    if (state) AppState.builderSaveState = state;
+    const el = document.getElementById('builder-autosave-status');
+    if (!el) return;
+    const tijdelijk = document.createElement('div');
+    tijdelijk.innerHTML = renderBuilderSaveStatus();
+    const nieuw = tijdelijk.firstElementChild;
+    el.replaceWith(nieuw);
+    IconHelper.init(nieuw.parentElement || document.body);
+    if (nieuw.tagName === 'BUTTON') {
+        nieuw.addEventListener('click', () => autoSaveBuilderDraft());
+    }
+}
+
 function setBuilderDirty() {
     AppState.builderIsDirty = true;
+    // #148: onthouden WELKE week veranderd is. De autosave schrijft sinds deze
+    // wijziging per week weg, en wie in drie seconden van week wisselt zou
+    // anders de vorige week niet bewaard krijgen.
+    if (!AppState.builderVuileWeken) AppState.builderVuileWeken = new Set();
+    AppState.builderVuileWeken.add(AppState.builderWeekNumber);
+    updateBuilderSaveStatus('bezig');
     scheduleBuilderAutoSave();
 }
 
@@ -1224,8 +1397,19 @@ function scheduleBuilderAutoSave() {
     AppState.builderAutoSaveTimer = setTimeout(() => autoSaveBuilderDraft(), 3000);
 }
 
+// #305: ook builderSaveState wissen. renderBuilderSaveStatus leest die eerst
+// en valt pas daarna terug op builderIsDirty en builderAutoSavedAt. Bleef hij
+// staan, dan toonde een pas geopend concept "Bewaard om 14:30" van het vorige,
+// of een rood "Niet bewaard. Opnieuw proberen" voor een concept waar niets mis
+// mee is. Deze regel is het enige signaal of je werk veilig is, dus hij mag
+// nooit over het vorige concept gaan.
 function startBuilderAutoSave() {
+    AppState.builderSaveState = null;
     AppState.builderAutoSavedAt = null;
+    // #148: bij een nieuw concept beginnen met een schone lijst. Bleef hier een
+    // weeknummer van het vorige concept staan, dan zou de eerstvolgende
+    // autosave dat concept een week opdringen die er niet in thuishoort.
+    AppState.builderVuileWeken = new Set();
 }
 
 function stopBuilderAutoSave() {
@@ -1237,45 +1421,106 @@ function stopBuilderAutoSave() {
 
 async function autoSaveBuilderDraft() {
     AppState.builderAutoSaveTimer = null;
-    if (!AppState.builderIsDirty || !AppState.builderLoadedDraftId) return;
+    if (!AppState.builderIsDirty || !AppState.builderLoadedDraftId) return true;
 
+    // De week waar je nu in zit staat nog in builderGrid; die moet eerst naar
+    // de cache voor we hem kunnen wegschrijven.
     AppState.builderGridByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderGrid));
-    const multiGrid = { _multiWeek: true };
-    for (const [weekNum, weekGrid] of Object.entries(AppState.builderGridByWeek)) {
-        if (Object.keys(weekGrid).length > 0 && Object.values(weekGrid).some(d => Object.keys(d).length > 0)) {
-            multiGrid[weekNum] = weekGrid;
-        }
-    }
-
-    const updateData = {
-        grid: JSON.parse(JSON.stringify(multiGrid)),
-        weekNumber: AppState.builderWeekNumber,
-        teamFilter: AppState.builderTeamFilter,
-        type: AppState.builderConceptType || 'basis',
-        holidayPeriodId: AppState.builderHolidayPeriodId || null
-    };
-    if (AppState.builderPattern) updateData.grid._pattern = AppState.builderPattern;
     AppState.builderStaffingRulesByWeek[AppState.builderWeekNumber] = JSON.parse(JSON.stringify(AppState.builderStaffingRules));
-    if (Object.keys(AppState.builderStaffingRulesByWeek).length > 0) {
-        updateData.grid._staffingRules = AppState.builderStaffingRulesByWeek;
-    }
-    updateData.grid._teamMeetings = AppState.builderMeetings || {};
 
+    // #148: per week wegschrijven in plaats van het hele raster.
+    //
+    // Hier stond een PUT die de VOLLEDIGE grid-kolom verving met alle weken
+    // zoals deze browser ze kende. Dat kon zolang er maar één iemand tegelijk
+    // in een concept mag; het slot op conceptniveau hield de tweede buiten.
+    // Wil je dat twee mensen tegelijk in verschillende weken werken, dan wist
+    // die PUT het werk van de ander, en een slot op zijn week helpt daar niet
+    // tegen omdat jij die week nooit aanraakte.
+    const teSchrijven = new Set(AppState.builderVuileWeken || []);
+    teSchrijven.add(AppState.builderWeekNumber);
+    const weken = [...teSchrijven];
+
+    updateBuilderSaveStatus('bezig');
     try {
-        await updateScheduleDraft(AppState.builderLoadedDraftId, updateData);
-        const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
-        if (cached) {
-            cached.grid = updateData.grid;
-            cached.weekNumber = AppState.builderWeekNumber;
-            cached.updatedAt = new Date().toISOString();
+        let antwoord = null;
+        for (let n = 0; n < weken.length; n++) {
+            const week = weken[n];
+            const lading = {
+                weekGrid: AppState.builderGridByWeek[week] || {},
+                staffingRules: AppState.builderStaffingRulesByWeek[week] || {},
+            };
+            if (AppState.builderPattern) {
+                lading.patternWeek = (AppState.builderPattern.weeks || {})[week] || {};
+            }
+            // Wat voor het HELE concept geldt gaat één keer mee, bij de laatste
+            // week. Anders staat het bij elk verzoek opnieuw in de lucht.
+            if (n === weken.length - 1) {
+                lading.teamMeetings = AppState.builderMeetings || {};
+                lading.teamFilter = AppState.builderTeamFilter;
+                lading.type = AppState.builderConceptType || 'basis';
+                lading.holidayPeriodId = AppState.builderHolidayPeriodId || null;
+                lading.weekNumber = AppState.builderWeekNumber;
+                if (AppState.builderPattern) {
+                    const { weeks, ...rest } = AppState.builderPattern;
+                    lading.patternMeta = rest;
+                }
+            }
+            antwoord = await updateScheduleDraftWeek(AppState.builderLoadedDraftId, week, lading);
         }
+
+        const cached = (DataStore.settings.schedule_drafts || []).find(d => d.id === AppState.builderLoadedDraftId);
+        if (cached && antwoord?.draft) {
+            // Het raster van de SERVER en niet dat van ons: daar kan intussen
+            // een week van iemand anders in staan.
+            cached.grid = antwoord.draft.grid;
+            cached.weekNumber = antwoord.draft.weekNumber;
+            cached.updatedAt = antwoord.draft.updatedAt;
+        }
+        AppState.builderVuileWeken = new Set();
         AppState.builderIsDirty = false;
         const now = new Date();
         AppState.builderAutoSavedAt = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        const statusEl = document.getElementById('builder-autosave-status');
-        if (statusEl) statusEl.textContent = `Automatisch opgeslagen om ${AppState.builderAutoSavedAt}`;
+        updateBuilderSaveStatus('bewaard');
+        return true;
     } catch (err) {
+        AppState.builderIsDirty = true;
+
+        // Een 423 betekent dat iemand anders het concept heeft overgenomen.
+        // Dat lost zichzelf NOOIT op, dus opnieuw proberen is hier verkeerd:
+        // de bouwer bleef elke tien seconden een verzoek sturen dat altijd
+        // afketste, en toonde ondertussen alleen "Niet bewaard" zonder te
+        // zeggen waarom. Je werk stond dan in je scherm en nergens anders.
+        //
+        // Dit kan gebeuren doordat de vergrendeling vervalt als je een half uur
+        // niets bewaart. Kom je daarna terug en typ je verder, dan is het
+        // concept al van een ander.
+        if (err.status === 423) {
+            console.error('Auto-save geweigerd, concept is overgenomen:', err);
+            updateBuilderSaveStatus('mislukt');
+            const naam = err.data?.lockedByName || 'iemand anders';
+            const terugnemen = await showConfirm(
+                `${naam} heeft dit concept overgenomen, dus je wijzigingen zijn niet bewaard. Wil je de vergrendeling terugnemen en alsnog bewaren? ${naam} verliest dan zijn vergrendeling.`,
+                'Concept overgenomen'
+            );
+            if (!terugnemen) return false;
+            try {
+                await lockScheduleDraft(AppState.builderLoadedDraftId, true);
+            } catch (fout) {
+                showToast('De vergrendeling kon niet overgenomen worden. Controleer je verbinding.', 'error');
+                return false;
+            }
+            return autoSaveBuilderDraft();
+        }
+
+        // Dit was vroeger stil: enkel een console.error, terwijl je werk niet
+        // bewaard was. Nu er geen opslaanknop meer is, moet dit zichtbaar zijn
+        // én zelf opnieuw proberen. De vuile weken blijven staan, dus een
+        // volgende poging pakt ze opnieuw mee.
         console.error('Auto-save failed:', err);
+        updateBuilderSaveStatus('mislukt');
+        if (AppState.builderAutoSaveTimer) clearTimeout(AppState.builderAutoSaveTimer);
+        AppState.builderAutoSaveTimer = setTimeout(() => autoSaveBuilderDraft(), 10000);
+        return false;
     }
 }
 
@@ -1306,11 +1551,22 @@ function attachBuilderOverviewListeners(container) {
     }
 
     // Card action buttons
-    container.querySelectorAll('.concept-card-load, .concept-card-edit').forEach(btn => {
+    container.querySelectorAll('.concept-card-load, .concept-card-edit, .concept-card-open').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            AppState.builderScreen = 'editor';
+            // #332: builderScreen niet hier zetten. doLoadDraft doet dat zelf,
+            // en alleen als het laden ook echt doorgaat.
             loadBuilderDraft(btn.dataset.draftId);
+        });
+    });
+
+    // #267: de hele kaart opent het concept. Klikken op een knop erin (het
+    // kebabmenu of een menuactie) telt niet mee; die roepen stopPropagation
+    // aan, maar de controle hieronder maakt dat onafhankelijk van hun volgorde.
+    container.querySelectorAll('.builder-concept-card[data-draft-id]').forEach(kaart => {
+        kaart.addEventListener('click', (e) => {
+            if (e.target.closest('button, a, input, select')) return;
+            loadBuilderDraft(kaart.dataset.draftId);
         });
     });
     container.querySelectorAll('.concept-card-apply').forEach(btn => {
@@ -1350,14 +1606,20 @@ function attachBuilderOverviewListeners(container) {
             e.stopPropagation();
             const menu = btn.closest('.concept-card-menu');
             const wasOpen = menu.classList.contains('open');
-            // Sluit alle open menus
-            document.querySelectorAll('.concept-card-menu.open').forEach(m => m.classList.remove('open'));
+            // Sluit alle open menus. #365: aria-expanded meldt de toestand ook
+            // aan een schermlezer, dus die moet overal mee terug naar false.
+            document.querySelectorAll('.concept-card-menu.open').forEach(m => {
+                m.classList.remove('open');
+                m.querySelector('.concept-card-menu-trigger')?.setAttribute('aria-expanded', 'false');
+            });
             if (!wasOpen) {
                 menu.classList.add('open');
+                btn.setAttribute('aria-expanded', 'true');
                 // Sluit bij volgende klik ergens
                 setTimeout(() => {
                     document.addEventListener('click', function closeMenu() {
                         menu.classList.remove('open');
+                        btn.setAttribute('aria-expanded', 'false');
                         document.removeEventListener('click', closeMenu);
                     }, { once: true });
                 }, 0);
@@ -1371,14 +1633,25 @@ function attachBuilderEventListeners(container) {
     const backBtn = document.getElementById('builder-back-to-overview');
     if (backBtn) {
         backBtn.addEventListener('click', async () => {
+            // Weggaan bewaart. De autosave draait pas na 3 seconden, dus wie
+            // snel doorklikt verloor anders zijn laatste wijziging — en een
+            // vraag "wil je weggooien?" is geen goede plek om dat op te lossen.
             if (AppState.builderIsDirty) {
-                const ok = await showConfirm('Je hebt onopgeslagen wijzigingen. Wil je terug zonder op te slaan?');
-                if (!ok) return;
                 stopBuilderAutoSave();
+                if (AppState.builderLoadedDraftId) {
+                    // Lukt het bewaren niet, dan blijf je hier met de melding
+                    // in beeld. Weggaan zou je werk stil kosten.
+                    const ok = await autoSaveBuilderDraft();
+                    if (!ok) return;
+                } else if (builderHeeftIets()) {
+                    // Nog nooit bewaard: dan is er geen id om stil in te
+                    // schrijven, dus vragen we alsnog om een naam.
+                    await saveBuilderDraft();
+                    if (AppState.builderIsDirty) return;   // geannuleerd
+                }
             }
             await unlockScheduleDraft(AppState.builderLoadedDraftId);
-            AppState.builderLoadedDraftId = null;
-            AppState.builderLoadedDraftName = null;
+            vergeetActiefConcept();
             AppState.builderScreen = 'overview';
             renderBuilder();
         });
@@ -1556,19 +1829,30 @@ function attachBuilderEventListeners(container) {
         });
     });
 
-    // Team filter
-    const teamSelect = document.getElementById('builder-team-select');
-    if (teamSelect) {
-        teamSelect.addEventListener('change', (e) => {
-            AppState.builderTeamFilter = e.target.value || null;
-            AppState.builderGrid = {};
-            AppState.builderGridByWeek = {};
-            AppState.builderStaffingRules = {};
-            AppState.builderStaffingRulesByWeek = {};
-            AppState.builderIsDirty = false;
-            renderBuilder();
+    document.getElementById('builder-clear-team-filter')?.addEventListener('click', () => {
+        AppState.builderTeamFilter = null;
+        setBuilderDirty();
+        renderBuilder();
+    });
+
+    // Teamgroepen in- en uitklappen, net als in de planning. Alleen de weergave
+    // verandert; het rooster zelf blijft ongemoeid — vandaar geen renderBuilder,
+    // dat zou je scrollpositie kosten.
+    container.querySelectorAll('[data-builder-team]').forEach(kop => {
+        const wissel = () => {
+            const teamKey = kop.dataset.builderTeam;
+            const body = container.querySelector(`[data-builder-team-body="${CSS.escape(teamKey)}"]`);
+            const dicht = kop.classList.toggle('collapsed');
+            body?.classList.toggle('collapsed', dicht);
+            kop.setAttribute('aria-expanded', String(!dicht));
+            if (dicht) AppState.collapsedTeams.add(teamKey);
+            else AppState.collapsedTeams.delete(teamKey);
+        };
+        kop.addEventListener('click', wissel);
+        kop.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); wissel(); }
         });
-    }
+    });
 
     // Load buttons
     const loadBase = document.getElementById('builder-load-base');
@@ -1590,11 +1874,11 @@ function attachBuilderEventListeners(container) {
         const doReset = () => {
             AppState.builderGrid = {};
             AppState.builderGridByWeek = {};
+            AppState.builderVuileWeken = new Set();
             AppState.builderStaffingRules = {};
             AppState.builderStaffingRulesByWeek = {};
             AppState.builderMeetings = {};
-            AppState.builderLoadedDraftId = null;
-            AppState.builderLoadedDraftName = null;
+            vergeetActiefConcept();
             AppState.builderPattern = {
                 cycleLength: 1,
                 referenceDate: getSchedulePattern().referenceDate || DataStore.settings.biWeeklyReferenceDate || '',
@@ -1603,11 +1887,18 @@ function attachBuilderEventListeners(container) {
             AppState.builderConceptType = 'basis';
             AppState.builderHolidayPeriodId = null;
             AppState.builderIsDirty = false;
+            // #222: de bewaarstatus bleef staan. Stond er "Bewaard om 14:32",
+            // dan sloeg dat op het concept dat je net verliet. En omdat er geen
+            // builderLoadedDraftId meer is, keert scheduleBuilderAutoSave
+            // meteen terug, zodat een volgende wijziging eeuwig "Bewaren…"
+            // toonde terwijl er niets gebeurde.
+            AppState.builderSaveState = null;
+            AppState.builderAutoSavedAt = null;
             renderBuilder();
             showToast('Grid leeggemaakt', 'info');
         };
         if (builderGridHasData()) {
-            showConfirm('Alle shifts in het huidige rooster worden gewist. Ben je zeker?', 'Leeg beginnen', {
+            showConfirm('Alle diensten in het huidige rooster worden gewist. Weet je het zeker?', 'Leeg beginnen', {
                 confirmText: 'Ja, leegmaken',
                 danger: true
             }).then(ok => { if (ok) doReset(); });
@@ -1621,11 +1912,13 @@ function attachBuilderEventListeners(container) {
         BuilderDragHandler.init();
     }
 
-    // Save draft button
-    const saveDraftBtn = document.getElementById('builder-save-draft');
-    if (saveDraftBtn) saveDraftBtn.addEventListener('click', saveBuilderDraft);
+    // Statusregel is bij een mislukte opslag een knop: opnieuw proberen
+    const statusBtn = document.getElementById('builder-autosave-status');
+    if (statusBtn && statusBtn.tagName === 'BUTTON') {
+        statusBtn.addEventListener('click', () => autoSaveBuilderDraft());
+    }
 
-    // Save As button (only visible when a draft is loaded)
+    // Save As button
     const saveDraftAsBtn = document.getElementById('builder-save-draft-as');
     if (saveDraftAsBtn) saveDraftAsBtn.addEventListener('click', saveBuilderDraftAs);
 

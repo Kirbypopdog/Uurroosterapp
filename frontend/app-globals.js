@@ -14,10 +14,19 @@ const AppState = {
     authToken: null,
     isAuthenticating: false, // Prevent concurrent authentication attempts
     currentView: 'home',
+    // Verlofplanning
+    leaveRounds: [],          // lijst van rondes
+    leaveRound: null,         // geladen detail (ronde + entries + submissions)
+    leaveRoundId: null,       // welke ronde staat open in de view
+    leaveScreen: 'landing',   // 'landing' | 'blok' | 'overzicht'
+    leaveBlockId: null,       // welke vakantie staat open
+    leaveDraft: {},           // { 'YYYY-MM-DD': status } vóór opslaan
     schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
-    currentMonthStart: null, // First day of month for month view
-    previousWeekStart: null, // Store week when switching to month view
+    // #331: gezet wanneer de diensten voor de zichtbare week niet geladen
+    // konden worden: { week: 'YYYY-MM-DD', melding: '...' }. De planner toont
+    // dan een balk in plaats van stilzwijgend een lege week.
+    weekLaadFout: null,
     viewMode: 'week',
     visibleTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
     visibleEmployeeTeams: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
@@ -38,6 +47,7 @@ const AppState = {
     builderTeamFilter: null,
     builderGrid: {},             // { [userId]: { [dayIndex0to6]: { startTime, endTime, team } } }
     builderGridByWeek: {},       // { [weekNumber]: builderGrid } — cache per week bij switchen
+    builderVuileWeken: new Set(), // #148: welke weken sinds de laatste autosave veranderd zijn
     builderLoadedDraftId: null,   // ID van het geladen concept (null = geen concept geladen)
     builderLoadedDraftName: null, // naam van het geladen concept
     builderIsDirty: false,
@@ -54,7 +64,8 @@ const AppState = {
     filterOnlyWithShifts: false,
     planningControlsCollapsed: true,
     settingsDirty: false,
-    swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend']
+    swapTeamFilter: ['vlot1', 'jobstudent', 'vlot2', 'cargo', 'overkoepelend'],
+    collapsedTeams: new Set()
 };
 
 // ===== TEAM HELPERS =====
@@ -65,6 +76,17 @@ function getTeamOrder() {
         const ob = teams[b]?.sort_order ?? 9999;
         return oa !== ob ? oa - ob : (teams[a]?.name || '').localeCompare(teams[b]?.name || '');
     });
+}
+
+// #370: de ruilmodal zette shift.team ongewijzigd op het scherm, dus daar stond
+// "Team: vlot1" terwijl de overnamemodal in dezelfde stroom wél "Vlot 1
+// (Begeleiding)" toonde. De opzoeking stond op een handvol plekken uitgeschreven
+// en op één plek helemaal niet. Nu één helper, met de sleutel als laatste
+// redmiddel zodat een team dat uit de instellingen is gehaald niet als lege
+// tekst verschijnt.
+function getTeamName(teamId) {
+    if (!teamId) return '';
+    return DataStore.settings.teams?.[teamId]?.name || teamId;
 }
 
 function syncTeamFilters() {
@@ -148,7 +170,16 @@ const UndoManager = {
     async _executeReverse(action) {
         switch (action.type) {
             case 'create':
-                await deleteShift(action.resultId);
+                // #302: ongedaan maken hoort de vorige toestand te herstellen,
+                // niet iets nieuws achter te laten. Zonder skipBlock bleef er
+                // een shift_block staan op een cel die er vóór de aanmaak geen
+                // had, waardoor het concept die medewerkerdag bij een volgende
+                // toepassing niet meer vulde.
+                //
+                // Bij het opnieuw uitvoeren van een verwijdering hieronder is
+                // die blokkade juist wél gewenst: daar is het leegmaken een
+                // bewuste keuze die het concept moet respecteren.
+                await deleteShift(action.resultId, true);
                 break;
             case 'update':
                 await updateShift(action.shiftId, action.previousData);
@@ -183,12 +214,11 @@ const UndoManager = {
         this.updateUI();
     },
 
-    updateUI() {
-        const undoBtn = document.getElementById('undo-btn');
-        const redoBtn = document.getElementById('redo-btn');
-        if (undoBtn) undoBtn.disabled = !this.canUndo();
-        if (redoBtn) redoBtn.disabled = !this.canRedo();
-    }
+    // #182: hier stonden #undo-btn en #redo-btn, die niet meer in de markup
+    // staan. Ongedaan maken loopt via Ctrl+Z en Ctrl+Y, en dat werkt gewoon.
+    // De functie blijft bestaan omdat _executeReverse en de undo-stapel hem
+    // aanroepen; hij heeft alleen geen knoppen meer om bij te werken.
+    updateUI() {}
 };
 
 // ===== PERMISSIONS SYSTEM =====
@@ -205,7 +235,26 @@ const PERMISSIONS = {
     EXPORT_DATA: ['admin', 'roosterverantwoordelijke']
 };
 
+// ===== AFWEZIGHEID: GRENZEN =====
+// #310: het plafond op een bulkregistratie afwezigheid. Dezelfde waarde staat
+// in server.js als MAX_AFWEZIGHEIDSDAGEN; de route is de echte grens, dit is de
+// meting die de gebruiker al ziet voor hij opslaat. Een jaar plus een
+// schrikkeldag dekt elke echte afwezigheid.
+const MAX_AFWEZIGHEIDSDAGEN = 366;
+// Daarboven vragen we niets, daaronder vragen we het vanaf dit aantal na. Twee
+// maanden afwezigheid komt voor, maar zelden per ongeluk.
+const BEVESTIG_AFWEZIGHEIDSDAGEN = 60;
+
 // ===== ACTIVITY TYPE LABELS =====
+// #163: deze afkortingen passen alleen op zeven pixels in een dienstblok.
+// Nagemeten: "Overl" op 7px is 25 pixels breed en er passen er twee in de 59
+// pixels die een dienst van acht uur overhoudt; op 8px hebben twee chips 61
+// pixels nodig en knipt de tweede af.
+//
+// Ik heb ze een ronde lang op twee letters gezet ("OL", "VM") zodat ze op 11px
+// pasten. Victor vond de volle woorden beter: "Overl" lees je meteen, "OL" is
+// een code die je eerst moet leren. Dat weegt zwaarder dan de lettergrootte,
+// dus ze staan terug zoals ze waren.
 const ACTIVITY_TYPE_LABELS_SHORT = { oudergesprek: 'OG', vorming: 'Vorm', overleg: 'Overl', afspraak: 'Afsp', vergadering: 'Verg', andere: 'And' };
 const ACTIVITY_TYPE_LABELS_FULL = { oudergesprek: 'Oudergesprek', vorming: 'Vorming', overleg: 'Overleg', afspraak: 'Afspraak', vergadering: 'Vergadering', andere: 'Andere' };
 
@@ -294,12 +343,6 @@ const IconHelper = {
         });
     }
 };
-
-// Demo users (niet gebruikt in productie)
-const USERS = [
-    { username: 'admin', password: 'admin', role: 'admin', name: 'Administrator' },
-    { username: 'medewerker', password: 'medewerker', role: 'employee', name: 'Medewerker' }
-];
 
 // DOM Elements cache (gevuld door initDOM in app-init.js)
 const DOM = {};
