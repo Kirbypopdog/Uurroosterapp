@@ -344,6 +344,12 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
 
   Let op het verschil met de bezettingsbalk: die telt een reservedienst wél mee. Of dat zo hoort is niet nagevraagd; dit is alleen besloten voor deze kaart.
 
+- **Datums in tekst die een mens leest**: nooit de kale ISO-vorm. `2026-10-05` is eenduidig voor een machine, maar wie hem in een zin tegenkomt moet gokken tussen oktober en mei — de Belgische (`05/10/2026`) en de Amerikaanse (`10/05/2026`) notatie zien er immers identiek uit. Gebruik `formatDateShortMetJaar()` ("5 okt 2026") in lopende tekst en `formatDate()` ("maandag 5 oktober 2026") in een **aria-label**, want dat wordt voorgelezen en losse getallen zijn daar onverstaanbaar.
+
+  Een ISO-datum hoort wél ongemoeid in: de `value` van een `date`-veld, een `data-date`-attribuut, een sleutel in een Set of Map, een queryparameter en een vergelijking. Dat zijn waarden, geen tekst.
+
+  Er is één ronde over de hele frontend gegaan die tien plekken opleverde — twee bevestigingsvensters in de bouwer, twee vakantiebanners, twee regels in de audit log, "Datum:" in het dienstvenster, en drie schermlezerlabels. Zoek met `\$\{[a-zA-Z_.]*(date|Date|datum|from|until)\}` en filter de attributen en sleutels eruit; let op dat een variabele die `from` of `dateStr` heet vaak al opgemaakt is.
+
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.
 

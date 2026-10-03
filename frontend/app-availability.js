@@ -270,8 +270,11 @@ function renderAvailability() {
                 //
                 // Alleen bewerkbare cellen worden focusbaar: een readonly-cel
                 // doet niets en zou de tabvolgorde alleen maar verlengen.
+                // formatDate en niet de kale datum: dit label wordt VOORGELEZEN.
+                // "2026-10-03" wordt dan een reeks losse getallen in plaats van
+                // een dag.
                 const celLabel = escapeHtml(
-                    `${emp.name}, ${date}${statusText ? `, ${statusText}` : ', beschikbaar'}`);
+                    `${emp.name}, ${formatDate(date)}${statusText ? `, ${statusText}` : ', beschikbaar'}`);
                 const celToets = canEdit
                     ? ` role="button" tabindex="0" aria-label="${celLabel}"`
                     : '';

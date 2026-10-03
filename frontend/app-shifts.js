@@ -514,7 +514,7 @@ function formatShiftPreview(shift) {
     return `
         <p><strong>Medewerker:</strong> ${employeeName}</p>
         <p><strong>Team:</strong> ${team}</p>
-        <p><strong>Datum:</strong> ${date}</p>
+        <p><strong>Datum:</strong> ${formatDate(date)}</p>
         <p><strong>Tijd:</strong> ${time}</p>
         ${shift.notes ? `<p><strong>Notities:</strong> ${escapeHtml(shift.notes)}</p>` : ''}
     `;
