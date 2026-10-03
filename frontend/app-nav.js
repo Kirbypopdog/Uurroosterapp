@@ -1150,17 +1150,48 @@ function renderHomeWeekendInfo() {
     `;
 }
 
+// Loopt deze dienst op dit moment? Apart gezet zodat het te testen is: de
+// kaart eromheen levert HTML en hangt aan een handvol globals.
+//
+// Drie dingen die hier eerder misgingen, alle drie zichtbaar op de kaart "Nu
+// aan het werk":
+//  - Een reservedienst telde mee. Die kan nog ingetrokken worden, dus die
+//    persoon staat niet als vaste kracht op de vloer.
+//  - De tijden werden als TEKST vergeleken. Bij een dienst van 18:00 tot 10:00
+//    is "23:00 < 10:00" onwaar, dus tussen 18:00 en middernacht meldde de kaart
+//    dat er niemand werkte terwijl de nachtdienst liep.
+//  - Een nachtdienst draagt de datum waarop hij BEGINT. De aanroeper moet dus
+//    ook de dag ervoor meenemen, anders ontbreekt wie gisteravond begon en
+//    vanochtend nog bezig is.
+function dienstLooptNu(shift, nu) {
+    if (!shift) return false;
+    if (shift.isReserve || shift.is_reserve) return false;
+    const date = (shift.date || '').split('T')[0];
+    const start = (shift.startTime || shift.start_time || '').substring(0, 5);
+    const eind  = (shift.endTime   || shift.end_time   || '').substring(0, 5);
+    if (!date || !start || !eind) return false;
+    const begin = parseDateTime(date, start);
+    const einde = getShiftEndDateTime({ date, startTime: start, endTime: eind });
+    return nu >= begin && nu < einde;
+}
+
 function renderHomeNuAanHetWerk() {
     const now = new Date();
     const todayStr = formatDateYYYYMMDD(now);
-    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    // Ook de dag ERVOOR, want een nachtdienst draagt de datum waarop hij
+    // BEGINT. Wie gisteren om 18:00 begon en vanochtend om 10:00 afgeeft,
+    // stond hier niet tussen: zijn dienst staat op gisteren, en de filter keek
+    // alleen naar vandaag. Precies in de uren waarop die vraag het meest
+    // gesteld wordt — 's ochtends vroeg — klopte de kaart dus niet. Dezelfde
+    // aanpak als calcPlanningHourlyHeadcount in app-planner.js.
+    const gisteren = new Date(now);
+    gisteren.setDate(gisteren.getDate() - 1);
+    const gisterenStr = formatDateYYYYMMDD(gisteren);
 
     const activeShifts = (DataStore.shifts || []).filter(s => {
         const date = (s.date || '').split('T')[0];
-        if (date !== todayStr) return false;
-        const start = (s.startTime || s.start_time || '').substring(0, 5);
-        const end = (s.endTime || s.end_time || '').substring(0, 5);
-        return start && end && currentTime >= start && currentTime < end;
+        if (date !== todayStr && date !== gisterenStr) return false;
+        return dienstLooptNu(s, now);
     });
 
     if (activeShifts.length === 0) {
@@ -1573,3 +1604,10 @@ function formatWeekRange(start, end) {
     return `${startStr} - ${endStr}`;
 }
 
+
+
+// Zodat dienstLooptNu in Node getest kan worden. In de browser bestaat `module`
+// niet, dus dit heeft daar geen effect.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { dienstLooptNu };
+}

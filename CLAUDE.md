@@ -90,6 +90,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `schema-drift.test.js` | Bewaakt dat `sql/schema.sql` niet achterloopt op de migraties (#329, #311) |
 | `monitoring.test.js` | Wat de foutmonitoring wegfiltert, op sleutelnaam én op waarde (#156) |
 | `permissies.test.js` | De pure rolchecks uit `frontend/app-permissions.js`, zoals wie een dienst mag afstaan |
+| `nu-aan-het-werk.test.js` | `dienstLooptNu()`: wie er op een moment werkelijk aan het werk is, inclusief nachtdiensten en reserve |
 | `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
@@ -336,6 +337,13 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
 
   **Wat hier géén probleem is:** de urenberekening. `calculateShiftHours()` rekent in verstreken milliseconden, maar de wisseling valt om 02:00 en dat ligt in het slaapvenster 23:00–07:00, dat als vast forfait telt in plaats van als verstreken tijd. De enige nachtdiensten in gebruik (18:00→09:00 en 18:00→10:00) nemen dat pad, dus geen enkele dienst verandert van lengte. Zou er ooit een dienst komen die 02:00–03:00 overspant zonder door het slaapvenster te lopen, dan telt die op de wisselnacht een uur minder of meer — fysiek correct, maar het verschilt dan van wat de klok op het rooster zegt.
 
+- **"Nu aan het werk"**: `dienstLooptNu()` in `app-nav.js` bepaalt of iemand op dit moment werkt. Drie dingen zaten daar tegelijk fout en leverden samen een kaart op die zelden klopte:
+  1. **Een reservedienst telde mee.** Die kan nog ingetrokken worden, dus die persoon staat niet als vaste kracht op de vloer.
+  2. **De tijden werden als TEKST vergeleken** (`"23:00" < "10:00"` is onwaar). Tussen 18:00 en middernacht meldde de kaart daardoor "Niemand is op dit moment aan het werk" terwijl de nachtdienst liep. Gebruik `getShiftEndDateTime()` uit `validation.js`, dat netjes naar de volgende dag doorrolt.
+  3. **Alleen diensten van VANDAAG werden bekeken.** Een nachtdienst draagt de datum waarop hij BEGINT, dus wie gisteravond om 18:00 begon en vanochtend om 10:00 afgeeft, ontbrak precies in de ochtenduren. De aanroeper neemt nu ook de dag ervoor mee — dezelfde aanpak als `calcPlanningHourlyHeadcount()` in `app-planner.js`, die dat al goed deed.
+
+  Let op het verschil met de bezettingsbalk: die telt een reservedienst wél mee. Of dat zo hoort is niet nagevraagd; dit is alleen besloten voor deze kaart.
+
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.
 
@@ -422,7 +430,7 @@ cd backend
 npm test           # Alle tests uitvoeren, in enkele seconden
 ```
 
-Twaalf testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
+Dertien testbestanden in `backend/tests/`; zie de tabel bij het bestandsoverzicht
 voor wat elk bestand dekt. Tests gebruiken Jest + Supertest en de database wordt
 volledig gemockt, dus er is geen echte databank nodig.
 
