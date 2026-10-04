@@ -92,6 +92,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `permissies.test.js` | De pure rolchecks uit `frontend/app-permissions.js`, zoals wie een dienst mag afstaan |
 | `nu-aan-het-werk.test.js` | `dienstLooptNu()`: wie er op een moment werkelijk aan het werk is, inclusief nachtdiensten en reserve |
 | `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
+| `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
@@ -251,6 +252,16 @@ vervanging", zonder één aanwijzing wélke dag het probleem was. Een overlap me
 een ANDERE starttijd wordt óók gemeld: die glipt langs de index en zou de
 vervanger stilletjes twee diensten op één dag geven.
 
+De route herschrijft ook de ROOSTERCONCEPTEN: in elk grid komt het id van de
+vervanger in de plaats van dat van de vertrekker. De bouwer leest die concepten
+niet op bij het openen maar uit `DataStore.settings.schedule_drafts`, de kopie
+van bij het opstarten. `replaceEmployee()` in `data.js` moet die dus mee
+verversen (#395). Deed het dat niet, dan bleef het raster het OUDE id tonen —
+dat is nu van een gedeactiveerde medewerker en krijgt geen rij meer, dus de
+vervanger stond erbij met een lege week terwijl de database haar diensten
+gewoon had. Elke nieuwe cache die de vervangroute raakt hoort in diezelfde
+`Promise.all`.
+
 Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
 ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.
 Ze laten staan betekende dat de tegenpartij een verzoek zag van iemand die weg
@@ -343,6 +354,12 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   3. **Alleen diensten van VANDAAG werden bekeken.** Een nachtdienst draagt de datum waarop hij BEGINT, dus wie gisteravond om 18:00 begon en vanochtend om 10:00 afgeeft, ontbrak precies in de ochtenduren. De aanroeper neemt nu ook de dag ervoor mee — dezelfde aanpak als `calcPlanningHourlyHeadcount()` in `app-planner.js`, die dat al goed deed.
 
   Let op het verschil met de bezettingsbalk: die telt een reservedienst wél mee. Of dat zo hoort is niet nagevraagd; dit is alleen besloten voor deze kaart.
+
+- **Datums in tekst die een mens leest**: nooit de kale ISO-vorm. `2026-10-05` is eenduidig voor een machine, maar wie hem in een zin tegenkomt moet gokken tussen oktober en mei — de Belgische (`05/10/2026`) en de Amerikaanse (`10/05/2026`) notatie zien er immers identiek uit. Gebruik `formatDateShortMetJaar()` ("5 okt 2026") in lopende tekst en `formatDate()` ("maandag 5 oktober 2026") in een **aria-label**, want dat wordt voorgelezen en losse getallen zijn daar onverstaanbaar.
+
+  Een ISO-datum hoort wél ongemoeid in: de `value` van een `date`-veld, een `data-date`-attribuut, een sleutel in een Set of Map, een queryparameter en een vergelijking. Dat zijn waarden, geen tekst.
+
+  Er is één ronde over de hele frontend gegaan die tien plekken opleverde — twee bevestigingsvensters in de bouwer, twee vakantiebanners, twee regels in de audit log, "Datum:" in het dienstvenster, en drie schermlezerlabels. Zoek met `\$\{[a-zA-Z_.]*(date|Date|datum|from|until)\}` en filter de attributen en sleutels eruit; let op dat een variabele die `from` of `dateStr` heet vaak al opgemaakt is.
 
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.

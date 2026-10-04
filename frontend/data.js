@@ -600,8 +600,9 @@ async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom 
             body: JSON.stringify(body)
         });
 
-        // Refresh all affected caches (including activities which may be transferred)
-        await Promise.all([refreshUsers(), refreshShifts(), refreshAvailability(), refreshActivities()]);
+        // Refresh all affected caches (including activities which may be transferred).
+        // refreshDrafts hoort hierbij: de route herschrijft ook de concepten.
+        await Promise.all([refreshUsers(), refreshShifts(), refreshAvailability(), refreshActivities(), refreshDrafts()]);
 
         return result;
     } catch (error) {
@@ -2151,6 +2152,29 @@ async function fetchScheduleDrafts() {
     return dataApiFetch('/schedule-drafts');
 }
 
+// De conceptenlijst wordt bij het opstarten één keer geladen en daarna uit
+// DataStore gelezen. Elke route die de grids in de DATABASE herschrijft zonder
+// dat dit scherm het weet, moet die kopie dus verversen. Dat is nu alleen de
+// vervangroute: die vervangt in elk concept het id van de vertrekker door dat
+// van de vervanger. Zonder deze verversing bleef het raster van de bouwer het
+// OUDE id tonen, dat intussen van een gedeactiveerde medewerker is en dus geen
+// rij meer krijgt — de vervanger stond er met een lege week terwijl de
+// database haar diensten gewoon had.
+async function refreshDrafts() {
+    try {
+        const data = await fetchScheduleDrafts();
+        if (data && data.drafts) {
+            DataStore.settings.schedule_drafts = data.drafts;
+            DataStore._draftsFromTable = true;
+            DataStore._draftsLoadFailed = false;
+        }
+        return DataStore.settings.schedule_drafts;
+    } catch (error) {
+        console.error('[Refresh] Failed to refresh schedule drafts:', error);
+        return DataStore.settings.schedule_drafts;
+    }
+}
+
 async function createScheduleDraft(draft) {
     return dataApiFetch('/schedule-drafts', {
         method: 'POST',
@@ -2405,6 +2429,8 @@ if (typeof module !== 'undefined' && module.exports) {
     getEmployee,
     getEligibleEmployeesForResponsible,
     isWeekendOrHolidayWeek,
-    getOrCalculateResponsible
+    getOrCalculateResponsible,
+    replaceEmployee,
+    refreshDrafts
   };
 }

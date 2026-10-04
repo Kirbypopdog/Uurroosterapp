@@ -1110,7 +1110,7 @@ function renderTimelineView() {
                             const isNachtdienst = shift.endTime <= shift.startTime;
                             const blokNaam = getEmployee(shift.employeeId)?.name || 'Medewerker';
                             const toetsAttrs = canEdit
-                                ? ` role="button" tabindex="0" aria-label="${escapeHtml(`Dienst ${blokNaam}, ${shift.date}, ${shift.startTime} tot ${shift.endTime}`)}"`
+                                ? ` role="button" tabindex="0" aria-label="${escapeHtml(`Dienst ${blokNaam}, ${formatDate(shift.date)}, ${shift.startTime} tot ${shift.endTime}`)}"`
                                 : '';
 
                             html += `<div class="${blockClass}"${toetsAttrs}
@@ -1355,7 +1355,7 @@ function renderTimelineView() {
                             const isNachtdienst = shift.endTime <= shift.startTime;
                             const blokNaam = getEmployee(shift.employeeId)?.name || 'Medewerker';
                             const toetsAttrs = canEdit
-                                ? ` role="button" tabindex="0" aria-label="${escapeHtml(`Dienst ${blokNaam}, ${shift.date}, ${shift.startTime} tot ${shift.endTime}`)}"`
+                                ? ` role="button" tabindex="0" aria-label="${escapeHtml(`Dienst ${blokNaam}, ${formatDate(shift.date)}, ${shift.startTime} tot ${shift.endTime}`)}"`
                                 : '';
 
                             html += `<div class="${blockClass}"${toetsAttrs}

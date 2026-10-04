@@ -1025,7 +1025,7 @@ function renderSettingsPlanning(container) {
                 <span class="holiday-status-icon">${IconHelper.html(ICONS.holiday, 'md')}</span>
                 <div class="holiday-status-text">
                     <strong>Vakantiewerking actief: ${escapeHtml(activeHoliday.name)}</strong>
-                    <span>${activeHoliday.startDate} t/m ${activeHoliday.endDate}</span>
+                    <span>${formatDateShortMetJaar(activeHoliday.startDate)} t/m ${formatDateShortMetJaar(activeHoliday.endDate)}</span>
                 </div>
                 <a href="#settings-holidays" class="btn btn-sm btn-secondary" onclick="document.getElementById('settings-holidays').scrollIntoView({behavior:'smooth'})">Instellingen</a>
            </div>`
@@ -1034,7 +1034,7 @@ function renderSettingsPlanning(container) {
                 <span class="holiday-status-icon">${IconHelper.html(ICONS.calendar, 'md')}</span>
                 <div class="holiday-status-text">
                     <strong>Komende vakantie: ${escapeHtml(upcomingHoliday.name)}</strong>
-                    <span>Start ${upcomingHoliday.startDate}</span>
+                    <span>Start ${formatDateShortMetJaar(upcomingHoliday.startDate)}</span>
                 </div>
                 <a href="#settings-holidays" class="btn btn-sm btn-secondary" onclick="document.getElementById('settings-holidays').scrollIntoView({behavior:'smooth'})">Instellingen</a>
            </div>`
@@ -1953,8 +1953,8 @@ function formatAuditDetails(details, resourceType) {
     if (details.type === 'bulk_sick_with_takeover') {
         const soort = details.absenceType === 'ziek' ? 'Ziekmelding' : 'Afwezigheid';
         const periode = details.startDate === details.endDate
-            ? details.startDate
-            : `${details.startDate} t/m ${details.endDate}`;
+            ? formatDateShortMetJaar(details.startDate)
+            : `${formatDateShortMetJaar(details.startDate)} t/m ${formatDateShortMetJaar(details.endDate)}`;
         const stukken = [`${soort} ${periode}`];
         if (details.daysCreated) stukken.push(`${details.daysCreated} ${details.daysCreated === 1 ? 'dag' : 'dagen'}`);
         if (details.takeoverRequestsCreated) {
@@ -2015,7 +2015,7 @@ function formatAuditDetails(details, resourceType) {
 
     // Een afwezigheid die verwijderd is.
     if (resourceType === 'availability' && details.date) {
-        return `Afwezigheid ${details.date}`;
+        return `Afwezigheid ${formatDateShortMetJaar(details.date)}`;
     }
 
     // Onbekende vorm: liever de ruwe sleutels dan niets, zodat een nieuwe vorm

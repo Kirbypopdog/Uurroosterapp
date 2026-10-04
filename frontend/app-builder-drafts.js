@@ -1048,9 +1048,10 @@ async function voerConceptToepassenUit(draftId) {
         if (result.needsOverlapConfirmation) {
             hideSectionLoading('planning-view');
             const overlaps = result.overlappingDrafts;
-            const overlapNames = overlaps.map(d => `"${d.name}" (${d.from} → ${d.until})`).join('\n• ');
+            const overlapNames = overlaps.map(d =>
+                `"${d.name}" (${formatDateShortMetJaar(d.from)} → ${formatDateShortMetJaar(d.until)})`).join('\n• ');
             const confirmed = await showConfirm(
-                `De volgende actieve concepten overlappen met deze periode:\n\n• ${overlapNames}\n\nDeze concepten worden ingekort tot ${result.newStartDate}. Doorgaan?`,
+                `De volgende actieve concepten overlappen met deze periode:\n\n• ${overlapNames}\n\nDeze concepten worden ingekort tot ${formatDateShortMetJaar(result.newStartDate)}. Doorgaan?`,
                 'Concepten overlappen'
             );
             if (!confirmed) return;
@@ -1276,7 +1277,7 @@ function showDraftApplyModal(draft, weekLabel, changesCount, empCount, changesSu
                 const dates = validateDates();
                 if (!dates) return;
                 const confirmed = await showConfirm(
-                    `Dit verwijdert ALLE diensten in de periode ${dates.startDate} – ${dates.endDate} en zet alles terug naar het concept "${draft.name}", inclusief manuele aanpassingen en leeggemaakte dagen.\n\nDoorgaan?`,
+                    `Dit verwijdert ALLE diensten in de periode ${formatDateShortMetJaar(dates.startDate)} – ${formatDateShortMetJaar(dates.endDate)} en zet alles terug naar het concept "${draft.name}", inclusief manuele aanpassingen en leeggemaakte dagen.\n\nDoorgaan?`,
                     'Reset alles naar concept'
                 );
                 if (!confirmed) return;
