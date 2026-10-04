@@ -92,6 +92,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `permissies.test.js` | De pure rolchecks uit `frontend/app-permissions.js`, zoals wie een dienst mag afstaan |
 | `nu-aan-het-werk.test.js` | `dienstLooptNu()`: wie er op een moment werkelijk aan het werk is, inclusief nachtdiensten en reserve |
 | `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
+| `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
@@ -250,6 +251,16 @@ controle liep de vervanging tegen de unieke index
 vervanging", zonder één aanwijzing wélke dag het probleem was. Een overlap met
 een ANDERE starttijd wordt óók gemeld: die glipt langs de index en zou de
 vervanger stilletjes twee diensten op één dag geven.
+
+De route herschrijft ook de ROOSTERCONCEPTEN: in elk grid komt het id van de
+vervanger in de plaats van dat van de vertrekker. De bouwer leest die concepten
+niet op bij het openen maar uit `DataStore.settings.schedule_drafts`, de kopie
+van bij het opstarten. `replaceEmployee()` in `data.js` moet die dus mee
+verversen (#395). Deed het dat niet, dan bleef het raster het OUDE id tonen —
+dat is nu van een gedeactiveerde medewerker en krijgt geen rij meer, dus de
+vervanger stond erbij met een lege week terwijl de database haar diensten
+gewoon had. Elke nieuwe cache die de vervangroute raakt hoort in diezelfde
+`Promise.all`.
 
 Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
 ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.
