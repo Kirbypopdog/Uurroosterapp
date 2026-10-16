@@ -4,6 +4,7 @@ const { pool } = require('../db');
 const { requireAuth, requireAdmin, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../helpers/audit');
 const { vandaagInBelgie } = require('../utils');
+const { maandagVan, alsTekst } = require('../helpers/verantwoordelijke');
 
 const router = maakRouter();
 
@@ -13,6 +14,90 @@ const router = maakRouter();
 // Ondersteunt beide layouts:
 //   single-week : { "<empId>": { "0": {...}, "3": {...} }, _pattern: ... }
 //   multi-week  : { _multiWeek: true, "1": { "<empId>": {...} }, ... }
+
+// #398: wie er VERANTWOORDELIJKE is, verhuist mee — maar alleen vooruit.
+//
+// De vervanging zette `responsibleRotation` wel over en `holidayPeriods` niet,
+// dus een vakantieweek bleef wijzen naar iemand die weg was. In productie stond
+// Jill Dias daardoor nog als verantwoordelijke voor de tweede kerstvakantieweek,
+// maanden nadat ze vervangen was.
+//
+// De grens is dezelfde als bij de diensten: `transferShiftsFrom`, of vandaag
+// als die er niet is. Wat DAARVOOR ligt blijft staan — dat is geen fout maar de
+// waarheid: zij was toen verantwoordelijk, en dat achteraf op naam van de
+// vervanger zetten maakt het verleden onjuist.
+function verhuisVerantwoordelijkheden(rotatie, vakanties, oldId, newId, vanaf) {
+  const oud = String(oldId);
+  const nieuw = String(newId);
+  let verplaatst = 0;
+
+  let nieuweRotatie = null;
+  if (rotatie && typeof rotatie === 'object') {
+    const kopie = JSON.parse(JSON.stringify(rotatie));
+    let gewijzigd = false;
+
+    // Het ANKER van de rotatie is geen toewijzing aan een week maar het punt
+    // waar de telling begint. Blijft dat op iemand staan die weg is, dan
+    // vindt de berekening hem niet terug in de kandidatenlijst en schuift de
+    // hele rotatie één plaats op. Die gaat dus altijd mee, ook achterwaarts.
+    if (String(kopie.rotationStartEmployee) === oud) {
+      kopie.rotationStartEmployee = nieuw;
+      gewijzigd = true;
+    }
+    if (kopie.previousRotation && String(kopie.previousRotation.rotationStartEmployee) === oud) {
+      kopie.previousRotation.rotationStartEmployee = nieuw;
+      gewijzigd = true;
+    }
+
+    // Handmatige toewijzingen hangen aan een weekdatum; alleen vanaf de
+    // ingangsdatum verhuizen ze. Als GETAL wegschrijven, net als het scherm
+    // doet.
+    for (const [week, id] of Object.entries(kopie.assignments || {})) {
+      if (String(id) !== oud) continue;
+      if (week < vanaf) continue;
+      kopie.assignments[week] = Number(newId);
+      gewijzigd = true;
+      verplaatst++;
+    }
+    if (gewijzigd) nieuweRotatie = kopie;
+  }
+
+  let nieuweVakanties = null;
+  if (Array.isArray(vakanties)) {
+    const kopie = JSON.parse(JSON.stringify(vakanties));
+    let gewijzigd = false;
+    for (const periode of kopie) {
+      if (!periode || !periode.startDate) continue;
+
+      // Per week aangeduid: week 1 begint op de maandag van de periode.
+      if (periode.weeklyResponsibles && typeof periode.weeklyResponsibles === 'object') {
+        const eersteMaandag = maandagVan(periode.startDate);
+        for (const [weekNr, id] of Object.entries(periode.weeklyResponsibles)) {
+          if (String(id) !== oud) continue;
+          const start = new Date(eersteMaandag.getTime());
+          start.setDate(start.getDate() + (Number(weekNr) - 1) * 7);
+          if (alsTekst(start) < vanaf) continue;
+          periode.weeklyResponsibles[weekNr] = nieuw;
+          gewijzigd = true;
+          verplaatst++;
+        }
+      }
+
+      // Ouder model: één persoon voor de hele periode.
+      if (periode.responsibleId !== undefined && String(periode.responsibleId) === oud) {
+        if (!periode.endDate || periode.endDate >= vanaf) {
+          periode.responsibleId = nieuw;
+          gewijzigd = true;
+          verplaatst++;
+        }
+      }
+    }
+    if (gewijzigd) nieuweVakanties = kopie;
+  }
+
+  return { nieuweRotatie, nieuweVakanties, verplaatst };
+}
+
 function remapDraftGridUser(grid, oldId, newId) {
   if (!grid || typeof grid !== 'object') return { grid, changed: false };
   const oldKey = String(oldId);
@@ -271,6 +356,30 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       }
     }
 
+    // 4b. De verantwoordelijkheden (#398). Zie verhuisVerantwoordelijkheden
+    //     hierboven voor waarom alleen vooruit.
+    const vanafVerantwoordelijk = transferShiftsFrom || vandaag;
+    const instellingen = await client.query(
+      `SELECT key, value FROM settings WHERE key IN ('responsibleRotation', 'holidayPeriods') FOR UPDATE`
+    );
+    const huidig = {};
+    for (const rij of instellingen.rows) huidig[rij.key] = rij.value;
+
+    const { nieuweRotatie, nieuweVakanties, verplaatst } = verhuisVerantwoordelijkheden(
+      huidig.responsibleRotation, huidig.holidayPeriods, oldUserId, newUserId, vanafVerantwoordelijk
+    );
+    if (nieuweRotatie) {
+      await client.query(
+        `UPDATE settings SET value = $1::jsonb WHERE key = 'responsibleRotation'`,
+        [JSON.stringify(nieuweRotatie)]);
+    }
+    if (nieuweVakanties) {
+      await client.query(
+        `UPDATE settings SET value = $1::jsonb WHERE key = 'holidayPeriods'`,
+        [JSON.stringify(nieuweVakanties)]);
+    }
+    const verantwoordelijkhedenVerplaatst = verplaatst;
+
     // 5. No auto-regeneration — user should re-apply active concept via Rooster Bouwen
 
     await client.query('COMMIT');
@@ -287,6 +396,7 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       newUser: { id: newUserId, name: newUser.name },
       shiftsTransferred,
       draftsUpdated,
+      verantwoordelijkhedenVerplaatst,
       verzoekenGeannuleerd,
       eigenDienstenVerwijderd,
       gaatLaterIn,
@@ -302,6 +412,7 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       newUser: { id: newUserId, name: newUser.name },
       shiftsTransferred,
       draftsUpdated,
+      verantwoordelijkhedenVerplaatst,
       verzoekenGeannuleerd,
       eigenDienstenVerwijderd,
       gaatLaterIn,

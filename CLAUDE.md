@@ -98,6 +98,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
 | `cdn-scripts.test.js` | Dat elke verwijzing naar een pakket-CDN in `index.html` een bestandspad én een vaste versie draagt (#396) |
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
+| `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
@@ -268,6 +269,33 @@ dat is nu van een gedeactiveerde medewerker en krijgt geen rij meer, dus de
 vervanger stond erbij met een lege week terwijl de database haar diensten
 gewoon had. Elke nieuwe cache die de vervangroute raakt hoort in diezelfde
 `Promise.all`.
+
+De VERANTWOORDELIJKHEDEN verhuizen ook mee, maar alleen VOORUIT (#398). De
+grens is dezelfde als bij de diensten: `transferShiftsFrom`, of vandaag als die
+er niet is. Wat daarvóór ligt blijft op naam van de vertrekker — dat is geen
+fout maar de waarheid, zij was toen verantwoordelijk.
+
+| wat | gedrag |
+|---|---|
+| `holidayPeriods[].weeklyResponsibles` na de ingangsdatum | verhuist |
+| idem vóór de ingangsdatum | blijft staan |
+| `responsibleRotation.assignments` | idem, en wordt als GETAL weggeschreven |
+| `rotationStartEmployee` (het anker) | verhuist **altijd**, ook achterwaarts |
+
+Dat anker is geen toewijzing aan een week maar het punt waar de telling begint.
+Blijft het op iemand staan die weg is, dan vindt de berekening hem niet terug in
+de kandidatenlijst en schuift de hele rotatie één plaats op.
+
+Dit stond eerst in de FRONTEND, ná de aanroep van `replaceEmployee`, en dekte
+alleen `responsibleRotation` — `holidayPeriods` niet. Een vakantieweek bleef dus
+wijzen naar iemand die weg was; in productie stond Jill Dias maanden na haar
+vervanging nog als verantwoordelijke voor de tweede kerstvakantieweek, en de
+herinneringsmail van #397 zou háár daarover aangeschreven hebben.
+
+Het hoort in de BACKEND en nergens anders: liet je dat frontendblok staan, dan
+schreef het zijn eigen verouderde `DataStore`-kopie meteen weer terug over de
+waarde die de route net gezet had. Om dezelfde reden ververst `replaceEmployee()`
+in `data.js` nu ook de instellingen.
 
 Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
 ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.

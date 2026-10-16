@@ -841,32 +841,18 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             const result = await replaceEmployee(Number(departingUser.id), Number(newUserId), fromDate, eigenDienstenVervanger);
             modal.remove();
 
-            // Weekendverantwoordelijkheid overerven
-            const rotation = DataStore.settings.responsibleRotation;
-            if (rotation) {
-                let rotationChanged = false;
-                // Als vertrekkende medewerker de startpersoon was → vervanger overneemt
-                if (String(rotation.rotationStartEmployee) === String(departingUser.id)) {
-                    rotation.rotationStartEmployee = String(newUserId);
-                    rotationChanged = true;
-                }
-                // Handmatige toewijzingen overzetten
-                if (rotation.assignments) {
-                    for (const [dateKey, assignedId] of Object.entries(rotation.assignments)) {
-                        if (String(assignedId) === String(departingUser.id)) {
-                            // Als GETAL wegschrijven, net als setWeekendResponsible
-                            // doet. Hier stond String(), en zolang getEmployee met
-                            // === vergeleek verdween de weekendverantwoordelijke
-                            // van die week na een vervanging stilletjes.
-                            rotation.assignments[dateKey] = Number(newUserId);
-                            rotationChanged = true;
-                        }
-                    }
-                }
-                if (rotationChanged) {
-                    await saveResponsibleRotationSettings();
-                }
-            }
+            // #398: de verantwoordelijkheden werden hier overgezet — alleen
+            // `responsibleRotation`, en `holidayPeriods` niet. Een vakantieweek
+            // bleef dus wijzen naar iemand die weg was.
+            //
+            // Dat gebeurt nu in de BACKEND, binnen dezelfde transactie als de
+            // rest van de vervanging. Dit blok hoort hier daarom niet meer te
+            // staan, en niet alleen omdat het dubbel zou zijn: het schreef
+            // `DataStore.settings.responsibleRotation` terug naar de server, en
+            // die kopie is op dit moment verouderd. Het zou de zojuist door de
+            // backend gezette waarde meteen weer overschrijven met de oude.
+            //
+            // `replaceEmployee()` ververst de instellingen nu mee.
 
             let msg = result.gaatLaterIn
                 ? `${departingUser.name} wordt op ${formatDateShortMetJaar(result.ingangsdatum)} vervangen door ${newUser.name}`

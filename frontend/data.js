@@ -602,7 +602,11 @@ async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom 
 
         // Refresh all affected caches (including activities which may be transferred).
         // refreshDrafts hoort hierbij: de route herschrijft ook de concepten.
-        await Promise.all([refreshUsers(), refreshShifts(), refreshAvailability(), refreshActivities(), refreshDrafts()]);
+        // refreshSettings sinds #398: de route verzet ook de verantwoordelijken
+        // in `responsibleRotation` en `holidayPeriods`. Zonder die verversing
+        // houdt het scherm de oude namen, en schrijft de eerstvolgende
+        // instellingenwijziging die oude waarden weer terug.
+        await Promise.all([refreshUsers(), refreshShifts(), refreshAvailability(), refreshActivities(), refreshDrafts(), refreshSettings()]);
 
         return result;
     } catch (error) {
