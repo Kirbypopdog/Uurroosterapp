@@ -269,6 +269,53 @@ function getBuilderWeekLabel(weekNumber) {
 }
 
 // Returns the Monday Date of week N in a vakantie concept (based on holiday period startDate)
+
+/**
+ * #399: wist de aanduidingen van een vakantieperiode die naar iemand wijzen
+ * die niet meer meedraait.
+ *
+ * Dit verandert DATA bij het openen van een scherm, en dat is normaal iets om
+ * te vermijden. Hier is het een bewuste keuze: de keuzelijst kan zo'n naam toch
+ * niet tonen, dus de waarde was onbereikbaar geworden — je kon hem zien noch
+ * wijzigen, terwijl de planning en de herinneringsmail hem wél gebruikten.
+ *
+ * Twee waarborgen, want stil data wissen is het ergste wat dit kan doen:
+ *  - er wordt NIETS gewist zolang de medewerkerslijst leeg is. Zonder die
+ *    controle zou een mislukte lading iedereen "onbekend" maken en de hele
+ *    periode leegvegen.
+ *  - het wordt GEMELD, met de namen erbij, zodat je weet dat er iets open
+ *    staat in plaats van dat het stilletjes verdwijnt.
+ *
+ * Het schrijven gebeurt maar één keer: daarna is de waarde weg en vindt een
+ * volgende render niets meer.
+ */
+async function ruimVertrokkenVakantieVerantwoordelijkenOp(periode) {
+    if (!periode || !periode.weeklyResponsibles) return;
+    if (!Array.isArray(DataStore.users) || DataStore.users.length === 0) return;
+
+    const actieveIds = new Set(getAllEmployees(true).map(e => String(e.id)));
+    const gewist = [];
+    for (const [week, id] of Object.entries(periode.weeklyResponsibles)) {
+        if (actieveIds.has(String(id))) continue;
+        // getEmployee kijkt in ALLE gebruikers, dus ook de gedeactiveerde —
+        // daardoor kunnen we de naam nog noemen in de melding.
+        const persoon = typeof getEmployee === 'function' ? getEmployee(id) : null;
+        gewist.push({ week, naam: persoon ? persoon.name : `onbekend (${id})` });
+        delete periode.weeklyResponsibles[week];
+    }
+    if (gewist.length === 0) return;
+
+    try {
+        await saveSettings('holidayPeriods', DataStore.settings.holidayPeriods);
+        const lijst = gewist.map(g => `week ${g.week}: ${g.naam}`).join(', ');
+        showToast(
+            `${gewist.length === 1 ? 'Eén week had' : `${gewist.length} weken hadden`} een verantwoordelijke die niet meer meedraait (${lijst}). Die aanduiding is weggehaald — duid opnieuw iemand aan.`,
+            'warning', 10000);
+    } catch (fout) {
+        console.error('Opruimen vakantieverantwoordelijken mislukt:', fout);
+    }
+}
+
 function getBuilderVakantieWeekStart(weekNumber) {
     const hp = (DataStore.settings.holidayPeriods || []).find(p => String(p.id) === String(AppState.builderHolidayPeriodId));
     if (!hp) return null;
@@ -501,6 +548,12 @@ function renderBuilderGrid(role, userTeam) {
         // Vakantie verantwoordelijke picker (per week)
         const activeEmps = getAllEmployees(true).sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
         const wn = AppState.builderWeekNumber;
+        // #399: de keuzelijst bevat alleen ACTIEVE medewerkers. Stond er iemand
+        // aangeduid die intussen weg is, dan vond geen enkele <option> die id,
+        // werd er niets geselecteerd en viel de lijst terug op "Geen" — terwijl
+        // de waarde gewoon bleef staan. Het scherm zei dus "niemand" en de
+        // planning toonde nog de vertrokken collega.
+        if (hp) ruimVertrokkenVakantieVerantwoordelijkenOp(hp);
         const weeklyResps = hp ? (hp.weeklyResponsibles || {}) : {};
         const currentRespId = String(weeklyResps[String(wn)] || '');
         const respOptions = activeEmps.map(e =>
@@ -1985,3 +2038,10 @@ const SETTINGS_TAB_CONFIG = [
     { id: 'communicatie', label: 'Communicatie', roles: ['admin', 'roosterverantwoordelijke'] },
     { id: 'beheer', label: 'Beheer', roles: ['admin'] }
 ];
+
+// Zodat het opruimen van vertrokken vakantieverantwoordelijken (#399) in Node
+// getest kan worden. In de browser bestaat `module` niet, dus dit heeft daar
+// geen effect.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { ruimVertrokkenVakantieVerantwoordelijkenOp, getBuilderVakantieWeekStart };
+}

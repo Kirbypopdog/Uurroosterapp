@@ -98,6 +98,8 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
 | `cdn-scripts.test.js` | Dat elke verwijzing naar een pakket-CDN in `index.html` een bestandspad én een vaste versie draagt (#396) |
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
+| `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
+| `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
@@ -269,6 +271,33 @@ vervanger stond erbij met een lege week terwijl de database haar diensten
 gewoon had. Elke nieuwe cache die de vervangroute raakt hoort in diezelfde
 `Promise.all`.
 
+De VERANTWOORDELIJKHEDEN verhuizen ook mee, maar alleen VOORUIT (#398). De
+grens is dezelfde als bij de diensten: `transferShiftsFrom`, of vandaag als die
+er niet is. Wat daarvóór ligt blijft op naam van de vertrekker — dat is geen
+fout maar de waarheid, zij was toen verantwoordelijk.
+
+| wat | gedrag |
+|---|---|
+| `holidayPeriods[].weeklyResponsibles` na de ingangsdatum | verhuist |
+| idem vóór de ingangsdatum | blijft staan |
+| `responsibleRotation.assignments` | idem, en wordt als GETAL weggeschreven |
+| `rotationStartEmployee` (het anker) | verhuist **altijd**, ook achterwaarts |
+
+Dat anker is geen toewijzing aan een week maar het punt waar de telling begint.
+Blijft het op iemand staan die weg is, dan vindt de berekening hem niet terug in
+de kandidatenlijst en schuift de hele rotatie één plaats op.
+
+Dit stond eerst in de FRONTEND, ná de aanroep van `replaceEmployee`, en dekte
+alleen `responsibleRotation` — `holidayPeriods` niet. Een vakantieweek bleef dus
+wijzen naar iemand die weg was; in productie stond Jill Dias maanden na haar
+vervanging nog als verantwoordelijke voor de tweede kerstvakantieweek, en de
+herinneringsmail van #397 zou háár daarover aangeschreven hebben.
+
+Het hoort in de BACKEND en nergens anders: liet je dat frontendblok staan, dan
+schreef het zijn eigen verouderde `DataStore`-kopie meteen weer terug over de
+waarde die de route net gezet had. Om dezelfde reden ververst `replaceEmployee()`
+in `data.js` nu ook de instellingen.
+
 Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
 ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.
 Ze laten staan betekende dat de tegenpartij een verzoek zag van iemand die weg
@@ -403,6 +432,31 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
 - **Stat-kaarten op home** (#166): twee reeksen, elk met een eigen doelgroep. `renderHomeEigenUren()` toont JOUW uren deze week en deze periode tegen je contract, plus wat op jou wacht; alleen voor wie meedraait in het rooster, want een adminaccount heeft geen diensten. `renderHomeStats()` toont de BEHEERcijfers en is er alleen voor admin en roosterverantwoordelijke. Zonder contracturen verschijnt er geen balk en geen "van": `32/0u` zou onzin zijn. De kleurregel is dezelfde als bij de uren in de planning: rood boven de norm, oranje eronder
 - **Bezetting en activiteiten** (#145): `calcPlanningHourlyHeadcount()` in `app-planner.js` geeft `bruto` (wie een dienst heeft) en `netto` (bruto min wie op dat uur een activiteit heeft). ALLE zes de activiteittypes verminderen de netto bezetting, voor hun volle duur. Dat is nagevraagd en bevestigd: bij oudergesprek, vorming, overleg, vergadering, afspraak én andere staat de begeleider niet bij de groep. Er is bewust geen uitzondering per type en geen vinkje "ik blijf bereikbaar" per activiteit: dan moet iemand dat elke keer beoordelen en kan het vergeten worden, en te vaak waarschuwen is bij bezetting de veilige kant. Netto voedt precies drie plekken: de onderbezettingsmeldingen in `renderHomeAlerts`, de bezettingsbalk in de planning en `validateMinimumStaffing` in `validation.js`. Activiteittypes worden verder nergens in logica onderscheiden, alleen voor kleur en label
 - **Weekend- en vakantieverantwoordelijke**: je bent verantwoordelijk voor het WEEKEND, dus alleen in een week waarin het weekend open is. Staat het weekend dicht, dan is er niemand aan de beurt en toont de app niemand. Tijdens een vakantie staat de verantwoordelijke PER WEEK, aan te duiden in de roosterbouwer: in de kerstvakantie doet de ene persoon week 1 en een ander week 2. Een vakantieweek is daarmee uitgepraat — is er voor die week niemand aangeduid, dan is er niemand, en valt de app bewust NIET terug op de rotatie. Een vakantieweek verbruikt ook geen beurt, dus na de vakantie gaat de rotatie verder waar hij gebleven was.
+
+  **De ROOSTERBOUWER is de waarheid voor een vakantieweek** (#399). Daar duid je
+  per week iemand aan; dat schrijft `holidayPeriods[].weeklyResponsibles`. In
+  Instellingen staat dezelfde week in het lijstje "komende weekends", maar daar
+  is hij **alleen-lezen**: klikken schreef er een handmatige toewijzing weg, en
+  die wint van de vakantieweek, dus je overschreef stilletjes het concept.
+
+  Drie dingen die daar samen één onbegrijpelijk scherm van maakten:
+  1. **De keuzelijst in de bouwer toont alleen ACTIEVE medewerkers.** Stond er
+     iemand die intussen weg is, dan vond geen enkele `<option>` dat id, werd er
+     niets geselecteerd en viel de lijst terug op "Geen" — terwijl de waarde
+     gewoon bleef staan. Het scherm zei "niemand" en de planning toonde de
+     vertrokken collega. `ruimVertrokkenVakantieVerantwoordelijkenOp()` wist zo'n
+     aanduiding nu en MELDT het met de naam erbij. Die functie wist bewust niets
+     zolang `DataStore.users` leeg is: zonder die controle zou een mislukte
+     lading de hele periode leegvegen.
+  2. **Instellingen zette een vakantieweek onder zijn WEEKENDdatums.** De week
+     die je in de bouwer als 28 dec – 3 jan aanduidt, verscheen daar als
+     2 jan – 3 jan. Een vakantieverantwoordelijke is er voor de hele week, dus
+     daar staan nu de weekdatums.
+  3. **De badge "vakantie" keek naar `responsibleId`** — het oude veld met één
+     persoon per hele periode, dat de bouwer nooit vult. Hij verscheen dus
+     nooit, en een vakantieverantwoordelijke was niet te onderscheiden van een
+     uitkomst van de rotatie. Gebruik `verklaarVerantwoordelijke()`: die geeft
+     het antwoord mét de reden, de naam van de vakantie en het weeknummer.
 
   De REGELS staan in `frontend/verantwoordelijke-regels.js`, als pure functies zonder DataStore, en worden door ALLEBEI de kanten ingeladen: `getOrCalculateResponsible()` in `data.js` en `backend/src/helpers/verantwoordelijke.js` vertalen alleen nog hun eigen gegevens naar diezelfde invoer (#397). Dat stond tot dan toe uitsluitend in de frontend; de server moest het kunnen beantwoorden voor de herinneringsmail. Schrijf die logica NIET over aan de serverkant — zie Mail hierboven. De volgorde is: handmatige toewijzing → vakantieweek → open weekend → rotatie. De rotatie loopt alfabetisch op naam.
 
