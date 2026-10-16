@@ -92,6 +92,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `permissies.test.js` | De pure rolchecks uit `frontend/app-permissions.js`, zoals wie een dienst mag afstaan |
 | `nu-aan-het-werk.test.js` | `dienstLooptNu()`: wie er op een moment werkelijk aan het werk is, inclusief nachtdiensten en reserve |
 | `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
+| `cdn-scripts.test.js` | Dat elke verwijzing naar een pakket-CDN in `index.html` een bestandspad én een vaste versie draagt (#396) |
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
@@ -360,6 +361,21 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   Een ISO-datum hoort wél ongemoeid in: de `value` van een `date`-veld, een `data-date`-attribuut, een sleutel in een Set of Map, een queryparameter en een vergelijking. Dat zijn waarden, geen tekst.
 
   Er is één ronde over de hele frontend gegaan die tien plekken opleverde — twee bevestigingsvensters in de bouwer, twee vakantiebanners, twee regels in de audit log, "Datum:" in het dienstvenster, en drie schermlezerlabels. Zoek met `\$\{[a-zA-Z_.]*(date|Date|datum|from|until)\}` en filter de attributen en sleutels eruit; let op dat een variabele die `from` of `dateStr` heet vaak al opgemaakt is.
+
+- **Scripts van een CDN** (#396): noem ALTIJD het bestandspad voluit, nooit
+  alleen `pakket@versie`. Zonder pad kiest de CDN zelf welk bestand uit het
+  npm-pakket hij serveert, en die keuze verschilt per CDN: unpkg leest het veld
+  `unpkg` uit `package.json`, jsDelivr het veld `jsdelivr` — en ontbreekt dat,
+  dan valt hij terug op `main`, dat doorgaans naar de CommonJS-bundel wijst. Zo
+  haalde onze terugval `cdn.jsdelivr.net/npm/lucide@0.577.0` de CJS-bundel op;
+  die bevat een icoon dat `Infinity` heet en dus een `const Infinity` op het
+  hoogste niveau, wat als gewoon `<script>` botst met de globale `Infinity` en
+  de hele bundel laat falen met een SyntaxError.
+
+  Let ook op wat `onerror` wél en níét dekt: alleen een MISLUKTE download. Een
+  bundel die met HTTP 200 binnenkomt en pas bij het uitvoeren stukloopt, gaat
+  daar stilletjes langs. Toets daarom het RESULTAAT — staat `window.lucide` er
+  na `load` niet, dan gaat `no-lucide` alsnog aan.
 
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.

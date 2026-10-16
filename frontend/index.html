@@ -31,12 +31,36 @@
          staat; dan wordt er ook niets van een CDN gehaald. Staat bewust vóór de
          app-bestanden, zodat een fout tijdens het opstarten ook gemeld wordt. -->
     <script src="config/monitoring.js?v=20260921a"></script>
-    <script src="https://unpkg.com/lucide@0.577.0" onerror="
+    <!-- #396: NOOIT zonder bestandspad naar een CDN verwijzen. Zonder pad kiest
+         de CDN zelf welk bestand uit het pakket hij serveert, en die keuze
+         verschilt per CDN: unpkg leest het veld `unpkg` uit package.json
+         (dist/umd/lucide.min.js, een browserbundel), jsDelivr leest het veld
+         `jsdelivr` — en dat heeft lucide niet, dus die viel terug op `main`:
+         dist/cjs/lucide.js, een CommonJS-bundel. Die bevat een icoon dat
+         "Infinity" heet en dus een `const Infinity` op het hoogste niveau. In
+         een module is dat eigen bereik; als gewoon <script> is dat de globale
+         ruimte, waar `Infinity` al bestaat — de hele bundel faalde met
+         "Identifier 'Infinity' has already been declared" (Sentry
+         UURROOSTER-FRONTEND-2). Allebei de paden staan nu voluit. -->
+    <script src="https://unpkg.com/lucide@0.577.0/dist/umd/lucide.min.js" onerror="
         var s=document.createElement('script');
-        s.src='https://cdn.jsdelivr.net/npm/lucide@0.577.0';
+        s.src='https://cdn.jsdelivr.net/npm/lucide@0.577.0/dist/umd/lucide.min.js';
         s.onerror=function(){document.documentElement.classList.add('no-lucide')};
         document.head.appendChild(s);
     "></script>
+    <script>
+        // Het bovenstaande onerror vangt alleen een MISLUKTE download. Een
+        // bundel die netjes binnenkomt maar bij het uitvoeren stukloopt, laat
+        // `lucide` ongedefinieerd zonder dat er ooit een fout langs onerror
+        // komt — dan bleef de pagina in geen van beide toestanden staan: geen
+        // iconen én geen terugvalopmaak. Deze controle kijkt naar het
+        // RESULTAAT in plaats van naar het laden, en dekt dus allebei.
+        window.addEventListener('load', function () {
+            if (typeof window.lucide === 'undefined') {
+                document.documentElement.classList.add('no-lucide');
+            }
+        });
+    </script>
     <script>
         // Voorkomt een flits van het loginscherm bij herladen met een actieve
         // sessie: #login-container staat zichtbaar in de HTML en werd pas
