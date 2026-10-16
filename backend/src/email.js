@@ -28,7 +28,14 @@ const DEFAULT_EMAIL_SETTINGS = {
     // #323: de resetmail hing aan het type 'welcome'. Wie de welkomstmail
     // uitzette, zette daarmee ongemerkt ook de resetmail uit, terwijl de app
     // ondertussen meldde dat de medewerker een mail zou krijgen.
-    password_reset: true
+    password_reset: true,
+    // Verlofplanning en verantwoordelijken (#397). Elk type staat apart, zodat
+    // je de herinneringen kan uitzetten zonder de aankondiging zelf te
+    // verliezen — en omgekeerd.
+    leave_round_opened: true,
+    leave_round_reminder: true,
+    responsible_reminder: true,
+    responsible_missing: true
   }
 };
 
@@ -459,6 +466,109 @@ async function notifyTestEmail(user) {
   return sendEmail(user.email, 'Testmail — Het Vlot Roosterplanning', html);
 }
 
+
+// ===== VERLOFPLANNING EN VERANTWOORDELIJKEN (#397) =====
+
+/** Een lijstje vakantieblokken als leesbare regels. */
+function blokkenLijst(blokken) {
+  if (!blokken || blokken.length === 0) return '';
+  const regels = blokken.map(b =>
+    `<p><strong>${escapeHtml(b.name)}</strong><br>${formatDate(b.startDate)} t/m ${formatDate(b.endDate)}</p>`
+  ).join('');
+  return `<div class="detail-box"><p class="detail-label">Vakanties in deze ronde</p>${regels}</div>`;
+}
+
+/**
+ * Een verlofronde is opengezet → iedereen die meedraait in het rooster.
+ */
+async function notifyLeaveRoundOpened(ontvangers, ronde, blokken) {
+  if (!await isTypeEnabled('leave_round_opened')) return { verstuurd: 0, overgeslagen: 0 };
+  const deadline = ronde.deadline
+    ? `<p>Invullen kan tot en met <strong>${formatDate(ronde.deadline)}</strong>.</p>`
+    : '<p>Er staat nog geen uiterste datum bij deze ronde.</p>';
+  const html = baseTemplate('Verlofronde geopend', `
+    <h2>De verlofronde ${escapeHtml(ronde.name)} staat open</h2>
+    <p>Je kan je voorkeuren nu invullen en indienen.</p>
+    ${blokkenLijst(blokken)}
+    ${deadline}
+    <p>Vul in via <strong>Verlof</strong> in de app. Vergeet niet op <strong>Indienen</strong> te klikken: een invulling die niet ingediend is, telt niet mee.</p>
+  `);
+  return verstuurReeks(ontvangers, `Verlofronde ${ronde.name} staat open`, html);
+}
+
+/**
+ * Herinnering aan wie nog niet indiende. Zowel de knop van de beheerder als de
+ * automatische taak komen hier uit; `automatisch` bepaalt alleen de toon.
+ */
+async function notifyLeaveRoundReminder(ontvangers, ronde, opties = {}) {
+  if (!await isTypeEnabled('leave_round_reminder')) return { verstuurd: 0, overgeslagen: 0 };
+  const { dagenTot = null } = opties;
+
+  let wanneer;
+  if (!ronde.deadline) {
+    wanneer = '<p>Er staat geen uiterste datum bij deze ronde, maar ze is nog open.</p>';
+  } else if (dagenTot !== null && dagenTot <= 0) {
+    wanneer = `<p><strong>De uiterste datum is vandaag (${formatDate(ronde.deadline)}).</strong></p>`;
+  } else if (dagenTot !== null) {
+    wanneer = `<p>Nog <strong>${dagenTot} dag${dagenTot === 1 ? '' : 'en'}</strong>: invullen kan tot en met ${formatDate(ronde.deadline)}.</p>`;
+  } else {
+    wanneer = `<p>Invullen kan tot en met <strong>${formatDate(ronde.deadline)}</strong>.</p>`;
+  }
+
+  const html = baseTemplate('Verlofronde nog niet ingediend', `
+    <h2>Je hebt ${escapeHtml(ronde.name)} nog niet ingediend</h2>
+    <p>Volgens de app staat jouw invulling voor deze verlofronde nog niet als ingediend.</p>
+    ${wanneer}
+    <p>Let op: alleen een INGEDIENDE invulling telt mee bij het verdelen. Heb je alles al ingevuld maar nog niet op <strong>Indienen</strong> geklikt, dan is dat het enige wat nog moet gebeuren.</p>
+  `);
+  return verstuurReeks(ontvangers, `Herinnering: ${ronde.name} nog niet ingediend`, html);
+}
+
+/**
+ * Jij bent de komende week verantwoordelijk. Gaat op de maandag van de week
+ * ERVOOR, zodat er nog een volle week is om te ruilen als het niet lukt.
+ */
+async function notifyResponsibleReminder(persoon, info) {
+  if (!await isTypeEnabled('responsible_reminder')) return { verstuurd: 0, overgeslagen: 0 };
+  const isVakantie = info.reden === 'vakantieweek';
+  const titel = isVakantie ? 'Vakantieverantwoordelijke' : 'Weekendverantwoordelijke';
+  const uitleg = isVakantie
+    ? `Je bent aangeduid als verantwoordelijke voor ${info.vakantie ? escapeHtml(info.vakantie) : 'de vakantie'}${info.vakantieWeek ? `, week ${info.vakantieWeek}` : ''}.`
+    : 'Je bent die week weekendverantwoordelijke.';
+  const html = baseTemplate(titel, `
+    <h2>${titel}: de week van ${formatDate(info.weekStart)}</h2>
+    <p>${uitleg}</p>
+    <div class="detail-box">
+      <p class="detail-label">Week</p>
+      <p><strong>${formatDate(info.weekStart)} t/m ${formatDate(info.weekEind)}</strong></p>
+    </div>
+    <p>Lukt het die week niet, laat het dan tijdig weten — dan is er nog een week om het op te lossen.</p>
+  `);
+  return verstuurReeks([persoon], `${titel}: week van ${formatDate(info.weekStart)}`, html);
+}
+
+/**
+ * Er staat NIEMAND aangeduid voor een week waarin dat wel hoort → de
+ * beheerders. Dit is de melding die voorkomt dat een weekend er stilletjes
+ * zonder verantwoordelijke doorkomt.
+ */
+async function notifyResponsibleMissing(beheerders, info) {
+  if (!await isTypeEnabled('responsible_missing')) return { verstuurd: 0, overgeslagen: 0 };
+  const waarom = info.reden === 'vakantieweek-niemand-aangeduid'
+    ? `Het is een vakantieweek${info.vakantie ? ` (${escapeHtml(info.vakantie)}${info.vakantieWeek ? `, week ${info.vakantieWeek}` : ''})` : ''}, en daar wordt de verantwoordelijke PER WEEK aangeduid in de roosterbouwer. Voor deze week staat er niemand. Een vakantieweek valt bewust niet terug op de rotatie, dus er is nu niemand.`
+    : 'Het weekend staat open, maar de rotatie levert niemand op. Controleer de rotatie-instellingen: staat er een startdatum en een startpersoon, en zijn er medewerkers in de deelnemende teams?';
+  const html = baseTemplate('Geen verantwoordelijke aangeduid', `
+    <h2>Geen verantwoordelijke voor de week van ${formatDate(info.weekStart)}</h2>
+    <p>${waarom}</p>
+    <div class="detail-box">
+      <p class="detail-label">Week</p>
+      <p><strong>${formatDate(info.weekStart)} t/m ${formatDate(info.weekEind)}</strong></p>
+    </div>
+    <p>Duid iemand aan via <strong>Instellingen &rsaquo; Verantwoordelijken</strong> of, bij een vakantie, in de roosterbouwer.</p>
+  `);
+  return verstuurReeks(beheerders, `Geen verantwoordelijke: week van ${formatDate(info.weekStart)}`, html);
+}
+
 module.exports = {
   sendEmail,
   sendEmailAsync,
@@ -473,6 +583,10 @@ module.exports = {
   notifyWelcome,
   notifyPasswordReset,
   notifyTestEmail,
+  notifyLeaveRoundOpened,
+  notifyLeaveRoundReminder,
+  notifyResponsibleReminder,
+  notifyResponsibleMissing,
   verstuurReeks,
   // Exported for unit testing only
   _helpers: { escapeHtml, formatDate, formatTime, shiftDetailBox, baseTemplate },

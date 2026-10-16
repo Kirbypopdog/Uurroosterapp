@@ -960,6 +960,15 @@ function renderLeaveManagerActions(round, medewerkers, subMap, nogNiet, blocks =
                 </div>` : '<p class="text-muted text-sm">Niets te beoordelen.</p>'}
             <div class="leave-manager-actions">
                 ${round.status === 'open' ? `<button class="btn btn-secondary" id="leave-close" data-open="${nogNiet.length}">Ronde sluiten</button>` : ''}
+                ${/* #397: met de hand herinneren. Er gaat ook automatisch een
+                      herinnering uit (7 en 2 dagen vóór de deadline), maar die
+                      hangt af van een server die net wakker is. Deze knop werkt
+                      op het moment dat je hem indrukt, en dat is wat je nodig
+                      hebt als de deadline morgen is. Alleen bij een OPEN ronde,
+                      en alleen als er nog iemand openstaat: anders biedt het
+                      scherm een knop aan die de backend met een 409 weigert. */''}
+                ${round.status === 'open' && nogNiet.length > 0
+                    ? `<button class="btn btn-secondary" id="leave-herinner" data-open="${nogNiet.length}">Herinnering sturen (${nogNiet.length})</button>` : ''}
                 ${/* Sluiten was een eenrichtingsstraat: het scherm kon een ronde
                       alleen vooruit zetten (open -> gesloten -> toegepast), nooit
                       terug. Sloot je te vroeg, of bleek achteraf dat iemand nog
@@ -1095,6 +1104,7 @@ function bindLeaveEvents(container, data) {
     container.querySelector('#leave-submit')?.addEventListener('click', () => saveLeaveDraft(round, true));
     container.querySelector('#leave-close')?.addEventListener('click', e => closeLeaveRound(round, Number(e.currentTarget.dataset.open || 0)));
     container.querySelector('#leave-heropen')?.addEventListener('click', () => heropenLeaveRound(round));
+    container.querySelector('#leave-herinner')?.addEventListener('click', e => herinnerLeaveRound(round, Number(e.currentTarget.dataset.open || 0)));
     container.querySelector('#leave-apply')?.addEventListener('click', () => applyLeaveRound(round));
     container.querySelector('#leave-export')?.addEventListener('click', () => exportLeaveRound(data));
     container.querySelector('#leave-resync')?.addEventListener('click', () => resyncLeaveClosedDays(data));
@@ -1279,6 +1289,37 @@ async function heropenLeaveRound(round) {
         renderLeave();
     } catch (err) {
         showToast('Heropenen mislukt: ' + getUserFriendlyError(err), 'error');
+    }
+}
+
+// #397: een herinnering naar wie nog niet indiende.
+//
+// Het antwoord van de backend wordt hier VOLUIT gemeld en niet samengevat tot
+// "verstuurd". Wie geen e-mailadres heeft of de meldingen uitzette krijgt
+// niets, en dat moet je weten: anders sluit je de ronde in de overtuiging dat
+// iedereen bereikt is terwijl er stilletjes mensen ontbraken.
+async function herinnerLeaveRound(round, aantalOpen) {
+    if (!await showConfirm(
+        `${aantalOpen} medewerker(s) hebben nog niet ingediend. Zij krijgen een herinnering per e-mail.`,
+        'Herinnering sturen', { confirmText: 'Versturen' })) return;
+    try {
+        const uit = await dataApiFetch(`/leave-rounds/${round.id}/remind`, { method: 'POST' });
+
+        if (uit.iedereenIngediend) {
+            showToast('Iedereen heeft intussen ingediend, er is niets verstuurd', 'info');
+            renderLeave();
+            return;
+        }
+
+        showToast(`Herinnering verstuurd naar ${uit.verstuurd} van ${uit.ontvangers} medewerker(s)`, 'success');
+
+        if (uit.zonderEmailadres?.length) {
+            showToast(`Zonder e-mailadres, dus niet bereikt: ${uit.zonderEmailadres.join(', ')}`, 'warning', 8000);
+        } else if (uit.nietBereikt > 0) {
+            showToast(`${uit.nietBereikt} medewerker(s) kregen niets — zij hebben de e-mailmeldingen uitgezet`, 'info', 8000);
+        }
+    } catch (err) {
+        showToast('Herinnering sturen mislukt: ' + getUserFriendlyError(err), 'error');
     }
 }
 

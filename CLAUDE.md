@@ -52,6 +52,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `app-admin.js` | Export/import, debug, migratie, sanitize |
 | `app-init.js` | initDOM, setupEventListeners, init(), DOMContentLoaded entry |
 | `data.js` | DataStore, API fetch wrappers, data loading |
+| `verantwoordelijke-regels.js` | Wie er weekend- of vakantieverantwoordelijke is. Pure functies, ook door de BACKEND ingeladen (#397) — zie Mail hieronder |
 | `validation.js` | Business rules: 11-uur regel, overlap, min bezetting, datumhelpers |
 | `drag-handler.js` | Drag & drop shifts tussen medewerkers |
 | `styles.css` | Alle CSS inclusief responsive, themas |
@@ -67,6 +68,9 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `src/middleware/auth.js` | `signToken`, `requireAuth`, `requireAdmin`, `requireRole` |
 | `src/helpers/audit.js` | `logAudit`: het schrijven naar de audit log. Het LEZEN is een route en staat in `routes/audit-log.js` |
 | `src/helpers/overnames.js` | `voerGeplandeOvernamesUit()`: de overnames uit `geplande_overnames` afmaken die vandaag ingaan. Draait bij opstart en elk uur |
+| `src/helpers/verantwoordelijke.js` | De serverkant van de verantwoordelijke: haalt de instellingen op en laat `frontend/verantwoordelijke-regels.js` het antwoord geven |
+| `src/helpers/verlofmail.js` | Wie krijgt welke verlofmail, en wie heeft er nog niet ingediend |
+| `src/helpers/herinneringen.js` | De geplande herinneringen (verlofronde, verantwoordelijke). Draait bij opstart en elk uur |
 | `src/helpers/dienstregels.js` | Waar een dienst aan moet voldoen: `validateShiftRules`, `blockDayIfEmpty`, `getMinRustUren`, de afwezigheidstypes en de tijdcontroles. De enige helpers die meer dan één domein deelt |
 | `src/migraties.js` | De `MIGRATIONS`-array en `runMigrations()` |
 | `src/db.js` | PostgreSQL connection pool |
@@ -94,6 +98,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
 | `cdn-scripts.test.js` | Dat elke verwijzing naar een pakket-CDN in `index.html` een bestandspad én een vaste versie draagt (#396) |
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
+| `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
@@ -108,7 +113,7 @@ sneller dan dit bestand (#291).
 
 ## Database Schema
 
-**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions, geplande_overnames
+**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions, geplande_overnames, verstuurde_meldingen
 
 Kernrelaties:
 - `shifts.user_id` → `users.id`
@@ -213,6 +218,7 @@ dagelijkse samenvatting naast de directe mail aan het eigen team.
 - `PUT /api/v1/leave-rounds/:id/blocks/:blockId` - Gesloten dagen van een blok opnieuw uit het concept overnemen (409 op een gesloten ronde zonder `?force=1`)
 - `PUT /api/v1/leave-rounds/:id/blocks/:blockId/entries` - Definitieve verdeling van een voorkeurblok vastleggen (enkel bij status `gesloten`; vervangt uitsluitend binnen het blokbereik)
 - `POST /api/v1/leave-rounds/:id/apply` - Goedgekeurd verlof → availability
+- `POST /api/v1/leave-rounds/:id/remind` - Met de hand een herinnering naar wie nog niet indiende (409 op een ronde die niet openstaat)
 
 ### Admin
 - `GET /api/v1/audit-log` - Audit log met filters en paginatie
@@ -268,6 +274,72 @@ ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldi
 Ze laten staan betekende dat de tegenpartij een verzoek zag van iemand die weg
 is, en dat aanvaarden de dienst van de VERVANGER verzette. Meeverhuizen is geen
 alternatief: dan erft de vervanger een vraag die zij nooit gesteld heeft.
+
+### Mail: aankondigingen en herinneringen (#397)
+
+Drie mails die er niet waren, plus de reden waarom ze eruitzien zoals ze
+eruitzien.
+
+| mail | wanneer | naar wie |
+|------|---------|----------|
+| `leave_round_opened` | bij de OVERGANG naar `open` | iedereen die meedraait in het rooster |
+| `leave_round_reminder` | 7 en 2 dagen vóór de deadline, én via de knop | wie nog niet INDIENDE |
+| `responsible_reminder` | maandag, over de week dáárna | de verantwoordelijke zelf |
+| `responsible_missing` | idem, als er niemand is | admin + roosterverantwoordelijke |
+
+Elk type heeft een eigen schakelaar in Instellingen, zodat de herinneringen uit
+kunnen zonder de aankondiging zelf — en omgekeerd.
+
+**De server is geen klok.** Hij slaapt in na een kwartier stilte, dus
+`setInterval` levert geen betrouwbaar moment. In de praktijk draait deze taak
+wanneer de eerste bezoeker hem wakker maakt: soms één keer op een dag, soms
+tien keer, en op een dag dat niemand inlogt helemaal niet. Daar volgt alles uit:
+
+1. **Claimen vóór versturen.** Elke melding legt eerst een regel vast in
+   `verstuurde_meldingen` (`soort` + `sleutel`, uniek) en verstuurt daarna pas.
+   Een tweede run vindt de claim bezet en doet niets. Loopt het versturen
+   daarna stuk, dan is het gevolg één gemiste mail in plaats van een stroom
+   herhalingen — en dat is de goede kant om op te falen bij iets dat naar
+   iedereen gaat.
+2. **Inhalen, niet missen.** Niets kijkt naar "is het vandaag precies dag X".
+   De verlofherinnering vuurt bij "nog hoogstens N dagen", de verantwoordelijke
+   bij "de week hierna is nog niet aangekondigd". Slaapt de server op de dag
+   zelf, dan vertrekt de mail de eerstvolgende keer — één keer.
+3. **Mijlpalen claimen die je overslaat.** Gaat een ronde pas twee dagen vóór
+   de deadline open, dan is 7 niet meer van toepassing maar wél nog vrij. Zonder
+   die mijlpaal mee te claimen zou hij een dag later alsnog vuren, naast die van
+   2. De run claimt daarom elke mijlpaal die ruimer is dan de huidige.
+4. **Daarom is er óók een knop.** "Herinnering sturen" bij een open ronde werkt
+   op het moment dat je hem indrukt, en dat is wat je nodig hebt als de deadline
+   morgen is. Die knop claimt bewust NIET: een beheerder mag twee keer
+   herinneren. Het antwoord noemt wie er niet bereikt is en wie er geen
+   e-mailadres heeft — anders sluit je de ronde in de overtuiging dat iedereen
+   bericht kreeg.
+
+**Eén gat, met opzet.** Slaapt de server een hele week, dan wordt die week
+overgeslagen in plaats van achteraf aangekondigd. Mailen over een weekend dat al
+bezig is helpt niemand.
+
+**De verantwoordelijke staat één keer beschreven.** `getOrCalculateResponsible()`
+stond volledig in `data.js` en was dus alleen in de BROWSER beschikbaar. Voor
+deze mail moet de server dezelfde vraag kunnen beantwoorden. De regels zijn
+daarom verhuisd naar `frontend/verantwoordelijke-regels.js`, als pure functies
+zonder DataStore; `data.js` en `backend/src/helpers/verantwoordelijke.js`
+vertalen allebei alleen nog hun eigen gegevens naar diezelfde invoer. Overschrijf
+die logica NIET aan de serverkant — twee kopieën lopen uiteen zonder dat iemand
+het merkt, precies zoals bij de filtering van de foutmonitoring.
+
+Die module vraagt zijn invoer **bij naam** (`roosterpatroon`, `vakantieperiodes`,
+`rotatie`, …) en niet als settings-blob. Dat is met opzet omslachtig: de
+frontend noemt het veld `schedulePattern` en de database `schedule_pattern`, en
+wie de verkeerde sleutel doorgeeft krijgt stil de STANDAARD terug — een
+omgekeerde weekendcyclus, zonder één foutmelding.
+
+**Let op bij elke nieuwe ontvangerslijst**: `verstuurReeks` filtert op de
+SNAKE_CASE kolom `email_notifications_enabled`. Selecteer je alleen de camelCase
+alias, dan is dat veld daar `undefined`, is `!== false` waar, en krijgt iemand
+die de mail net heeft uitgezet hem alsnog. De queries in `verlofmail.js` en
+`verantwoordelijke.js` selecteren daarom allebei de namen.
 
 ### Agendakoppeling (iCal)
 - `POST /api/v1/me/ical-token` - Persoonlijke feedlink aanmaken of vervangen

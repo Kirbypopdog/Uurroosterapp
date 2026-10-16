@@ -5,6 +5,12 @@ const { maakRouter } = require('../veilige-router');
 const { pool } = require('../db');
 const { requireAuth, requireAdmin, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../helpers/audit');
+const {
+  ontvangersVanRonde,
+  nietIngediend,
+  verstuurRondeGeopend,
+  verstuurRondeHerinnering
+} = require('../helpers/verlofmail');
 
 const router = maakRouter();
 
@@ -246,6 +252,33 @@ router.put('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES)
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
     await logAudit(req, 'UPDATE', 'settings', req.params.id, { type: 'leave_round', status });
+
+    // #397: een ronde die opengaat is het moment waarop iedereen iets moet
+    // doen, en tot nu toe vertrok daar niets voor. Alleen bij de OVERGANG naar
+    // open: een PUT die enkel de naam wijzigt op een ronde die al open staat
+    // mag niet opnieuw iedereen mailen.
+    //
+    // Na de commit en buiten het antwoord om: een haperende mailservice mag
+    // het openen zelf niet laten mislukken.
+    const gingOpen = status === 'open' && huidige.rows[0].status !== 'open';
+    if (gingOpen) {
+      const ronde = result.rows[0];
+      (async () => {
+        try {
+          const [ontvangers, blokken] = await Promise.all([
+            ontvangersVanRonde(),
+            pool.query(
+              `SELECT name, start_date::text AS "startDate", end_date::text AS "endDate"
+                 FROM leave_round_blocks WHERE round_id = $1 ORDER BY sort_order, start_date`,
+              [req.params.id])
+          ]);
+          await verstuurRondeGeopend(ontvangers, ronde, blokken.rows);
+        } catch (e) {
+          console.error('[verlofmail] ronde geopend:', e.message);
+        }
+      })();
+    }
+
     res.json({ round: result.rows[0] });
   } catch (err) {
     console.error('Error updating leave round:', err);
@@ -602,6 +635,51 @@ router.post('/leave-rounds/:id/submit', requireAuth, async (req, res) => {
     console.error('Error submitting leave round:', err);
     res.status(500).json({ error: 'Server error' });
   }
+});
+
+/**
+ * #397: met de hand een herinnering sturen naar wie nog niet indiende.
+ *
+ * Naast de automatische herinnering, niet in plaats daarvan. De automatische
+ * hangt af van een server die net wakker is; deze knop werkt op het moment dat
+ * je hem indrukt, en dat is wat je nodig hebt als de deadline morgen is.
+ *
+ * Geen claim: dit is een bewuste handeling van een beheerder, en die mag
+ * desnoods twee keer herinneren. Het ANTWOORD zegt naar hoeveel mensen het
+ * ging, zodat op het scherm staat wat er gebeurd is.
+ */
+router.post('/leave-rounds/:id/remind', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
+  const rondeRes = await pool.query(
+    `SELECT id, name, deadline::text AS deadline, status FROM leave_rounds WHERE id = $1`,
+    [req.params.id]);
+  if (rondeRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
+  const ronde = rondeRes.rows[0];
+  if (ronde.status !== 'open') {
+    return res.status(409).json({
+      error: 'Een herinnering heeft alleen zin bij een ronde die openstaat.',
+      status: ronde.status
+    });
+  }
+
+  const ontvangers = await nietIngediend(ronde.id);
+  if (ontvangers.length === 0) {
+    return res.json({ verstuurd: 0, ontvangers: 0, iedereenIngediend: true });
+  }
+
+  const zonderMail = ontvangers.filter(o => !o.email).map(o => o.name);
+  const uit = await verstuurRondeHerinnering(ontvangers, ronde, {});
+  await logAudit(req, 'UPDATE', 'settings', req.params.id,
+    { type: 'leave_round_remind', ontvangers: ontvangers.length, verstuurd: uit.verstuurd });
+
+  res.json({
+    verstuurd: uit.verstuurd,
+    ontvangers: ontvangers.length,
+    // Wie geen e-mailadres heeft of de meldingen uitzette, krijgt niets. Dat
+    // hoort op het scherm te staan: anders denkt de beheerder dat iedereen
+    // bereikt is terwijl er stilletjes mensen ontbreken.
+    nietBereikt: ontvangers.length - uit.verstuurd,
+    zonderEmailadres: zonderMail
+  });
 });
 
 // Goedkeuren of afwijzen van één medewerker binnen een ronde

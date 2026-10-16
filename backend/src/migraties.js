@@ -916,6 +916,35 @@ const MIGRATIONS = [
         CREATE INDEX IF NOT EXISTS idx_geplande_overnames_datum
           ON geplande_overnames (ingangsdatum) WHERE status = 'gepland'`);
     }
+  },
+  {
+    name: '048_verstuurde_meldingen',
+    up: async (client) => {
+      // #397: de herinneringen (verlofronde, weekendverantwoordelijke) draaien
+      // als geplande taak. De server slaapt in na een kwartier stilte, dus die
+      // taak draait in de praktijk wanneer de eerste bezoeker hem wakker maakt
+      // — soms één keer, soms vaker op een dag.
+      //
+      // Deze tabel is wat dubbel versturen onmogelijk maakt. De taak CLAIMT
+      // eerst een regel en verstuurt daarna pas: een tweede run vindt de claim
+      // bezet en doet niets, en een crash halverwege leidt tot één gemiste mail
+      // in plaats van een stroom herhalingen.
+      //
+      // `sleutel` is wat de melding uniek maakt binnen zijn soort: voor een
+      // verlofherinnering '<rondeId>:<dagen-voor-deadline>', voor de
+      // verantwoordelijke de maandag van de week waar het over gaat.
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS verstuurde_meldingen (
+          id            SERIAL PRIMARY KEY,
+          soort         TEXT NOT NULL,
+          sleutel       TEXT NOT NULL,
+          verstuurd_op  TIMESTAMP NOT NULL DEFAULT NOW(),
+          aantal        INTEGER NOT NULL DEFAULT 0
+        )`);
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_verstuurde_meldingen_uniek
+          ON verstuurde_meldingen (soort, sleutel)`);
+    }
   }
 ];
 

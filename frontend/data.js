@@ -1889,113 +1889,44 @@ function getWeekendResponsible(weekStartDate) {
     return null;
 }
 
+// De REGELS staan in `verantwoordelijke-regels.js`, zodat de server dezelfde
+// vraag kan beantwoorden zonder een tweede kopie van deze logica. Hier blijft
+// alleen het vertalen van DataStore naar de invoer die die regels vragen.
+//
+// Let op de naam `schedulePattern`: dat is de GEMAPTE sleutel in DataStore, de
+// database noemt hem `schedule_pattern`. De regels vragen de velden daarom bij
+// naam, zodat een verkeerde sleutel niet stilletjes op de standaard terugvalt.
+function _verantwoordelijkeRegels() {
+    if (typeof module !== 'undefined' && module.exports) {
+        return require('./verantwoordelijke-regels.js');
+    }
+    return (typeof globalThis !== 'undefined' ? globalThis : window).VerantwoordelijkeRegels;
+}
+
+function _verantwoordelijkeContext(weekStartDate) {
+    return {
+        weekStart: typeof weekStartDate === 'string' ? weekStartDate : formatDateYYYYMMDD(weekStartDate),
+        medewerkers: DataStore.users || [],
+        rotatie: DataStore.settings.responsibleRotation || null,
+        vakantieperiodes: DataStore.settings.holidayPeriods || [],
+        roosterpatroon: DataStore.settings.schedulePattern || null,
+        referentieDatumTweewekelijks: DataStore.settings.biWeeklyReferenceDate || null
+    };
+}
+
 function getOrCalculateResponsible(weekStartDate) {
-    const manual = getWeekendResponsible(weekStartDate);
-    if (manual) return manual;
+    const regels = _verantwoordelijkeRegels();
+    if (!regels) return null;
+    return regels.bepaalVerantwoordelijke(_verantwoordelijkeContext(weekStartDate));
+}
 
-    // Vakantie: de verantwoordelijke staat PER WEEK en wordt in de
-    // roosterbouwer aangeduid. In de kerstvakantie doet de ene persoon week 1
-    // en een ander week 2.
-    //
-    // Een vakantieweek is daarmee UITGEPRAAT: staat er niemand voor die week,
-    // dan is er niemand. Hier viel de code vroeger terug op de gewone rotatie,
-    // en dan stond er tijdens de vakantie iemand die helemaal niet aan de beurt
-    // was — bovendien bleef die persoon staan zolang de vakantie duurde, want
-    // vakantieweken laten de rotatieteller niet oplopen. Dat leverde de twee
-    // klachten op die één en dezelfde gebeurtenis waren: "hij blijft hangen op
-    // X" en "de vakantieverantwoordelijke komt niet in de planning".
-    for (let i = 0; i < 7; i++) {
-        const day = new Date(parseDateOnly(weekStartDate));
-        day.setDate(day.getDate() + i);
-        const hp = getHolidayPeriod(day);
-        if (!hp) continue;
-
-        // Per-week responsible (weeklyResponsibles) takes priority over legacy single responsibleId
-        if (hp.weeklyResponsibles) {
-            const periodMonday = getMondayOfWeek(parseDateOnly(hp.startDate));
-            const thisMonday = getMondayOfWeek(day);
-            // Afronden, niet afkappen. Twee lokale middernachten liggen over de
-            // overgang naar zomertijd 6,958 dagen uit elkaar in plaats van 7,
-            // en Math.floor maakt daar een week te weinig van. Een vakantie die
-            // over de laatste zondag van maart loopt — de paasvakantie doet dat
-            // vaak — toonde dan in week 2 de persoon van week 1.
-            const weekNum = Math.round((thisMonday - periodMonday) / (7 * 86400000)) + 1;
-            const respId = hp.weeklyResponsibles[String(weekNum)];
-            const emp = respId ? getEmployee(respId) : null;
-            return emp || null;
-        }
-        if (hp.responsibleId) {
-            // Legacy: single responsible for entire period
-            return getEmployee(hp.responsibleId) || null;
-        }
-        return null;
-    }
-
-    // Je bent verantwoordelijk voor het WEEKEND, dus alleen in een week waarin
-    // het weekend open is. Is het weekend dicht, dan is er niemand aan de
-    // beurt en mag er ook niemand aangeduid staan.
-    //
-    // De planning, het beginscherm en het instellingenscherm filterden hier
-    // alle drie zelf al op, elk met hun eigen aanroep van
-    // isWeekendOrHolidayWeek. De regel hoort hier, anders kan een vierde
-    // aanroeper hem vergeten — wat het bewerkvenster in de instellingen dan
-    // ook deed. Een handmatige toewijzing hierboven blijft wél gelden: die is
-    // een bewuste keuze van de beheerder.
-    if (!isWeekendOrHolidayWeek(weekStartDate)) return null;
-
-    const rotation = DataStore.settings.responsibleRotation;
-    if (!rotation) return null;
-
-    // Date-aware: if effectiveFrom is set and target date is before it, use previousRotation
-    let activeRotation = rotation;
-    if (rotation.effectiveFrom && rotation.previousRotation) {
-        const targetDate = new Date(weekStartDate);
-        targetDate.setHours(0, 0, 0, 0);
-        const effectiveDate = parseDateOnly(rotation.effectiveFrom);
-        if (targetDate < effectiveDate) {
-            activeRotation = { ...rotation, ...rotation.previousRotation };
-        }
-    }
-
-    if (!activeRotation?.rotationStart || !activeRotation?.rotationStartEmployee) {
-        return null;
-    }
-
-    const eligible = getEligibleEmployeesForResponsible();
-    if (eligible.length === 0) return null;
-
-    const startEmployeeId = String(activeRotation.rotationStartEmployee);
-    const startIndex = eligible.findIndex(e => String(e.id) === startEmployeeId);
-    if (startIndex === -1) return eligible[0];
-
-    const startDate = parseDateOnly(activeRotation.rotationStart);
-    startDate.setHours(0, 0, 0, 0);
-    const targetDate = parseDateOnly(weekStartDate);
-    targetDate.setHours(0, 0, 0, 0);
-
-    if (targetDate < startDate) return null;
-
-    let count = 0;
-    const current = new Date(startDate);
-
-    while (current.getTime() < targetDate.getTime()) {
-        // Skip vakantieweken in rotatie count — alleen open weekenden buiten vakantie tellen mee
-        const inVakantie = (function() {
-            for (let i = 0; i < 7; i++) {
-                const day = new Date(current);
-                day.setDate(current.getDate() + i);
-                if (getHolidayPeriod(day)) return true;
-            }
-            return false;
-        })();
-        if (!inVakantie && isWeekendOrHolidayWeek(current)) {
-            count++;
-        }
-        current.setDate(current.getDate() + 7);
-    }
-
-    const currentIndex = (startIndex + count) % eligible.length;
-    return eligible[currentIndex];
+// Hetzelfde antwoord, maar mét de reden. Gebruikt waar een scherm of een mail
+// moet kunnen zeggen waaróm er niemand is: gesloten weekend, vakantieweek
+// zonder aanduiding, of een rotatie die nog niet begonnen is.
+function verklaarVerantwoordelijke(weekStartDate) {
+    const regels = _verantwoordelijkeRegels();
+    if (!regels) return { persoon: null, reden: 'regels-niet-geladen' };
+    return regels.uitleg(_verantwoordelijkeContext(weekStartDate));
 }
 
 async function setRotationStart(startDate, employeeId) {
@@ -2430,6 +2361,7 @@ if (typeof module !== 'undefined' && module.exports) {
     getEligibleEmployeesForResponsible,
     isWeekendOrHolidayWeek,
     getOrCalculateResponsible,
+    verklaarVerantwoordelijke,
     replaceEmployee,
     refreshDrafts
   };
