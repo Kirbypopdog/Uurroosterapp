@@ -8712,6 +8712,12 @@ body[data-view-mode="day"] .timeline-day-cell {
 .upcoming-item-clickable:hover .upcoming-edit-icon {
     opacity: 0.6;
 }
+/* #399: een vakantieweek is hier alleen-lezen — het concept is de waarheid.
+   Het slotje staat er permanent, zacht: het legt uit waarom er niets gebeurt
+   als je klikt, in plaats van een potlood te tonen dat niets doet. */
+.upcoming-edit-icon-uit {
+    opacity: 0.35;
+}
 
 /* Weekend responsible picker modal */
 .weekend-picker-options {

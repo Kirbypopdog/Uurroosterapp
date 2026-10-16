@@ -3011,18 +3011,56 @@ function renderUpcomingResponsibles() {
             if (responsible) {
                 const teamColor = DataStore.settings.teams[responsible.mainTeam]?.color || '#6b7280';
                 const responsibleName = escapeHtml(responsible.name);
-                const weekHoliday = typeof getHolidayPeriod === 'function' ? getHolidayPeriod(weekendSat) : null;
-                const isVakantieResp = weekHoliday && weekHoliday.responsibleId;
-                const badge = isVakantieResp ? ' <span class="upcoming-manual-badge shift-badge-upcoming">vakantie</span>'
+
+                // #399: hier stond `weekHoliday.responsibleId` — het OUDE veld
+                // met één persoon voor een hele vakantie. De roosterbouwer vult
+                // dat nooit; die zet `weeklyResponsibles` per week. De badge
+                // verscheen dus nooit, en een vakantieverantwoordelijke was in
+                // dit lijstje niet te onderscheiden van een uitkomst van de
+                // rotatie. `verklaarVerantwoordelijke()` zegt het gewoon.
+                const uitleg = typeof verklaarVerantwoordelijke === 'function'
+                    ? verklaarVerantwoordelijke(checkDate) : { reden: null };
+                const isVakantieWeek = uitleg.reden === 'vakantieweek';
+
+                // #399: een vakantieverantwoordelijke is er voor de HELE week,
+                // niet voor het weekend. Die onder "2 jan – 3 jan" zetten
+                // terwijl je in de bouwer "28 dec – 3 jan" aanduidde, leest als
+                // een andere week — en dat was ook precies de verwarring.
+                const weekMa = new Date(checkDate);
+                const weekZo = new Date(checkDate);
+                weekZo.setDate(weekZo.getDate() + 6);
+                const datums = isVakantieWeek
+                    ? `${weekMa.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })} – ${weekZo.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' })}`
+                    : dateDisplay;
+
+                const badge = isVakantieWeek
+                    ? ` <span class="upcoming-manual-badge shift-badge-upcoming">${escapeHtml(uitleg.vakantie || 'vakantie')}${uitleg.vakantieWeek ? ' wk ' + uitleg.vakantieWeek : ''}</span>`
                     : isManual ? ' <span class="upcoming-manual-badge">handmatig</span>' : '';
-                html += `
+
+                // #399: tijdens een vakantie is het CONCEPT de waarheid. Klikken
+                // schreef hier een handmatige toewijzing weg, en die wint van de
+                // vakantieweek — je overschreef dus stilletjes wat in de
+                // roosterbouwer stond, zonder dat iets dat zei. Een vakantieweek
+                // is hier daarom alleen-lezen, met de verwijzing erbij.
+                if (isVakantieWeek) {
+                    html += `
+                <div class="upcoming-item" data-tooltip="Aanpassen doe je in Rooster bouwen, bij het vakantieconcept">
+                    <span class="upcoming-date">${datums}</span>
+                    <span class="upcoming-name" style="border-left: 3px solid ${teamColor}; padding-left: 8px;">
+                        ${responsibleName}${badge}
+                    </span>
+                    <span class="upcoming-edit-icon upcoming-edit-icon-uit">${IconHelper.html(ICONS.lock, 'xs')}</span>
+                </div>`;
+                } else {
+                    html += `
                 <div class="upcoming-item upcoming-item-clickable" data-monday="${mondayKey}">
-                    <span class="upcoming-date">${dateDisplay}</span>
+                    <span class="upcoming-date">${datums}</span>
                     <span class="upcoming-name" style="border-left: 3px solid ${teamColor}; padding-left: 8px;">
                         ${responsibleName}${badge}
                     </span>
                     <span class="upcoming-edit-icon">${IconHelper.html(ICONS.edit, 'xs')}</span>
                 </div>`;
+                }
                 count++;
             }
         }
