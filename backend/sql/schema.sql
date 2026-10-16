@@ -341,6 +341,21 @@ BEGIN
   END LOOP;
 END $$;
 
+-- #397: wat de geplande taken al verstuurd hebben. De taak claimt hier eerst
+-- een regel en verstuurt daarna pas, zodat een tweede run op dezelfde dag --
+-- en de server wordt vaak meermaals per dag wakker -- niets herhaalt.
+CREATE TABLE IF NOT EXISTS verstuurde_meldingen (
+  id            SERIAL PRIMARY KEY,
+  soort         TEXT NOT NULL,
+  sleutel       TEXT NOT NULL,
+  verstuurd_op  TIMESTAMP NOT NULL DEFAULT NOW(),
+  aantal        INTEGER NOT NULL DEFAULT 0
+);
+-- Pal onder de tabel, niet bij de andere indexen bovenaan: dit bestand wordt
+-- van boven naar beneden uitgevoerd, en een index op een tabel die nog niet
+-- bestaat laat het hele schema struikelen.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_verstuurde_meldingen_uniek ON verstuurde_meldingen (soort, sleutel);
+
 -- Migration tracking table (used by runMigrations() in server.js)
 CREATE TABLE IF NOT EXISTS migrations (
   id SERIAL PRIMARY KEY,

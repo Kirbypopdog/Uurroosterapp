@@ -1359,7 +1359,11 @@ function renderSettingsEmail(container) {
             takeover_accepted: true,
             request_cancelled: true,
             welcome: true,
-            password_reset: true
+            password_reset: true,
+            leave_round_opened: true,
+            leave_round_reminder: true,
+            responsible_reminder: true,
+            responsible_missing: true
         }
     };
 
@@ -1374,7 +1378,13 @@ function renderSettingsEmail(container) {
         { key: 'welcome', label: 'Welkomstmail', desc: 'Nieuwe medewerker ontvangt zijn inloggegevens per e-mail' },
         // #323: de resetmail hing aan de schakelaar hierboven. Wie de
         // welkomstmail uitzette, zette daarmee ongemerkt ook dit bericht uit.
-        { key: 'password_reset', label: 'Wachtwoord gereset', desc: 'Medewerker krijgt bericht dat een beheerder het wachtwoord heeft gereset' }
+        { key: 'password_reset', label: 'Wachtwoord gereset', desc: 'Medewerker krijgt bericht dat een beheerder het wachtwoord heeft gereset' },
+        // #397: verlofplanning en verantwoordelijken. Elk type staat apart,
+        // zodat de herinneringen uit kunnen zonder de aankondiging zelf.
+        { key: 'leave_round_opened', label: 'Verlofronde geopend', desc: 'Iedereen die meedraait in het rooster krijgt bericht wanneer een ronde opengaat' },
+        { key: 'leave_round_reminder', label: 'Herinnering verlofronde', desc: 'Wie nog niet indiende krijgt een herinnering — automatisch vóór de deadline en via de knop bij de ronde' },
+        { key: 'responsible_reminder', label: 'Herinnering verantwoordelijke', desc: 'De weekend- of vakantieverantwoordelijke krijgt op maandag bericht over de week erna' },
+        { key: 'responsible_missing', label: 'Geen verantwoordelijke aangeduid', desc: 'Beheerders krijgen bericht wanneer er voor een open weekend of vakantieweek niemand aangeduid staat' }
     ];
 
     const typeToggles = emailTypes.map(t => `

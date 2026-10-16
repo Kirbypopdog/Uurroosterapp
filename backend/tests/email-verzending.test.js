@@ -192,6 +192,105 @@ describe('#323 eigen schakelaar voor de resetmail', () => {
   });
 });
 
+// ===== #397: verlofplanning en verantwoordelijken =====
+
+describe('#397 de nieuwe mails hebben elk hun eigen schakelaar', () => {
+  beforeEach(() => { leeg(); instellingen.waarde = null; });
+  afterEach(() => { instellingen.waarde = null; });
+
+  const RONDE = { id: 'r1', name: 'Schooljaar 2026-2027', deadline: '2026-11-15' };
+  const BLOKKEN = [{ name: 'Herfstvakantie', startDate: '2026-10-26', endDate: '2026-11-01' }];
+  const PLOEG = [
+    { id: 10, name: 'Bryan', email: 'b@test.be', email_notifications_enabled: true },
+    { id: 11, name: 'Chelsea', email: 'c@test.be', email_notifications_enabled: true }
+  ];
+  const WEEK = { weekStart: '2026-10-19', weekEind: '2026-10-25', reden: 'rotatie' };
+
+  test('ronde geopend gaat naar iedereen die meedraait', async () => {
+    instellingen.waarde = { globalEnabled: true, types: { leave_round_opened: true } };
+    const uit = await email.notifyLeaveRoundOpened(PLOEG, RONDE, BLOKKEN);
+    await laatBezinken();
+    expect(uit.verstuurd).toBe(2);
+    expect(verzonden[0].subject).toContain('Schooljaar 2026-2027');
+  });
+
+  test('de aankondiging uitzetten laat de herinnering staan', async () => {
+    instellingen.waarde = { globalEnabled: true, types: { leave_round_opened: false, leave_round_reminder: true } };
+    await email.notifyLeaveRoundOpened(PLOEG, RONDE, BLOKKEN);
+    await laatBezinken();
+    expect(verzonden).toHaveLength(0);
+
+    const uit = await email.notifyLeaveRoundReminder(PLOEG, RONDE, { dagenTot: 2 });
+    await laatBezinken();
+    expect(uit.verstuurd).toBe(2);
+  });
+
+  // Wie de meldingen uitzette, hoort ook deze niet te krijgen. verstuurReeks
+  // filtert op de SNAKE_CASE naam; een ontvanger die alleen de camelCase
+  // variant draagt glipt er stil doorheen.
+  test('wie de meldingen uitzette krijgt niets', async () => {
+    instellingen.waarde = { globalEnabled: true, types: { leave_round_reminder: true } };
+    const uit = await email.notifyLeaveRoundReminder(
+      [{ id: 10, name: 'Bryan', email: 'b@test.be', email_notifications_enabled: false }],
+      RONDE, { dagenTot: 2 });
+    await laatBezinken();
+    expect(uit.verstuurd).toBe(0);
+    expect(verzonden).toHaveLength(0);
+  });
+
+  test('de herinnering noemt hoeveel dagen er nog zijn', async () => {
+    instellingen.waarde = { globalEnabled: true, types: { leave_round_reminder: true } };
+    await email.notifyLeaveRoundReminder(PLOEG, RONDE, { dagenTot: 1 });
+    await laatBezinken();
+    expect(verzonden[0].html).toContain('Nog <strong>1 dag</strong>');
+  });
+
+  test('op de dag zelf staat dat er ook zo in', async () => {
+    instellingen.waarde = { globalEnabled: true, types: { leave_round_reminder: true } };
+    await email.notifyLeaveRoundReminder(PLOEG, RONDE, { dagenTot: 0 });
+    await laatBezinken();
+    expect(verzonden[0].html).toContain('vandaag');
+  });
+
+  test('de verantwoordelijke krijgt zijn week voluit, niet als ISO-datum', async () => {
+    instellingen.waarde = { globalEnabled: true, types: { responsible_reminder: true } };
+    await email.notifyResponsibleReminder(PLOEG[0], WEEK);
+    await laatBezinken();
+    expect(verzonden).toHaveLength(1);
+    expect(verzonden[0].html).toContain('19 oktober 2026');
+    expect(verzonden[0].html).not.toContain('2026-10-19');
+  });
+
+  test('een vakantieweek noemt de vakantie bij naam', async () => {
+    instellingen.waarde = { globalEnabled: true, types: { responsible_reminder: true } };
+    await email.notifyResponsibleReminder(PLOEG[0],
+      Object.assign({}, WEEK, { reden: 'vakantieweek', vakantie: 'Herfstvakantie', vakantieWeek: 1 }));
+    await laatBezinken();
+    expect(verzonden[0].subject).toContain('Vakantieverantwoordelijke');
+    expect(verzonden[0].html).toContain('Herfstvakantie');
+  });
+
+  test('de melding dat er niemand is, zegt waaróm', async () => {
+    instellingen.waarde = { globalEnabled: true, types: { responsible_missing: true } };
+    await email.notifyResponsibleMissing(PLOEG,
+      Object.assign({}, WEEK, { reden: 'vakantieweek-niemand-aangeduid', vakantie: 'Herfstvakantie' }));
+    await laatBezinken();
+    expect(verzonden[0].html).toContain('roosterbouwer');
+  });
+
+  test('de globale schakelaar uit houdt alle vier tegen', async () => {
+    instellingen.waarde = { globalEnabled: false, types: {
+      leave_round_opened: true, leave_round_reminder: true,
+      responsible_reminder: true, responsible_missing: true } };
+    await email.notifyLeaveRoundOpened(PLOEG, RONDE, BLOKKEN);
+    await email.notifyLeaveRoundReminder(PLOEG, RONDE, {});
+    await email.notifyResponsibleReminder(PLOEG[0], WEEK);
+    await email.notifyResponsibleMissing(PLOEG, WEEK);
+    await laatBezinken();
+    expect(verzonden).toHaveLength(0);
+  });
+});
+
 // ===== #322: eerlijk melden of er iets vertrekt =====
 
 describe('#322 notifyPasswordReset meldt of er een mail vertrekt', () => {

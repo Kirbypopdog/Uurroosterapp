@@ -90,6 +90,7 @@ const { getMonday, formatDateYYYYMMDD, parseLocalDate, getBelgianPublicHolidays,
 // ===== VERSIONED MIGRATIONS =====  (verhuisd naar migraties.js, #157)
 const { MIGRATIONS, runMigrations } = require('./migraties');
 const { voerGeplandeOvernamesUit } = require('./helpers/overnames');
+const { voerHerinneringenUit } = require('./helpers/herinneringen');
 
 async function ensureBootstrapData() {
   const adminEmail = process.env.ADMIN_EMAIL;
@@ -388,6 +389,13 @@ if (process.env.NODE_ENV !== 'test') {
       // bij het opstarten te doen: een server die dagen blijft draaien zou hem
       // anders missen. Elk uur is ruim genoeg voor een grens van een hele dag.
       setInterval(() => { voerGeplandeOvernamesUit().catch(() => {}); }, 60 * 60 * 1000).unref();
+
+      // #397: de herinneringen rijden mee op dezelfde twee momenten, en om
+      // dezelfde reden. Ze draaien NA het luisteren en niet ervoor: een
+      // haperende mailservice mag het opstarten niet ophouden, terwijl een
+      // mislukte migratie dat juist wél moet.
+      voerHerinneringenUit().catch(() => {});
+      setInterval(() => { voerHerinneringenUit().catch(() => {}); }, 60 * 60 * 1000).unref();
     })
     .catch(err => {
       // #193: hier stond een .catch die alleen logde, gevolgd door een
