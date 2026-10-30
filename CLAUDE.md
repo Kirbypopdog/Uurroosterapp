@@ -434,14 +434,31 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   verwijdert. De markering hoort dus op het BLOK, niet op de celachtergrond —
   die ligt eronder.
 
-  Het label (`.absent-label`) neemt de REGEL van de activiteitenchips over in
-  plaats van er een regel bij te vragen: het blok is te laag voor een derde
-  regel (#163), en activiteiten op een dag dat iemand afwezig is zijn toch niet
-  meer aan de orde. Nagemeten op 1440px in weekweergave: "Verlof" neemt 33px op
-  een blok van 63px, niets wordt afgeknipt en het blok loopt niet over. Contrast
-  5,9 in de lichte modus en 6,0 in de donkere (eis 4,5). Onder de 2,5 uur
-  verdwijnt het label, net als de tijd (#147); dan blijft de rode rand het
-  signaal.
+  Het type staat SCHUIN op de achtergrond (`.absent-watermerk`), en het blok
+  krijgt een EIGEN achtergrond uit de alert-tokens. Twee eerdere pogingen waren
+  fout, en allebei om een reden die het onthouden waard is:
+
+  1. **Een rood chipje op de regel van de activiteiten.** Qua vorm, grootte én
+     plaats niet te onderscheiden van een activiteitenchip, dus "Verlof" las als
+     nóg een activiteit. Een markering die voor iets anders wordt aangezien is
+     erger dan geen markering.
+  2. **Het woord schuin maar DOORZICHTIG over de teamkleur.** Dezelfde val als
+     bij #163 met de chips: onder het blok ligt de teamkleur, en die verschilt
+     per team (blauw, paars, groen, roze, amber). Op het ene team las je het
+     woord, op het andere niet. Daarom vervangt een afwezig blok zijn
+     achtergrond; de teamkleur blijft in de volle streep links staan.
+
+  **Watermerk en tijd hebben dezelfde kleur**, dus waar ze kruisen vechten ze.
+  Nagerekend: élke dekking die het watermerk zichtbaar maakt (vanaf ~0,45) duwt
+  de tijd eroverheen onder de 4,5. Dat is met dekking niet op te lossen — de
+  tijd krijgt daarom een halo in de kleur van de blokachtergrond. Precies wat de
+  oude, nooit gebruikte `.shift-absent-conflict` met `text-shadow: 0 0 1px
+  white` al deed.
+
+  Nagemeten op 1440px in weekweergave: het langste woord ("Overuren", 57px) past
+  met 8px links en 6px rechts over in een blok van 71px; niets wordt afgeknipt.
+  Onder de 2,5 uur verdwijnt het watermerk, net als de tijd (#147); dan blijft
+  de rode rand het signaal.
 
   In de CSS staan nog twee stukken DODE stijl uit een oudere planner:
   `.absent-badge` en de hele `.shift-absent-conflict`-behandeling met rode

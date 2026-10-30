@@ -5416,38 +5416,77 @@ body[data-view-mode="day"] .timeline-day-cell {
     text-align: left;
 }
 
-/* #401: het type afwezigheid in het blok zelf.
-   Het stond alleen in de tooltip, dus je moest met de muis op een dienst gaan
-   staan om te zien dat die collega verlof had. Daardoor viel het niemand op.
+/* #401: het type afwezigheid SCHUIN op de achtergrond van het dienstblok.
 
-   Het label neemt de REGEL van de activiteitenchips over in plaats van er een
-   regel bij te vragen: het blok is maar ~32px hoog (#163) en er is geen derde
-   regel vrij. Dat kan ook: activiteiten op een dag dat iemand afwezig is, zijn
-   toch niet meer aan de orde — de conflictmelding is dan het enige dat telt.
+   Eerste poging was een rood chipje op de regel van de activiteiten. Fout: qua
+   vorm, grootte én plaats niet te onderscheiden van een activiteitenchip, dus
+   "Verlof" las als nóg een activiteit. Een markering die voor iets anders wordt
+   aangezien is erger dan geen markering.
 
-   Kleuren uit de --alert-error-tokens, dus ze slaan mee om in donkere modus. */
-.absent-label {
-    max-width: 100%;
-    font-size: 9px;
-    font-weight: 700;
-    line-height: 1.3;
-    padding: 0 4px;
-    border-radius: 3px;
-    background: var(--alert-error-bg);
-    color: var(--alert-error-text);
-    box-shadow: inset 0 0 0 1px var(--alert-error-border);
-    /* Net als bij de tijd (#208): links uitlijnen en een beletselteken, zodat
-       een te lang label aan ÉÉN kant afgeknipt wordt en je het begin leest. */
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex-shrink: 0;
+   Tweede poging was het woord schuin, doorzichtig, over de teamkleur heen. Ook
+   fout, en om de reden die bij #163 al beschreven staat: onder het blok ligt de
+   teamkleur, en die verschilt per team (blauw, paars, groen, roze, amber). Een
+   doorzichtige laag heeft daar geen voorspelbaar contrast — op het ene team las
+   je het woord, op het andere niet.
+
+   Daarom krijgt een blok met een afwezigheid zijn EIGEN achtergrond, uit de
+   alert-tokens. Dan is de ondergrond bekend en klopt het contrast voor elk
+   team. De teamkleur blijft staan waar hij het hardst nodig is: de volle streep
+   langs de linkerkant (#163). */
+.timeline-block.absent-conflict,
+.timeline-block.team-vlot1.absent-conflict,
+.timeline-block.team-vlot2.absent-conflict,
+.timeline-block.team-cargo.absent-conflict,
+.timeline-block.team-overkoepelend.absent-conflict,
+.timeline-block.team-jobstudent.absent-conflict {
+    background: var(--alert-error-bg) !important;
+    color: var(--alert-error-text) !important;
 }
 
-/* Onder de 2,5 uur verdwijnt de tijd al (#147) en is er voor tekst geen ruimte.
-   De rode rand om het blok blijft dan het signaal, en de tooltip de uitleg. */
-.timeline-block--xs .absent-label {
+.absent-watermerk {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: rotate(-24deg);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    color: var(--alert-error-text);
+    /* Het watermerk en de tijd hebben dezelfde kleur, dus waar ze kruisen
+       vechten ze om leesbaarheid. Nagerekend: elke dekking die het watermerk
+       zichtbaar maakt (vanaf ~0,45) duwt de tijd eróverheen onder de 4,5. De
+       dekking oplossen kan dus niet — de tijd krijgt hieronder een halo, zodat
+       hij van zijn ondergrond loskomt. Precies wat de oude, nooit gebruikte
+       `.shift-absent-conflict` met `text-shadow: 0 0 1px white` al deed. */
+    opacity: 0.55;
+    white-space: nowrap;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+/* De halo. In de kleur van de blokachtergrond, zodat de tijd leesbaar blijft
+   waar het watermerk eronder doorloopt, zonder dat je de halo zelf ziet. */
+.timeline-block.absent-conflict .block-time {
+    text-shadow:
+        0 0 3px var(--alert-error-bg),
+        0 0 2px var(--alert-error-bg),
+        0 0 1px var(--alert-error-bg);
+}
+
+/* De inhoud blijft erbovenop. .timeline-block is zelf position:absolute, dus
+   deze twee hebben een eigen positiecontext nodig om te kunnen stapelen. */
+.timeline-block .block-time,
+.timeline-block .activity-chips-row {
+    position: relative;
+    z-index: 1;
+}
+
+/* Onder de 2,5 uur is het blok ~20px breed; daar past geen woord meer, ook niet
+   schuin. De tijd verdwijnt daar al (#147) en de rode rand blijft het signaal. */
+.timeline-block--xs .absent-watermerk {
     display: none;
 }
 

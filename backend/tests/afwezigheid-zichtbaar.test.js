@@ -7,9 +7,17 @@
 // staan om te weten wat er aan de hand was. En dat is de normale situatie: van
 // de 29 verlofdagen in productie staat er op 28 nog gewoon een dienst.
 //
-// Het label staat nu in het blok zelf, op de regel van de activiteitenchips.
-// Die ruilen is bewust: het blok is te laag voor een derde regel (#163), en
-// activiteiten op een dag dat iemand afwezig is zijn toch niet meer aan de orde.
+// Het type staat nu SCHUIN op de achtergrond van het blok, en het blok krijgt
+// een eigen achtergrond uit de alert-tokens.
+//
+// Twee eerdere pogingen waren fout, en allebei om een reden die de moeite is om
+// te onthouden:
+//   1. een rood chipje op de regel van de activiteiten — qua vorm, grootte én
+//      plaats niet te onderscheiden van een activiteitenchip, dus "Verlof" las
+//      als nóg een activiteit;
+//   2. het woord schuin maar DOORZICHTIG over de teamkleur — die verschilt per
+//      team (blauw, paars, groen, roze, amber), dus het contrast was per team
+//      anders. Dezelfde val als bij #163 met de activiteitenchips.
 
 const fs = require('fs');
 const path = require('path');
@@ -56,15 +64,22 @@ describe('het label van een afwezigheidstype', () => {
 describe('wat de planner rendert', () => {
   const BRON = fs.readFileSync(frontend('app-planner.js'), 'utf8');
 
-  test('het label staat in het blok, in beide weergaven', () => {
-    const treffers = BRON.match(/class="absent-label"/g) || [];
+  test('het watermerk staat in het blok, in beide weergaven', () => {
+    const treffers = BRON.match(/class="absent-watermerk"/g) || [];
     expect(treffers).toHaveLength(2); // week- én dagweergave
   });
 
-  // Het label neemt de plek van de chips in; staan ze er allebei, dan wordt het
-  // blok te hoog voor zijn inhoud.
-  test('het label vervangt de activiteitenchips en komt er niet bij', () => {
-    const treffers = BRON.match(/isAbsent\s*\n?\s*\?\s*`<span class="absent-label">/g) || [];
+  // De activiteitenchips blijven staan: het watermerk ligt eronder en vraagt
+  // dus geen eigen regel. Dat was bij het afgekeurde chipje wél zo.
+  test('de activiteitenchips blijven staan bij een afwezigheid', () => {
+    const treffers = BRON.match(/\$\{actChips\}/g) || [];
+    expect(treffers.length).toBe(2);
+  });
+
+  // Het is een decoratieve herhaling van wat de tooltip al zegt; een
+  // schermlezer hoort het niet twee keer voor te lezen.
+  test('het watermerk is verborgen voor een schermlezer', () => {
+    const treffers = BRON.match(/class="absent-watermerk" aria-hidden="true"/g) || [];
     expect(treffers.length).toBe(2);
   });
 
@@ -77,31 +92,44 @@ describe('wat de planner rendert', () => {
   });
 });
 
-describe('de opmaak van het label', () => {
+describe('de opmaak van het watermerk', () => {
   const CSS = fs.readFileSync(frontend('styles.css'), 'utf8');
-  const blok = CSS.match(/\.absent-label \{[\s\S]*?\n\}/);
+  const blok = CSS.match(/\.absent-watermerk \{[\s\S]*?\n\}/);
+  const zonderUitleg = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '');
 
-  test('bestaat', () => {
+  test('bestaat en staat schuin', () => {
     expect(blok).not.toBeNull();
+    expect(blok[0]).toMatch(/transform:\s*rotate\(-?\d+deg\)/);
   });
 
   // CLAUDE.md: gebruik de tokens, nooit een hexwaarde — anders werkt het maar
   // in één thema.
   test('gebruikt de alert-tokens en geen hexkleuren', () => {
-    const zonderUitleg = blok[0].replace(/\/\*[\s\S]*?\*\//g, '');
-    expect(zonderUitleg).toContain('var(--alert-error-bg)');
-    expect(zonderUitleg).toContain('var(--alert-error-text)');
-    expect(zonderUitleg).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(zonderUitleg(blok[0])).toContain('var(--alert-error-text)');
+    expect(zonderUitleg(blok[0])).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 
-  // #163: de tijd past op 9px en niet op 10. Groter maken knipt tekst af.
-  test('houdt zich aan de 9px van het dienstblok', () => {
-    expect(blok[0]).toMatch(/font-size:\s*9px/);
+  // De kern van de tweede afgekeurde poging: onder het blok ligt de TEAMkleur,
+  // en die verschilt per team. Een afwezig blok krijgt daarom zijn eigen
+  // achtergrond, zodat het contrast van het watermerk voor elk team klopt.
+  test('een afwezig blok krijgt een eigen achtergrond, los van het team', () => {
+    const regel = CSS.match(/\.timeline-block\.team-vlot1\.absent-conflict[\s\S]*?\n\}/);
+    expect(regel).not.toBeNull();
+    expect(regel[0]).toContain('var(--alert-error-bg)');
   });
 
-  // Onder de 2,5 uur verdwijnt de tijd al (#147); dan is er ook voor het label
-  // geen ruimte en blijft de rode rand het signaal.
+  // Watermerk en tijd hebben dezelfde kleur. Nagerekend: élke dekking die het
+  // watermerk zichtbaar maakt, duwt de tijd eroverheen onder de 4,5. De halo
+  // maakt de tijd los van zijn ondergrond.
+  test('de tijd krijgt een halo zodat hij over het watermerk leesbaar blijft', () => {
+    const regel = CSS.match(/\.timeline-block\.absent-conflict \.block-time \{[\s\S]*?\n\}/);
+    expect(regel).not.toBeNull();
+    expect(regel[0]).toMatch(/text-shadow:[\s\S]*var\(--alert-error-bg\)/);
+  });
+
+  // Onder de 2,5 uur verdwijnt de tijd al (#147); dan past er ook geen woord
+  // meer, ook niet schuin, en blijft de rode rand het signaal.
   test('verdwijnt op het smalste blok', () => {
-    expect(CSS).toMatch(/\.timeline-block--xs \.absent-label \{\s*display:\s*none/);
+    expect(CSS).toMatch(/\.timeline-block--xs \.absent-watermerk \{\s*display:\s*none/);
   });
 });

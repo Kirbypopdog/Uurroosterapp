@@ -1140,10 +1140,11 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                <span class="block-time">${timeLabel}</span>
                                 ${isAbsent
-                                    ? `<span class="absent-label">${escapeHtml(afwezigheidsLabel(availability.type))}</span>`
-                                    : actChips}
+                                    ? `<span class="absent-watermerk" aria-hidden="true">${escapeHtml(afwezigheidsLabel(availability.type))}</span>`
+                                    : ''}
+                                <span class="block-time">${timeLabel}</span>
+                                ${actChips}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -1397,10 +1398,11 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                <span class="block-time">${timeLabel}</span>
                                 ${isAbsent
-                                    ? `<span class="absent-label">${escapeHtml(afwezigheidsLabel(availability.type))}</span>`
-                                    : actChips}
+                                    ? `<span class="absent-watermerk" aria-hidden="true">${escapeHtml(afwezigheidsLabel(availability.type))}</span>`
+                                    : ''}
+                                <span class="block-time">${timeLabel}</span>
+                                ${actChips}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
