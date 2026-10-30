@@ -13,16 +13,24 @@
 // woensdag"). Die stond daar als eigen lijstje, zonder 'vrij', waardoor de
 // tekst voor 'vrij' terugviel op "afwezig is" (#314).
 //
-// `teltAlsAfwezig` markeert of het type een echte afwezigheid is. 'vrij' is
-// puur informatief en levert nergens een conflict op (#173); validateAvailability
-// sloot het al uit, de drag-handler niet.
+// `teltAlsAfwezig` markeert of het type een echte afwezigheid is.
+//
+// #400: 'vrij' stond hier op `false`, naar de oorspronkelijke bedoeling van
+// #173 ("puur informatief, verlaagt de bezetting niet"). Maar #204 heeft 'vrij'
+// toegevoegd aan de AFWEZIG-lijst van de bezettingsberekening, en terecht: een
+// vaste vrije dag betekent dat die persoon niet op de vloer staat.
+//
+// Die twee helften spraken elkaar daarna tegen. Je kon zonder één waarschuwing
+// een dienst op een vrije dag zetten, en die dienst telde vervolgens NIET mee
+// in de bezetting — een dienst die er staat maar niet meetelt, en een gat in de
+// bezetting dat niemand meldt. De vlag volgt nu wat de bezetting al deed.
 const ABSENCE_TYPES = {
     'verlof':   { label: 'Verlof',   keuze: 'Verlof',           werkwoord: 'verlof heeft',    teltAlsAfwezig: true },
     'ziek':     { label: 'Ziekte',   keuze: 'Ziekte',           werkwoord: 'ziek is',         teltAlsAfwezig: true },
     'overuren': { label: 'Overuren', keuze: 'Overuren opnemen', werkwoord: 'overuren opneemt', teltAlsAfwezig: true },
     'vorming':  { label: 'Vorming',  keuze: 'Vorming',          werkwoord: 'vorming heeft',   teltAlsAfwezig: true },
     'andere':   { label: 'Andere',   keuze: 'Andere',           werkwoord: 'afwezig is',      teltAlsAfwezig: true },
-    'vrij':     { label: 'Vrij',     keuze: 'Vrij',             werkwoord: 'vrij is',         teltAlsAfwezig: false }
+    'vrij':     { label: 'Vrij',     keuze: 'Vrij',             werkwoord: 'vrij is',         teltAlsAfwezig: true }
 };
 
 // Is dit type een echte afwezigheid, of alleen een markering? Onbekende types
@@ -994,3 +1002,9 @@ function meldOvernameAnnulaties(uitkomst) {
     );
 }
 
+// Zodat de afwezigheidstypes en `teltAlsAfwezigheid` in Node getest kunnen
+// worden (#400). In de browser bestaat `module` niet, dus dit heeft daar geen
+// effect.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { ABSENCE_TYPES, teltAlsAfwezigheid };
+}

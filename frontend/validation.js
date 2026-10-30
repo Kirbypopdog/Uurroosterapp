@@ -301,8 +301,17 @@ function validateAvailability(employeeId, date, startTime = null, endTime = null
         return { warnings };
     }
 
-    // vrij is puur informatief — geen conflict met een shift (#173)
-    if (absence.type === 'vrij') {
+    // #400: hier stond een eigen uitzondering op 'vrij'. Of een type als
+    // afwezigheid telt staat in ABSENCE_TYPES (app-availability.js), en dat is
+    // de enige plek waar dat hoort. Een tweede oordeel hier liep uiteen met de
+    // bezettingsberekening, en zo ontstond de tegenstrijdigheid.
+    //
+    // Is die functie er niet (de Node-tests laden dit bestand los), dan telt het
+    // als afwezigheid: de veilige kant, er komt hooguit een waarschuwing te veel.
+    const teltMee = typeof teltAlsAfwezigheid === 'function'
+        ? teltAlsAfwezigheid(absence.type)
+        : true;
+    if (!teltMee) {
         return { warnings };
     }
 
@@ -312,7 +321,8 @@ function validateAvailability(employeeId, date, startTime = null, endTime = null
         'ziek': 'Ziekte',
         'overuren': 'Overuren opnemen',
         'vorming': 'Vorming/Opleiding',
-        'andere': 'Andere'
+        'andere': 'Andere',
+        'vrij': 'Vrij'
     };
 
     const absenceType = absenceLabels[absence.type] || 'Afwezig';
@@ -755,5 +765,5 @@ function validateSwapRequest(swapData) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { parseDateTime, getShiftEndDateTime, getHoursBetweenShifts, shiftsOverlap,
                      _schuifDatum, dienstenRondDatum, VALIDATIE_MARGE_DAGEN,
-                     beschrijfRustPaar };
+                     beschrijfRustPaar, validateAvailability };
 }

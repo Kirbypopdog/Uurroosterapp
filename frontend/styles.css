@@ -5529,7 +5529,12 @@ body[data-view-mode="day"] .timeline-day-cell {
     border-radius: 4px;
     color: var(--text-secondary, #9ca3af);
     opacity: 0.7;
-    cursor: help;
+    /* #400: hier stond `cursor: help`. In dit bestand betekent dat "alleen
+       uitleg, klikken doet niets" — zo werkt .shift-block-indicator, en die
+       wordt in drag-handler.js ook echt van de klik uitgezonderd. Deze overlay
+       niet: de klik valt door naar de cel eronder en opent "nieuwe dienst". De
+       muisaanwijzer beloofde dus iets anders dan er gebeurde. Zonder eigen
+       cursor gedraagt de cel zich als elke andere lege cel. */
     z-index: 1;
 }
 .vrij-indicator:hover { opacity: 1; }

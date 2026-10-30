@@ -963,8 +963,11 @@ function renderTimelineView() {
                             const availability = getAvailability(shift.employeeId, date);
 
                             // Check if employee is absent - this is a conflict!
-                            const validAbsenceTypes = ['verlof', 'ziek', 'overuren', 'vorming', 'andere'];
-                            const isAbsent = availability && availability.type && validAbsenceTypes.includes(availability.type);
+                            // #400: hier stond een eigen lijstje dat 'vrij' uitsloot. Of een type
+                            // als afwezigheid telt staat in ABSENCE_TYPES, en nergens anders.
+                            const isAbsent = !!(availability && availability.type
+                                && (typeof teltAlsAfwezigheid === 'function'
+                                    ? teltAlsAfwezigheid(availability.type) : true));
 
                             const [startHour, startMin] = shift.startTime.split(':').map(Number);
                             const [endHour, endMin] = shift.endTime.split(':').map(Number);
@@ -1216,8 +1219,11 @@ function renderTimelineView() {
                             const availability = getAvailability(shift.employeeId, date);
 
                             // Check if employee is absent - this is a conflict!
-                            const validAbsenceTypes = ['verlof', 'ziek', 'overuren', 'vorming', 'andere'];
-                            const isAbsent = availability && availability.type && validAbsenceTypes.includes(availability.type);
+                            // #400: hier stond een eigen lijstje dat 'vrij' uitsloot. Of een type
+                            // als afwezigheid telt staat in ABSENCE_TYPES, en nergens anders.
+                            const isAbsent = !!(availability && availability.type
+                                && (typeof teltAlsAfwezigheid === 'function'
+                                    ? teltAlsAfwezigheid(availability.type) : true));
 
                             const [startHour, startMin] = shift.startTime.split(':').map(Number);
                             const [endHour, endMin] = shift.endTime.split(':').map(Number);

@@ -307,7 +307,10 @@ function sanitizeImportedData(rawData) {
             if (!Number.isFinite(employeeId) || !employeeIds.has(String(employeeId))) return null;
             if (!isValidDateString(entry?.date)) return null;
             const type = entry?.type;
-            const allowedTypes = ['verlof', 'ziek', 'overuren', 'vorming', 'andere'];
+            // #400: 'vrij' ontbrak, dus een herstel uit een JSON-backup liet elke
+            // vrije dag stilzwijgend vallen (de `return null` hieronder). De
+            // backend kent het type wel, en de CHECK-constraint van de database ook.
+            const allowedTypes = ['verlof', 'ziek', 'overuren', 'vorming', 'andere', 'vrij'];
             if (!allowedTypes.includes(type)) return null;
             return {
                 key: `${employeeId}_${entry.date}`,

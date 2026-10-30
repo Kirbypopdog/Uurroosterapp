@@ -100,6 +100,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
 | `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
 | `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
+| `vrij-telt-mee.test.js` | Dat 'vrij' overal als afwezigheid telt, en dat één bron dat bepaalt (#400) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
@@ -502,6 +503,39 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   bundel die met HTTP 200 binnenkomt en pas bij het uitvoeren stukloopt, gaat
   daar stilletjes langs. Toets daarom het RESULTAAT — staat `window.lucide` er
   na `load` niet, dan gaat `no-lucide` alsnog aan.
+
+- **Afwezigheidstypes: één oordeel, één plek** (#400): `ABSENCE_TYPES` in
+  `app-availability.js` is de enige plaats die zegt welke types als afwezigheid
+  tellen (`teltAlsAfwezig`). Maak nergens een eigen lijstje — `validation.js`,
+  `app-planner.js` (twee keer) en `app-admin.js` deden dat wel, en liepen
+  uiteen.
+
+  Het gevolg bij `vrij`: #173 voerde het in als "puur informatief, verlaagt de
+  bezetting NIET", #204 voegde het toe aan de AFWEZIG-lijst van de
+  bezettingsberekening — terecht, een vaste vrije dag betekent dat die persoon
+  niet op de vloer staat — maar de andere helft bleef staan. Je kon dus zonder
+  één waarschuwing een dienst op een vrije dag zetten, en die dienst telde
+  daarna niet mee in de bezetting: een dienst die er staat maar niet meetelt,
+  en een gat in de bezetting dat niemand meldt. `teltAlsAfwezig` staat nu op
+  `true` en de drie andere plekken vragen die vlag.
+
+  `app-admin.js` liet bij een herstel uit een JSON-backup elke `vrij`-rij
+  stilzwijgend vallen, omdat het type in zijn `allowedTypes` ontbrak. Die lijst
+  moet gelijk zijn aan `AFWEZIGHEIDSTYPES` in `backend/src/helpers/dienstregels.js`.
+
+  **Over de cursor**: `cursor: help` betekent in `styles.css` "alleen uitleg,
+  klikken doet niets" — zo werkt `.shift-block-indicator`, en die wordt in
+  `drag-handler.js` ook echt van de klik uitgezonderd. `.vrij-indicator` had die
+  cursor zonder die uitzondering, dus de klik viel door naar de cel en opende
+  "nieuwe dienst". Geef een overlay die cursor alleen als klikken er werkelijk
+  niets doet.
+
+  **Waar `vrij` eigenlijk voor dient**: in productie gebruikt één deeltijdse
+  collega het voor haar vaste vrije dagen en de schoolvakantieweken — 44 rijen,
+  met de hand ingevuld, terwijl haar weekrooster leeg is. Dat hoort in het
+  weekrooster thuis; dat genereert vandaag alleen diensten en toont nergens
+  "deze persoon werkt hier niet". Zolang dat zo is, blijft iemand dit met de
+  hand invullen.
 
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.
