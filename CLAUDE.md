@@ -101,6 +101,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
 | `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
 | `vrij-telt-mee.test.js` | Dat 'vrij' overal als afwezigheid telt, en dat één bron dat bepaalt (#400) |
+| `afwezigheid-zichtbaar.test.js` | Dat het type afwezigheid in het dienstblok staat en niet alleen in de tooltip (#401) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
@@ -423,6 +424,34 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
 - **Kleuren** (#180): gebruik de tokens, nooit een hexwaarde. De warme palette staat bovenaan `styles.css`; voor alles wat een betekenis draagt zijn dat de `--alert-*`-tokens (zie Meldingen hierboven). Een hardgecodeerde kleur werkt per definitie maar in één thema, en dat is hoe de oude Tailwind-waarden hier binnenkwamen. Teamkleuren zijn de uitzondering: die horen bij een team en hebben hun eigen `--team-*`-tokens
 - **Zijbalk** (#162): de zijbalk is in BEIDE thema's donker, want hij is een eigen vlak en geen stuk pagina. Alles wat erin staat gebruikt daarom de `--sidebar-*`-tokens (`-bg`, `-text`, `-text-active`, `-label`, `-active-bg`, `-hover-bg`, `-line`) en nooit de tekstkleuren van de pagina zoals `--text-primary`. Een `body.dark-mode`-uitzondering op iets in de zijbalk is bijna altijd fout: die zou de zijbalk juist terug naar de paginakleuren trekken. De dekkingen zijn gemeten op contrast, niet gekozen op smaak: navigatietekst `.72` haalt 8,1 en het groepslabel `.55` haalt 5,4
 - **Dienstblok in de tijdlijn** (#163): het blok is smal, en dat bepaalt wat erin past. Nagemeten op 1440 pixels in weekweergave houdt een dienst van acht uur 59 pixels over: de tijd past daar op 9px en niet op 10. Grotere tekst knipt de tijd af, en een afgeknipte tijd leest als een ANDERE tijd. Verhoog die maten dus niet zonder opnieuw te meten. Activiteiten staan als chips met de volle afkorting op 9px (`ACTIVITY_TYPE_LABELS_SHORT`, `activiteitenChips()` in `app-planner.js`). Die ruimte komt uit de opmaak eromheen en niet uit de tekst: padding 2 in plaats van 3, linkerrand 1 in plaats van 2, tussenruimte 1 in plaats van 2. Twee chips passen daarmee in de 67 pixels van een dienst van acht uur, en ook in de smalste blok dat chips toont (zes uur). Kortere codes op een grotere letter zijn geprobeerd en afgewezen, want "Overl" lees je meteen en "OL" is een code die je eerst moet leren. De achtergronden van `.activity-type-*` zijn ondoorzichtig, want daaronder ligt de teamkleur en die verschilt per team; met doorzichtige chips hing het leescontrast dus af van wie er in welk team zit. Het verloop van het blok loopt van 78 naar 88 procent teamkleur en niet tot 100: bij de volle kleur zakte de tekst op drie van de vijf teams onder de contrasteis
+- **Afwezigheid zichtbaar in de planning** (#401): een dienst van iemand die
+  afwezig is kreeg alleen een rode GLOED om het blok, en het type stond
+  uitsluitend in de tooltip. Je moest er dus met de muis op gaan staan om te
+  zien dát een collega verlof had, en daardoor viel het niemand op.
+
+  Dat is géén randgeval: van de 29 verlofdagen in productie staat er op 28 nog
+  gewoon een dienst. De dienst blijft namelijk staan tot iemand hem overneemt of
+  verwijdert. De markering hoort dus op het BLOK, niet op de celachtergrond —
+  die ligt eronder.
+
+  Het label (`.absent-label`) neemt de REGEL van de activiteitenchips over in
+  plaats van er een regel bij te vragen: het blok is te laag voor een derde
+  regel (#163), en activiteiten op een dag dat iemand afwezig is zijn toch niet
+  meer aan de orde. Nagemeten op 1440px in weekweergave: "Verlof" neemt 33px op
+  een blok van 63px, niets wordt afgeknipt en het blok loopt niet over. Contrast
+  5,9 in de lichte modus en 6,0 in de donkere (eis 4,5). Onder de 2,5 uur
+  verdwijnt het label, net als de tijd (#147); dan blijft de rode rand het
+  signaal.
+
+  In de CSS staan nog twee stukken DODE stijl uit een oudere planner:
+  `.absent-badge` en de hele `.shift-absent-conflict`-behandeling met rode
+  diagonale strepen. Die horen bij `.shift-block`, en de tijdlijn gebruikt
+  `.timeline-block`. Ze worden nergens gerenderd.
+
+  Het label toont het TYPE, nooit het redenveld: `GET /availability` maakt
+  `reason` leeg voor wie geen beheerder is, en bij ziekte is dat
+  gezondheidsinformatie (#152).
+
 - **Hoe lang je ingelogd blijft** (#159): drie dingen die samen werken, en die je niet los van elkaar moet aanpassen.
   1. **Waar het token staat.** Niet rechtstreeks in de opslag maar via `bewaarToken()`, `leesToken()` en `wisToken()` in `data.js`. Het staat in `localStorage`, dus het overleeft het sluiten van een tabblad. `leesToken()` kijkt in ALLEBEI de opslagen, want er kan nog een token uit `sessionStorage` staan van vroeger en de terugval bij geblokkeerde `localStorage` schrijft daar ook naartoe; `wisToken()` leegt er allebei. De controle vóór de eerste paint in `index.html` doet hetzelfde nog eens inline, want `data.js` is daar nog niet geladen.
   2. **Het token is 7 dagen geldig en loopt mee.** `TOKEN_GELDIGHEID_UREN` in `middleware/auth.js`. Is een token over de helft, dan stuurt `requireAuth` een vers exemplaar mee in de header `X-Vernieuwd-Token` en bewaart `dataApiFetch` dat stilletjes. Die header staat in de CORS bij `exposedHeaders`; zonder dat is hij voor JavaScript onzichtbaar, zonder foutmelding. Door dat meelopen betekent dit getal alleen nog: HOE LANG JE WEG MAG BLIJVEN voor je opnieuw moet inloggen. Het heeft even op 24 uur gestaan; dat is teruggedraaid omdat een medewerker die zijn rooster één keer per week bekijkt dan élke keer opnieuw moest inloggen, en dat is de meerderheid. Verkort dit getal dus niet om een onbewaakte laptop te beschermen: daar gaat punt 3 over.

@@ -110,6 +110,15 @@ function renderPlanning() {
 let _bezettingIndex = null;
 let _bezettingBron = null;
 
+// #401: het label van een afwezigheidstype, uit de ene bron die dat bepaalt
+// (ABSENCE_TYPES in app-availability.js). Dat bestand laadt ná dit bestand,
+// dus de controle is nodig; de terugval is bewust het neutrale "Afwezig" en
+// niet het ruwe type, want `ziek` in beeld is iets anders dan "Ziekte".
+function afwezigheidsLabel(type) {
+    if (typeof ABSENCE_LABELS !== 'undefined' && ABSENCE_LABELS[type]) return ABSENCE_LABELS[type];
+    return 'Afwezig';
+}
+
 function _bouwBezettingIndex() {
     const shifts = DataStore.shifts || [];
     const activities = DataStore.activities || [];
@@ -1042,9 +1051,16 @@ function renderTimelineView() {
                             if (isOvernight) {
                                 titleText += ' (nachtdienst)';
                             }
+                            // #401: het type stond alleen nog in de tooltip, dus je moest
+                            // met de muis op het blok gaan staan om te zien dát er
+                            // iemand verlof had. Het label gaat nu ook in het blok zelf,
+                            // zie `afwezigLabel` hieronder.
+                            //
+                            // ABSENCE_LABELS komt uit ABSENCE_TYPES (app-availability.js).
+                            // Hier stond een eigen kopie van die labels; dat is precies
+                            // het soort tweede lijstje dat in #400 uiteenliep.
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'vrij': 'Vrij' };
-                                titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
+                                titleText = `CONFLICT: ${afwezigheidsLabel(availability.type)}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
                                 titleText += `\n${validation.errors.map(e => e.message).join('\n')}`;
@@ -1125,7 +1141,9 @@ function renderTimelineView() {
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 <span class="block-time">${timeLabel}</span>
-                                ${actChips}
+                                ${isAbsent
+                                    ? `<span class="absent-label">${escapeHtml(afwezigheidsLabel(availability.type))}</span>`
+                                    : actChips}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -1291,9 +1309,16 @@ function renderTimelineView() {
                             if (isOvernight) {
                                 titleText += ' (nachtdienst)';
                             }
+                            // #401: het type stond alleen nog in de tooltip, dus je moest
+                            // met de muis op het blok gaan staan om te zien dát er
+                            // iemand verlof had. Het label gaat nu ook in het blok zelf,
+                            // zie `afwezigLabel` hieronder.
+                            //
+                            // ABSENCE_LABELS komt uit ABSENCE_TYPES (app-availability.js).
+                            // Hier stond een eigen kopie van die labels; dat is precies
+                            // het soort tweede lijstje dat in #400 uiteenliep.
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'vrij': 'Vrij' };
-                                titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
+                                titleText = `CONFLICT: ${afwezigheidsLabel(availability.type)}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
                                 titleText += `\n${validation.errors.map(e => e.message).join('\n')}`;
@@ -1373,7 +1398,9 @@ function renderTimelineView() {
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 <span class="block-time">${timeLabel}</span>
-                                ${actChips}
+                                ${isAbsent
+                                    ? `<span class="absent-label">${escapeHtml(afwezigheidsLabel(availability.type))}</span>`
+                                    : actChips}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -1484,3 +1511,9 @@ function calculateShiftColumns(shifts) {
 // renderShiftBlock removed — was dead code (never called, timeline renders inline in renderTimelineView)
 
 // Keep old function for backwards compatibility if needed elsewhere
+
+// Zodat `afwezigheidsLabel` in Node getest kan worden (#401). In de browser
+// bestaat `module` niet, dus dit heeft daar geen effect.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { afwezigheidsLabel };
+}
