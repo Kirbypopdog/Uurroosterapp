@@ -5445,15 +5445,21 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .absent-watermerk {
     position: absolute;
-    inset: 0;
     z-index: 0;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 4px;
+    /* Het patroon staat schuin en moet de hoeken van het blok halen, dus het is
+       ruim groter dan het blok zelf. De overflow van het blok snijdt het af, en
+       juist dat afsnijden geeft het behangeffect. */
+    inset: -70%;
     transform: rotate(-24deg);
-    font-size: 12px;
+    font-size: 9px;
     font-weight: 800;
     letter-spacing: 0.03em;
+    line-height: 1.15;
     color: var(--alert-error-text);
     /* Het watermerk en de tijd hebben dezelfde kleur, dus waar ze kruisen
        vechten ze om leesbaarheid. Nagerekend: elke dekking die het watermerk
@@ -5474,6 +5480,17 @@ body[data-view-mode="day"] .timeline-day-cell {
         0 0 3px var(--alert-error-bg),
         0 0 2px var(--alert-error-bg),
         0 0 1px var(--alert-error-bg);
+}
+
+/* Eén rij tegels. De oneven rijen schuiven een halve tegel op, zodat de
+   woorden niet in kolommen onder elkaar staan maar als metselverband. */
+.absent-watermerk-rij {
+    display: flex;
+    gap: 10px;
+    white-space: nowrap;
+}
+.absent-watermerk-rij.verschoven {
+    transform: translateX(-24px);
 }
 
 /* De inhoud blijft erbovenop. .timeline-block is zelf position:absolute, dus

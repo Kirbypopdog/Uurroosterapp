@@ -119,6 +119,29 @@ function afwezigheidsLabel(type) {
     return 'Afwezig';
 }
 
+// #401: het watermerk is het woord als BEHANG — schuin, herhaald in rijen én
+// naast elkaar, met de oneven rijen een halve tegel verschoven.
+//
+// Eén keer in het midden botste frontaal met de tijd: die staat ook in het
+// midden, in dezelfde kleur. Als patroon valt er altijd tekst náást de tijd,
+// en leest het als een achtergrond in plaats van als een los label — precies
+// het verschil met een activiteitenchip, en dat was de hele klacht.
+//
+// Ruim bemeten: het blok is maar ~63 bij 73 pixels en het patroon staat schuin,
+// dus de diagonaal is langer dan beide zijden. Wat niet past snijdt de overflow
+// van het blok eraf, en juist dat afsnijden geeft het behangeffect. Te krap
+// bemeten laat de hoeken leeg en dan oogt het weer als losse woorden.
+const WATERMERK_RIJEN = 7;
+const WATERMERK_KOLOMMEN = 3;
+
+function afwezigheidsWatermerk(type) {
+    const woord = escapeHtml(afwezigheidsLabel(type));
+    const tegels = Array.from({ length: WATERMERK_KOLOMMEN }, () => `<span>${woord}</span>`).join('');
+    const rijen = Array.from({ length: WATERMERK_RIJEN }, (_, i) =>
+        `<span class="absent-watermerk-rij${i % 2 ? ' verschoven' : ''}">${tegels}</span>`).join('');
+    return `<span class="absent-watermerk" aria-hidden="true">${rijen}</span>`;
+}
+
 function _bouwBezettingIndex() {
     const shifts = DataStore.shifts || [];
     const activities = DataStore.activities || [];
@@ -1140,9 +1163,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                ${isAbsent
-                                    ? `<span class="absent-watermerk" aria-hidden="true">${escapeHtml(afwezigheidsLabel(availability.type))}</span>`
-                                    : ''}
+                                ${isAbsent ? afwezigheidsWatermerk(availability.type) : ''}
                                 <span class="block-time">${timeLabel}</span>
                                 ${actChips}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
@@ -1398,9 +1419,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                ${isAbsent
-                                    ? `<span class="absent-watermerk" aria-hidden="true">${escapeHtml(afwezigheidsLabel(availability.type))}</span>`
-                                    : ''}
+                                ${isAbsent ? afwezigheidsWatermerk(availability.type) : ''}
                                 <span class="block-time">${timeLabel}</span>
                                 ${actChips}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}

@@ -449,6 +449,16 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
      woord, op het andere niet. Daarom vervangt een afwezig blok zijn
      achtergrond; de teamkleur blijft in de volle streep links staan.
 
+  **Het woord staat er als BEHANG**: schuin, herhaald in rijen én naast elkaar
+  (`WATERMERK_RIJEN` × `WATERMERK_KOLOMMEN`), met de oneven rijen een halve
+  tegel verschoven zodat het metselverband wordt en geen kolommen. Eén keer in
+  het midden botste frontaal met de tijd: die staat ook in het midden, in
+  dezelfde kleur. Als patroon valt er altijd tekst náást de tijd, en leest het
+  als achtergrond in plaats van als een los label — precies het verschil met een
+  activiteitenchip. Het patroon staat op een negatieve `inset` zodat het de
+  HOEKEN haalt; de overflow van het blok snijdt het af, en juist dat afsnijden
+  geeft het behangeffect.
+
   **Watermerk en tijd hebben dezelfde kleur**, dus waar ze kruisen vechten ze.
   Nagerekend: élke dekking die het watermerk zichtbaar maakt (vanaf ~0,45) duwt
   de tijd eroverheen onder de 4,5. Dat is met dekking niet op te lossen — de
@@ -456,8 +466,6 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   oude, nooit gebruikte `.shift-absent-conflict` met `text-shadow: 0 0 1px
   white` al deed.
 
-  Nagemeten op 1440px in weekweergave: het langste woord ("Overuren", 57px) past
-  met 8px links en 6px rechts over in een blok van 71px; niets wordt afgeknipt.
   Onder de 2,5 uur verdwijnt het watermerk, net als de tijd (#147); dan blijft
   de rode rand het signaal.
 

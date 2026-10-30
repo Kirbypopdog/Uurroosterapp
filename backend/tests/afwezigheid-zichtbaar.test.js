@@ -63,10 +63,28 @@ describe('het label van een afwezigheidstype', () => {
 
 describe('wat de planner rendert', () => {
   const BRON = fs.readFileSync(frontend('app-planner.js'), 'utf8');
+  const CSS = fs.readFileSync(frontend('styles.css'), 'utf8');
 
   test('het watermerk staat in het blok, in beide weergaven', () => {
-    const treffers = BRON.match(/class="absent-watermerk"/g) || [];
+    const treffers = BRON.match(/afwezigheidsWatermerk\(availability\.type\)/g) || [];
     expect(treffers).toHaveLength(2); // week- én dagweergave
+  });
+
+  // Eén keer in het midden botste frontaal met de tijd: die staat ook in het
+  // midden, in dezelfde kleur. Als BEHANG valt er altijd tekst naast de tijd,
+  // en leest het als achtergrond in plaats van als een los label.
+  test('het woord wordt herhaald in rijen én kolommen', () => {
+    expect(BRON).toMatch(/WATERMERK_RIJEN\s*=\s*([2-9]|\d{2})/);
+    expect(BRON).toMatch(/WATERMERK_KOLOMMEN\s*=\s*([2-9]|\d{2})/);
+    expect(BRON).toMatch(/Array\.from\(\{ length: WATERMERK_RIJEN \}/);
+    expect(BRON).toMatch(/Array\.from\(\{ length: WATERMERK_KOLOMMEN \}/);
+  });
+
+  // Staan de woorden recht onder elkaar, dan oogt het als kolommen en niet als
+  // behang. De oneven rijen schuiven daarom een halve tegel op.
+  test('de rijen staan versprongen, als metselverband', () => {
+    expect(BRON).toMatch(/i % 2 \? ' verschoven' : ''/);
+    expect(CSS).toMatch(/\.absent-watermerk-rij\.verschoven \{[\s\S]*?translateX/);
   });
 
   // De activiteitenchips blijven staan: het watermerk ligt eronder en vraagt
@@ -79,8 +97,9 @@ describe('wat de planner rendert', () => {
   // Het is een decoratieve herhaling van wat de tooltip al zegt; een
   // schermlezer hoort het niet twee keer voor te lezen.
   test('het watermerk is verborgen voor een schermlezer', () => {
-    const treffers = BRON.match(/class="absent-watermerk" aria-hidden="true"/g) || [];
-    expect(treffers.length).toBe(2);
+    // Het woord staat er zeven keer; een schermlezer hoort het nul keer te
+    // horen — de tooltip zegt het al.
+    expect(BRON).toMatch(/class="absent-watermerk" aria-hidden="true"/);
   });
 
   test('de planner heeft geen eigen labellijstje meer', () => {
@@ -100,6 +119,13 @@ describe('de opmaak van het watermerk', () => {
   test('bestaat en staat schuin', () => {
     expect(blok).not.toBeNull();
     expect(blok[0]).toMatch(/transform:\s*rotate\(-?\d+deg\)/);
+  });
+
+  // De stapel staat schuin en moet de HOEKEN van het blok halen; staat hij op
+  // inset 0, dan blijven de hoeken leeg en oogt het als een los woord.
+  test('de stapel is groter dan het blok zelf', () => {
+    expect(blok[0]).toMatch(/inset:\s*-\d+%/);
+    expect(blok[0]).toMatch(/flex-direction:\s*column/);
   });
 
   // CLAUDE.md: gebruik de tokens, nooit een hexwaarde — anders werkt het maar
