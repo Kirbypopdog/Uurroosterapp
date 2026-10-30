@@ -30,7 +30,16 @@ const ABSENCE_TYPES = {
     'overuren': { label: 'Overuren', keuze: 'Overuren opnemen', werkwoord: 'overuren opneemt', teltAlsAfwezig: true },
     'vorming':  { label: 'Vorming',  keuze: 'Vorming',          werkwoord: 'vorming heeft',   teltAlsAfwezig: true },
     'andere':   { label: 'Andere',   keuze: 'Andere',           werkwoord: 'afwezig is',      teltAlsAfwezig: true },
-    'vrij':     { label: 'Vrij',     keuze: 'Vrij',             werkwoord: 'vrij is',         teltAlsAfwezig: true }
+    // #402: 'vrij' wordt niet meer AANGEBODEN, maar blijft wel herkend. Het is
+    // overbodig geworden: een dag zonder dienst toont sindsdien vanzelf "Vrij",
+    // ook zonder basisrooster, dus niemand hoeft dat nog met de hand in te
+    // geven. In productie deed één deeltijdse collega dat 44 keer.
+    //
+    // Weghalen uit de lijst zou de bestaande rijen stuk maken: het label valt
+    // dan terug op "Afwezig", de import gooit ze weg en de CHECK-constraint van
+    // de database kent het type nog wel. `verouderd` haalt hem uit het
+    // keuzemenu en laat de rest ongemoeid.
+    'vrij':     { label: 'Vrij',     keuze: 'Vrij',             werkwoord: 'vrij is',         teltAlsAfwezig: true, verouderd: true }
 };
 
 // Is dit type een echte afwezigheid, of alleen een markering? Onbekende types
@@ -50,8 +59,10 @@ const ABSENCE_LABELS = Object.fromEntries(
 function vulAfwezigheidstypes() {
     const veld = document.getElementById('absence-type');
     if (!veld) return;
+    // Een verouderd type blijft herkend maar wordt niet meer aangeboden (#402).
     veld.innerHTML = '<option value="">-- Selecteer type --</option>'
         + Object.entries(ABSENCE_TYPES)
+            .filter(([, t]) => !t.verouderd)
             .map(([sleutel, t]) => `<option value="${escapeHtml(sleutel)}">${escapeHtml(t.keuze)}</option>`)
             .join('');
 }
@@ -110,7 +121,7 @@ function renderAvailability() {
                 </div>
                 <div class="controls-spacer"></div>
                 <div class="availability-legend-inline">
-                    <span class="legend-chip available">Beschikbaar</span>
+                    <span class="legend-chip not-scheduled">Vrij</span>
                     <span class="legend-chip absent">Afwezig</span>
                     <span class="legend-chip has-shift">Dienst</span>
                 </div>
@@ -255,15 +266,31 @@ function renderAvailability() {
                         statusClass = 'has-shift';
                         statusText = 'Dienst';
                         tooltipText = 'Heeft dienst ingepland';
-                    } else if (hasWeekSchedule && !scheduledForDay) {
-                        // Medewerker heeft een weekrooster maar werkt niet op deze dag
+                    } else {
+                        // #402: hier stonden twee takken. Wie een basisrooster had
+                        // kreeg op een niet-ingeplande dag "Vrij"; wie er geen had
+                        // viel terug op "Beschikbaar" — een GROENE cel met een
+                        // vinkje.
+                        //
+                        // Die groene cel beweerde iets dat de app niet weet. Ze
+                        // weet alleen dat er geen dienst en geen afwezigheid staat;
+                        // of die persoon kán werken is daar geen gevolg van. Bij
+                        // een deeltijdse collega zonder basisrooster stond er dus
+                        // in het groen "beschikbaar" op precies de dagen dat ze
+                        // niet kan.
+                        //
+                        // Nu zegt de cel alleen nog wat waar is: er staat geen
+                        // dienst. Dat geldt voor iedereen gelijk, met of zonder
+                        // basisrooster. De tooltip zegt er nog bij wáárom, want
+                        // dat verschilt wél.
                         statusClass = 'not-scheduled';
                         statusText = 'Vrij';
-                        tooltipText = 'Niet ingepland volgens basisrooster';
-                    } else {
-                        statusClass = 'available';
-                        statusText = '';
-                        tooltipText = canManageAvailability(emp.id) ? 'Beschikbaar, klik om afwezigheid te registreren' : '';
+                        tooltipText = hasWeekSchedule && !scheduledForDay
+                            ? 'Niet ingepland volgens basisrooster'
+                            : 'Geen dienst ingepland';
+                        if (canManageAvailability(emp.id)) {
+                            tooltipText += ' · Klik om een afwezigheid te registreren';
+                        }
                     }
                 }
 
@@ -281,8 +308,7 @@ function renderAvailability() {
                 // formatDate en niet de kale datum: dit label wordt VOORGELEZEN.
                 // "2026-10-03" wordt dan een reeks losse getallen in plaats van
                 // een dag.
-                const celLabel = escapeHtml(
-                    `${emp.name}, ${formatDate(date)}${statusText ? `, ${statusText}` : ', beschikbaar'}`);
+                const celLabel = escapeHtml(`${emp.name}, ${formatDate(date)}, ${statusText}`);
                 const celToets = canEdit
                     ? ` role="button" tabindex="0" aria-label="${celLabel}"`
                     : '';
@@ -291,7 +317,7 @@ function renderAvailability() {
                          data-employee-id="${emp.id}"
                          data-date="${date}"
                          data-tooltip="${escapeHtml(tooltipText)}">
-                        ${conflictIcon}${statusText ? `<span class="status-label">${escapeHtml(statusText)}</span>` : `<span class="status-check">${IconHelper.html(ICONS.check, 'xs')}</span>`}
+                        ${conflictIcon}<span class="status-label">${escapeHtml(statusText)}</span>
                     </div>
                 ` : '';
 

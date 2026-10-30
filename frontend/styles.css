@@ -8063,9 +8063,18 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-weight: 600;
 }
 
-.legend-chip.available {
-    background: var(--color-success-light);
-    color: var(--ok-text);
+/* #402: "Beschikbaar" bestaat niet meer als toestand. De cel zei in het GROEN
+   dat iemand kon werken, terwijl de app alleen weet dat er geen dienst staat.
+   De legende volgt de cel: beige met een stippellijn, net als .not-scheduled. */
+.legend-chip.not-scheduled {
+    background: #f6f4ef;
+    color: var(--text-secondary);
+    border: 1px dashed #d8d3c6;
+}
+body.dark-mode .legend-chip.not-scheduled {
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    border-color: var(--line);
 }
 
 .legend-chip.absent {

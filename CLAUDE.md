@@ -102,6 +102,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
 | `vrij-telt-mee.test.js` | Dat 'vrij' overal als afwezigheid telt, en dat één bron dat bepaalt (#400) |
 | `afwezigheid-zichtbaar.test.js` | Dat het type afwezigheid in het dienstblok staat en niet alleen in de tooltip (#401) |
+| `beschikbaar-weg.test.js` | Dat een dag zonder dienst "Vrij" heet in plaats van groen "Beschikbaar", en dat 'vrij' verouderd is maar herkend blijft (#402) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
@@ -576,12 +577,31 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   "nieuwe dienst". Geef een overlay die cursor alleen als klikken er werkelijk
   niets doet.
 
-  **Waar `vrij` eigenlijk voor dient**: in productie gebruikt één deeltijdse
-  collega het voor haar vaste vrije dagen en de schoolvakantieweken — 44 rijen,
-  met de hand ingevuld, terwijl haar weekrooster leeg is. Dat hoort in het
-  weekrooster thuis; dat genereert vandaag alleen diensten en toont nergens
-  "deze persoon werkt hier niet". Zolang dat zo is, blijft iemand dit met de
-  hand invullen.
+  **"Beschikbaar" bestond niet echt** (#402). De afwezigheidstab had twee
+  takken: wie een basisrooster had kreeg op een niet-ingeplande dag "Vrij", wie
+  er geen had viel terug op "Beschikbaar" — een GROENE cel met een vinkje. Maar
+  de app weet alleen dat er geen dienst en geen afwezigheid staat; of iemand KAN
+  werken volgt daar niet uit. Bij een deeltijdse collega zonder basisrooster
+  stond er dus in het groen "beschikbaar" op precies de dagen dat ze niet kan.
+
+  Een dag zonder dienst heet nu voor iedereen "Vrij", met of zonder
+  basisrooster. Het verschil blijft bestaan als UITLEG in de tooltip ("Niet
+  ingepland volgens basisrooster" tegenover "Geen dienst ingepland"), niet als
+  bewering in kleur.
+
+  Daarmee is het TYPE `vrij` overbodig: niemand hoeft nog met de hand in te
+  geven wat de cel vanzelf toont. Het staat op `verouderd: true` — het wordt
+  niet meer aangeboden in het keuzemenu, maar blijft overal herkend. Dat laatste
+  moet: schrap je het uit `ABSENCE_TYPES`, dan valt het label van de bestaande
+  rijen terug op "Afwezig", gooit de import ze weg en kent de CHECK-constraint
+  van de database ze nog wel.
+
+  **Waarom het weekrooster hier geen antwoord is**: die ene collega heeft er
+  geen, en kan er geen hebben — haar begin- en eindtijden liggen nooit vast
+  (09:00-16:00, 12:00-16:00, 09:30-15:00, 11:00-17:30…), terwijl een weekrooster
+  vaste tijden per dag vraagt. Ze maakt haar rooster zelf per maand en wordt
+  door niemand ingepland, dus de "plan mij hier niet in"-kant van `vrij` deed
+  voor haar sowieso niets.
 
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.
