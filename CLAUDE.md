@@ -449,15 +449,20 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
      woord, op het andere niet. Daarom vervangt een afwezig blok zijn
      achtergrond; de teamkleur blijft in de volle streep links staan.
 
-  **Het woord staat er als BEHANG**: schuin, herhaald in rijen én naast elkaar
-  (`WATERMERK_RIJEN` × `WATERMERK_KOLOMMEN`), met de oneven rijen een halve
-  tegel verschoven zodat het metselverband wordt en geen kolommen. Eén keer in
-  het midden botste frontaal met de tijd: die staat ook in het midden, in
-  dezelfde kleur. Als patroon valt er altijd tekst náást de tijd, en leest het
-  als achtergrond in plaats van als een los label — precies het verschil met een
-  activiteitenchip. Het patroon staat op een negatieve `inset` zodat het de
-  HOEKEN haalt; de overflow van het blok snijdt het af, en juist dat afsnijden
-  geeft het behangeffect.
+  **Het woord staat er herhaald**, schuin, met elke tweede regel verschoven
+  (`WATERMERK_RIJEN`). Eén keer in het midden botste frontaal met de tijd: die
+  staat ook in het midden, in dezelfde kleur. Herhaald valt er altijd tekst
+  náást de tijd, en leest het als achtergrond in plaats van als een los label —
+  precies het verschil met een activiteitenchip.
+
+  **Maar hooguit DRIE keer.** Een echt tegelpatroon zoals je dat op een foto
+  ziet, heeft een groot vlak nodig; dit blok is ~75 bij 75 pixels en een
+  leesbaar woord al ~40 bij 10. Nagekeken op ware grootte met echte diensten:
+  bij zeven regels in drie kolommen stond er letterlijk "VerlofVerlofVerlof"
+  aan elkaar en viel er niets meer te lezen. Verhoog die aantallen dus niet
+  zonder opnieuw op ware grootte te kijken — uitvergroot lijkt het altijd nog
+  mee te vallen. Het patroon staat op een negatieve `inset` zodat het de hoeken
+  haalt; de overflow van het blok snijdt het af.
 
   **Watermerk en tijd hebben dezelfde kleur**, dus waar ze kruisen vechten ze.
   Nagerekend: élke dekking die het watermerk zichtbaar maakt (vanaf ~0,45) duwt

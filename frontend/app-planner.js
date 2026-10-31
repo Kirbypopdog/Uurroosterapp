@@ -127,18 +127,21 @@ function afwezigheidsLabel(type) {
 // en leest het als een achtergrond in plaats van als een los label — precies
 // het verschil met een activiteitenchip, en dat was de hele klacht.
 //
-// Ruim bemeten: het blok is maar ~63 bij 73 pixels en het patroon staat schuin,
-// dus de diagonaal is langer dan beide zijden. Wat niet past snijdt de overflow
-// van het blok eraf, en juist dat afsnijden geeft het behangeffect. Te krap
-// bemeten laat de hoeken leeg en dan oogt het weer als losse woorden.
-const WATERMERK_RIJEN = 7;
-const WATERMERK_KOLOMMEN = 3;
+// DRIE regels, en bewust niet meer. Het blok is maar ~75 bij 75 pixels en een
+// leesbaar woord is al ~40 bij 10. Een echt tegelpatroon zoals je het op een
+// foto ziet, heeft een groot vlak nodig; op een postzegel lopen de woorden in
+// elkaar en wordt het pap. Nagekeken op ware grootte met echte diensten: bij
+// zeven regels in drie kolommen stond er "VerlofVerlofVerlof" aan elkaar en was
+// er niets meer te lezen.
+//
+// Drie regels, ruim uit elkaar, elke tweede een halve woordbreedte verschoven:
+// genoeg om als patroon te lezen, weinig genoeg om leesbaar te blijven.
+const WATERMERK_RIJEN = 3;
 
 function afwezigheidsWatermerk(type) {
     const woord = escapeHtml(afwezigheidsLabel(type));
-    const tegels = Array.from({ length: WATERMERK_KOLOMMEN }, () => `<span>${woord}</span>`).join('');
     const rijen = Array.from({ length: WATERMERK_RIJEN }, (_, i) =>
-        `<span class="absent-watermerk-rij${i % 2 ? ' verschoven' : ''}">${tegels}</span>`).join('');
+        `<span class="absent-watermerk-rij${i % 2 ? ' verschoven' : ''}">${woord}</span>`).join('');
     return `<span class="absent-watermerk" aria-hidden="true">${rijen}</span>`;
 }
 

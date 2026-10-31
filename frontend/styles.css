@@ -5450,11 +5450,13 @@ body[data-view-mode="day"] .timeline-day-cell {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    /* Ruim: nagekeken op ware grootte met echte diensten. Krapper en de woorden
+       lopen in elkaar ("VerlofVerlofVerlof"), wijder en je leest nog maar één
+       halve flard. */
+    gap: 26px;
     /* Het patroon staat schuin en moet de hoeken van het blok halen, dus het is
-       ruim groter dan het blok zelf. De overflow van het blok snijdt het af, en
-       juist dat afsnijden geeft het behangeffect. */
-    inset: -70%;
+       groter dan het blok zelf. De overflow van het blok snijdt het af. */
+    inset: -30%;
     transform: rotate(-24deg);
     font-size: 9px;
     font-weight: 800;
@@ -5485,12 +5487,12 @@ body[data-view-mode="day"] .timeline-day-cell {
 /* Eén rij tegels. De oneven rijen schuiven een halve tegel op, zodat de
    woorden niet in kolommen onder elkaar staan maar als metselverband. */
 .absent-watermerk-rij {
-    display: flex;
-    gap: 10px;
     white-space: nowrap;
 }
+/* Elke tweede regel een halve woordbreedte opzij, zodat de woorden niet recht
+   onder elkaar staan. */
 .absent-watermerk-rij.verschoven {
-    transform: translateX(-24px);
+    transform: translateX(-20px);
 }
 
 /* De inhoud blijft erbovenop. .timeline-block is zelf position:absolute, dus

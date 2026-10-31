@@ -73,16 +73,25 @@ describe('wat de planner rendert', () => {
   // Eén keer in het midden botste frontaal met de tijd: die staat ook in het
   // midden, in dezelfde kleur. Als BEHANG valt er altijd tekst naast de tijd,
   // en leest het als achtergrond in plaats van als een los label.
-  test('het woord wordt herhaald in rijen én kolommen', () => {
-    expect(BRON).toMatch(/WATERMERK_RIJEN\s*=\s*([2-9]|\d{2})/);
-    expect(BRON).toMatch(/WATERMERK_KOLOMMEN\s*=\s*([2-9]|\d{2})/);
+  test('het woord wordt herhaald', () => {
     expect(BRON).toMatch(/Array\.from\(\{ length: WATERMERK_RIJEN \}/);
-    expect(BRON).toMatch(/Array\.from\(\{ length: WATERMERK_KOLOMMEN \}/);
+  });
+
+  // Nagekeken op ware grootte met echte diensten: het blok is ~75 bij 75 pixels
+  // en een leesbaar woord al ~40 bij 10. Bij zeven regels in drie kolommen
+  // stond er "VerlofVerlofVerlof" aan elkaar en was er niets meer te lezen.
+  // Een echt tegelpatroon heeft een groot vlak nodig; op een postzegel niet.
+  test('maar hooguit een handvol keer — anders wordt het pap', () => {
+    const m = BRON.match(/WATERMERK_RIJEN\s*=\s*(\d+)/);
+    expect(m).not.toBeNull();
+    const rijen = Number(m[1]);
+    expect(rijen).toBeGreaterThanOrEqual(2);
+    expect(rijen).toBeLessThanOrEqual(4);
   });
 
   // Staan de woorden recht onder elkaar, dan oogt het als kolommen en niet als
   // behang. De oneven rijen schuiven daarom een halve tegel op.
-  test('de rijen staan versprongen, als metselverband', () => {
+  test('de rijen staan versprongen, niet recht onder elkaar', () => {
     expect(BRON).toMatch(/i % 2 \? ' verschoven' : ''/);
     expect(CSS).toMatch(/\.absent-watermerk-rij\.verschoven \{[\s\S]*?translateX/);
   });
@@ -126,6 +135,13 @@ describe('de opmaak van het watermerk', () => {
   test('de stapel is groter dan het blok zelf', () => {
     expect(blok[0]).toMatch(/inset:\s*-\d+%/);
     expect(blok[0]).toMatch(/flex-direction:\s*column/);
+  });
+
+  // De tussenruimte is het verschil tussen een patroon en een kluwen.
+  test('de regels staan ruim uit elkaar', () => {
+    const m = blok[0].replace(/\/\*[\s\S]*?\*\//g, '').match(/gap:\s*(\d+)px/);
+    expect(m).not.toBeNull();
+    expect(Number(m[1])).toBeGreaterThanOrEqual(16);
   });
 
   // CLAUDE.md: gebruik de tokens, nooit een hexwaarde — anders werkt het maar
