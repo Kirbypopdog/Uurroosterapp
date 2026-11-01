@@ -28,7 +28,16 @@ const ABSENCE_TYPES = {
     'verlof':   { label: 'Verlof',   keuze: 'Verlof',           werkwoord: 'verlof heeft',    teltAlsAfwezig: true },
     'ziek':     { label: 'Ziekte',   keuze: 'Ziekte',           werkwoord: 'ziek is',         teltAlsAfwezig: true },
     'overuren': { label: 'Overuren', keuze: 'Overuren opnemen', werkwoord: 'overuren opneemt', teltAlsAfwezig: true },
-    'vorming':  { label: 'Vorming',  keuze: 'Vorming',          werkwoord: 'vorming heeft',   teltAlsAfwezig: true },
+    // #403: 'vorming' wordt niet meer AANGEBODEN als afwezigheid. Het bestond
+    // ook als ACTIVITEIT, en daar hoort het: een vorming doe je tijdens je
+    // dienst, je bent niet afwezig. In productie bevestigde de data dat — nul
+    // afwezigheidsrijen tegenover zeventien activiteiten.
+    //
+    // Net als bij 'vrij' blijft het herkend en verdwijnt het alleen uit het
+    // keuzemenu. Hier zijn er weliswaar geen bestaande rijen om te beschermen,
+    // maar de backend en de CHECK-constraint van de database kennen het type
+    // nog wel; blind schrappen zou alleen een tweede lijstje laten uiteenlopen.
+    'vorming':  { label: 'Vorming',  keuze: 'Vorming',          werkwoord: 'vorming heeft',   teltAlsAfwezig: true, verouderd: true },
     'andere':   { label: 'Andere',   keuze: 'Andere',           werkwoord: 'afwezig is',      teltAlsAfwezig: true },
     // #402: 'vrij' wordt niet meer AANGEBODEN, maar blijft wel herkend. Het is
     // overbodig geworden: een dag zonder dienst toont sindsdien vanzelf "Vrij",

@@ -605,6 +605,20 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   rijen terug op "Afwezig", gooit de import ze weg en kent de CHECK-constraint
   van de database ze nog wel.
 
+  **`vorming` is óók verouderd** (#403), om een andere reden: het bestond zowel
+  als afwezigheidstype als als ACTIVITEITstype. Het hoort bij dat laatste — een
+  vorming doe je tijdens je dienst, je bent niet afwezig. De productiedata was
+  eenduidig: nul afwezigheidsrijen tegenover zeventien activiteiten. De
+  activiteit blijft dus gewoon bestaan.
+
+  Het keuzemenu voor afwezigheid houdt over: **Verlof, Ziekte, Overuren
+  opnemen, Andere**.
+
+  **Waarom `verouderd` en niet schrappen**, ook bij nul rijen: de backend
+  (`AFWEZIGHEIDSTYPES`), de import (`allowedTypes`) en de CHECK-constraint van
+  de database kennen het type nog. Het alleen in de frontend weghalen laat
+  precies die lijstjes uiteenlopen — de fout uit #400.
+
   **Waarom het weekrooster hier geen antwoord is**: die ene collega heeft er
   geen, en kan er geen hebben — haar begin- en eindtijden liggen nooit vast
   (09:00-16:00, 12:00-16:00, 09:30-15:00, 11:00-17:30…), terwijl een weekrooster

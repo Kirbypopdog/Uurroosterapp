@@ -78,9 +78,31 @@ describe("het type 'vrij' is verouderd, niet verdwenen", () => {
   });
 
   test('de andere types worden gewoon aangeboden', () => {
-    for (const [sleutel, t] of Object.entries(ABSENCE_TYPES)) {
-      if (sleutel === 'vrij') continue;
-      expect(t.verouderd).toBeUndefined();
-    }
+    const aangeboden = Object.entries(ABSENCE_TYPES)
+      .filter(([, t]) => !t.verouderd).map(([k]) => k).sort();
+    expect(aangeboden).toEqual(['andere', 'overuren', 'verlof', 'ziek']);
+  });
+});
+
+// #403: 'vorming' bestond zowel als AFWEZIGHEID als als ACTIVITEIT. Het hoort
+// bij dat laatste — een vorming doe je tijdens je dienst, je bent niet afwezig.
+// De productiedata bevestigde het: nul afwezigheidsrijen tegenover zeventien
+// activiteiten.
+describe("het type 'vorming' is verouderd als afwezigheid", () => {
+  test('het wordt niet meer aangeboden', () => {
+    expect(ABSENCE_TYPES.vorming.verouderd).toBe(true);
+  });
+
+  // Blind schrappen zou een tweede lijstje laten uiteenlopen: de backend en de
+  // CHECK-constraint van de database kennen het type nog wel.
+  test('maar het blijft herkend, met zijn eigen label', () => {
+    expect(ABSENCE_TYPES.vorming.label).toBe('Vorming');
+    expect(teltAlsAfwezigheid('vorming')).toBe(true);
+  });
+
+  // De activiteit met dezelfde naam blijft bestaan; die is hier de bedoeling.
+  test('de activiteit vorming blijft ongemoeid', () => {
+    const globals = fs.readFileSync(frontend('app-globals.js'), 'utf8');
+    expect(globals).toMatch(/vorming/);
   });
 });
