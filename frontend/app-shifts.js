@@ -988,6 +988,94 @@ function applySuggestion(btn) {
 
 // ===== ACTIVITY MODAL =====
 
+/**
+ * Wie staat er die dag nog meer ingepland, naast deze persoon? (#408)
+ *
+ * Apart gehouden van het tekenen, zodat de keuze ("wie komt er in de lijst")
+ * te testen is zonder DOM. Twee dingen zitten erin die er makkelijk uit
+ * vallen bij een herschrijving:
+ *
+ *  - Een id vergelijken als TEKST. Een id komt als GETAL uit de API maar als
+ *    STRING uit een `<select>` of een `dataset`, en `120 === "120"` is false.
+ *    Zonder dat zou de persoon voor wie de activiteit al is, nóg eens in de
+ *    lijst staan en een dubbele rij opleveren.
+ *  - Een dienst van iemand die niet (meer) in de medewerkerslijst staat valt
+ *    weg in plaats van een naamloos vinkje te worden.
+ */
+function activiteitDeelnemerKandidaten(shifts, userId, date, zoekMedewerker) {
+    return (shifts || [])
+        .filter(sh => sh.date === date && String(sh.employeeId) !== String(userId))
+        .map(sh => ({ shift: sh, emp: zoekMedewerker(sh.employeeId) }))
+        .filter(x => x.emp)
+        .sort((a, b) => (a.emp.name || '').localeCompare(b.emp.name || '', 'nl'));
+}
+
+/**
+ * Wie kan er nog meer bij deze activiteit? (#408)
+ *
+ * Een activiteit staat in de database PER PERSOON — er is geen gedeelde
+ * gebeurtenis met deelnemers. Dat is voor de teamvergadering nooit opgevallen,
+ * want die genereert het concept. Alles wat met de hand gaat moest je per
+ * persoon opnieuw intypen: dienstvenster openen, + Toevoegen, type, twee
+ * tijden, omschrijving — voor elke deelnemer apart. In productie telt een
+ * vergadering gemiddeld 3,5 deelnemers, en "EE Stage Yana" staat er inderdaad
+ * twee keer in, met de hand.
+ *
+ * Dit verandert de gegevens niet: er worden nog steeds losse rijen geschreven.
+ * Het scheelt alleen de herhaling. Een echte gedeelde gebeurtenis is een
+ * schemawijziging en een apart gesprek.
+ *
+ * De kandidaten zijn wie die dag een DIENST heeft. Iemand zonder dienst kan
+ * niet in een activiteit binnen een dienst zitten, en de lijst zou anders de
+ * hele personeelslijst zijn.
+ *
+ * @param {number|string} userId  voor wie de activiteit in elk geval is
+ * @param {string} date           de dag, als YYYY-MM-DD
+ */
+function vulActiviteitDeelnemers(userId, date) {
+    const groep = document.getElementById('activity-deelnemers-groep');
+    const lijst = document.getElementById('activity-deelnemers');
+    if (!groep || !lijst) return;
+
+    // Dezelfde grens als de backend trekt: een medewerker mag alleen voor
+    // zichzelf een activiteit aanmaken, dus die krijgt de lijst niet te zien.
+    // Staat die check alleen achterin, dan biedt het scherm iets aan dat pas
+    // bij de laatste klik geweigerd wordt (regel 5 in CLAUDE.md).
+    if (!canCreateActivityForOthers()) {
+        groep.classList.add('hidden');
+        lijst.innerHTML = '';
+        return;
+    }
+
+    const anderen = activiteitDeelnemerKandidaten(
+        DataStore.shifts || [], userId, date, getEmployee);
+
+    if (anderen.length === 0) {
+        groep.classList.add('hidden');
+        lijst.innerHTML = '';
+        return;
+    }
+
+    const voor = getEmployee(userId);
+    const label = document.getElementById('activity-deelnemers-label');
+    if (label) {
+        label.textContent = voor
+            ? `Ook voor (naast ${voor.name})`
+            : 'Ook voor';
+    }
+
+    lijst.innerHTML = anderen.map(({ shift: sh, emp }) => `
+        <label class="activity-deelnemer">
+            <input type="checkbox" value="${emp.id}"
+                   data-shift-id="${sh.id}"
+                   data-shift-start="${escapeHtml(sh.startTime || '')}"
+                   data-shift-end="${escapeHtml(sh.endTime || '')}">
+            <span class="activity-deelnemer-naam">${escapeHtml(emp.name || '')}</span>
+            <span class="activity-deelnemer-uren">${escapeHtml(String(sh.startTime || '').substring(0, 5))}-${escapeHtml(String(sh.endTime || '').substring(0, 5))}</span>
+        </label>`).join('');
+    groep.classList.remove('hidden');
+}
+
 function openAddActivityModal(userId, date, shiftStart, shiftEnd, shiftId) {
     document.getElementById('activity-modal-title').textContent = 'Activiteit toevoegen';
     document.getElementById('activity-id').value = '';
@@ -1001,6 +1089,7 @@ function openAddActivityModal(userId, date, shiftStart, shiftEnd, shiftId) {
     document.getElementById('activity-end').value = '';
     document.getElementById('activity-description').value = '';
     document.getElementById('activity-delete-btn').classList.add('hidden');
+    vulActiviteitDeelnemers(userId, date);
     toonModal(document.getElementById('activity-modal'));
     IconHelper.init(document.getElementById('activity-modal'));
 }
@@ -1025,6 +1114,10 @@ function openEditActivityModal(activityId) {
     document.getElementById('activity-end').value = activity.endTime;
     document.getElementById('activity-description').value = activity.description || '';
     document.getElementById('activity-delete-btn').classList.remove('hidden');
+    // Bij BEWERKEN geen deelnemers: je bewerkt één rij. Een vinkje erbij zou
+    // suggereren dat je de hele gebeurtenis aanpast, en dat is niet zo —
+    // de rijen van de anderen blijven staan zoals ze stonden.
+    document.getElementById('activity-deelnemers-groep')?.classList.add('hidden');
     toonModal(document.getElementById('activity-modal'));
     IconHelper.init(document.getElementById('activity-modal'));
 }
@@ -1054,28 +1147,64 @@ async function handleActivitySubmit(e) {
         return;
     }
 
-    // Warn if activity falls outside shift hours
-    const shiftStart = document.getElementById('activity-shift-start')?.value;
-    const shiftEnd = document.getElementById('activity-shift-end')?.value;
-    if (shiftStart && shiftEnd) {
-        if (startTime < shiftStart || endTime > shiftEnd) {
-            if (!await showConfirm('Deze activiteit valt (deels) buiten de shift-uren (' + shiftStart.substring(0,5) + '-' + shiftEnd.substring(0,5) + '). Toch opslaan?')) {
-                return;
-            }
-        }
+    // Voor wie wordt dit aangemaakt? Bij bewerken altijd die ene rij; bij
+    // aanmaken de persoon van wie het dienstvenster openstond, plus wie er is
+    // aangevinkt (#408).
+    const ontvangers = id ? [] : [{
+        userId: parseInt(userId, 10),
+        shiftId: shiftId ? parseInt(shiftId, 10) : null,
+        shiftStart: document.getElementById('activity-shift-start')?.value || '',
+        shiftEnd: document.getElementById('activity-shift-end')?.value || '',
+    }];
+    if (!id) {
+        document.querySelectorAll('#activity-deelnemers input:checked').forEach(vink => {
+            ontvangers.push({
+                userId: parseInt(vink.value, 10),
+                shiftId: vink.dataset.shiftId ? parseInt(vink.dataset.shiftId, 10) : null,
+                shiftStart: vink.dataset.shiftStart || '',
+                shiftEnd: vink.dataset.shiftEnd || '',
+            });
+        });
+    }
+
+    // Warn if activity falls outside shift hours.
+    // #408: dit keek naar de dienst van één persoon. Met deelnemers erbij is
+    // dat niet genoeg — de een werkt tot 16:30 en de ander tot 12:30, en dan
+    // valt dezelfde activiteit voor de een wél en voor de ander niet binnen de
+    // dienst. De waarschuwing noemt daarom wie het betreft.
+    const buitenDienst = ontvangers.filter(o =>
+        o.shiftStart && o.shiftEnd && (startTime < o.shiftStart || endTime > o.shiftEnd));
+    if (buitenDienst.length > 0) {
+        const namen = buitenDienst
+            .map(o => `${getEmployee(o.userId)?.name || 'Medewerker'} (${o.shiftStart.substring(0, 5)}-${o.shiftEnd.substring(0, 5)})`)
+            .join(', ');
+        const vraag = buitenDienst.length === 1
+            ? `Deze activiteit valt (deels) buiten de shift-uren van ${namen}. Toch opslaan?`
+            : `Deze activiteit valt (deels) buiten de shift-uren van ${buitenDienst.length} personen: ${namen}. Toch opslaan?`;
+        if (!await showConfirm(vraag)) return;
     }
 
     try {
         if (id) {
             await updateActivity(parseInt(id, 10), { startTime, endTime, type, description });
         } else {
-            await addActivity({ userId: parseInt(userId, 10), shiftId: shiftId ? parseInt(shiftId, 10) : null, date, startTime, endTime, type, description });
+            // Eén rij per persoon: het schema kent geen gedeelde gebeurtenis.
+            // Op volgorde en niet met Promise.all, want addActivity ververst na
+            // elke aanroep de cache; parallel zou dat door elkaar laten lopen.
+            for (const o of ontvangers) {
+                await addActivity({
+                    userId: o.userId, shiftId: o.shiftId, date,
+                    startTime, endTime, type, description,
+                });
+            }
         }
         closeActivityModal();
         renderPlanning();
         // Herrender de open shift-modal zodat de nieuwe activiteit meteen zichtbaar is
         if (AppState.editingShiftId) openEditShiftModal(AppState.editingShiftId);
-        showToast('Activiteit opgeslagen', 'success');
+        showToast(ontvangers.length > 1
+            ? `Activiteit opgeslagen voor ${ontvangers.length} personen`
+            : 'Activiteit opgeslagen', 'success');
     } catch (error) {
         showToast('Fout bij opslaan: ' + getUserFriendlyError(error), 'error');
     }
@@ -1116,3 +1245,9 @@ async function deleteShiftConfirm(shiftId) {
     }
 }
 
+
+// Zodat de pure keuzelogica in Node getest kan worden (#408). In de browser
+// bestaat `module` niet, dus dit heeft daar geen effect.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { activiteitDeelnemerKandidaten };
+}

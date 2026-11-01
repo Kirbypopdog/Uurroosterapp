@@ -26,7 +26,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20261101b">
+    <link rel="stylesheet" href="styles.css?v=20261101c">
     <!-- #156: foutmonitoring. Inert zolang er geen DSN in config/monitoring.js
          staat; dan wordt er ook niets van een CDN gehaald. Staat bewust vóór de
          app-bestanden, zodat een fout tijdens het opstarten ook gemeld wordt. -->
@@ -554,6 +554,14 @@
                     <label for="activity-description">Omschrijving</label>
                     <input type="text" id="activity-description" placeholder="Bijv. Oudergesprek met Fam. Jansen">
                 </div>
+                <!-- #408: een vergadering is zelden van één persoon. In productie
+                     telt een vergadering gemiddeld 3,5 deelnemers, maar een
+                     activiteit staat per persoon in de database, dus moest je
+                     hem per persoon opnieuw intypen. -->
+                <div class="form-group hidden" id="activity-deelnemers-groep">
+                    <label id="activity-deelnemers-label">Ook voor</label>
+                    <div id="activity-deelnemers" class="activity-deelnemers"></div>
+                </div>
                 <div class="modal-actions modal-actions-split">
                     <div class="modal-actions-left">
                         <button type="button" class="btn btn-danger hidden" id="activity-delete-btn">Verwijderen</button>
@@ -973,12 +981,12 @@
     <script src="validation.js?v=20261030a"></script>
     <script src="drag-handler.js?v=20260830a"></script>
     <script src="app-globals.js?v=20260611a"></script>
-    <script src="app-permissions.js?v=20260611a"></script>
+    <script src="app-permissions.js?v=20261101b"></script>
     <script src="app-ui.js?v=20260830a"></script>
     <script src="app-auth.js?v=20260611a"></script>
     <script src="app-nav.js?v=20260830a"></script>
     <script src="app-planner.js?v=20261101b"></script>
-    <script src="app-shifts.js?v=20260611a"></script>
+    <script src="app-shifts.js?v=20261101b"></script>
     <script src="app-swaps.js?v=20260611a"></script>
     <script src="app-leave.js?v=20261016a"></script>
     <script src="app-employees.js?v=20260830a"></script>

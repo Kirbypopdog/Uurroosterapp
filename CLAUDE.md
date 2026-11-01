@@ -105,6 +105,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `beschikbaar-weg.test.js` | Dat een dag zonder dienst "Vrij" heet in plaats van groen "Beschikbaar", en dat 'vrij' verouderd is maar herkend blijft (#402) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
 | `activiteiten-balkje.test.js` | Dat een activiteit als balkje op zijn echte uren staat, en dat het tijdlabel van een dienstblok niet afgekapt wordt (#404, #406) |
+| `activiteit-deelnemers.test.js` | Wie er in de deelnemerslijst van een activiteit komt, en wie er een activiteit voor anderen mag aanmaken (#408) |
 | `vergadering-dubbel.test.js` | Dat een concept toepassen geen tweede Teamvergadering naast de bestaande zet (#407) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
@@ -545,6 +546,30 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   een handmatig ingevoerde vergadering net zo goed zo kan heten. De tuple is de
   veilige sleutel, want een bestaande vergadering op dezelfde persoon, dag en
   uur ÍS deze vergadering.
+
+- **Een activiteit voor meerdere mensen** (#408): een activiteit staat PER
+  PERSOON in de database; er is geen gedeelde gebeurtenis met deelnemers. In
+  productie zijn 254 werkelijke vergaderingen opgeslagen als 879 rijen,
+  gemiddeld 3,5 deelnemers per stuk. Voor de teamvergadering viel dat nooit op
+  — die genereert het concept — maar alles met de hand moest per persoon
+  opnieuw ingetypt worden.
+
+  Het activiteitenvenster heeft daarom een deelnemerslijst: wie die dag een
+  dienst heeft, met zijn uren erachter. Er worden nog steeds LOSSE rijen
+  geschreven; dit scheelt alleen de herhaling. Een echte gedeelde gebeurtenis
+  is een schemawijziging en een apart gesprek.
+
+  Vier dingen die erbij horen:
+  - **Alleen bij aanmaken.** Bij bewerken bewerk je één rij; de rijen van de
+    anderen blijven staan. Een vinkje zou het tegendeel suggereren.
+  - **De waarschuwing over diensturen geldt per ONTVANGER.** De een werkt tot
+    16:30 en de ander tot 12:30, dus dezelfde activiteit valt voor de een wél
+    en voor de ander niet binnen de dienst. De melding noemt wie.
+  - **Een medewerker ziet de lijst niet**: `canCreateActivityForOthers()` is de
+    frontendkant van de check in `POST /shift-activities` (regel 5).
+  - Id's worden als TEKST vergeleken. Een id komt als getal uit de API maar als
+    string uit een `dataset`; zonder dat zou de persoon voor wie de activiteit
+    al is er nóg eens in staan en een dubbele rij krijgen.
 
 - **Bezetting en activiteiten** (#145): `calcPlanningHourlyHeadcount()` in `app-planner.js` geeft `bruto` (wie een dienst heeft) en `netto` (bruto min wie op dat uur een activiteit heeft). ALLE zes de activiteittypes verminderen de netto bezetting, voor hun volle duur. Dat is nagevraagd en bevestigd: bij oudergesprek, vorming, overleg, vergadering, afspraak én andere staat de begeleider niet bij de groep. Er is bewust geen uitzondering per type en geen vinkje "ik blijf bereikbaar" per activiteit: dan moet iemand dat elke keer beoordelen en kan het vergeten worden, en te vaak waarschuwen is bij bezetting de veilige kant. Netto voedt precies drie plekken: de onderbezettingsmeldingen in `renderHomeAlerts`, de bezettingsbalk in de planning en `validateMinimumStaffing` in `validation.js`. Activiteittypes worden verder nergens in logica onderscheiden, alleen voor kleur en label
 - **Weekend- en vakantieverantwoordelijke**: je bent verantwoordelijk voor het WEEKEND, dus alleen in een week waarin het weekend open is. Staat het weekend dicht, dan is er niemand aan de beurt en toont de app niemand. Tijdens een vakantie staat de verantwoordelijke PER WEEK, aan te duiden in de roosterbouwer: in de kerstvakantie doet de ene persoon week 1 en een ander week 2. Een vakantieweek is daarmee uitgepraat — is er voor die week niemand aangeduid, dan is er niemand, en valt de app bewust NIET terug op de rotatie. Een vakantieweek verbruikt ook geen beurt, dus na de vakantie gaat de rotatie verder waar hij gebleven was.
