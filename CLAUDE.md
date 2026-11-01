@@ -104,6 +104,8 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `afwezigheid-zichtbaar.test.js` | Dat het type afwezigheid in het dienstblok staat en niet alleen in de tooltip (#401) |
 | `beschikbaar-weg.test.js` | Dat een dag zonder dienst "Vrij" heet in plaats van groen "Beschikbaar", en dat 'vrij' verouderd is maar herkend blijft (#402) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
+| `activiteiten-balkje.test.js` | Dat een activiteit als balkje op zijn echte uren staat, en dat het tijdlabel van een dienstblok niet afgekapt wordt (#404, #406) |
+| `vergadering-dubbel.test.js` | Dat een concept toepassen geen tweede Teamvergadering naast de bestaande zet (#407) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
@@ -487,6 +489,63 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   **Waarom alle drie.** De app bevat ziekmeldingen, dus gezondheidsgegevens (#152). De laptops worden gedeeld maar iedereen heeft zijn eigen login en dus zijn eigen browserprofiel, dus een collega komt niet zomaar in jouw opslag. Wat overblijft is de laptop die onbewaakt open blijft staan, en daar helpt alleen punt 3 tegen: een kortere geldigheid doet niets als het token op dat moment vers is.
 - **Opstartscherm** (#389): `index.html` zet de klasse `session-restoring` op `<html>` zodra er een token in `sessionStorage` staat. Die verbergt het loginscherm (anders flitst dat voorbij bij wie al ingelogd is) en `#app-container` staat dan nog op `hidden`. In dat gat toont `#opstartscherm` het KADER van de app: dezelfde zijbalk op dezelfde plek, met vlakken waar de inhoud komt. Puur markup en CSS, dus het staat er al bij de eerste paint. **De klasse moet op élk pad weggehaald worden**: in `showApp()` (geslaagd), in de twee foutafhandelingen van `checkSession()` en in `showLogin()`. Vergeet je er één, dan blijft het opstartscherm over de app heen staan
 - **Stat-kaarten op home** (#166): twee reeksen, elk met een eigen doelgroep. `renderHomeEigenUren()` toont JOUW uren deze week en deze periode tegen je contract, plus wat op jou wacht; alleen voor wie meedraait in het rooster, want een adminaccount heeft geen diensten. `renderHomeStats()` toont de BEHEERcijfers en is er alleen voor admin en roosterverantwoordelijke. Zonder contracturen verschijnt er geen balk en geen "van": `32/0u` zou onzin zijn. De kleurregel is dezelfde als bij de uren in de planning: rood boven de norm, oranje eronder
+- **Activiteiten in het dienstblok** (#406): een balkje onderaan, op de uren
+  waarop de activiteit werkelijk valt. Het waren tekstchips met het TYPE erin,
+  en dat was het verkeerde veld: van de activiteiten in productie is 96% een
+  vergadering en heet 869× `Teamvergadering`, terwijl de omschrijving — in
+  99,9% van de rijen ingevuld — alleen in de tooltip stond. De chip toonde dus
+  bij bijna elke dienst hetzelfde woord.
+
+  Wat het balkje toevoegt is het enige dat ergens doorwerkt: WANNEER. Alle zes
+  de types verlagen de netto bezetting voor hun volle duur (#145), en het
+  balkje ligt nu recht onder de dip in de bezettingsbalk.
+
+  Drie dingen zijn gemeten en niet gekozen:
+
+  1. **Het balkje heeft een eigen lichte ring** (`box-shadow: 0 0 0 1px
+     var(--surface-color)`). Een gekleurde streep los op het blok hangt voor
+     zijn contrast af van de teamkleur eronder, en die verschilt per team —
+     dezelfde val als bij de chips in #163 en het watermerk in #401. Op cargo
+     verdween een neutrale streep bijna.
+  2. **De omschrijving staat alleen in de DAGweergave in het balkje.** Nagemeten
+     op een venster van 1440px: in de weekweergave is een dagcel 143,7px, een
+     uur dus 8,45px en een vergadering van drie uur 25px — daar past alleen
+     `Te…` in. In de dagweergave is diezelfde cel 1008px en dat balkje 178px.
+     De drempel van 2,5 uur komt daarvandaan; ook in de dagweergave krijgt een
+     overleg van één uur (59px) geen tekst.
+  3. **De tijd staat vóór de omschrijving.** Kapt het op een smaller venster
+     toch af, dan verdwijnt de omschrijving en blijft het uur heel. Andersom
+     lees je een half uur, en dat is de fout uit #208.
+
+  Een nachtdienst die over TWEE dagcellen loopt krijgt géén balkje: de breedte
+  van zo'n blok is `calc(dag1% + 4px + dag2%)`, dus een percentage binnen het
+  blok is geen tijdstip. Liever niets dan verkeerd; de activiteit blijft in de
+  tooltip en in het dienstvenster staan.
+
+  Elk type draagt in `styles.css` drie waarden in plaats van drie losse
+  declaraties: `--act-licht` (het vlak waar tekst op staat), `--act-donker` (het
+  dunne balkje in de weekweergave — een lichte tint van 4px is daar niet te
+  zien) en `--act-tekst` (de bij #163 nagemeten tekstkleur). Eén bron per type.
+
+- **Het tijdlabel van een dienstblok** (#404): het volle bereik verschijnt pas
+  vanaf **7,5 uur** breedte, niet vanaf 6. `09:00-15:00` is 62,9px en een blok
+  van zes uur maar 50,4px, van zeven uur 59,2px. Alles daartussen werd
+  gecentreerd afgekapt tot `9:00-15:0`, en dat leest als een geldige tijd die
+  het niet is — dezelfde fout als bij het doorloopblok in #208. De drempel
+  staat als `VOLLEDIG_BEREIK_VANAF_UREN` in `app-planner.js`; verlaag hem niet
+  zonder opnieuw te meten.
+
+- **Geen dubbele teamvergaderingen** (#407): `draft-apply.js` ruimt vlak vóór
+  het invoegen de rijen op die het gaat schrijven, op `(user_id, date,
+  start_time, end_time)` met `type = 'vergadering'`. Dat is nodig naast de
+  opruiming op `draft_id`: de 879 vergaderingen in productie dateren allemaal
+  van vóór migratie 038 en dragen dat veld niet, dus die werden niet gevonden
+  en kregen er elk een tweede naast — 324 daarvan in de toekomst. Gok hier
+  NOOIT op `description = 'Teamvergadering'`: dat is in #376 afgewezen omdat
+  een handmatig ingevoerde vergadering net zo goed zo kan heten. De tuple is de
+  veilige sleutel, want een bestaande vergadering op dezelfde persoon, dag en
+  uur ÍS deze vergadering.
+
 - **Bezetting en activiteiten** (#145): `calcPlanningHourlyHeadcount()` in `app-planner.js` geeft `bruto` (wie een dienst heeft) en `netto` (bruto min wie op dat uur een activiteit heeft). ALLE zes de activiteittypes verminderen de netto bezetting, voor hun volle duur. Dat is nagevraagd en bevestigd: bij oudergesprek, vorming, overleg, vergadering, afspraak én andere staat de begeleider niet bij de groep. Er is bewust geen uitzondering per type en geen vinkje "ik blijf bereikbaar" per activiteit: dan moet iemand dat elke keer beoordelen en kan het vergeten worden, en te vaak waarschuwen is bij bezetting de veilige kant. Netto voedt precies drie plekken: de onderbezettingsmeldingen in `renderHomeAlerts`, de bezettingsbalk in de planning en `validateMinimumStaffing` in `validation.js`. Activiteittypes worden verder nergens in logica onderscheiden, alleen voor kleur en label
 - **Weekend- en vakantieverantwoordelijke**: je bent verantwoordelijk voor het WEEKEND, dus alleen in een week waarin het weekend open is. Staat het weekend dicht, dan is er niemand aan de beurt en toont de app niemand. Tijdens een vakantie staat de verantwoordelijke PER WEEK, aan te duiden in de roosterbouwer: in de kerstvakantie doet de ene persoon week 1 en een ander week 2. Een vakantieweek is daarmee uitgepraat — is er voor die week niemand aangeduid, dan is er niemand, en valt de app bewust NIET terug op de rotatie. Een vakantieweek verbruikt ook geen beurt, dus na de vakantie gaat de rotatie verder waar hij gebleven was.
 

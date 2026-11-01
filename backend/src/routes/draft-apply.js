@@ -697,6 +697,34 @@ router.post('/schedule-drafts/:id/apply', requireAuth, requireRole('admin', 'roo
       }
 
       if (teSchrijvenActiviteiten.length > 0) {
+        // #407: de opruiming hierboven begrenst op draft_id, en de
+        // vergaderingen van vóór migratie 038 hebben dat veld niet. Die
+        // blijven dus staan en krijgen bij elke toepassing een tweede naast
+        // zich. In productie zijn dat er 869, waarvan 324 in de toekomst — dus
+        // geen enkele dubbele maar honderden.
+        //
+        // De sleutel die dat wél dicht trekt is niet de omschrijving maar de
+        // rijen die we op dit moment gaan schrijven: persoon, datum, begin- en
+        // eindtijd. Een bestaande vergadering op diezelfde persoon, dag en uur
+        // IS deze vergadering, wie hem ook heeft aangemaakt. Een met de hand
+        // gezette vergadering op een ANDER uur blijft staan.
+        //
+        // Dit is bewust geen gok op `description = 'Teamvergadering'`: dat was
+        // in #376 afgewezen omdat het handwerk zou kunnen wissen, en terecht.
+        await client.query(
+          `DELETE FROM shift_activities
+            WHERE type = 'vergadering'
+              AND (user_id, date, start_time, end_time)
+                  IN (SELECT u, d::date, f::time, t::time
+                      FROM unnest($1::int[], $2::date[], $3::text[], $4::text[]) AS x(u, d, f, t))`,
+          [
+            teSchrijvenActiviteiten.map(a => a.userId),
+            teSchrijvenActiviteiten.map(a => a.date),
+            teSchrijvenActiviteiten.map(a => a.from),
+            teSchrijvenActiviteiten.map(a => a.to),
+          ]
+        );
+
         // shift_id bestaat pas na migratie 020; zonder die kolom valt de
         // koppeling weg en blijft alleen de dag over.
         if (shiftIdExists) {

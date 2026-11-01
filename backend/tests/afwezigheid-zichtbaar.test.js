@@ -74,10 +74,12 @@ describe('wat de planner rendert', () => {
     expect(treffers).toHaveLength(2); // week- én dagweergave
   });
 
-  // De activiteitenchips blijven staan: het lint ligt in de hoek en vraagt geen
+  // De activiteiten blijven staan: het lint ligt in de hoek en vraagt geen
   // eigen regel. Bij het afgekeurde chipje was dat wél zo.
-  test('de activiteitenchips blijven staan bij een afwezigheid', () => {
-    const treffers = BRON.match(/\$\{actChips\}/g) || [];
+  // #406: de chips zijn balkjes geworden; die liggen onderaan en komen het
+  // lint in de rechterbovenhoek dus evenmin in de weg.
+  test('de activiteiten blijven staan bij een afwezigheid', () => {
+    const treffers = BRON.match(/\$\{actBalkjes\}/g) || [];
     expect(treffers.length).toBe(2);
   });
 

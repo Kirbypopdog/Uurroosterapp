@@ -203,33 +203,129 @@ function _bezetting() {
 }
 
 /**
- * #163: de activiteitenchips stonden op zeven pixels, afgekort tot vier à vijf
- * letters ("Overl", "Vorm"). Dat was voor veel mensen niet te lezen, en groter
- * kon niet: op 8px hadden twee chips al 61 pixels nodig terwijl een dienst van
- * acht uur er 59 geeft.
+ * Welk tijdlabel past er in een dienstblok van deze breedte? (#147, #208, #404)
  *
- * Ik heb het eerst omgebouwd naar een balkje onderaan op de juiste uren. Victor
- * vond de chips beter, omdat je daarmee ziet WAT er staat en niet alleen
- * wanneer. Terecht, en het echte probleem was de tekst en niet de vorm.
+ * Een volledig bereik als "09:00-15:00" is 62,9px breed. Nagemeten op een
+ * venster van 1440px is een dagcel 143,7px en één uur dus 8,45px:
  *
- * De codes zijn nu twee letters (zie ACTIVITY_TYPE_LABELS_SHORT). Nagemeten:
- * "Overl" op 7px is 25 pixels breed, "OL" op 11px is 23. Er passen er dus
- * evenveel, maar de letter is de helft groter. De volledige naam en de tijd
- * staan in de tooltip.
+ *   6 uur   -> 50,4px   te smal
+ *   7 uur   -> 59,2px   te smal
+ *   7,5 uur -> 63,4px   past net
+ *   8 uur   -> 67,2px   past
  *
- * @param {Array} activiteiten  de activiteiten van deze dienst
+ * De drempel stond op 6 uur, waardoor alles tussen 6 en 7,5 uur gecentreerd
+ * werd afgekapt tot "9:00-15:0". Dat leest als een ándere tijd — dezelfde fout
+ * als bij het doorloopblok in #208 en bij de activiteitenchips in #405. Onder
+ * de drempel alleen de starttijd: die is ondubbelzinnig, een afgeknipte reeks
+ * niet.
+ *
+ * @param {string} startTime     begintijd van de dienst
+ * @param {string} endTime       eindtijd van de dienst
+ * @param {number} zichtbaarUren hoeveel uren van de tijdlijn het blok beslaat
+ *                               (iets anders dan de duur: een nachtdienst kan
+ *                               op een geknipte cel veel smaller uitkomen)
  */
-function activiteitenChips(activiteiten) {
+const VOLLEDIG_BEREIK_VANAF_UREN = 7.5;
+
+function tijdLabelVoorBlok(startTime, endTime, zichtbaarUren) {
+    return zichtbaarUren < VOLLEDIG_BEREIK_VANAF_UREN
+        ? startTime
+        : `${startTime}-${endTime}`;
+}
+
+/**
+ * Activiteiten in een dienstblok: een balkje op de uren waarop de activiteit
+ * werkelijk valt (#406).
+ *
+ * De geschiedenis hoort erbij, want dit is de derde vorm. #163 verving chips op
+ * zeven pixels door een balkje; Victor koos toen voor chips terug, omdat je
+ * daarmee ziet WAT er staat en niet alleen wanneer. Dat was juist — maar twee
+ * dingen die toen niet bekend waren maken het nu anders:
+ *
+ *  1. Het TYPE zegt in de praktijk niets. Van de activiteiten in productie is
+ *     96% een vergadering, en 869 daarvan heten allemaal "Teamvergadering".
+ *     De chip toonde dus bij bijna elke dienst hetzelfde woord, terwijl de
+ *     omschrijving — in 99,9% van de rijen ingevuld — alleen in de tooltip
+ *     stond. De chip toonde het veld met de minste inhoud.
+ *  2. De chips pasten niet. Bij drie activiteiten kromp elke chip tot 19-21px
+ *     en werd de tekst doorgesneden ("Overl" las als "Over"), zonder dat er
+ *     ruimte was voor de puntjes van text-overflow (#405).
+ *
+ * Wat het balkje wél toevoegt is de enige eigenschap die ergens doorwerkt:
+ * WANNEER. Alle zes de types verlagen de netto bezetting voor hun volle duur
+ * (#145), en tot nu toe was nergens te zien waar die dip vandaan kwam. Het
+ * balkje ligt recht onder de bezettingsbalk.
+ *
+ * Twee dingen zijn gemeten en niet gekozen:
+ *
+ * - Het balkje heeft een EIGEN lichte ondergrond. Een gekleurde streep los op
+ *   het blok hangt voor zijn contrast af van de teamkleur eronder, en die
+ *   verschilt per team — dezelfde val als bij de chips in #163 en het
+ *   watermerk in #401. Op cargo verdween een neutrale streep bijna.
+ * - De omschrijving staat ALLEEN in de dagweergave in het balkje. Nagemeten op
+ *   een venster van 1440px: in de weekweergave is een dagcel 143,7px, dus een
+ *   uur 8,45px en een vergadering van drie uur 25px breed. Daar past geen woord
+ *   in, alleen "Te…". In de dagweergave is dezelfde cel 1008px, een uur 59px en
+ *   diezelfde vergadering 178px — ruim genoeg voor "13:00-16:00 · Teamvergadering".
+ *   De drempel van 2,5 uur komt daar vandaan: 2,5 × 59 = 148px, net genoeg.
+ *   Ook in de dagweergave krijgt een overleg van een uur (59px) dus geen tekst.
+ * - De TIJD staat vooraan en de omschrijving erachter. Wordt het op een smaller
+ *   venster toch te krap, dan kapt `text-overflow` de omschrijving af en blijft
+ *   het uur heel. Andersom zou je een half uur lezen, en dat is de fout uit #208.
+ *
+ * Een nachtdienst die over TWEE dagcellen loopt krijgt geen balkje. De breedte
+ * van zo'n blok is `calc(dag1% + 4px + dag2%)`, dus een percentage binnen het
+ * blok komt niet overeen met een tijdstip; een balkje zou op de verkeerde plek
+ * staan. Liever niets dan verkeerd — de activiteit blijft zichtbaar in de
+ * tooltip van de dienst en in het dienstvenster. Het gaat in productie om
+ * enkele rijen, en die staan bovendien grotendeels buiten hun eigen dienst.
+ *
+ * @param {Array}  activiteiten  de activiteiten van deze dienst
+ * @param {number} blokStartUur  het uur waarop het blok BEGINT zoals het getekend is
+ * @param {number} blokUren      hoeveel uren breed het blok getekend is
+ * @param {boolean} isDagweergave  in de dagweergave is er plaats voor tekst
+ * @param {boolean} gesplitstBlok  true bij een nachtdienst over twee cellen
+ */
+function activiteitenBalkjes(activiteiten, blokStartUur, blokUren, isDagweergave, gesplitstBlok) {
     if (!activiteiten || !activiteiten.length) return '';
-    const chips = activiteiten.map(act => {
-        const kort = ACTIVITY_TYPE_LABELS_SHORT[act.type] || act.type;
+    if (gesplitstBlok) return '';
+    if (!(blokUren > 0)) return '';
+
+    const naarUur = (t) => {
+        const [u, m] = String(t).split(':').map(Number);
+        if (!Number.isFinite(u)) return null;
+        return u + (Number.isFinite(m) ? m : 0) / 60;
+    };
+    const blokEindUur = blokStartUur + blokUren;
+
+    return activiteiten.map(act => {
+        const van = naarUur(act.startTime);
+        const tot = naarUur(act.endTime);
+        if (van === null || tot === null) return '';
+        // Alleen het deel dat binnen het getekende blok valt. Een activiteit die
+        // er helemaal buiten ligt — dat komt voor, de modal waarschuwt maar
+        // staat het toe — krijgt geen balkje in plaats van een balkje aan de rand.
+        const van2 = Math.max(van, blokStartUur);
+        const tot2 = Math.min(tot, blokEindUur);
+        if (!(tot2 > van2)) return '';
+
+        const links = ((van2 - blokStartUur) / blokUren) * 100;
+        const breed = ((tot2 - van2) / blokUren) * 100;
+
         const vol = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
         const t = `${String(act.startTime).substring(0, 5)}-${String(act.endTime).substring(0, 5)}`;
         const titel = escapeHtml(`${vol} ${t}${act.description ? ' — ' + act.description : ''}`);
-        return `<span class="activity-chip activity-type-${escapeHtml(act.type)}"`
-             + ` data-activity-id="${act.id}" data-tooltip="${titel}">${escapeHtml(kort)}</span>`;
+
+        // Tekst alleen waar hij werkelijk past: zie de drempel hierboven.
+        const tekst = act.description || vol;
+        const metTekst = !!isDagweergave && (tot2 - van2) >= 2.5;
+        const klasse = `activity-band activity-type-${escapeHtml(act.type)}${metTekst ? ' activity-band--tekst' : ''}`;
+
+        return `<span class="${klasse}" style="left:${links.toFixed(2)}%;width:${breed.toFixed(2)}%"`
+             + ` data-activity-id="${act.id}" data-tooltip="${titel}">`
+             + (metTekst ? `${escapeHtml(t)} · ${escapeHtml(tekst)}` : '')
+             + `</span>`;
     }).join('');
-    return `<div class="activity-chips-row">${chips}</div>`;
 }
 
 function calcPlanningHourlyHeadcount(date, hour) {
@@ -742,11 +838,11 @@ function renderOvernightContinuation(empId, date, START_HOUR, TOTAL_HOURS) {
             // blok van 20 pixels waar het er 40 nodig heeft. Je las dan "→07:0"
             // of "→0…", en dat leest als een ander tijdstip. Dezelfde regel als
             // bij de gewone blokken: onder 2,5 zichtbare uren geen label, onder
-            // de 6 uur geen activiteitenchips.
+            // de 7,5 uur geen volledig tijdbereik (#404).
             const doorloopUren = endFrac > START_HOUR ? endFrac - START_HOUR : 0;
             let doorloopKlasse = '';
             if (doorloopUren < 2.5)    doorloopKlasse = ' timeline-block--xs';
-            else if (doorloopUren < 6) doorloopKlasse = ' timeline-block--sm';
+            else if (doorloopUren < 7.5) doorloopKlasse = ' timeline-block--sm';
             html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation${doorloopKlasse}"
                          data-shift-id="${prevShift.id}"
                          data-employee-id="${prevShift.employeeId}"
@@ -1117,20 +1213,19 @@ function renderTimelineView() {
                             // "22:00-07:00" 57px, dus ruwweg 2,5 en 6 uur breedte.
                             const zichtbaarUren = Math.max(0, breedteUren || 0);
                             if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
-                            else if (zichtbaarUren < 6) blockClass += ' timeline-block--sm';
+                            else if (zichtbaarUren < 7.5) blockClass += ' timeline-block--sm';
 
-                            // #163: activiteiten als balkje onderaan, op de uren waar ze
-                            // vallen, in plaats van als tekstchips die om breedte vochten.
+                            // #406: activiteiten als balkje onderaan, op de uren waar ze
+                            // werkelijk vallen. Zie activiteitenBalkjes() voor waarom
+                            // dit geen tekstchips meer zijn.
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            const actChips = activiteitenChips(shiftActivities);
+                            const gesplitstBlok = isOvernight && !(dayOfWeek === 0 || isDayView);
+                            const actBalkjes = activiteitenBalkjes(
+                                shiftActivities, Math.max(startFrac, START_HOUR), breedteUren,
+                                isDayView, gesplitstBlok);
 
-                            // Show only start time when block is too narrow for full range (#147)
-                            // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
-                            // niet, dus dan alleen de starttijd. Die is
-                            // ondubbelzinnig, een afgeknipte reeks niet.
-                            const timeLabel = zichtbaarUren < 6
-                                ? shift.startTime
-                                : `${shift.startTime}-${shift.endTime}`;
+                            // Welk label past er? Zie tijdLabelVoorBlok() (#147, #404).
+                            const timeLabel = tijdLabelVoorBlok(shift.startTime, shift.endTime, zichtbaarUren);
 
                             // #274: een dienstblok is een div en stond dus niet
                             // in de tabvolgorde; met het toetsenbord was er geen
@@ -1165,7 +1260,7 @@ function renderTimelineView() {
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 ${isAbsent ? afwezigheidsLint(availability.type) : ''}
                                 <span class="block-time">${timeLabel}</span>
-                                ${actChips}
+                                ${actBalkjes}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -1373,20 +1468,19 @@ function renderTimelineView() {
                             // "22:00-07:00" 57px, dus ruwweg 2,5 en 6 uur breedte.
                             const zichtbaarUren = Math.max(0, breedteUren || 0);
                             if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
-                            else if (zichtbaarUren < 6) blockClass += ' timeline-block--sm';
+                            else if (zichtbaarUren < 7.5) blockClass += ' timeline-block--sm';
 
-                            // #163: activiteiten als balkje onderaan, op de uren waar ze
-                            // vallen, in plaats van als tekstchips die om breedte vochten.
+                            // #406: activiteiten als balkje onderaan, op de uren waar ze
+                            // werkelijk vallen. Zie activiteitenBalkjes() voor waarom
+                            // dit geen tekstchips meer zijn.
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            const actChips = activiteitenChips(shiftActivities);
+                            const gesplitstBlok = isOvernight && !(dayOfWeek === 0 || isDayView);
+                            const actBalkjes = activiteitenBalkjes(
+                                shiftActivities, Math.max(startFrac, START_HOUR), breedteUren,
+                                isDayView, gesplitstBlok);
 
-                            // Show only start time when block is too narrow for full range (#147)
-                            // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
-                            // niet, dus dan alleen de starttijd. Die is
-                            // ondubbelzinnig, een afgeknipte reeks niet.
-                            const timeLabel = zichtbaarUren < 6
-                                ? shift.startTime
-                                : `${shift.startTime}-${shift.endTime}`;
+                            // Welk label past er? Zie tijdLabelVoorBlok() (#147, #404).
+                            const timeLabel = tijdLabelVoorBlok(shift.startTime, shift.endTime, zichtbaarUren);
 
                             // #274: een dienstblok is een div en stond dus niet
                             // in de tabvolgorde; met het toetsenbord was er geen
@@ -1421,7 +1515,7 @@ function renderTimelineView() {
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 ${isAbsent ? afwezigheidsLint(availability.type) : ''}
                                 <span class="block-time">${timeLabel}</span>
-                                ${actChips}
+                                ${actBalkjes}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -1533,8 +1627,11 @@ function calculateShiftColumns(shifts) {
 
 // Keep old function for backwards compatibility if needed elsewhere
 
-// Zodat `afwezigheidsLabel` in Node getest kan worden (#401). In de browser
-// bestaat `module` niet, dus dit heeft daar geen effect.
+// Zodat deze pure functies in Node getest kunnen worden (#401, #404, #406).
+// In de browser bestaat `module` niet, dus dit heeft daar geen effect.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { afwezigheidsLabel, afwezigheidsLint };
+  module.exports = {
+    afwezigheidsLabel, afwezigheidsLint,
+    activiteitenBalkjes, tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN,
+  };
 }

@@ -5280,34 +5280,45 @@ body[data-view-mode="day"] .timeline-day-cell {
     min-width: 20px;
 }
 
-/* Activiteitenchips in een dienstblok (#163).
-   De tekst is de volle afkorting ("Overl", "Vorm"): die lees je meteen, waar
-   een code als "OL" eerst geleerd moet worden.
-   De ACHTERGROND van .activity-type-* is ondoorzichtig gemaakt, want daaronder
-   ligt de teamkleur en die verschilt per team; zie daar. */
-.timeline-block .activity-chips-row {
-    display: flex;
-    gap: 1px;
-    flex-wrap: nowrap;
-    max-width: 100%;
-    overflow: hidden;
+/* Activiteitenbalkje in een dienstblok (#406).
+   Vervangt de tekstchips van #163. De reden staat bij activiteitenBalkjes()
+   in app-planner.js; kort: het type zegt in de praktijk niets (96% is een
+   vergadering) en de chips kapten bij drie activiteiten hun eigen labels af.
+
+   Het balkje heeft een EIGEN ondergrond in de oppervlaktekleur. Zonder die
+   ondergrond ligt de teamkleur eronder, en die verschilt per team — dezelfde
+   val als bij de chips hierboven en bij het watermerk in #401. De gekleurde
+   kern zit als binnenvlak in dat bedje. */
+.timeline-block .activity-band {
+    position: absolute;
+    bottom: 1px;
+    height: 4px;
+    z-index: 3;
+    cursor: pointer;
+    border-radius: 2px;
+    background: var(--act-donker);
+    /* De lichte ring is het "bedje": hij scheidt de kleur van de teamkleur
+       eronder, zodat het contrast van het balkje vastligt. */
+    box-shadow: 0 0 0 1px var(--surface-color);
 }
 
-.timeline-block .activity-chip {
-    /* Zeven pixels was te klein om prettig te lezen. De ruimte voor negen komt
-       uit de opmaak eromheen en niet uit de tekst: padding van 3 naar 2, de
-       linkerrand van 2 naar 1 en de tussenruimte van 2 naar 1. Dat scheelt zes
-       pixels per paar chips, ruim genoeg om de twee extra pixels lettergrootte
-       op te vangen.
-       Nagemeten op een dienst van acht uur, 67 pixels breed: twee chips hadden
-       op 7px met de oude opmaak 54 pixels nodig, op 9px met deze 57. */
-    padding: 0 2px;
+/* In de dagweergave is het balkje breed genoeg voor tekst; dan is het geen
+   streepje meer maar een bandje met het uur en de omschrijving erin. Daar komt
+   de LICHTE achtergrond van het type terug, met de tekstkleur die bij #163 op
+   contrast is nagemeten. */
+.timeline-block .activity-band--tekst {
+    height: 14px;
+    border-radius: 3px 3px 0 0;
+    padding: 0 5px;
+    background: var(--act-licht);
+    color: var(--act-tekst);
     font-size: 9px;
-    border-left-width: 1px;
-    border-radius: 2px;
-    line-height: 13px;
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
     white-space: nowrap;
-    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .timeline-block:hover {
@@ -5481,12 +5492,11 @@ body[data-view-mode="day"] .timeline-day-cell {
     display: none;
 }
 
-/* Short shift blocks — hide chips at <6u, hide time text at <45min (#147) */
-.timeline-block--sm .activity-chips-row {
-    display: none;
-}
-.timeline-block--xs .block-time,
-.timeline-block--xs .activity-chips-row {
+/* Short shift blocks — hide time text at <45min (#147).
+   Het activiteitenbalkje blijft wél staan, ook op een smal blok: het kost
+   geen hoogte en vecht dus met niets om ruimte, anders dan de chips van
+   vroeger die hier verborgen moesten worden (#406). */
+.timeline-block--xs .block-time {
     display: none;
 }
 
@@ -5677,38 +5687,9 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* Activity chips within shift blocks */
-.shift-activities-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px;
-    margin-top: 2px;
-}
-
-.activity-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 9px;
-    font-weight: 600;
-    cursor: pointer;
-    border-left: 3px solid;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-    transition: filter 0.15s;
-}
-
-.activity-chip:hover {
-    filter: brightness(0.9);
-}
-
-.activity-chip-time {
-    opacity: 0.75;
-    font-weight: 500;
-}
+/* .shift-activities-chips, .activity-chip en .activity-chip-time stonden hier.
+   De chips in het dienstblok zijn in #406 vervangen door balkjes en de twee
+   andere klassen werden al nergens gerenderd. */
 
 /* #163: deze achtergronden waren doorzichtig (0,7 en bij vergadering zelfs 0,3).
    In een dienstblok ligt daar de teamkleur onder, die per team verschilt, dus
@@ -5717,40 +5698,40 @@ body[data-view-mode="day"] .timeline-day-cell {
    terwijl de eis 4,5 is.
    Ondoorzichtig maakt het contrast vast en voorspelbaar, ongeacht het blok
    eronder. Deze kleuren zijn de identiteit van een activiteitstype, net als de
-   teamkleuren, en blijven daarom hexwaarden en geen alert-tokens (#180). */
-.activity-type-oudergesprek {
-    background: #fbbf24;
-    border-color: #d97706;
-    color: #78350f;             /* 5,43 */
-}
-.activity-type-vorming {
-    background: #c4b5fd;
-    border-color: #7c3aed;
-    color: #4c1d95;             /* 5,93 */
-}
-.activity-type-overleg {
-    background: #6ee7b7;
-    border-color: #059669;
-    color: #064e3b;             /* 6,38 */
-}
-.activity-type-afspraak {
-    background: #93c5fd;
-    border-color: #3d6a5e;
-    color: #1e3a5f;             /* 6,38 */
-}
+   teamkleuren, en blijven daarom hexwaarden en geen alert-tokens (#180).
+
+   #406: elk type draagt nu drie waarden in plaats van drie losse declaraties.
+   --act-licht  het vlak waar tekst op staat (het bandje in de dagweergave,
+                het streepje in het dienstvenster)
+   --act-donker de verzadigde kleur voor het dunne balkje in de weekweergave;
+                een lichte tint van 4 pixels hoog is daar niet te zien
+   --act-tekst  de tekstkleur die bij --act-licht is nagemeten
+   Eén bron per type: de declaraties eronder lezen deze drie. */
+.activity-type-oudergesprek { --act-licht: #fbbf24; --act-donker: #d97706; --act-tekst: #78350f; } /* 5,43 */
+.activity-type-vorming      { --act-licht: #c4b5fd; --act-donker: #7c3aed; --act-tekst: #4c1d95; } /* 5,93 */
+.activity-type-overleg      { --act-licht: #6ee7b7; --act-donker: #059669; --act-tekst: #064e3b; } /* 6,38 */
+.activity-type-afspraak     { --act-licht: #93c5fd; --act-donker: #2563eb; --act-tekst: #1e3a5f; } /* 6,38 */
+/* De donkere kleur van afspraak stond op #3d6a5e, een groenige rand onder een
+   blauwe chip. Dat viel niet op zolang het alleen een randje van 1px was; als
+   balkje van 4px leest het als een ander type dan de chip ernaast. Nu het
+   blauw dat bij #93c5fd hoort. */
 /* Vergadering haalde ondoorzichtig nog maar 3,30: zijn amber en zijn tekst
    lagen te dicht bijeen. En het felle amber van oudergesprek zat er zo dicht
    tegenaan dat je de twee niet uit elkaar hield. Nu donker amber met witte
-   tekst: leesbaar op 5,56 en duidelijk anders dan oudergesprek (verschil 3,33). */
-.activity-type-vergadering {
-    background: #a3521b;
-    border-color: #7c3d12;
-    color: #ffffff;             /* 5,56 */
-}
+   tekst: leesbaar op 5,56 en duidelijk anders dan oudergesprek (verschil 3,33).
+   Hier is --act-licht dus de donkere en --act-tekst het wit. */
+.activity-type-vergadering  { --act-licht: #a3521b; --act-donker: #7c3d12; --act-tekst: #ffffff; } /* 5,56 */
+.activity-type-andere       { --act-licht: #d1d5db; --act-donker: #6b7280; --act-tekst: #1f2937; } /* 9,96 */
+
+.activity-type-oudergesprek,
+.activity-type-vorming,
+.activity-type-overleg,
+.activity-type-afspraak,
+.activity-type-vergadering,
 .activity-type-andere {
-    background: #d1d5db;
-    border-color: #6b7280;
-    color: #1f2937;             /* 9,96 */
+    background: var(--act-licht);
+    border-color: var(--act-donker);
+    color: var(--act-tekst);
 }
 
 /* Add activity button on shift block */

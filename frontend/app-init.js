@@ -501,8 +501,11 @@ function setupEventListeners() {
             await handleShiftDelete(shiftId);
         }
 
-        // Activity chip/badge click → edit activity
-        const activityEl = e.target.closest('.activity-chip, .activity-badge');
+        // Activity band/badge click → edit activity
+        // #406: `.activity-chip` is vervallen; het balkje in het dienstblok
+        // heet nu `.activity-band`. `.activity-badge` is het rijtje in het
+        // dienstvenster en blijft.
+        const activityEl = e.target.closest('.activity-band, .activity-badge');
         if (activityEl) {
             e.stopPropagation();
             const activityId = activityEl.dataset.activityId;
