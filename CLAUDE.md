@@ -435,44 +435,40 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   verwijdert. De markering hoort dus op het BLOK, niet op de celachtergrond —
   die ligt eronder.
 
-  Het type staat SCHUIN op de achtergrond (`.absent-watermerk`), en het blok
-  krijgt een EIGEN achtergrond uit de alert-tokens. Twee eerdere pogingen waren
-  fout, en allebei om een reden die het onthouden waard is:
+  Het type staat als een schuin **lintje** over de rechterbovenhoek
+  (`.afwezig-lint`), en het blok krijgt een EIGEN achtergrond uit de
+  alert-tokens. Dat laatste is wat het in de rij laat opvallen tussen de
+  verzadigde teamkleuren; de teamkleur blijft in de volle streep links staan.
 
-  1. **Een rood chipje op de regel van de activiteiten.** Qua vorm, grootte én
-     plaats niet te onderscheiden van een activiteitenchip, dus "Verlof" las als
-     nóg een activiteit. Een markering die voor iets anders wordt aangezien is
-     erger dan geen markering.
+  **Drie ontwerpen sneuvelden hiervoor**, en elk om een reden die het onthouden
+  waard is:
+
+  1. **Een rood chipje op de regel van de activiteiten.** Niet te onderscheiden
+     van een activiteitenchip, dus "Verlof" las als nóg een activiteit. Wat het
+     verraadde was niet de tekst maar het PIL-VLAK eronder — kale tekst zonder
+     achtergrond leest niet als een chip.
   2. **Het woord schuin maar DOORZICHTIG over de teamkleur.** Dezelfde val als
      bij #163 met de chips: onder het blok ligt de teamkleur, en die verschilt
      per team (blauw, paars, groen, roze, amber). Op het ene team las je het
-     woord, op het andere niet. Daarom vervangt een afwezig blok zijn
-     achtergrond; de teamkleur blijft in de volle streep links staan.
+     woord, op het andere niet.
+  3. **Datzelfde woord als behang, herhaald.** Een tegelpatroon heeft een groot
+     vlak nodig; dit blok is ~75 bij 75 en dan lopen de woorden in elkaar — op
+     staging stond er letterlijk "VerlofVerlofVerlof".
 
-  **Het woord staat er herhaald**, schuin, met elke tweede regel verschoven
-  (`WATERMERK_RIJEN`). Eén keer in het midden botste frontaal met de tijd: die
-  staat ook in het midden, in dezelfde kleur. Herhaald valt er altijd tekst
-  náást de tijd, en leest het als achtergrond in plaats van als een los label —
-  precies het verschil met een activiteitenchip.
+  Het lint lost alle drie tegelijk op: het heeft zijn **eigen ondergrond** (dus
+  leesbaar op elke teamkleur), het ligt in de **hoek** (dus de tijd blijft
+  gecentreerd en de activiteitenchips houden hun regel), en het is **één
+  element** in plaats van een patroon dat om ruimte vecht.
 
-  **Maar hooguit DRIE keer.** Een echt tegelpatroon zoals je dat op een foto
-  ziet, heeft een groot vlak nodig; dit blok is ~75 bij 75 pixels en een
-  leesbaar woord al ~40 bij 10. Nagekeken op ware grootte met echte diensten:
-  bij zeven regels in drie kolommen stond er letterlijk "VerlofVerlofVerlof"
-  aan elkaar en viel er niets meer te lezen. Verhoog die aantallen dus niet
-  zonder opnieuw op ware grootte te kijken — uitvergroot lijkt het altijd nog
-  mee te vallen. Het patroon staat op een negatieve `inset` zodat het de hoeken
-  haalt; de overflow van het blok snijdt het af.
+  De tekst OP de band heeft een eigen token nodig, `--alert-lint-tekst`: hij
+  staat op `--alert-error-text` en niet op een achtergrondkleur. Nagerekend:
+  6,9 in de lichte modus en 6,0 in de donkere (eis 4,5). Een lang woord als
+  "Overuren" wordt met `text-overflow: ellipsis` afgekapt in plaats van over de
+  rand te vallen. Onder de 2,5 uur verdwijnt het lint, net als de tijd (#147);
+  dan blijft de rode rand het signaal.
 
-  **Watermerk en tijd hebben dezelfde kleur**, dus waar ze kruisen vechten ze.
-  Nagerekend: élke dekking die het watermerk zichtbaar maakt (vanaf ~0,45) duwt
-  de tijd eroverheen onder de 4,5. Dat is met dekking niet op te lossen — de
-  tijd krijgt daarom een halo in de kleur van de blokachtergrond. Precies wat de
-  oude, nooit gebruikte `.shift-absent-conflict` met `text-shadow: 0 0 1px
-  white` al deed.
-
-  Onder de 2,5 uur verdwijnt het watermerk, net als de tijd (#147); dan blijft
-  de rode rand het signaal.
+  **Les voor de volgende keer**: beoordeel dit soort blokken op WARE grootte.
+  Alle drie de afgekeurde ontwerpen zagen er uitvergroot prima uit.
 
   In de CSS staan nog twee stukken DODE stijl uit een oudere planner:
   `.absent-badge` en de hele `.shift-absent-conflict`-behandeling met rode

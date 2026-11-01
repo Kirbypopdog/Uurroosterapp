@@ -7,17 +7,22 @@
 // staan om te weten wat er aan de hand was. En dat is de normale situatie: van
 // de 29 verlofdagen in productie staat er op 28 nog gewoon een dienst.
 //
-// Het type staat nu SCHUIN op de achtergrond van het blok, en het blok krijgt
-// een eigen achtergrond uit de alert-tokens.
+// Het type staat nu als een schuin LINTJE over de rechterbovenhoek.
 //
-// Twee eerdere pogingen waren fout, en allebei om een reden die de moeite is om
-// te onthouden:
-//   1. een rood chipje op de regel van de activiteiten — qua vorm, grootte én
-//      plaats niet te onderscheiden van een activiteitenchip, dus "Verlof" las
-//      als nóg een activiteit;
+// Drie ontwerpen sneuvelden daarvoor, en elk om een reden die het onthouden
+// waard is:
+//   1. een rood chipje op de regel van de activiteiten — niet te onderscheiden
+//      van een activiteitenchip. Wat het verraadde was niet de tekst maar het
+//      PIL-VLAK eronder;
 //   2. het woord schuin maar DOORZICHTIG over de teamkleur — die verschilt per
 //      team (blauw, paars, groen, roze, amber), dus het contrast was per team
-//      anders. Dezelfde val als bij #163 met de activiteitenchips.
+//      anders. Dezelfde val als bij #163 met de activiteitenchips;
+//   3. datzelfde woord als behang, herhaald — een tegelpatroon heeft een groot
+//      vlak nodig, en op een blok van ~75 bij 75 lopen de woorden in elkaar.
+//
+// Het lint lost alle drie tegelijk op: eigen ondergrond (leesbaar op elk team),
+// in de hoek (raakt de tijd niet, deelt niets met de chips), en één element in
+// plaats van een patroon dat om ruimte vecht.
 
 const fs = require('fs');
 const path = require('path');
@@ -63,52 +68,23 @@ describe('het label van een afwezigheidstype', () => {
 
 describe('wat de planner rendert', () => {
   const BRON = fs.readFileSync(frontend('app-planner.js'), 'utf8');
-  const CSS = fs.readFileSync(frontend('styles.css'), 'utf8');
 
-  test('het watermerk staat in het blok, in beide weergaven', () => {
-    const treffers = BRON.match(/afwezigheidsWatermerk\(availability\.type\)/g) || [];
+  test('het lint staat in het blok, in beide weergaven', () => {
+    const treffers = BRON.match(/afwezigheidsLint\(availability\.type\)/g) || [];
     expect(treffers).toHaveLength(2); // week- én dagweergave
   });
 
-  // Eén keer in het midden botste frontaal met de tijd: die staat ook in het
-  // midden, in dezelfde kleur. Als BEHANG valt er altijd tekst naast de tijd,
-  // en leest het als achtergrond in plaats van als een los label.
-  test('het woord wordt herhaald', () => {
-    expect(BRON).toMatch(/Array\.from\(\{ length: WATERMERK_RIJEN \}/);
-  });
-
-  // Nagekeken op ware grootte met echte diensten: het blok is ~75 bij 75 pixels
-  // en een leesbaar woord al ~40 bij 10. Bij zeven regels in drie kolommen
-  // stond er "VerlofVerlofVerlof" aan elkaar en was er niets meer te lezen.
-  // Een echt tegelpatroon heeft een groot vlak nodig; op een postzegel niet.
-  test('maar hooguit een handvol keer — anders wordt het pap', () => {
-    const m = BRON.match(/WATERMERK_RIJEN\s*=\s*(\d+)/);
-    expect(m).not.toBeNull();
-    const rijen = Number(m[1]);
-    expect(rijen).toBeGreaterThanOrEqual(2);
-    expect(rijen).toBeLessThanOrEqual(4);
-  });
-
-  // Staan de woorden recht onder elkaar, dan oogt het als kolommen en niet als
-  // behang. De oneven rijen schuiven daarom een halve tegel op.
-  test('de rijen staan versprongen, niet recht onder elkaar', () => {
-    expect(BRON).toMatch(/i % 2 \? ' verschoven' : ''/);
-    expect(CSS).toMatch(/\.absent-watermerk-rij\.verschoven \{[\s\S]*?translateX/);
-  });
-
-  // De activiteitenchips blijven staan: het watermerk ligt eronder en vraagt
-  // dus geen eigen regel. Dat was bij het afgekeurde chipje wél zo.
+  // De activiteitenchips blijven staan: het lint ligt in de hoek en vraagt geen
+  // eigen regel. Bij het afgekeurde chipje was dat wél zo.
   test('de activiteitenchips blijven staan bij een afwezigheid', () => {
     const treffers = BRON.match(/\$\{actChips\}/g) || [];
     expect(treffers.length).toBe(2);
   });
 
-  // Het is een decoratieve herhaling van wat de tooltip al zegt; een
-  // schermlezer hoort het niet twee keer voor te lezen.
-  test('het watermerk is verborgen voor een schermlezer', () => {
-    // Het woord staat er zeven keer; een schermlezer hoort het nul keer te
-    // horen — de tooltip zegt het al.
-    expect(BRON).toMatch(/class="absent-watermerk" aria-hidden="true"/);
+  // Het herhaalt wat de tooltip al zegt; een schermlezer hoort het niet twee
+  // keer voor te lezen.
+  test('het lint is verborgen voor een schermlezer', () => {
+    expect(BRON).toMatch(/class="afwezig-lint" aria-hidden="true"/);
   });
 
   test('de planner heeft geen eigen labellijstje meer', () => {
@@ -118,60 +94,67 @@ describe('wat de planner rendert', () => {
   test('het label wordt ge-escaped', () => {
     expect(BRON).toContain('escapeHtml(afwezigheidsLabel(');
   });
+
+  // Het watermerk is helemaal weg; blijven er resten staan, dan vecht er stille
+  // CSS met het lint.
+  test('er staat geen watermerk meer in de code', () => {
+    expect(BRON).not.toContain('absent-watermerk');
+    const CSS = fs.readFileSync(frontend('styles.css'), 'utf8');
+    expect(CSS).not.toContain('absent-watermerk');
+  });
 });
 
-describe('de opmaak van het watermerk', () => {
+describe('de opmaak van het lint', () => {
   const CSS = fs.readFileSync(frontend('styles.css'), 'utf8');
-  const blok = CSS.match(/\.absent-watermerk \{[\s\S]*?\n\}/);
+  const band = CSS.match(/\.afwezig-lint-band \{[\s\S]*?\n\}/);
+  const houder = CSS.match(/\.afwezig-lint \{[\s\S]*?\n\}/);
   const zonderUitleg = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '');
 
   test('bestaat en staat schuin', () => {
-    expect(blok).not.toBeNull();
-    expect(blok[0]).toMatch(/transform:\s*rotate\(-?\d+deg\)/);
+    expect(band).not.toBeNull();
+    expect(band[0]).toMatch(/transform:\s*rotate\(-?\d+deg\)/);
   });
 
-  // De stapel staat schuin en moet de HOEKEN van het blok halen; staat hij op
-  // inset 0, dan blijven de hoeken leeg en oogt het als een los woord.
-  test('de stapel is groter dan het blok zelf', () => {
-    expect(blok[0]).toMatch(/inset:\s*-\d+%/);
-    expect(blok[0]).toMatch(/flex-direction:\s*column/);
-  });
-
-  // De tussenruimte is het verschil tussen een patroon en een kluwen.
-  test('de regels staan ruim uit elkaar', () => {
-    const m = blok[0].replace(/\/\*[\s\S]*?\*\//g, '').match(/gap:\s*(\d+)px/);
-    expect(m).not.toBeNull();
-    expect(Number(m[1])).toBeGreaterThanOrEqual(16);
+  // De houder knipt de band af tot een hoek; zonder overflow steekt hij buiten
+  // het blok en loopt hij over de buurcel heen.
+  test('de houder knipt de band af tot een hoek', () => {
+    expect(houder).not.toBeNull();
+    expect(houder[0]).toMatch(/overflow:\s*hidden/);
+    expect(houder[0]).toMatch(/pointer-events:\s*none/);
   });
 
   // CLAUDE.md: gebruik de tokens, nooit een hexwaarde — anders werkt het maar
-  // in één thema.
-  test('gebruikt de alert-tokens en geen hexkleuren', () => {
-    expect(zonderUitleg(blok[0])).toContain('var(--alert-error-text)');
-    expect(zonderUitleg(blok[0])).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  // in één thema. De tekst OP de band heeft een eigen token nodig, want hij
+  // staat op alert-error-text en niet op een achtergrondkleur.
+  test('gebruikt de tokens en geen hexkleuren', () => {
+    expect(zonderUitleg(band[0])).toContain('var(--alert-error-text)');
+    expect(zonderUitleg(band[0])).toContain('var(--alert-lint-tekst)');
+    expect(zonderUitleg(band[0])).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 
-  // De kern van de tweede afgekeurde poging: onder het blok ligt de TEAMkleur,
-  // en die verschilt per team. Een afwezig blok krijgt daarom zijn eigen
-  // achtergrond, zodat het contrast van het watermerk voor elk team klopt.
-  test('een afwezig blok krijgt een eigen achtergrond, los van het team', () => {
+  test('en dat token bestaat in beide thema\'s', () => {
+    const treffers = CSS.match(/--alert-lint-tekst:/g) || [];
+    expect(treffers.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // Een lang woord als "Overuren" mag niet over de rand van de band vallen.
+  test('een te lang woord wordt netjes afgekapt', () => {
+    expect(band[0]).toMatch(/text-overflow:\s*ellipsis/);
+    expect(band[0]).toMatch(/white-space:\s*nowrap/);
+  });
+
+  // Onder de 2,5 uur verdwijnt de tijd al (#147); dan past er ook geen lint
+  // meer en blijft de rode rand het signaal.
+  test('verdwijnt op het smalste blok', () => {
+    expect(CSS).toMatch(/\.timeline-block--xs \.afwezig-lint \{\s*display:\s*none/);
+  });
+
+  // De eigen achtergrond is wat het blok in de rij laat opvallen; zonder die
+  // regel staat het lint op de teamkleur en is het contrast weer per team
+  // anders.
+  test('een afwezig blok houdt zijn eigen achtergrond', () => {
     const regel = CSS.match(/\.timeline-block\.team-vlot1\.absent-conflict[\s\S]*?\n\}/);
     expect(regel).not.toBeNull();
     expect(regel[0]).toContain('var(--alert-error-bg)');
-  });
-
-  // Watermerk en tijd hebben dezelfde kleur. Nagerekend: élke dekking die het
-  // watermerk zichtbaar maakt, duwt de tijd eroverheen onder de 4,5. De halo
-  // maakt de tijd los van zijn ondergrond.
-  test('de tijd krijgt een halo zodat hij over het watermerk leesbaar blijft', () => {
-    const regel = CSS.match(/\.timeline-block\.absent-conflict \.block-time \{[\s\S]*?\n\}/);
-    expect(regel).not.toBeNull();
-    expect(regel[0]).toMatch(/text-shadow:[\s\S]*var\(--alert-error-bg\)/);
-  });
-
-  // Onder de 2,5 uur verdwijnt de tijd al (#147); dan past er ook geen woord
-  // meer, ook niet schuin, en blijft de rode rand het signaal.
-  test('verdwijnt op het smalste blok', () => {
-    expect(CSS).toMatch(/\.timeline-block--xs \.absent-watermerk \{\s*display:\s*none/);
   });
 });

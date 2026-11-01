@@ -119,30 +119,27 @@ function afwezigheidsLabel(type) {
     return 'Afwezig';
 }
 
-// #401: het watermerk is het woord als BEHANG — schuin, herhaald in rijen én
-// naast elkaar, met de oneven rijen een halve tegel verschoven.
+// #401: het type afwezigheid als een schuin LINTJE over de rechterbovenhoek.
 //
-// Eén keer in het midden botste frontaal met de tijd: die staat ook in het
-// midden, in dezelfde kleur. Als patroon valt er altijd tekst náást de tijd,
-// en leest het als een achtergrond in plaats van als een los label — precies
-// het verschil met een activiteitenchip, en dat was de hele klacht.
+// Drie ontwerpen sneuvelden hiervoor, en elk om een reden die het onthouden
+// waard is:
 //
-// DRIE regels, en bewust niet meer. Het blok is maar ~75 bij 75 pixels en een
-// leesbaar woord is al ~40 bij 10. Een echt tegelpatroon zoals je het op een
-// foto ziet, heeft een groot vlak nodig; op een postzegel lopen de woorden in
-// elkaar en wordt het pap. Nagekeken op ware grootte met echte diensten: bij
-// zeven regels in drie kolommen stond er "VerlofVerlofVerlof" aan elkaar en was
-// er niets meer te lezen.
+//  1. Een rood chipje op de regel van de activiteiten. Niet te onderscheiden
+//     van een activiteitenchip, dus "Verlof" las als nóg een activiteit. Wat
+//     het verraadde was niet de tekst maar het PIL-VLAK eronder.
+//  2. Het woord schuin maar doorzichtig over de teamkleur. Onder het blok ligt
+//     de teamkleur, en die verschilt per team — op het ene team las je het
+//     woord, op het andere niet. Dezelfde val als bij #163 met de chips.
+//  3. Datzelfde woord als behang, herhaald. Een tegelpatroon heeft een groot
+//     vlak nodig; dit blok is ~75 bij 75 en dan lopen de woorden in elkaar.
 //
-// Drie regels, ruim uit elkaar, elke tweede een halve woordbreedte verschoven:
-// genoeg om als patroon te lezen, weinig genoeg om leesbaar te blijven.
-const WATERMERK_RIJEN = 3;
-
-function afwezigheidsWatermerk(type) {
+// Het lint lost alle drie tegelijk op: het heeft zijn EIGEN ondergrond (dus
+// leesbaar op elke teamkleur), het ligt in de hoek (dus het raakt de
+// gecentreerde tijd niet en hoeft niets te delen met de activiteitenchips), en
+// het is één element in plaats van een patroon dat om ruimte vecht.
+function afwezigheidsLint(type) {
     const woord = escapeHtml(afwezigheidsLabel(type));
-    const rijen = Array.from({ length: WATERMERK_RIJEN }, (_, i) =>
-        `<span class="absent-watermerk-rij${i % 2 ? ' verschoven' : ''}">${woord}</span>`).join('');
-    return `<span class="absent-watermerk" aria-hidden="true">${rijen}</span>`;
+    return `<span class="afwezig-lint" aria-hidden="true"><span class="afwezig-lint-band">${woord}</span></span>`;
 }
 
 function _bouwBezettingIndex() {
@@ -1166,7 +1163,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                ${isAbsent ? afwezigheidsWatermerk(availability.type) : ''}
+                                ${isAbsent ? afwezigheidsLint(availability.type) : ''}
                                 <span class="block-time">${timeLabel}</span>
                                 ${actChips}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
@@ -1422,7 +1419,7 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
-                                ${isAbsent ? afwezigheidsWatermerk(availability.type) : ''}
+                                ${isAbsent ? afwezigheidsLint(availability.type) : ''}
                                 <span class="block-time">${timeLabel}</span>
                                 ${actChips}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
@@ -1539,5 +1536,5 @@ function calculateShiftColumns(shifts) {
 // Zodat `afwezigheidsLabel` in Node getest kan worden (#401). In de browser
 // bestaat `module` niet, dus dit heeft daar geen effect.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { afwezigheidsLabel };
+  module.exports = { afwezigheidsLabel, afwezigheidsLint };
 }
