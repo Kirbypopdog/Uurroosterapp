@@ -945,6 +945,54 @@ const MIGRATIONS = [
         CREATE UNIQUE INDEX IF NOT EXISTS idx_verstuurde_meldingen_uniek
           ON verstuurde_meldingen (soort, sleutel)`);
     }
+  },
+  {
+    name: '049_shifts_updated_at',
+    up: async (client) => {
+      // #409: een gewijzigde dienst bleef in een gekoppelde agenda op zijn
+      // oude uren staan. De iCal-feed stuurde geen SEQUENCE mee, en zonder
+      // die teller ziet een abonnee-agenda een gebeurtenis die hij al heeft en
+      // laat hij staan wat hij heeft.
+      //
+      // Die teller moet zeggen WANNEER de dienst veranderde, en dat wist de
+      // database niet: `shifts` had alleen `created_at`.
+      await client.query(
+        `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()`);
+
+      // De trigger gaat er eerst AF, en dat is geen schoonheidsfoutje.
+      // Migratie 000 draait `schema.sql` bij elke opstart, en die maakt de
+      // trigger hieronder ook aan. Hij bestaat hier dus al, en een BEFORE
+      // UPDATE-trigger vuurt ook op de backfill: die zette alle rijen netjes
+      // op `created_at` en de trigger zette ze meteen weer op NOW(). De
+      // backfill deed dan niets, zonder één foutmelding.
+      await client.query(`DROP TRIGGER IF EXISTS trg_shifts_updated_at ON shifts`);
+
+      // Bestaande rijen krijgen hun aanmaakmoment en niet het moment van deze
+      // migratie: dat is wat we werkelijk weten. Dat het daardoor lijkt alsof
+      // ze sindsdien niet veranderd zijn, is voor de agenda's geen probleem —
+      // zij hebben nog nooit een SEQUENCE gezien en houden dus impliciet 0
+      // aan, terwijl de feed er vanaf nu een veel hogere meestuurt. Elke
+      // bestaande koppeling wordt daarmee één keer helemaal bijgewerkt, ook
+      // de dagen die er al verkeerd in stonden.
+      await client.query(`UPDATE shifts SET updated_at = created_at WHERE created_at IS NOT NULL`);
+
+      // Een TRIGGER en niet een hand vol losse UPDATE-statements. Diensten
+      // worden vanuit een stuk of zes routes geschreven (shifts, draft-apply,
+      // replace-employee, swaps, de bulkziekmelding, de import). Eén daarvan
+      // vergeten betekent een agenda die stil achterloopt — precies de fout
+      // die hier wordt opgelost. De trigger kan niet overgeslagen worden.
+      await client.query(`
+        CREATE OR REPLACE FUNCTION shifts_zet_updated_at() RETURNS trigger AS $$
+        BEGIN
+          NEW.updated_at = NOW();
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql`);
+      await client.query(`
+        CREATE TRIGGER trg_shifts_updated_at
+          BEFORE UPDATE ON shifts
+          FOR EACH ROW EXECUTE FUNCTION shifts_zet_updated_at()`);
+    }
   }
 ];
 

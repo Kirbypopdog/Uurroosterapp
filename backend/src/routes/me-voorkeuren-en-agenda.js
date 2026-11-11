@@ -5,7 +5,7 @@ const { maakRouter } = require('../veilige-router');
 const { pool } = require('../db');
 const { requireAuth, requireAdmin, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../helpers/audit');
-const { formatDateYYYYMMDD, formatICalDateTime } = require('../utils');
+const { formatDateYYYYMMDD, formatICalDateTime, icalUtcStempel, icalSequence } = require('../utils');
 const crypto = require('crypto');
 
 const router = maakRouter();
@@ -100,7 +100,7 @@ router.get('/calendar/:token.ics', async (req, res) => {
     const [shiftsResult, teamsSettingResult] = await Promise.all([
       pool.query(
         `SELECT s.id, s.date::text, s.start_time, s.end_time, s.team, s.notes,
-                t.name as team_name
+                s.updated_at, t.name as team_name
          FROM shifts s
          LEFT JOIN teams t ON t.id = s.team
          WHERE s.user_id = $1 AND s.date >= $2 AND s.date <= $3
@@ -112,7 +112,10 @@ router.get('/calendar/:token.ics', async (req, res) => {
     // settings.teams is the primary display name source (may differ from teams table)
     const teamNameMap = teamsSettingResult.rows.length ? teamsSettingResult.rows[0].value : {};
 
-    const now = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z';
+    // #409: de terugval voor een dienst zonder `updated_at`. Die kolom is NOT
+    // NULL sinds migratie 049, dus in de praktijk komt dit niet voor; het
+    // vangt alleen een database op waar die migratie nog niet gedraaid is.
+    const nu = icalUtcStempel(new Date());
 
     const events = shiftsResult.rows.map(s => {
       const dateStr = s.date.slice(0, 10);
@@ -124,10 +127,21 @@ router.get('/calendar/:token.ics', async (req, res) => {
       }
       const end = formatICalDateTime(endDate, s.end_time);
       const summary = icalEscape((teamNameMap[s.team] && teamNameMap[s.team].name) || s.team_name || s.team || 'Shift');
+
+      // #409: zonder deze drie regels laat een abonnee-agenda een gebeurtenis
+      // staan zoals hij hem al had. Zie icalSequence() in utils.js.
+      //
+      // DTSTAMP stond hier op "nu", één waarde voor het hele verzoek. Elke
+      // ophaling gaf dus élke gebeurtenis een nieuw stempel, ook de honderden
+      // die niet veranderd waren — ruis in plaats van een signaal. Het hoort
+      // het moment te zijn waarop déze gebeurtenis voor het laatst veranderde.
+      const gewijzigd = icalUtcStempel(s.updated_at) || nu;
       const lines = [
         'BEGIN:VEVENT',
         `UID:shift-${s.id}@hetvlot`,
-        `DTSTAMP:${now}`,
+        `DTSTAMP:${gewijzigd}`,
+        `LAST-MODIFIED:${gewijzigd}`,
+        `SEQUENCE:${icalSequence(s.updated_at)}`,
         `DTSTART;TZID=Europe/Brussels:${start}`,
         `DTEND;TZID=Europe/Brussels:${end}`,
         `SUMMARY:${summary}`,

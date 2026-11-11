@@ -133,6 +133,23 @@ describe('#329 schema.sql loopt niet achter op de migraties', () => {
     expect(ontbreekt).toEqual([]);
   });
 
+  // #409: migratie 049 zette een trigger en een functie op `shifts`, en die
+  // vielen buiten de vier controles hierboven — die kijken naar kolommen,
+  // indexen, constraints en tabellen. Een trigger die alleen in de migratie
+  // staat betekent dat een VERSE database hem mist, en dan loopt `updated_at`
+  // daar stil achter zonder dat iets het meldt.
+  test('elke trigger en functie die een migratie aanmaakt staat ook in schema.sql', () => {
+    const schema = genormaliseerd(schemaSql);
+    const ontbreekt = [];
+    const regex = /create\s+(?:or\s+replace\s+)?(trigger|function)\s+(\w+)/gi;
+    let m;
+    while ((m = regex.exec(migratieBlok)) !== null) {
+      const naam = m[2].toLowerCase();
+      if (!schema.includes(naam)) ontbreekt.push(`${m[1].toLowerCase()} ${naam}`);
+    }
+    expect(ontbreekt).toEqual([]);
+  });
+
   test('elke tabel die een migratie aanmaakt staat ook in schema.sql', () => {
     const schema = genormaliseerd(schemaSql);
     const regex = /create\s+table\s+(?:if\s+not\s+exists\s+)?(\w+)/gi;

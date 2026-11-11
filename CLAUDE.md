@@ -106,6 +106,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
 | `activiteiten-balkje.test.js` | Dat een activiteit als balkje op zijn echte uren staat, en dat het tijdlabel van een dienstblok niet afgekapt wordt (#404, #406) |
 | `activiteit-deelnemers.test.js` | Wie er in de deelnemerslijst van een activiteit komt, en wie er een activiteit voor anderen mag aanmaken (#408) |
+| `agenda-sequence.test.js` | Dat een gewijzigde dienst een hogere `SEQUENCE` krijgt in de agendafeed, en dat de migratie de trigger pas ná de backfill zet (#409) |
 | `vergadering-dubbel.test.js` | Dat een concept toepassen geen tweede Teamvergadering naast de bestaande zet (#407) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
@@ -406,6 +407,44 @@ zijn agenda stilletjes achterloopt.
 geen rij per ophaling. Een agenda-app haalt elk kwartier op, dus dat zou een
 eindeloos groeiende tabel met verbindingsgegevens van medewerkers zijn: meer
 persoonsgegevens aanmaken om persoonsgegevens te beschermen.
+
+**Een gewijzigde dienst moet een hogere `SEQUENCE` krijgen** (#409). Een
+abonnee-agenda koppelt een binnenkomende VEVENT op `UID` aan de afspraak die hij
+al heeft, en gebruikt `SEQUENCE` om te beslissen of dit een nieuwere versie is.
+Stuur je er geen mee, dan houdt hij impliciet 0 aan en laat hij staan wat hij
+heeft: een dienst die van 13:00–23:00 naar 09:00–16:00 ging, bleef in Outlook op
+13:00–23:00 staan, maanden lang, terwijl de feed gewoon opgehaald werd.
+
+| regel | waarde |
+|---|---|
+| `SEQUENCE` | seconden tussen 1 jan 2020 en `shifts.updated_at`, minstens 1 |
+| `LAST-MODIFIED` | `updated_at` in UTC |
+| `DTSTAMP` | idem — per GEBEURTENIS, niet per verzoek |
+
+Dat laatste stond op "nu", één waarde voor het hele verzoek, dus elke ophaling
+gaf élke gebeurtenis een nieuw stempel: ruis in plaats van een signaal.
+
+Het ijkpunt is **2020 en niet de Unix-epoch**, anders staat het getal nu al op
+1,7 miljard en komt het in de buurt van wat een client in een 32-bits geheel
+getal kwijt kan. En het is **nooit 0**: elke bestaande koppeling heeft nog nooit
+een `SEQUENCE` gezien en houdt dus 0 aan, dus een minimum van 1 werkt elke
+bestaande agenda één keer helemaal bij — inclusief de dagen die er al verkeerd
+in stonden.
+
+**`shifts.updated_at` wordt door een TRIGGER bijgehouden**
+(`trg_shifts_updated_at`), niet door de routes. Diensten worden vanuit een stuk
+of zes routes geschreven — shifts, draft-apply, replace-employee, swaps, de
+bulkziekmelding, de import — en één daarvan vergeten betekent een agenda die
+stil achterloopt, precies de fout die hier wordt opgelost.
+
+**Let op de volgorde in migratie 049.** Migratie `000_base_schema` draait
+`schema.sql` bij élke opstart, en die maakt de trigger ook aan. Hij bestaat dus
+al wanneer 049 draait, en een `BEFORE UPDATE`-trigger vuurt óók op de backfill:
+die zette alle rijen op `created_at` en de trigger zette ze meteen weer op
+`NOW()`. De backfill deed dan niets, zonder één foutmelding. De migratie laat
+de trigger daarom eerst vallen, vult bij, en zet hem daarna terug. Dit kwam
+alleen aan het licht door de migratie tegen een ECHTE PostgreSQL te draaien; de
+testsuite draait met een gemockte database en ziet dit soort dingen niet.
 
 ## Frontend Patronen
 

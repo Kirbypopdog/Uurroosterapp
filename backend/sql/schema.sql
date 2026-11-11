@@ -53,8 +53,30 @@ CREATE TABLE IF NOT EXISTS shifts (
   -- De verwijzing naar schedule_drafts staat onderaan dit bestand, want die
   -- tabel wordt pas verderop aangemaakt.
   draft_id TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP DEFAULT NOW(),
+  -- #409: wanneer deze dienst voor het laatst veranderde. De iCal-feed leidt
+  -- hier zijn SEQUENCE en LAST-MODIFIED uit af; zonder die twee laat een
+  -- abonnee-agenda een gebeurtenis staan zoals hij hem al had, en bleef een
+  -- gewijzigde dienst in Outlook op zijn oude uren staan.
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- #409: de kolom hierboven wordt door een TRIGGER onderhouden en niet door de
+-- routes. Diensten worden vanuit een stuk of zes routes geschreven (shifts,
+-- draft-apply, replace-employee, swaps, de bulkziekmelding, de import); een
+-- daarvan vergeten betekent een agenda die stil achterloopt, en dat is precies
+-- de fout die hier wordt opgelost. De trigger kan niet overgeslagen worden.
+CREATE OR REPLACE FUNCTION shifts_zet_updated_at() RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_shifts_updated_at ON shifts;
+CREATE TRIGGER trg_shifts_updated_at
+  BEFORE UPDATE ON shifts
+  FOR EACH ROW EXECUTE FUNCTION shifts_zet_updated_at();
 
 -- Availability (afwezigheid/verlof) - references users directly
 CREATE TABLE IF NOT EXISTS availability (

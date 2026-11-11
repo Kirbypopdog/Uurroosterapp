@@ -2647,6 +2647,64 @@ describe('GET /calendar/:token.ics', () => {
     const res = await request(app).get('/api/v1/calendar/nope.ics');
     expect(res.status).toBe(404);
   });
+
+  // #409: een gewijzigde dienst bleef in Outlook op zijn oude uren staan.
+  // Een abonnee-agenda koppelt een binnenkomende VEVENT op UID aan de afspraak
+  // die hij al heeft, en gebruikt SEQUENCE om te beslissen of dit een nieuwere
+  // versie is. Die stuurde de feed niet mee.
+  function arrangeFeed(updatedAt) {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 7, name: 'Karen Claes' }] })
+      .mockResolvedValueOnce({ rows: [{
+        id: 100, date: '2026-11-19', start_time: '09:00', end_time: '16:00',
+        team: 'vlot1', notes: null, team_name: 'Vlot 1', updated_at: updatedAt,
+      }] })
+      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] });
+  }
+
+  test('elke gebeurtenis draagt een SEQUENCE en een LAST-MODIFIED (#409)', async () => {
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('SEQUENCE:');
+    expect(body).toContain('LAST-MODIFIED:20261008T124815Z');
+  });
+
+  test('DTSTAMP is het moment van de dienst, niet van het verzoek (#409)', async () => {
+    // Dit stond op "nu", één waarde voor het hele verzoek. Elke ophaling gaf
+    // dus elke gebeurtenis een nieuw stempel, ook de honderden die niet
+    // veranderd waren.
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('DTSTAMP:20261008T124815Z');
+  });
+
+  test('twee ophalingen zonder wijziging geven dezelfde SEQUENCE (#409)', async () => {
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const een = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const twee = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    const seq = (t) => /SEQUENCE:(\d+)/.exec(t)[1];
+    expect(seq(een)).toBe(seq(twee));
+  });
+
+  test('een gewijzigde dienst krijgt een HOGERE SEQUENCE (#409)', async () => {
+    // Dit is de hele fix: zonder een hoger getal laat Outlook staan wat hij heeft.
+    arrangeFeed(new Date('2026-10-06T07:33:10Z'));
+    const voor = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const na = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    const seq = (t) => Number(/SEQUENCE:(\d+)/.exec(t)[1]);
+    expect(seq(na)).toBeGreaterThan(seq(voor));
+  });
+
+  test('zonder updated_at blijft de feed werken', async () => {
+    // Een database waar migratie 049 nog niet gedraaid heeft.
+    arrangeFeed(undefined);
+    const res = await request(app).get('/api/v1/calendar/t.ics');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('SEQUENCE:1');
+    expect(res.text).toContain('DTSTART;TZID=Europe/Brussels:20261119T090000');
+  });
 });
 
 // ===== POST /schedule-drafts/:id/deactivate =====

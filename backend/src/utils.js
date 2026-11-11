@@ -141,6 +141,46 @@ function formatICalDateTime(dateStr, timeStr) {
   return dateStr.replace(/-/g, '') + 'T' + timeStr.replace(':', '') + '00';
 }
 
+// Een moment als UTC-tijdstempel voor iCal: 20261119T134851Z.
+//
+// Dit is het enige in de feed dat WEL in UTC hoort. DTSTART en DTEND dragen
+// een wandklok met TZID=Europe/Brussels (#172), maar DTSTAMP en LAST-MODIFIED
+// zijn momenten en geen afspraaktijden.
+function icalUtcStempel(moment) {
+  const d = moment instanceof Date ? moment : new Date(moment);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z';
+}
+
+// Het ijkpunt van de SEQUENCE hieronder. Niet de Unix-epoch, want dan is het
+// getal nu al 1,7 miljard en komt het in de buurt van wat een client in een
+// 32-bits geheel getal kwijt kan.
+const ICAL_SEQUENCE_IJKPUNT = Date.UTC(2020, 0, 1);
+
+// Het revisienummer van een gebeurtenis, zoals RFC 5545 het bedoelt: een
+// geheel getal dat omhoog gaat telkens als de gebeurtenis verandert.
+//
+// Een abonnee-agenda koppelt een binnenkomende VEVENT op UID aan de afspraak
+// die hij al heeft, en gebruikt SEQUENCE om te beslissen of dit een nieuwere
+// versie is. Stuur je er geen mee, dan houdt hij impliciet 0 aan en laat hij
+// staan wat hij heeft — dat is #409: een dienst die van 13:00-23:00 naar
+// 09:00-16:00 ging, bleef in Outlook op 13:00-23:00 staan.
+//
+// Het getal is het aantal SECONDEN tussen het ijkpunt en het moment waarop de
+// dienst voor het laatst veranderde. Dat loopt vanzelf op, is stabiel zolang de
+// dienst niet verandert, en vraagt geen tweede kolom om bij te houden.
+//
+// Nooit 0, en nooit negatief: elke bestaande koppeling heeft nog nooit een
+// SEQUENCE gezien en houdt dus 0 aan. Door hier altijd minstens 1 terug te
+// geven wordt zo'n agenda één keer helemaal bijgewerkt, inclusief de dagen die
+// er al verkeerd in stonden.
+function icalSequence(gewijzigdOp) {
+  const d = gewijzigdOp instanceof Date ? gewijzigdOp : new Date(gewijzigdOp);
+  const t = d.getTime();
+  if (Number.isNaN(t)) return 1;
+  return Math.max(1, Math.floor((t - ICAL_SEQUENCE_IJKPUNT) / 1000));
+}
+
 // De datum van VANDAAG zoals de gebruiker hem ziet, dus in Belgische tijd.
 //
 // De server draait in UTC. `new Date().toISOString().slice(0, 10)` geeft
@@ -160,5 +200,6 @@ function vandaagInBelgie(nu = new Date()) {
 module.exports = {
   getMonday, formatDateYYYYMMDD, parseLocalDate, getEasterDate, getBelgianPublicHolidays,
   parseShiftDateTime, getShiftEndDT, hoursBetweenShifts, shiftsOverlapCheck, formatICalDateTime,
+  icalUtcStempel, icalSequence, ICAL_SEQUENCE_IJKPUNT,
   vandaagInBelgie, TIJDZONE
 };
