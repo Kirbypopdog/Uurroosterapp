@@ -5734,20 +5734,74 @@ body[data-view-mode="day"] .timeline-day-cell {
     color: var(--act-tekst);
 }
 
-/* Deelnemers aan een activiteit (#408). Kolommen, niet één lange rij: de
-   namen staan dan onder elkaar uitgelijnd en de uren erachter, zodat je ziet
-   wie er die dag tot wanneer werkt zonder het venster te verlaten. */
+/* Deelnemers aan een activiteit (#408), venster herzien in #411.
+   Eén kolom en gegroepeerd per TEAM. Het stond in twee kolommen die rij voor
+   rij gevuld werden, dus de volgorde sprong links-rechts-links en je kon geen
+   naam opzoeken. En de structuur die er werkelijk in zit was onzichtbaar: de
+   vergaderingen in productie zijn zonder uitzondering van één team. */
+.activity-deelnemers-kop {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+.activity-deelnemers-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+.activity-deelnemers-telling {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
 .activity-deelnemers {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    gap: 2px 10px;
-    max-height: 190px;
+    max-height: 240px;
     overflow-y: auto;
-    padding: 4px 2px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm, 6px);
     background: var(--surface-color);
 }
+
+/* De teamkop plakt bovenaan bij het scrollen: in een lijst van dertien namen
+   wil je blijven zien onder welk team je zit. */
+.activity-team-kop {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 9px;
+    background: var(--surface-2);
+    border-top: 1px solid var(--border-color);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+.activity-team-kop:first-child { border-top: none; }
+.activity-team-stip {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.activity-team-naam { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-team-alles {
+    margin-left: auto;
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 0;
+    font: 600 11px/1.3 inherit;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--primary-color, #2f6f5e);
+}
+.activity-team-alles:hover { text-decoration: underline; }
 
 /* Twee klassen diep, want `.form-group label` zet display:block en wint het
    anders van een enkele klasse. Dan vallen de naam en de uren onder elkaar en
@@ -5756,17 +5810,22 @@ body[data-view-mode="day"] .timeline-day-cell {
 .activity-deelnemers .activity-deelnemer {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     margin-bottom: 0;
-    padding: 3px 6px;
-    border-radius: 4px;
+    padding: 4px 9px;
     cursor: pointer;
     font-weight: 400;
     font-size: 13px;
 }
+.activity-deelnemers .activity-deelnemer:hover { background: var(--surface-2); }
 
-.activity-deelnemers .activity-deelnemer:hover {
-    background: var(--surface-2);
+/* De persoon van wie het dienstvenster openstond. Zijn vinkje staat vast: hij
+   is de reden dat dit venster er is.
+   Géén eigen achtergrond: die was dezelfde tint als de teamkop er vlak boven,
+   dus de twee liepen in elkaar over en zijn naam las als een stuk van de kop.
+   Het grijze vinkje en "deze dienst" onderscheiden hem al. */
+.activity-deelnemers .activity-deelnemer--zelf .activity-deelnemer-naam {
+    font-weight: 600;
 }
 
 .activity-deelnemer-naam {
@@ -5776,14 +5835,34 @@ body[data-view-mode="day"] .timeline-day-cell {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-
-/* De uren zijn bijzaak naast de naam, maar ze moeten leesbaar blijven; dit is
-   geen decoratie maar de reden waarom je iemand wel of niet aanvinkt. */
+.activity-deelnemer-vast,
 .activity-deelnemer-uren {
     color: var(--text-secondary);
     font-size: 11px;
-    font-variant-numeric: tabular-nums;
     white-space: nowrap;
+}
+.activity-deelnemer-uren { font-variant-numeric: tabular-nums; }
+
+/* Wie er op het gekozen uur niet is. Niet verbergen en niet blokkeren — soms
+   komt iemand er speciaal voor — maar wel zichtbaar vóór het opslaan in
+   plaats van erna in een bevestigingsvenster. */
+.activity-deelnemers .activity-deelnemer--buiten .activity-deelnemer-naam,
+.activity-deelnemers .activity-deelnemer--buiten .activity-deelnemer-uren {
+    opacity: 0.75;
+}
+.activity-deelnemer-buiten {
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--alert-warning-bg);
+    color: var(--alert-warning-text);
+}
+
+/* Type, van en tot op één regel (#411). */
+.form-row.activity-hoofdrij {
+    grid-template-columns: 1fr 112px 112px;
 }
 
 /* Add activity button on shift block */
@@ -6303,6 +6382,16 @@ body[data-view-mode="day"] .timeline-day-cell {
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+/* #411: de dag onder de titel van het activiteitenvenster. `align-items:center`
+   op .modal-header zou de titel nu scheef zetten tegenover het kruisje, dus
+   deze kop lijnt bovenaan uit. */
+#activity-modal .modal-header { align-items: flex-start; }
+.activity-modal-datum {
+    margin-top: 3px;
+    font-size: 13px;
+    color: var(--text-secondary);
 }
 
 .modal-header h2 {

@@ -437,6 +437,32 @@ function setupEventListeners() {
     if (activityForm) {
         activityForm.addEventListener('submit', handleActivitySubmit);
     }
+    // #411: de telling, de knoptekst en de merkjes "buiten dienst" lopen mee
+    // met de vinkjes EN met de tijden — wie er op dat uur niet is hangt immers
+    // van die tijden af. Eén handler op de lijst in plaats van een listener
+    // per vinkje, want de lijst wordt bij elk openen opnieuw opgebouwd.
+    const deelnemersLijst = document.getElementById('activity-deelnemers');
+    if (deelnemersLijst) {
+        deelnemersLijst.addEventListener('change', werkActiviteitDeelnemersBij);
+        deelnemersLijst.addEventListener('click', (e) => {
+            const alles = e.target.closest('.activity-team-alles');
+            if (!alles) return;
+            e.preventDefault();
+            // Allemaal aan, of allemaal uit als ze al aanstonden. De persoon
+            // van de dienst zelf staat vast en blijft buiten schot.
+            const vinkjes = [...deelnemersLijst.querySelectorAll(
+                `.activity-deelnemer[data-team="${CSS.escape(alles.dataset.team || '')}"] input:not([data-zelf])`)];
+            if (vinkjes.length === 0) return;
+            const allesAan = vinkjes.every(v => v.checked);
+            vinkjes.forEach(v => { v.checked = !allesAan; });
+            werkActiviteitDeelnemersBij();
+        });
+    }
+    ['activity-start', 'activity-end'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', werkActiviteitDeelnemersBij);
+        document.getElementById(id)?.addEventListener('input', werkActiviteitDeelnemersBij);
+    });
+
     document.getElementById('activity-cancel-btn')?.addEventListener('click', closeActivityModal);
     document.getElementById('activity-delete-btn')?.addEventListener('click', handleActivityDelete);
     document.querySelectorAll('#activity-modal .modal-close').forEach(btn => {

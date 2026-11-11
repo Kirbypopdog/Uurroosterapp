@@ -989,6 +989,40 @@ function applySuggestion(btn) {
 // ===== ACTIVITY MODAL =====
 
 /**
+ * Valt de activiteit binnen de dienst van deze persoon? (#411)
+ *
+ * Dit stond als tekstvergelijking in `handleActivitySubmit`:
+ * `startTime < shiftStart || endTime > shiftEnd`. Dat klopt niet bij een
+ * NACHTDIENST. Een overleg van 20:00 tot 21:00 binnen een dienst van 18:00 tot
+ * 09:00 werd gemeld als "buiten de shift-uren", want `"21:00" > "09:00"` is
+ * waar. In productie staan zulke rijen; de waarschuwing ging daar dus af
+ * terwijl er niets aan de hand was.
+ *
+ * Een dienst die over middernacht loopt, loopt door op de volgende dag. De
+ * activiteit draagt dezelfde datum als de dienst, dus een activiteit vóór de
+ * starttijd hoort bij het stuk NA middernacht.
+ */
+function dienstDektActiviteit(dienstVan, dienstTot, actVan, actTot) {
+    const uur = (t) => {
+        // Let op de lege tekst: `Number('')` is 0 en dus "eindig", dus zonder
+        // deze controle leest een leeg tijdveld als middernacht.
+        const tekst = String(t == null ? '' : t).trim();
+        if (!tekst) return null;
+        const [u, m] = tekst.split(':').map(Number);
+        return Number.isFinite(u) ? u + (Number.isFinite(m) ? m : 0) / 60 : null;
+    };
+    const dv = uur(dienstVan), dt = uur(dienstTot);
+    const av = uur(actVan), at = uur(actTot);
+    if (dv === null || dt === null || av === null || at === null) return true; // niets te zeggen
+
+    const eindDienst = dt <= dv ? dt + 24 : dt;          // nachtdienst rolt door
+    let startAct = av, eindAct = at <= av ? at + 24 : at;
+    // Een activiteit vóór de start van een nachtdienst hoort bij de ochtend erna.
+    if (eindDienst > 24 && startAct < dv) { startAct += 24; eindAct += 24; }
+    return startAct >= dv && eindAct <= eindDienst;
+}
+
+/**
  * Wie staat er die dag nog meer ingepland, naast deze persoon? (#408)
  *
  * Apart gehouden van het tekenen, zodat de keuze ("wie komt er in de lijst")
@@ -1001,6 +1035,11 @@ function applySuggestion(btn) {
  *    lijst staan en een dubbele rij opleveren.
  *  - Een dienst van iemand die niet (meer) in de medewerkerslijst staat valt
  *    weg in plaats van een naamloos vinkje te worden.
+ *
+ * #411: de persoon van de dienst zelf hoort er nu WEL bij, als eerste en
+ * vastgezet. Hij stond vroeger alleen tussen haakjes in het label — twaalf
+ * namen mét uren en één zonder, terwijl juist zijn uren bepalen of je straks
+ * de waarschuwing krijgt.
  */
 function activiteitDeelnemerKandidaten(shifts, userId, date, zoekMedewerker) {
     return (shifts || [])
@@ -1011,19 +1050,52 @@ function activiteitDeelnemerKandidaten(shifts, userId, date, zoekMedewerker) {
 }
 
 /**
- * Wie kan er nog meer bij deze activiteit? (#408)
+ * De deelnemers gegroepeerd per TEAM, met de persoon van de dienst vooraan.
+ *
+ * Waarom per team: de vergaderingen in productie zijn zonder uitzondering van
+ * één team — 294 gebeurtenissen, geen enkele die er twee overspant. Dat is dus
+ * de structuur van de lijst, en vroeger was die onzichtbaar. Je vinkte vier
+ * losse namen aan en kon achteraf niet zien of je er een vergeten was.
+ *
+ * Het eigen team staat bovenaan, want dat is bijna altijd waar je moet zijn.
+ */
+function activiteitDeelnemersPerTeam(kandidaten, eigenShift, eigenEmp) {
+    const groepen = new Map();
+    const voegToe = (teamId, item) => {
+        if (!groepen.has(teamId)) groepen.set(teamId, []);
+        groepen.get(teamId).push(item);
+    };
+    const teamVan = (emp, shift) => emp?.mainTeam || shift?.team || '_geen';
+
+    if (eigenEmp) voegToe(teamVan(eigenEmp, eigenShift), { emp: eigenEmp, shift: eigenShift, zelf: true });
+    kandidaten.forEach(k => voegToe(teamVan(k.emp, k.shift), { emp: k.emp, shift: k.shift, zelf: false }));
+
+    const eigenTeam = eigenEmp ? teamVan(eigenEmp, eigenShift) : null;
+    return [...groepen.entries()]
+        .sort((a, b) => {
+            if (a[0] === eigenTeam) return -1;
+            if (b[0] === eigenTeam) return 1;
+            // Defensief: bij het allereerste openen kunnen de instellingen nog
+            // niet geladen zijn, en dan hoort de lijst te verschijnen met de
+            // team-ID als naam in plaats van helemaal niet.
+            const teamsCfg = (DataStore.settings && DataStore.settings.teams) || {};
+            const naam = id => ((teamsCfg[id] && teamsCfg[id].name) || id || '');
+            return naam(a[0]).localeCompare(naam(b[0]), 'nl');
+        })
+        .map(([teamId, leden]) => ({ teamId, leden }));
+}
+
+/**
+ * De deelnemerslijst tekenen (#408, venster herzien in #411).
  *
  * Een activiteit staat in de database PER PERSOON — er is geen gedeelde
  * gebeurtenis met deelnemers. Dat is voor de teamvergadering nooit opgevallen,
  * want die genereert het concept. Alles wat met de hand gaat moest je per
- * persoon opnieuw intypen: dienstvenster openen, + Toevoegen, type, twee
- * tijden, omschrijving — voor elke deelnemer apart. In productie telt een
- * vergadering gemiddeld 3,5 deelnemers, en "EE Stage Yana" staat er inderdaad
- * twee keer in, met de hand.
+ * persoon opnieuw intypen; in productie telt een vergadering gemiddeld 3,5
+ * deelnemers en staat "EE Stage Yana" er twee keer in, met de hand.
  *
  * Dit verandert de gegevens niet: er worden nog steeds losse rijen geschreven.
- * Het scheelt alleen de herhaling. Een echte gedeelde gebeurtenis is een
- * schemawijziging en een apart gesprek.
+ * Het scheelt alleen de herhaling.
  *
  * De kandidaten zijn wie die dag een DIENST heeft. Iemand zonder dienst kan
  * niet in een activiteit binnen een dienst zitten, en de lijst zou anders de
@@ -1032,6 +1104,15 @@ function activiteitDeelnemerKandidaten(shifts, userId, date, zoekMedewerker) {
  * @param {number|string} userId  voor wie de activiteit in elk geval is
  * @param {string} date           de dag, als YYYY-MM-DD
  */
+// #411: de dag in de kop van het venster. Nooit de kale ISO-vorm: `2026-11-17`
+// moet een mens laten gokken tussen november en… zie CLAUDE.md bij "Datums in
+// tekst die een mens leest".
+function zetActiviteitVensterDatum(date) {
+    const el = document.getElementById('activity-modal-datum');
+    if (!el) return;
+    el.textContent = date && typeof formatDate === 'function' ? formatDate(date) : '';
+}
+
 function vulActiviteitDeelnemers(userId, date) {
     const groep = document.getElementById('activity-deelnemers-groep');
     const lijst = document.getElementById('activity-deelnemers');
@@ -1049,31 +1130,91 @@ function vulActiviteitDeelnemers(userId, date) {
 
     const anderen = activiteitDeelnemerKandidaten(
         DataStore.shifts || [], userId, date, getEmployee);
-
     if (anderen.length === 0) {
         groep.classList.add('hidden');
         lijst.innerHTML = '';
         return;
     }
 
-    const voor = getEmployee(userId);
-    const label = document.getElementById('activity-deelnemers-label');
-    if (label) {
-        label.textContent = voor
-            ? `Ook voor (naast ${voor.name})`
-            : 'Ook voor';
-    }
+    const eigenEmp = getEmployee(userId);
+    const eigenShift = (DataStore.shifts || []).find(
+        sh => sh.date === date && String(sh.employeeId) === String(userId));
 
-    lijst.innerHTML = anderen.map(({ shift: sh, emp }) => `
-        <label class="activity-deelnemer">
-            <input type="checkbox" value="${emp.id}"
-                   data-shift-id="${sh.id}"
-                   data-shift-start="${escapeHtml(sh.startTime || '')}"
-                   data-shift-end="${escapeHtml(sh.endTime || '')}">
-            <span class="activity-deelnemer-naam">${escapeHtml(emp.name || '')}</span>
-            <span class="activity-deelnemer-uren">${escapeHtml(String(sh.startTime || '').substring(0, 5))}-${escapeHtml(String(sh.endTime || '').substring(0, 5))}</span>
-        </label>`).join('');
+    const teams = DataStore.settings.teams || {};
+    const perTeam = activiteitDeelnemersPerTeam(anderen, eigenShift, eigenEmp);
+
+    lijst.innerHTML = perTeam.map(({ teamId, leden }) => {
+        const cfg = teams[teamId] || {};
+        const teamNaam = escapeHtml(cfg.name || teamId || 'Geen team');
+        const kleur = escapeHtml(cfg.color || '#9c9890');
+        // "Allemaal" zet alleen de aanvinkbare leden om; de persoon van de
+        // dienst zit er sowieso bij en heeft geen vinkje dat iets doet.
+        const kop = `<div class="activity-team-kop">
+                <span class="activity-team-stip" style="background:${kleur}"></span>
+                <span class="activity-team-naam">${teamNaam}</span>
+                <button type="button" class="activity-team-alles" data-team="${escapeHtml(String(teamId))}">Allemaal</button>
+            </div>`;
+        const rijen = leden.map(({ emp, shift, zelf }) => {
+            const van = String(shift && shift.startTime || '').substring(0, 5);
+            const tot = String(shift && shift.endTime || '').substring(0, 5);
+            return `<label class="activity-deelnemer${zelf ? ' activity-deelnemer--zelf' : ''}"
+                           data-team="${escapeHtml(String(teamId))}"
+                           data-shift-van="${escapeHtml(van)}" data-shift-tot="${escapeHtml(tot)}">
+                    <input type="checkbox" value="${emp.id}"
+                           data-shift-id="${shift ? shift.id : ''}"
+                           data-shift-start="${escapeHtml(shift && shift.startTime || '')}"
+                           data-shift-end="${escapeHtml(shift && shift.endTime || '')}"
+                           ${zelf ? 'checked disabled data-zelf="1"' : ''}>
+                    <span class="activity-deelnemer-naam">${escapeHtml(emp.name || '')}</span>
+                    ${zelf ? '<span class="activity-deelnemer-vast">deze dienst</span>' : ''}
+                    <span class="activity-deelnemer-buiten hidden">buiten dienst</span>
+                    <span class="activity-deelnemer-uren">${escapeHtml(van)}&#8211;${escapeHtml(tot)}</span>
+                </label>`;
+        }).join('');
+        return kop + rijen;
+    }).join('');
+
     groep.classList.remove('hidden');
+    werkActiviteitDeelnemersBij();
+}
+
+/**
+ * De telling, de knoptekst en de merkjes "buiten dienst" bijwerken (#411).
+ *
+ * Dit draait bij elke wijziging van de vinkjes EN van de tijden, want wie er
+ * op dat uur niet is hangt van die tijden af. Vroeger hoorde je dat pas ná het
+ * opslaan, in een bevestigingsvenster — terwijl de uren van iedereen gewoon in
+ * het lijstje stonden.
+ */
+function werkActiviteitDeelnemersBij() {
+    const lijst = document.getElementById('activity-deelnemers');
+    if (!lijst || lijst.children.length === 0) return;
+
+    const van = document.getElementById('activity-start') ? document.getElementById('activity-start').value : '';
+    const tot = document.getElementById('activity-end') ? document.getElementById('activity-end').value : '';
+    const tijdenIngevuld = !!(van && tot);
+
+    let aangevinkt = 0;
+    const rijen = lijst.querySelectorAll('.activity-deelnemer');
+    rijen.forEach(rij => {
+        const vink = rij.querySelector('input');
+        if (vink && vink.checked) aangevinkt++;
+        const buiten = rij.querySelector('.activity-deelnemer-buiten');
+        if (!buiten) return;
+        const dekt = !tijdenIngevuld || dienstDektActiviteit(
+            rij.dataset.shiftVan, rij.dataset.shiftTot, van, tot);
+        buiten.classList.toggle('hidden', dekt);
+        rij.classList.toggle('activity-deelnemer--buiten', !dekt);
+    });
+
+    const telling = document.getElementById('activity-deelnemers-telling');
+    if (telling) telling.textContent = `${aangevinkt} van ${rijen.length}`;
+
+    const knop = document.getElementById('activity-submit-btn');
+    const idVeld = document.getElementById('activity-id');
+    if (knop && idVeld && !idVeld.value) {
+        knop.textContent = aangevinkt > 1 ? `Opslaan voor ${aangevinkt} personen` : 'Opslaan';
+    }
 }
 
 function openAddActivityModal(userId, date, shiftStart, shiftEnd, shiftId) {
@@ -1089,6 +1230,9 @@ function openAddActivityModal(userId, date, shiftStart, shiftEnd, shiftId) {
     document.getElementById('activity-end').value = '';
     document.getElementById('activity-description').value = '';
     document.getElementById('activity-delete-btn').classList.add('hidden');
+    zetActiviteitVensterDatum(date);
+    const submitKnop = document.getElementById('activity-submit-btn');
+    if (submitKnop) submitKnop.textContent = 'Opslaan';
     vulActiviteitDeelnemers(userId, date);
     toonModal(document.getElementById('activity-modal'));
     IconHelper.init(document.getElementById('activity-modal'));
@@ -1114,6 +1258,9 @@ function openEditActivityModal(activityId) {
     document.getElementById('activity-end').value = activity.endTime;
     document.getElementById('activity-description').value = activity.description || '';
     document.getElementById('activity-delete-btn').classList.remove('hidden');
+    zetActiviteitVensterDatum(activity.date);
+    const bewerkKnop = document.getElementById('activity-submit-btn');
+    if (bewerkKnop) bewerkKnop.textContent = 'Opslaan';
     // Bij BEWERKEN geen deelnemers: je bewerkt één rij. Een vinkje erbij zou
     // suggereren dat je de hele gebeurtenis aanpast, en dat is niet zo —
     // de rijen van de anderen blijven staan zoals ze stonden.
@@ -1157,7 +1304,10 @@ async function handleActivitySubmit(e) {
         shiftEnd: document.getElementById('activity-shift-end')?.value || '',
     }];
     if (!id) {
-        document.querySelectorAll('#activity-deelnemers input:checked').forEach(vink => {
+        // #411: de persoon van de dienst staat nu ZELF in de lijst, als eerste
+        // en vastgezet. Een uitgeschakeld vinkje telt gewoon mee voor
+        // `:checked`, dus zonder deze uitzondering zou hij twee rijen krijgen.
+        document.querySelectorAll('#activity-deelnemers input:checked:not([data-zelf])').forEach(vink => {
             ontvangers.push({
                 userId: parseInt(vink.value, 10),
                 shiftId: vink.dataset.shiftId ? parseInt(vink.dataset.shiftId, 10) : null,
@@ -1172,8 +1322,14 @@ async function handleActivitySubmit(e) {
     // dat niet genoeg — de een werkt tot 16:30 en de ander tot 12:30, en dan
     // valt dezelfde activiteit voor de een wél en voor de ander niet binnen de
     // dienst. De waarschuwing noemt daarom wie het betreft.
+    //
+    // #411: dit vergeleek de tijden als TEKST, en dat klopt niet bij een
+    // nachtdienst — een overleg van 20:00 tot 21:00 binnen een dienst van
+    // 18:00 tot 09:00 werd gemeld als "buiten de shift-uren", want
+    // `"21:00" > "09:00"` is waar. Zie dienstDektActiviteit().
     const buitenDienst = ontvangers.filter(o =>
-        o.shiftStart && o.shiftEnd && (startTime < o.shiftStart || endTime > o.shiftEnd));
+        o.shiftStart && o.shiftEnd
+        && !dienstDektActiviteit(o.shiftStart, o.shiftEnd, startTime, endTime));
     if (buitenDienst.length > 0) {
         const namen = buitenDienst
             .map(o => `${getEmployee(o.userId)?.name || 'Medewerker'} (${o.shiftStart.substring(0, 5)}-${o.shiftEnd.substring(0, 5)})`)
@@ -1249,5 +1405,7 @@ async function deleteShiftConfirm(shiftId) {
 // Zodat de pure keuzelogica in Node getest kan worden (#408). In de browser
 // bestaat `module` niet, dus dit heeft daar geen effect.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { activiteitDeelnemerKandidaten };
+  module.exports = {
+    activiteitDeelnemerKandidaten, activiteitDeelnemersPerTeam, dienstDektActiviteit,
+  };
 }

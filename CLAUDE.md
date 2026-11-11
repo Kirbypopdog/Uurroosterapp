@@ -644,6 +644,33 @@ waar nog een trigger aan hangt laat zich niet droppen.
     string uit een `dataset`; zonder dat zou de persoon voor wie de activiteit
     al is er nóg eens in staan en een dubbele rij krijgen.
 
+  **Het venster zelf is in #411 herzien.** Beoordeeld met de dertien mensen die
+  op een echte dag ingepland stonden, niet met een handvol:
+
+  1. **De dag staat in de kop.** Je opent het venster vanaf een dienst, en
+     daarvóór stond er alleen de titel — je kon niet nakijken of je goed zat.
+  2. **Eén kolom, gegroepeerd per TEAM**, met de teamkleur en een "Allemaal"
+     per team. Het stond in twee kolommen die rij voor rij gevuld werden, dus
+     de volgorde sprong links-rechts-links en je kon geen naam opzoeken. En het
+     team is de structuur die er werkelijk in zit: de 294 gebeurtenissen in
+     productie zijn zonder uitzondering van één team.
+  3. **De persoon van de dienst staat IN de lijst**, bovenaan zijn eigen team,
+     vastgezet. Hij stond alleen tussen haakjes in het label. Let op: zijn
+     vinkje is uitgeschakeld maar telt wél mee voor `:checked`, dus de
+     verzamelaar in `handleActivitySubmit` sluit hem uit met `:not([data-zelf])`
+     — anders krijgt hij twee rijen.
+  4. **Wie er op het gekozen uur niet is, krijgt "buiten dienst"** en staat
+     gedimd, bijgewerkt terwijl je de tijden typt. Aanvinken blijft mogelijk;
+     soms komt iemand er speciaal voor.
+
+  `dienstDektActiviteit()` beslist dat, en bestaat omdat de oude controle de
+  tijden als TEKST vergeleek (`startTime < shiftStart || endTime > shiftEnd`).
+  Bij een NACHTDIENST klopt dat niet: een overleg van 20:00 tot 21:00 binnen
+  een dienst van 18:00 tot 09:00 werd gemeld als buiten de uren, want
+  `"21:00" > "09:00"` is waar. Let in die functie ook op de lege tekst:
+  `Number('')` is 0 en dus "eindig", dus zonder controle leest een leeg
+  tijdveld als middernacht.
+
 - **Bezetting en activiteiten** (#145): `calcPlanningHourlyHeadcount()` in `app-planner.js` geeft `bruto` (wie een dienst heeft) en `netto` (bruto min wie op dat uur een activiteit heeft). ALLE zes de activiteittypes verminderen de netto bezetting, voor hun volle duur. Dat is nagevraagd en bevestigd: bij oudergesprek, vorming, overleg, vergadering, afspraak én andere staat de begeleider niet bij de groep. Er is bewust geen uitzondering per type en geen vinkje "ik blijf bereikbaar" per activiteit: dan moet iemand dat elke keer beoordelen en kan het vergeten worden, en te vaak waarschuwen is bij bezetting de veilige kant. Netto voedt precies drie plekken: de onderbezettingsmeldingen in `renderHomeAlerts`, de bezettingsbalk in de planning en `validateMinimumStaffing` in `validation.js`. Activiteittypes worden verder nergens in logica onderscheiden, alleen voor kleur en label
 - **Weekend- en vakantieverantwoordelijke**: je bent verantwoordelijk voor het WEEKEND, dus alleen in een week waarin het weekend open is. Staat het weekend dicht, dan is er niemand aan de beurt en toont de app niemand. Tijdens een vakantie staat de verantwoordelijke PER WEEK, aan te duiden in de roosterbouwer: in de kerstvakantie doet de ene persoon week 1 en een ander week 2. Een vakantieweek is daarmee uitgepraat — is er voor die week niemand aangeduid, dan is er niemand, en valt de app bewust NIET terug op de rotatie. Een vakantieweek verbruikt ook geen beurt, dus na de vakantie gaat de rotatie verder waar hij gebleven was.
 
