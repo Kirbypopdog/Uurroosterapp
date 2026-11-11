@@ -108,6 +108,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `activiteit-deelnemers.test.js` | Wie er in de deelnemerslijst van een activiteit komt, en wie er een activiteit voor anderen mag aanmaken (#408) |
 | `agenda-sequence.test.js` | Dat een gewijzigde dienst een hogere `SEQUENCE` krijgt in de agendafeed, en dat de migratie de trigger pas ná de backfill zet (#409) |
 | `vergadering-dubbel.test.js` | Dat een concept toepassen geen tweede Teamvergadering naast de bestaande zet (#407) |
+| `init-bestendig.test.js` | Dat `setupEventListeners` geen kale verwijzing naar een functie uit een ander bestand bevat, want één ontbrekende functie legde de hele opstart plat (#412) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
@@ -561,6 +562,24 @@ waar nog een trigger aan hangt laat zich niet droppen.
   3. **Vier uur niets aanraken en de sessie wordt gewist.** `INACTIEF_UITLOGGEN_MS` in `app-auth.js`. Dit werkt op een TIJDSTEMPEL in `localStorage` en niet op een aflopende timer: een timer telt niet door terwijl een laptop dicht is en bestaat niet meer na een herlading. Daarom wordt hij ook bij het OPSTARTEN nagekeken in `checkSession()` en niet alleen in de minuutcontrole. De stempel wordt hoogstens eens per minuut geschreven, dus een actieve gebruiker loopt nooit meer dan die minuut achter op een grens van vier uur.
 
   **Waarom alle drie.** De app bevat ziekmeldingen, dus gezondheidsgegevens (#152). De laptops worden gedeeld maar iedereen heeft zijn eigen login en dus zijn eigen browserprofiel, dus een collega komt niet zomaar in jouw opslag. Wat overblijft is de laptop die onbewaakt open blijft staan, en daar helpt alleen punt 3 tegen: een kortere geldigheid doet niets als het token op dat moment vers is.
+- **Een functie uit een ander bestand aanroepen in `setupEventListeners`**
+  (#412): zet er een `typeof ... === 'function'`-controle omheen als hij NIEUW
+  is. De frontend bestaat uit losse `<script>`-bestanden zonder bouwstap, dus
+  een bezoeker kan index.html en app-shifts.js uit zijn cache halen terwijl
+  app-init.js al nieuw is — dat gebeurt als je de pagina herlaadt precies
+  terwijl een deploy uitrolt. De functie bestaat dan niet, en omdat
+  `setupEventListeners` daar afbreekt wordt géén enkele listener daarná nog
+  opgehangen: de app laadt wel maar reageert nergens meer op, met alleen
+  `Error during initialization` in de console.
+
+  `typeof` op een niet-gedeclareerde naam gooit niets; `if (naam)` wél. Dat is
+  waarom die vorm er staat. Een ontbrekende functie hoort hoogstens zijn eigen
+  stukje uit te schakelen.
+
+  De cachebusters (`?v=`) helpen hier niet tegen: die staan ín index.html, dus
+  wie een oude index.html vasthoudt vraagt ook de oude URL's op — en krijgt van
+  de server toch de nieuwe inhoud, want de queryparameter zegt de server niets.
+
 - **Opstartscherm** (#389): `index.html` zet de klasse `session-restoring` op `<html>` zodra er een token in `sessionStorage` staat. Die verbergt het loginscherm (anders flitst dat voorbij bij wie al ingelogd is) en `#app-container` staat dan nog op `hidden`. In dat gat toont `#opstartscherm` het KADER van de app: dezelfde zijbalk op dezelfde plek, met vlakken waar de inhoud komt. Puur markup en CSS, dus het staat er al bij de eerste paint. **De klasse moet op élk pad weggehaald worden**: in `showApp()` (geslaagd), in de twee foutafhandelingen van `checkSession()` en in `showLogin()`. Vergeet je er één, dan blijft het opstartscherm over de app heen staan
 - **Stat-kaarten op home** (#166): twee reeksen, elk met een eigen doelgroep. `renderHomeEigenUren()` toont JOUW uren deze week en deze periode tegen je contract, plus wat op jou wacht; alleen voor wie meedraait in het rooster, want een adminaccount heeft geen diensten. `renderHomeStats()` toont de BEHEERcijfers en is er alleen voor admin en roosterverantwoordelijke. Zonder contracturen verschijnt er geen balk en geen "van": `32/0u` zou onzin zijn. De kleurregel is dezelfde als bij de uren in de planning: rood boven de norm, oranje eronder
 - **Activiteiten in het dienstblok** (#406): een balkje onderaan, op de uren

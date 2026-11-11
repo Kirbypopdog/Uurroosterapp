@@ -441,9 +441,21 @@ function setupEventListeners() {
     // met de vinkjes EN met de tijden — wie er op dat uur niet is hangt immers
     // van die tijden af. Eén handler op de lijst in plaats van een listener
     // per vinkje, want de lijst wordt bij elk openen opnieuw opgebouwd.
+    //
+    // #412: die functie staat in app-shifts.js, en hier stond hem kaal
+    // aanroepen. Haalt een bezoeker index.html en app-shifts.js nog uit zijn
+    // cache terwijl dit bestand al nieuw is — wat gebeurt als je de pagina
+    // herlaadt precies terwijl een deploy uitrolt — dan bestaat die functie
+    // niet en gooit `setupEventListeners` een ReferenceError. Dat brak niet de
+    // teller maar de HELE opstart: "Error during initialization" en een app die
+    // nergens meer op reageerde. Een ontbrekende functie hoort hoogstens zijn
+    // eigen stukje uit te schakelen.
     const deelnemersLijst = document.getElementById('activity-deelnemers');
-    if (deelnemersLijst) {
-        deelnemersLijst.addEventListener('change', werkActiviteitDeelnemersBij);
+    const telDeelnemers = typeof werkActiviteitDeelnemersBij === 'function'
+        ? werkActiviteitDeelnemersBij
+        : null;
+    if (deelnemersLijst && telDeelnemers) {
+        deelnemersLijst.addEventListener('change', telDeelnemers);
         deelnemersLijst.addEventListener('click', (e) => {
             const alles = e.target.closest('.activity-team-alles');
             if (!alles) return;
@@ -455,13 +467,15 @@ function setupEventListeners() {
             if (vinkjes.length === 0) return;
             const allesAan = vinkjes.every(v => v.checked);
             vinkjes.forEach(v => { v.checked = !allesAan; });
-            werkActiviteitDeelnemersBij();
+            telDeelnemers();
         });
     }
-    ['activity-start', 'activity-end'].forEach(id => {
-        document.getElementById(id)?.addEventListener('change', werkActiviteitDeelnemersBij);
-        document.getElementById(id)?.addEventListener('input', werkActiviteitDeelnemersBij);
-    });
+    if (telDeelnemers) {
+        ['activity-start', 'activity-end'].forEach(id => {
+            document.getElementById(id)?.addEventListener('change', telDeelnemers);
+            document.getElementById(id)?.addEventListener('input', telDeelnemers);
+        });
+    }
 
     document.getElementById('activity-cancel-btn')?.addEventListener('click', closeActivityModal);
     document.getElementById('activity-delete-btn')?.addEventListener('click', handleActivityDelete);
