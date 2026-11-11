@@ -26,7 +26,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20261111b">
+    <link rel="stylesheet" href="styles.css?v=20261111c">
     <!-- #156: foutmonitoring. Inert zolang er geen DSN in config/monitoring.js
          staat; dan wordt er ook niets van een CDN gehaald. Staat bewust vóór de
          app-bestanden, zodat een fout tijdens het opstarten ook gemeld wordt. -->
@@ -572,7 +572,9 @@
                         <span class="activity-deelnemers-label" id="activity-deelnemers-label">Deelnemers</span>
                         <span class="activity-deelnemers-telling" id="activity-deelnemers-telling"></span>
                     </div>
-                    <div id="activity-deelnemers" class="activity-deelnemers"></div>
+                    <div class="activity-deelnemers-wrap" id="activity-deelnemers-wrap">
+                        <div id="activity-deelnemers" class="activity-deelnemers"></div>
+                    </div>
                 </div>
                 <div class="modal-actions modal-actions-split">
                     <div class="modal-actions-left">
@@ -998,7 +1000,7 @@
     <script src="app-auth.js?v=20260611a"></script>
     <script src="app-nav.js?v=20260830a"></script>
     <script src="app-planner.js?v=20261101b"></script>
-    <script src="app-shifts.js?v=20261111b"></script>
+    <script src="app-shifts.js?v=20261111c"></script>
     <script src="app-swaps.js?v=20260611a"></script>
     <script src="app-leave.js?v=20261016a"></script>
     <script src="app-employees.js?v=20261111a"></script>

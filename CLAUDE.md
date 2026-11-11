@@ -682,6 +682,22 @@ waar nog een trigger aan hangt laat zich niet droppen.
      gedimd, bijgewerkt terwijl je de tijden typt. Aanvinken blijft mogelijk;
      soms komt iemand er speciaal voor.
 
+  **Twee stukken CSS die daar niets deden** (#413), allebei gevonden door te
+  METEN in plaats van te kijken:
+  - `grid-template-columns` op `.form-row` doet niets: die klasse wordt
+    verderop in `styles.css` opnieuw gedefinieerd als `display: flex` met
+    `.form-row .form-group { flex: 1 }`, en die regel wint op volgorde. Gebruik
+    `flex-basis` als je daar een kolom een eigen breedte wil geven.
+  - `.modal-content--sm` (450px) staat vóór `.modal-content` (600px) en verliest
+    dus bij gelijke specificiteit. Elk venster met die modifier is 600px. Het
+    activiteitenvenster heeft daarom een eigen `max-width: 520px`.
+
+  De deelnemerslijst krijgt een **vervaging onderaan** in plaats van een
+  hoogte die op de rijen past: teamkoppen zijn lager dan naamrijen, dus zo'n
+  veelvoud bestaat niet en er werd altijd een rij doormidden gesneden. De
+  scroll-listener wordt opgehangen in `app-shifts.js` zelf, niet in
+  `app-init.js` — zie #412 hieronder.
+
   `dienstDektActiviteit()` beslist dat, en bestaat omdat de oude controle de
   tijden als TEKST vergeleek (`startTime < shiftStart || endTime > shiftEnd`).
   Bij een NACHTDIENST klopt dat niet: een overleg van 20:00 tot 21:00 binnen

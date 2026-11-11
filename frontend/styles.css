@@ -5756,6 +5756,34 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-variant-numeric: tabular-nums;
 }
 
+/* #413: de lijst is 240px hoog en een rij 28px, dus er werd altijd een rij
+   doormidden gesneden — en bij een teamkop sneed dat dwars door de letters.
+   Dat las als kapot in plaats van als "er is meer".
+   Oplossing is niet een hoogte die precies op de rijen past: teamkoppen zijn
+   lager dan naamrijen, dus zo'n veelvoud bestaat niet. In plaats daarvan een
+   vervaging onderaan, die verdwijnt zodra je onderaan bent. */
+.activity-deelnemers-wrap {
+    position: relative;
+}
+.activity-deelnemers-wrap::after {
+    content: '';
+    position: absolute;
+    left: 1px;
+    right: 1px;
+    bottom: 1px;
+    height: 28px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    border-radius: 0 0 var(--radius-sm, 6px) var(--radius-sm, 6px);
+    background: linear-gradient(to bottom,
+        rgba(0, 0, 0, 0) 0%,
+        var(--surface-color) 100%);
+}
+.activity-deelnemers-wrap.is-scrollbaar:not(.is-onderaan)::after {
+    opacity: 1;
+}
+
 .activity-deelnemers {
     max-height: 240px;
     overflow-y: auto;
@@ -5835,11 +5863,22 @@ body[data-view-mode="day"] .timeline-day-cell {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.activity-deelnemer-vast,
 .activity-deelnemer-uren {
     color: var(--text-secondary);
     font-size: 11px;
     white-space: nowrap;
+}
+
+/* #413: "deze dienst" stond in dezelfde grijstint en grootte als de uren er
+   vlak naast, dus de twee lazen als één brok: "deze dienst 07:30-16:30". Als
+   omlijnd merkje is het een label bij de naam en geen deel van de tijd. */
+.activity-deelnemer-vast {
+    font-size: 10px;
+    white-space: nowrap;
+    padding: 1px 5px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-secondary);
 }
 .activity-deelnemer-uren { font-variant-numeric: tabular-nums; }
 
@@ -5860,9 +5899,25 @@ body[data-view-mode="day"] .timeline-day-cell {
     color: var(--alert-warning-text);
 }
 
-/* Type, van en tot op één regel (#411). */
-.form-row.activity-hoofdrij {
-    grid-template-columns: 1fr 112px 112px;
+/* Type, van en tot op één regel (#411).
+   #413: dit stond als `grid-template-columns` en deed NIETS. `.form-row` is
+   verderop in dit bestand opnieuw gedefinieerd als `display: flex` met
+   `.form-row .form-group { flex: 1 }`, en die regel wint op volgorde. Alle
+   drie de velden waren daardoor 173px breed — twee daarvan voor "13:00".
+   Nagemeten: het tijdveld heeft 120px nodig, inclusief het klokje dat de
+   browser erin zet. */
+.form-row.activity-hoofdrij .form-group:nth-child(n+2) {
+    flex: 0 0 120px;
+}
+
+/* #413: het venster was 600px. `.modal-content--sm` (450px) staat eerder in
+   dit bestand dan `.modal-content` (600px) en verliest dus — die modifier doet
+   al een tijd niets. Hier niet globaal rechtgezet, want dat verandert ook het
+   venster "week kopiëren"; zie de bevinding bij #413.
+   520px is gemeten op de langste naam in productie, "Marie-Louise Van den
+   Berghe": die past met zijn uren en het merkje erbij zonder af te kappen. */
+#activity-modal .modal-content {
+    max-width: 520px;
 }
 
 /* Add activity button on shift block */

@@ -1175,7 +1175,38 @@ function vulActiviteitDeelnemers(userId, date) {
     }).join('');
 
     groep.classList.remove('hidden');
+    lijst.scrollTop = 0;
+    volgActiviteitLijstScroll(lijst);
     werkActiviteitDeelnemersBij();
+}
+
+/**
+ * De vervaging onderaan de deelnemerslijst aan- en uitzetten (#413).
+ *
+ * De lijst is 240px hoog en een rij 28px, dus er wordt altijd een rij
+ * doormidden gesneden; bij een teamkop sneed dat dwars door de letters en las
+ * het als kapot in plaats van als "er is meer". Een hoogte die precies op de
+ * rijen past bestaat niet, want teamkoppen zijn lager dan naamrijen.
+ *
+ * De listener hangt aan het element zelf en wordt hier opgehangen, niet in
+ * app-init.js: de lijst wordt bij elk openen opnieuw opgebouwd, en een
+ * verwijzing vanuit dat bestand naar een functie hier is precies wat in #412
+ * de hele opstart brak.
+ */
+function volgActiviteitLijstScroll(lijst) {
+    const wrap = document.getElementById('activity-deelnemers-wrap');
+    if (!wrap || !lijst) return;
+    const bijwerken = () => {
+        const scrollbaar = lijst.scrollHeight > lijst.clientHeight + 1;
+        wrap.classList.toggle('is-scrollbaar', scrollbaar);
+        wrap.classList.toggle('is-onderaan',
+            lijst.scrollTop + lijst.clientHeight >= lijst.scrollHeight - 1);
+    };
+    if (!lijst.dataset.scrollGevolgd) {
+        lijst.addEventListener('scroll', bijwerken);
+        lijst.dataset.scrollGevolgd = '1';
+    }
+    bijwerken();
 }
 
 /**
