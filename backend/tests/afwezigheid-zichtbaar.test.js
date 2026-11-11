@@ -151,12 +151,29 @@ describe('de opmaak van het lint', () => {
     expect(CSS).toMatch(/\.timeline-block--xs \.afwezig-lint \{\s*display:\s*none/);
   });
 
-  // De eigen achtergrond is wat het blok in de rij laat opvallen; zonder die
-  // regel staat het lint op de teamkleur en is het contrast weer per team
-  // anders.
-  test('een afwezig blok houdt zijn eigen achtergrond', () => {
-    const regel = CSS.match(/\.timeline-block\.team-vlot1\.absent-conflict[\s\S]*?\n\}/);
-    expect(regel).not.toBeNull();
-    expect(regel[0]).toContain('var(--alert-error-bg)');
+  // #414: een afwezig blok KREEG ook een eigen beige achtergrond. Dat is er
+  // weer uit: het lint heeft zijn eigen ondergrond — dat is precies waarom het
+  // de drie afgekeurde ontwerpen versloeg — dus het leest op elke teamkleur
+  // hetzelfde, met of zonder beige eronder. Wat het beige wél deed is de
+  // teamkleur wegnemen, en die draagt informatie.
+  test('een afwezig blok houdt zijn TEAMkleur', () => {
+    expect(CSS).not.toMatch(
+      /\.timeline-block\.team-vlot1\.absent-conflict[\s\S]{0,200}var\(--alert-error-bg\)/);
+  });
+
+  // Het lint leest op elke teamkleur hetzelfde omdat het zijn eigen ondergrond
+  // heeft. Zonder die twee regels hangt het contrast weer af van wie er in
+  // welk team zit — de val uit #163 en #401.
+  test('het lint heeft een eigen ondergrond en eigen tekstkleur', () => {
+    const band = CSS.match(/\.afwezig-lint-band \{[\s\S]*?\n\}/);
+    expect(band).not.toBeNull();
+    expect(band[0]).toContain('background: var(--alert-error-text)');
+    expect(band[0]).toContain('color: var(--alert-lint-tekst)');
+  });
+
+  // Het tweede signaal, en het enige dat overblijft op een blok dat te smal is
+  // voor een lint.
+  test('de rode gloed blijft', () => {
+    expect(CSS).toMatch(/\.timeline-block\.absent-conflict \{\s*box-shadow:/);
   });
 });

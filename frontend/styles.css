@@ -5430,19 +5430,20 @@ body[data-view-mode="day"] .timeline-day-cell {
     text-align: left;
 }
 
-/* #401: een blok met een afwezigheid krijgt een EIGEN achtergrond, los van het
-   team. Daarmee valt het in de rij meteen op tussen de verzadigde teamkleuren,
-   en heeft het lint hieronder een bekende ondergrond. De teamkleur blijft staan
-   waar hij het hardst nodig is: de volle streep langs de linkerkant (#163). */
-.timeline-block.absent-conflict,
-.timeline-block.team-vlot1.absent-conflict,
-.timeline-block.team-vlot2.absent-conflict,
-.timeline-block.team-cargo.absent-conflict,
-.timeline-block.team-overkoepelend.absent-conflict,
-.timeline-block.team-jobstudent.absent-conflict {
-    background: var(--alert-error-bg) !important;
-    color: var(--alert-error-text) !important;
-}
+/* #401 gaf een blok met een afwezigheid ook een EIGEN beige achtergrond, los
+   van het team. #414 heeft dat er weer uit gehaald: het was niet nodig.
+
+   De redenering toen was dat het lint een bekende ondergrond nodig had. Dat
+   klopt niet — het lint hieronder heeft zijn EIGEN ondergrond, en dat is
+   precies waarom het de drie afgekeurde ontwerpen versloeg. Het leest dus op
+   elke teamkleur hetzelfde, met of zonder beige eronder.
+
+   Wat het beige wél deed is de teamkleur wegnemen, en die draagt informatie:
+   in een rij vol blokken zie je aan de kleur bij welk team een dienst hoort.
+   Een afwezigheid is geen reden om dat te verbergen. Het signaal blijft het
+   lint plus de rode gloed hierboven.
+
+   Niets vervangt dit blok — dat is de hele wijziging. */
 
 /* Het TYPE als een schuin lintje over de rechterbovenhoek.
 

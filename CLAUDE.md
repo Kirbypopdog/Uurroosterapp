@@ -513,9 +513,14 @@ waar nog een trigger aan hangt laat zich niet droppen.
   die ligt eronder.
 
   Het type staat als een schuin **lintje** over de rechterbovenhoek
-  (`.afwezig-lint`), en het blok krijgt een EIGEN achtergrond uit de
-  alert-tokens. Dat laatste is wat het in de rij laat opvallen tussen de
-  verzadigde teamkleuren; de teamkleur blijft in de volle streep links staan.
+  (`.afwezig-lint`). Het blok kreeg daarbij ook een EIGEN beige achtergrond uit
+  de alert-tokens, maar **die is er in #414 weer uit**: het lint heeft zijn
+  eigen ondergrond — precies waarom het de drie afgekeurde ontwerpen versloeg —
+  dus het leest op elke teamkleur hetzelfde, met of zonder beige eronder. Wat
+  het beige wél deed was de teamkleur wegnemen, en die draagt informatie: in
+  een rij vol blokken zie je daaraan bij welk team een dienst hoort. Een
+  afwezigheid is geen reden om dat te verbergen. Het signaal is het lint plus
+  de rode gloed.
 
   **Drie ontwerpen sneuvelden hiervoor**, en elk om een reden die het onthouden
   waard is:
