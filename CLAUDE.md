@@ -379,6 +379,7 @@ die de mail net heeft uitgezet hem alsnog. De queries in `verlofmail.js` en
 
 ### Agendakoppeling (iCal)
 - `POST /api/v1/me/ical-token` - Persoonlijke feedlink aanmaken of vervangen
+- `PUT /api/v1/me/agenda-omschrijvingen` - Gaan de omschrijvingen van je activiteiten mee? (#410)
 - `GET /api/v1/calendar/:token.ics` - De feed zelf (geen auth, het token ís de auth)
 
 De feed geeft dertien maanden rooster (30 dagen terug, een jaar vooruit) plus de
@@ -445,6 +446,39 @@ die zette alle rijen op `created_at` en de trigger zette ze meteen weer op
 de trigger daarom eerst vallen, vult bij, en zet hem daarna terug. Dit kwam
 alleen aan het licht door de migratie tegen een ECHTE PostgreSQL te draaien; de
 testsuite draait met een gemockte database en ziet dit soort dingen niet.
+
+**Activiteiten gaan mee, hun omschrijving alleen op eigen verzoek** (#410). Een
+vergadering van 13 tot 16 uur stond niet in je agenda: je zag alleen de dienst.
+Elke activiteit is nu een eigen VEVENT (`UID:activiteit-<id>@hetvlot`) binnen
+die dienst.
+
+De TITEL is de keuze. Standaard staat er alleen het soort — `Overleg`,
+`Vergadering` — en pas met `users.ical_omschrijvingen` aan komt de eigen
+omschrijving erin. Dat is geen voorzichtigheid om de voorzichtigheid: de feed
+heeft geen login, en in dat veld staan in productie `Eind evaluatie Lois`,
+`AZ sint-lucas met J.` en `Samen met kamer 12 collect & go doen` — jongeren bij
+naam, een ziekenhuisbezoek, een kamernummer. De schakelaar staat per MEDEWERKER
+in zijn eigen profiel en is bewust geen beheerdersinstelling: het is zijn link.
+
+**Het omzetten van die schakelaar moet de SEQUENCE verhogen.** De SEQUENCE van
+een activiteit komt uit haar eigen `updated_at`, en die beweegt niet als een
+gebruiker zijn voorkeur wijzigt — dus zou de titel wel in de feed veranderen
+maar in de agenda blijven staan zoals hij was. Daarom legt
+`users.ical_voorkeur_gewijzigd` dat moment vast en neemt de feed
+`Math.max(seq(activiteit), seq(voorkeur))`. Dezelfde fout als #409, één laag
+dieper.
+
+**Geen tweede lijstje met labels.** Zonder omschrijving wordt `vergadering`
+gewoon `Vergadering`: alle zes de types zijn één Nederlands woord, dus een
+hoofdletter volstaat. Een labellijst aan de serverkant zou uiteenlopen met
+`ACTIVITY_TYPE_LABELS_FULL` in de frontend — de fout uit #400.
+
+**Eén trigger-functie voor beide tabellen.** `shifts_zet_updated_at` uit #409
+deed niets tabel-specifieks en heet sinds migratie 050 `zet_updated_at`;
+`shifts` en `shift_activities` hangen er allebei aan. Een tweede kopie ernaast
+zetten is precies diezelfde drift. Let op de volgorde in die migratie: de oude
+functie kan pas vallen nádat beide triggers omgehangen zijn, want een functie
+waar nog een trigger aan hangt laat zich niet droppen.
 
 ## Frontend Patronen
 

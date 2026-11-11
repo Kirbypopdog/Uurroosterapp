@@ -59,6 +59,35 @@ router.put('/me/email-preferences', requireAuth, async (req, res) => {
   }
 });
 
+// #410: gaan de OMSCHRIJVINGEN van je activiteiten mee in je agendafeed?
+//
+// Alleen voor jezelf, en bewust geen beheerdersinstelling: het is jouw link en
+// jouw afweging. `ical_voorkeur_gewijzigd` legt vast wanneer dit omging, zodat
+// de feed een hogere SEQUENCE kan meesturen en een agenda die je activiteiten
+// al heeft de nieuwe titels ook werkelijk overneemt.
+router.put('/me/agenda-omschrijvingen', requireAuth, async (req, res) => {
+  const { icalOmschrijvingen } = req.body || {};
+  if (typeof icalOmschrijvingen !== 'boolean') {
+    return res.status(400).json({ error: 'icalOmschrijvingen (boolean) is verplicht' });
+  }
+  try {
+    const r = await pool.query(
+      `UPDATE users SET ical_omschrijvingen = $1, ical_voorkeur_gewijzigd = NOW()
+        WHERE id = $2
+        RETURNING ical_omschrijvingen AS "icalOmschrijvingen"`,
+      [icalOmschrijvingen, req.user.id]
+    );
+    // Niet WAT er nu meegaat in de audit log, alleen DAT de keuze omging:
+    // de omschrijvingen zelf zijn precies het gevoelige deel.
+    await logAudit(req, 'UPDATE', 'user', req.user.id,
+      { action: 'ical_omschrijvingen', icalOmschrijvingen });
+    res.json({ icalOmschrijvingen: r.rows[0].icalOmschrijvingen });
+  } catch (err) {
+    console.error('PUT /me/agenda-omschrijvingen error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // POST /me/ical-token - Genereer of reset persoonlijke iCal feed token
 router.post('/me/ical-token', requireAuth, async (req, res) => {
   try {
@@ -89,7 +118,7 @@ router.get('/calendar/:token.ics', async (req, res) => {
     const userResult = await pool.query(
       `UPDATE users SET ical_last_access = NOW()
         WHERE ical_feed_token = $1 AND active = true
-        RETURNING id, name`,
+        RETURNING id, name, ical_omschrijvingen, ical_voorkeur_gewijzigd`,
       [req.params.token]
     );
     if (!userResult.rows.length) return res.status(404).send('Not found');
@@ -97,7 +126,7 @@ router.get('/calendar/:token.ics', async (req, res) => {
 
     const from = new Date(); from.setDate(from.getDate() - 30);
     const to   = new Date(); to.setDate(to.getDate() + 365);
-    const [shiftsResult, teamsSettingResult] = await Promise.all([
+    const [shiftsResult, teamsSettingResult, activiteitenResult] = await Promise.all([
       pool.query(
         `SELECT s.id, s.date::text, s.start_time, s.end_time, s.team, s.notes,
                 s.updated_at, t.name as team_name
@@ -107,7 +136,17 @@ router.get('/calendar/:token.ics', async (req, res) => {
          ORDER BY s.date, s.start_time`,
         [user.id, formatDateYYYYMMDD(from), formatDateYYYYMMDD(to)]
       ),
-      pool.query(`SELECT value FROM settings WHERE key = 'teams'`)
+      pool.query(`SELECT value FROM settings WHERE key = 'teams'`),
+      // #410: de activiteiten gaan mee als eigen gebeurtenis. Zonder dat zag je
+      // op je telefoon alleen "Vlot 2, 13:00-23:00" en niet dat je van 13 tot
+      // 16 uur in de teamvergadering zat.
+      pool.query(
+        `SELECT id, date::text, start_time::text, end_time::text, type, description, updated_at
+         FROM shift_activities
+         WHERE user_id = $1 AND date >= $2 AND date <= $3
+         ORDER BY date, start_time`,
+        [user.id, formatDateYYYYMMDD(from), formatDateYYYYMMDD(to)]
+      )
     ]);
     // settings.teams is the primary display name source (may differ from teams table)
     const teamNameMap = teamsSettingResult.rows.length ? teamsSettingResult.rows[0].value : {};
@@ -117,7 +156,7 @@ router.get('/calendar/:token.ics', async (req, res) => {
     // vangt alleen een database op waar die migratie nog niet gedraaid is.
     const nu = icalUtcStempel(new Date());
 
-    const events = shiftsResult.rows.map(s => {
+    const dienstEvents = shiftsResult.rows.map(s => {
       const dateStr = s.date.slice(0, 10);
       const start = formatICalDateTime(dateStr, s.start_time);
       let endDate = dateStr;
@@ -149,7 +188,66 @@ router.get('/calendar/:token.ics', async (req, res) => {
       if (s.notes) lines.push(`DESCRIPTION:${icalEscape(s.notes)}`);
       lines.push('END:VEVENT');
       return lines.join('\r\n');
-    }).join('\r\n');
+    });
+
+    // #410: elke activiteit als eigen gebeurtenis binnen de dienst.
+    //
+    // De TITEL hangt af van een keuze die de medewerker zelf maakt. Standaard
+    // staat er alleen het soort activiteit ("Vergadering", "Overleg"); wie zijn
+    // omschrijvingen wil meesturen zet dat aan in zijn profiel. De feed heeft
+    // geen login, en in dat veld staan in productie namen van jongeren, een
+    // ziekenhuisbezoek en een kamernummer — dat hoort niet mee te gaan omdat
+    // iemand anders dat ooit zo heeft ingesteld.
+    const omschrijvingenMee = user.ical_omschrijvingen === true;
+
+    // Het ijkpunt van de SEQUENCE schuift mee met het omzetten van die
+    // schakelaar. Doe je dat niet, dan verandert de titel wel in de feed maar
+    // blijft elke agenda staan op wat hij al had: de SEQUENCE van een
+    // activiteit komt uit háár updated_at, en die beweegt niet als een
+    // gebruiker zijn eigen voorkeur wijzigt. Dezelfde fout als #409, één laag
+    // dieper.
+    const voorkeurSeq = user.ical_voorkeur_gewijzigd
+      ? icalSequence(user.ical_voorkeur_gewijzigd) : 1;
+
+    const activiteitEvents = activiteitenResult.rows.map(a => {
+      const dateStr = String(a.date).slice(0, 10);
+      const van = String(a.start_time).slice(0, 5);
+      const tot = String(a.end_time).slice(0, 5);
+      const start = formatICalDateTime(dateStr, van);
+
+      // Een activiteit die over middernacht loopt bestaat niet in de praktijk,
+      // maar de kolommen laten het toe; dezelfde doorrol als bij een dienst.
+      let eindDatum = dateStr;
+      if (tot <= van) {
+        const d = new Date(dateStr); d.setDate(d.getDate() + 1);
+        eindDatum = formatDateYYYYMMDD(d);
+      }
+      const end = formatICalDateTime(eindDatum, tot);
+
+      // Geen tweede lijstje met labels: `vergadering` wordt `Vergadering`.
+      // Alle zes de types zijn één Nederlands woord, dus een hoofdletter
+      // volstaat — en een lijstje dat uiteenloopt met de frontend is precies
+      // de fout uit #400.
+      const soort = String(a.type || '').charAt(0).toUpperCase() + String(a.type || '').slice(1);
+      const titel = omschrijvingenMee && a.description ? a.description : (soort || 'Activiteit');
+
+      const gewijzigdAct = icalUtcStempel(a.updated_at) || nu;
+      const seq = Math.max(icalSequence(a.updated_at), voorkeurSeq);
+
+      return [
+        'BEGIN:VEVENT',
+        `UID:activiteit-${a.id}@hetvlot`,
+        `DTSTAMP:${gewijzigdAct}`,
+        `LAST-MODIFIED:${gewijzigdAct}`,
+        `SEQUENCE:${seq}`,
+        `DTSTART;TZID=Europe/Brussels:${start}`,
+        `DTEND;TZID=Europe/Brussels:${end}`,
+        `SUMMARY:${icalEscape(titel)}`,
+        'END:VEVENT',
+      ].join('\r\n');
+    });
+
+    const events = dienstEvents.concat(activiteitEvents).join('\r\n');
 
     const ical = [
       'BEGIN:VCALENDAR',

@@ -107,3 +107,61 @@ describe('waar updated_at vandaan komt', () => {
     expect(migratie049).toMatch(/UPDATE shifts SET updated_at = created_at/);
   });
 });
+
+describe('de activiteiten in de agendafeed (#410)', () => {
+  const migraties = fs.readFileSync(path.join(__dirname, '..', 'src', 'migraties.js'), 'utf8');
+  const schema = fs.readFileSync(path.join(__dirname, '..', 'sql', 'schema.sql'), 'utf8');
+  const migratie050 = migraties.slice(
+    migraties.indexOf("name: '050_agenda_activiteiten'"),
+    migraties.indexOf('async function runMigrations'));
+
+  test('er is EEN functie voor beide tabellen, niet twee kopieën', () => {
+    // Twee identieke functies naast elkaar is precies de drift uit #400.
+    expect(migratie050).toMatch(/CREATE OR REPLACE FUNCTION zet_updated_at\(\)/);
+    expect(migratie050).toMatch(/DROP FUNCTION IF EXISTS shifts_zet_updated_at\(\)/);
+    expect(schema).not.toMatch(/FUNCTION shifts_zet_updated_at/);
+    expect((schema.match(/EXECUTE FUNCTION zet_updated_at\(\)/g) || []).length).toBe(2);
+  });
+
+  test('de oude functie gaat er pas AF nadat de triggers omgehangen zijn', () => {
+    // Een functie waar nog een trigger aan hangt, laat zich niet droppen.
+    const hangOm = migratie050.indexOf('FOR EACH ROW EXECUTE FUNCTION zet_updated_at()');
+    const drop = migratie050.indexOf('DROP FUNCTION IF EXISTS shifts_zet_updated_at');
+    expect(hangOm).toBeGreaterThan(-1);
+    expect(drop).toBeGreaterThan(hangOm);
+  });
+
+  test('ook hier gaan de triggers eerst af en wordt er daarna pas bijgevuld', () => {
+    const drop = migratie050.indexOf('DROP TRIGGER IF EXISTS trg_shift_activities_updated_at');
+    const backfill = migratie050.indexOf('UPDATE shift_activities SET updated_at = created_at');
+    expect(drop).toBeGreaterThan(-1);
+    expect(backfill).toBeGreaterThan(drop);
+  });
+
+  test('de schakelaar staat standaard UIT', () => {
+    // De feed heeft geen login. In het omschrijvingsveld staan in productie
+    // namen van jongeren, een ziekenhuisbezoek en een kamernummer; dat hoort
+    // niet buiten de app te komen omdat iemand een vinkje vergat.
+    expect(migratie050).toMatch(/ical_omschrijvingen BOOLEAN NOT NULL DEFAULT false/);
+    expect(schema).toMatch(/ical_omschrijvingen BOOLEAN NOT NULL DEFAULT false/);
+  });
+
+  test('het moment van omzetten wordt vastgelegd', () => {
+    // Zonder dat doet de schakelaar niets aan een agenda die de activiteiten
+    // al heeft: de SEQUENCE komt uit de activiteit zelf.
+    expect(migratie050).toMatch(/ical_voorkeur_gewijzigd TIMESTAMP/);
+    expect(schema).toMatch(/ical_voorkeur_gewijzigd TIMESTAMP/);
+  });
+
+  test('de feed neemt het hoogste van de twee als SEQUENCE', () => {
+    const route = fs.readFileSync(
+      path.join(__dirname, '..', 'src', 'routes', 'me-voorkeuren-en-agenda.js'), 'utf8');
+    expect(route).toMatch(/Math\.max\(icalSequence\(a\.updated_at\), voorkeurSeq\)/);
+  });
+
+  test('het endpoint legt alleen DAT de keuze omging vast, niet de omschrijvingen', () => {
+    const route = fs.readFileSync(
+      path.join(__dirname, '..', 'src', 'routes', 'me-voorkeuren-en-agenda.js'), 'utf8');
+    expect(route).toMatch(/action: 'ical_omschrijvingen', icalOmschrijvingen/);
+  });
+});

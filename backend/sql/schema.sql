@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS users (
   -- geen toegangstabel.
   ical_token_created TIMESTAMPTZ,
   ical_last_access TIMESTAMPTZ,
+  -- #410: gaan de OMSCHRIJVINGEN van je activiteiten mee in de agendafeed?
+  -- Standaard niet. De feed heeft geen login en in dat veld staan in productie
+  -- namen van jongeren, een ziekenhuisbezoek en een kamernummer; dat hoort
+  -- alleen buiten de app te komen als de medewerker daar zelf voor kiest.
+  ical_omschrijvingen BOOLEAN NOT NULL DEFAULT false,
+  -- Wanneer die keuze voor het laatst omging. De feed neemt het hoogste van
+  -- deze en de `updated_at` van de activiteit als SEQUENCE; zonder dat zou het
+  -- omzetten niets doen aan een agenda die de activiteiten al heeft (#409).
+  ical_voorkeur_gewijzigd TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -66,7 +75,11 @@ CREATE TABLE IF NOT EXISTS shifts (
 -- draft-apply, replace-employee, swaps, de bulkziekmelding, de import); een
 -- daarvan vergeten betekent een agenda die stil achterloopt, en dat is precies
 -- de fout die hier wordt opgelost. De trigger kan niet overgeslagen worden.
-CREATE OR REPLACE FUNCTION shifts_zet_updated_at() RETURNS trigger AS $$
+--
+-- #410: de functie is algemeen en heet daarom niet meer naar `shifts`;
+-- `shift_activities` gebruikt hem ook. Een tweede kopie ernaast zetten is
+-- precies de drift die hier vaker is misgegaan (#400).
+CREATE OR REPLACE FUNCTION zet_updated_at() RETURNS trigger AS $$
 BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
@@ -76,7 +89,7 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_shifts_updated_at ON shifts;
 CREATE TRIGGER trg_shifts_updated_at
   BEFORE UPDATE ON shifts
-  FOR EACH ROW EXECUTE FUNCTION shifts_zet_updated_at();
+  FOR EACH ROW EXECUTE FUNCTION zet_updated_at();
 
 -- Availability (afwezigheid/verlof) - references users directly
 CREATE TABLE IF NOT EXISTS availability (
@@ -182,8 +195,16 @@ CREATE TABLE IF NOT EXISTS shift_activities (
   -- kan de opruiming bij het toepassen niet zien welke vergaderingen ze mag
   -- weghalen (#376). De verwijzing staat onderaan dit bestand.
   draft_id TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP DEFAULT NOW(),
+  -- #410: wanneer deze activiteit voor het laatst veranderde. De agendafeed
+  -- leidt hier zijn SEQUENCE uit af; zie de dienst hierboven (#409).
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+DROP TRIGGER IF EXISTS trg_shift_activities_updated_at ON shift_activities;
+CREATE TRIGGER trg_shift_activities_updated_at
+  BEFORE UPDATE ON shift_activities
+  FOR EACH ROW EXECUTE FUNCTION zet_updated_at();
 
 -- Audit log (tracks all changes)
 CREATE TABLE IF NOT EXISTS audit_log (

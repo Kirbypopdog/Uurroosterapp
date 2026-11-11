@@ -23,7 +23,8 @@ router.get('/me', requireAuth, async (req, res) => {
                 onboarding_flags as "onboardingFlags",
                 ical_feed_token as "icalFeedToken",
                 ical_token_created as "icalTokenCreated",
-                ical_last_access as "icalLastAccess"
+                ical_last_access as "icalLastAccess",
+                ical_omschrijvingen as "icalOmschrijvingen"
          FROM users WHERE id = $1`,
         [req.user.id]
       );

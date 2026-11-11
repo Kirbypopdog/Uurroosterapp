@@ -426,6 +426,18 @@ function renderProfile() {
                                     Deel deze link met niemand. Wie hem heeft, ziet je diensten van het voorbije jaar en het komende jaar, zonder in te loggen. Deel je hem per ongeluk, genereer dan hieronder een nieuwe.
                                 </div>
                                 <div class="profile-ical-gebruik">${icalGebruikTekst(user)}</div>
+                                <!-- #410: je activiteiten gaan altijd mee, hun
+                                     OMSCHRIJVING alleen als je dat zelf kiest. -->
+                                <label class="profile-ical-omschrijvingen">
+                                    <input type="checkbox" id="profile-ical-omschrijvingen" ${user.icalOmschrijvingen ? 'checked' : ''}>
+                                    <span>
+                                        <strong>Omschrijvingen meesturen</strong>
+                                        <em>Je activiteiten staan sowieso in je agenda, met hun uur en het soort
+                                        ("Vergadering", "Overleg"). Zet dit aan en de omschrijving komt er ook in
+                                        te staan — dus ook namen die je daarin typt. Denk eraan dat iedereen met
+                                        deze link ze dan kan lezen.</em>
+                                    </span>
+                                </label>
                                 <button type="button" class="btn btn-ghost btn-xs profile-ical-reset" id="profile-ical-reset">
                                     ${IconHelper.html('refresh-cw', 'xs')} Nieuwe link genereren
                                 </button>
@@ -465,6 +477,29 @@ function renderProfile() {
                 showToast(emailToggle.checked ? 'E-mailmeldingen ingeschakeld' : 'E-mailmeldingen uitgeschakeld', 'success');
             } catch (error) {
                 emailToggle.checked = !emailToggle.checked;
+                showToast('Kon voorkeur niet opslaan: ' + error.message, 'error');
+            }
+        });
+    }
+
+    // #410: schakelaar voor de omschrijvingen in de agendafeed
+    const icalOmsToggle = document.getElementById('profile-ical-omschrijvingen');
+    if (icalOmsToggle) {
+        icalOmsToggle.addEventListener('change', async () => {
+            try {
+                const data = await dataApiFetch('/me/agenda-omschrijvingen', {
+                    method: 'PUT',
+                    body: JSON.stringify({ icalOmschrijvingen: icalOmsToggle.checked })
+                });
+                AppState.currentUser.icalOmschrijvingen = data.icalOmschrijvingen;
+                sessionStorage.setItem('hetvlot_user', JSON.stringify(AppState.currentUser));
+                showToast(data.icalOmschrijvingen
+                    ? 'Omschrijvingen gaan mee in je agenda'
+                    : 'Alleen het soort activiteit gaat mee in je agenda', 'success');
+            } catch (error) {
+                // Terugzetten, anders staat het vinkje iets te beloven wat
+                // niet opgeslagen is.
+                icalOmsToggle.checked = !icalOmsToggle.checked;
                 showToast('Kon voorkeur niet opslaan: ' + error.message, 'error');
             }
         });

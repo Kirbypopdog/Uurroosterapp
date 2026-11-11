@@ -2625,7 +2625,8 @@ describe('GET /calendar/:token.ics', () => {
     pool.query
       .mockResolvedValueOnce({ rows: [{ id: 7, name: 'Karen Claes' }] }) // user by token
       .mockResolvedValueOnce({ rows: [{ id: 100, date: '2026-06-15', start_time: '12:00', end_time: '20:00', team: 'vlot1', notes: null, team_name: 'Vlot 1' }] }) // shifts
-      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] }); // settings.teams
+      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] }) // settings.teams
+      .mockResolvedValueOnce({ rows: [] }); // #410: activiteiten
 
     const res = await request(app).get('/api/v1/calendar/some-token.ics');
     expect(res.status).toBe(200);
@@ -2659,7 +2660,8 @@ describe('GET /calendar/:token.ics', () => {
         id: 100, date: '2026-11-19', start_time: '09:00', end_time: '16:00',
         team: 'vlot1', notes: null, team_name: 'Vlot 1', updated_at: updatedAt,
       }] })
-      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] });
+      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] })
+      .mockResolvedValueOnce({ rows: [] });   // #410: geen activiteiten
   }
 
   test('elke gebeurtenis draagt een SEQUENCE en een LAST-MODIFIED (#409)', async () => {
@@ -2695,6 +2697,80 @@ describe('GET /calendar/:token.ics', () => {
     const na = (await request(app).get('/api/v1/calendar/t.ics')).text;
     const seq = (t) => Number(/SEQUENCE:(\d+)/.exec(t)[1]);
     expect(seq(na)).toBeGreaterThan(seq(voor));
+  });
+
+  // #410: de activiteiten gaan mee als eigen gebeurtenis binnen de dienst.
+  // De TITEL hangt af van een keuze die de medewerker zelf maakt: standaard
+  // alleen het soort ("Overleg"), en pas met de schakelaar aan zijn eigen
+  // omschrijving. De feed heeft geen login, en in dat veld staan in productie
+  // namen van jongeren.
+  function arrangeMetActiviteit(omschrijvingenMee, voorkeurGewijzigd = null) {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{
+        id: 7, name: 'Karen Claes',
+        ical_omschrijvingen: omschrijvingenMee,
+        ical_voorkeur_gewijzigd: voorkeurGewijzigd,
+      }] })
+      .mockResolvedValueOnce({ rows: [{
+        id: 100, date: '2026-12-14', start_time: '09:30', end_time: '16:00',
+        team: 'vlot1', notes: null, team_name: 'Vlot 1',
+        updated_at: new Date('2026-10-08T12:48:15Z'),
+      }] })
+      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] })
+      .mockResolvedValueOnce({ rows: [{
+        id: 55, date: '2026-12-14', start_time: '15:00:00', end_time: '16:00:00',
+        type: 'overleg', description: 'Eind evaluatie Lois',
+        updated_at: new Date('2026-10-08T12:48:15Z'),
+      }] });
+  }
+
+  test('een activiteit komt als eigen gebeurtenis in de feed (#410)', async () => {
+    arrangeMetActiviteit(false);
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('UID:activiteit-55@hetvlot');
+    expect(body).toContain('DTSTART;TZID=Europe/Brussels:20261214T150000');
+    expect(body).toContain('DTEND;TZID=Europe/Brussels:20261214T160000');
+    // en de dienst staat er nog steeds naast
+    expect(body).toContain('UID:shift-100@hetvlot');
+  });
+
+  test('standaard staat er alleen het SOORT activiteit in (#410)', async () => {
+    arrangeMetActiviteit(false);
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('SUMMARY:Overleg');
+    expect(body).not.toContain('Lois');
+  });
+
+  test('met de schakelaar aan komt de omschrijving erin (#410)', async () => {
+    arrangeMetActiviteit(true);
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('SUMMARY:Eind evaluatie Lois');
+  });
+
+  test('de schakelaar omzetten verhoogt de SEQUENCE van de activiteit (#410)', async () => {
+    // Zonder dit verandert de titel wel in de feed, maar blijft elke agenda
+    // staan op wat hij al had: de SEQUENCE komt uit de activiteit zelf, en die
+    // beweegt niet als een gebruiker zijn eigen voorkeur wijzigt.
+    const seqVan = (t) => Number(/UID:activiteit-55@hetvlot[\s\S]*?SEQUENCE:(\d+)/.exec(t)[1]);
+    arrangeMetActiviteit(false);
+    const voor = seqVan((await request(app).get('/api/v1/calendar/t.ics')).text);
+    arrangeMetActiviteit(true, new Date('2026-11-11T18:52:00Z'));
+    const na = seqVan((await request(app).get('/api/v1/calendar/t.ics')).text);
+    expect(na).toBeGreaterThan(voor);
+  });
+
+  test('een activiteit zonder omschrijving valt terug op het type (#410)', async () => {
+    // Geen tweede lijstje met labels: `vergadering` wordt `Vergadering`.
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 7, name: 'K', ical_omschrijvingen: true, ical_voorkeur_gewijzigd: null }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ value: {} }] })
+      .mockResolvedValueOnce({ rows: [{
+        id: 56, date: '2026-12-14', start_time: '13:00:00', end_time: '16:00:00',
+        type: 'vergadering', description: '', updated_at: new Date('2026-10-08T12:48:15Z'),
+      }] });
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('SUMMARY:Vergadering');
   });
 
   test('zonder updated_at blijft de feed werken', async () => {

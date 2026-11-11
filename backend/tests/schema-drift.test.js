@@ -140,11 +140,25 @@ describe('#329 schema.sql loopt niet achter op de migraties', () => {
   // daar stil achter zonder dat iets het meldt.
   test('elke trigger en functie die een migratie aanmaakt staat ook in schema.sql', () => {
     const schema = genormaliseerd(schemaSql);
+    // #410: dezelfde uitzondering als bij de kolommen hierboven. Migratie 049
+    // maakte `shifts_zet_updated_at` en 050 hernoemde die naar `zet_updated_at`
+    // en liet de oude vallen. Zo'n functie hoort juist NIET meer in schema.sql.
+    const weg = new Set();
+    const dropRegex = /drop\s+(trigger|function)\s+(?:if\s+exists\s+)?(\w+)/gi;
+    let d;
+    while ((d = dropRegex.exec(migratieBlok)) !== null) weg.add(d[2].toLowerCase());
+
     const ontbreekt = [];
     const regex = /create\s+(?:or\s+replace\s+)?(trigger|function)\s+(\w+)/gi;
     let m;
     while ((m = regex.exec(migratieBlok)) !== null) {
       const naam = m[2].toLowerCase();
+      // Een trigger wordt vlak voor zijn CREATE gedropt; dat telt niet als
+      // "weggehaald". Alleen wat NERGENS meer aangemaakt wordt, mag ontbreken.
+      const wordtLaterNogGemaakt = new RegExp(
+        `create\\s+(?:or\\s+replace\\s+)?(?:trigger|function)\\s+${naam}\\b`, 'i'
+      ).test(migratieBlok.slice(m.index + m[0].length));
+      if (weg.has(naam) && !wordtLaterNogGemaakt && !schema.includes(naam)) continue;
       if (!schema.includes(naam)) ontbreekt.push(`${m[1].toLowerCase()} ${naam}`);
     }
     expect(ontbreekt).toEqual([]);

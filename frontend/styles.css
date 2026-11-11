@@ -7061,6 +7061,36 @@ body[data-view-mode="day"] .timeline-day-cell {
 .profile-ical-waarschuwing svg { flex-shrink: 0; margin-top: 2px; }
 .profile-ical-gebruik { font-size: 12px; color: var(--text-secondary); }
 
+/* #410: de keuze of je omschrijvingen meegaan in je agendafeed. Het vinkje
+   staat links en de uitleg ernaast, want die uitleg is hier het belangrijkste
+   deel: wat je aanzet is niet "meer detail" maar "deze tekst verlaat de app". */
+.profile-ical-omschrijvingen {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    max-width: 520px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.profile-ical-omschrijvingen:hover { background: var(--surface-2); }
+.profile-ical-omschrijvingen input { margin-top: 2px; flex-shrink: 0; }
+.profile-ical-omschrijvingen strong {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.profile-ical-omschrijvingen em {
+    display: block;
+    margin-top: 2px;
+    font-style: normal;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
 /* #387: het venster dat een gegenereerd wachtwoord één keer toont. Groot en
    in een vaste letterbreedte, want dit wordt overgetypt of voorgelezen. */
 .ww-toon-rij {

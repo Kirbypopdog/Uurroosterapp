@@ -993,6 +993,75 @@ const MIGRATIONS = [
           BEFORE UPDATE ON shifts
           FOR EACH ROW EXECUTE FUNCTION shifts_zet_updated_at()`);
     }
+  },
+  {
+    name: '050_agenda_activiteiten',
+    up: async (client) => {
+      // #410: de activiteiten gaan mee in de agendafeed, en dan geldt voor hen
+      // hetzelfde als voor een dienst in #409: zonder een SEQUENCE die omhoog
+      // gaat, laat een abonnee-agenda staan wat hij al heeft.
+      //
+      // De functie uit 049 heette `shifts_zet_updated_at` maar doet niets
+      // tabel-specifieks. Een tweede kopie ernaast zetten voor
+      // `shift_activities` is precies de drift die hier vaker is misgegaan
+      // (#400), dus hij wordt hernoemd naar iets algemeens en allebei de
+      // triggers wijzen ernaar.
+      await client.query(`
+        CREATE OR REPLACE FUNCTION zet_updated_at() RETURNS trigger AS $$
+        BEGIN
+          NEW.updated_at = NOW();
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql`);
+
+      await client.query(
+        `ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()`);
+
+      // Eerst de triggers eraf. Zelfde reden als in 049: migratie 000 draait
+      // `schema.sql` bij elke opstart en maakt ze ook aan, dus ze bestaan hier
+      // al — en een BEFORE UPDATE-trigger vuurt óók op de backfill, die daarmee
+      // stilletjes niets zou doen.
+      await client.query(`DROP TRIGGER IF EXISTS trg_shifts_updated_at ON shifts`);
+      await client.query(`DROP TRIGGER IF EXISTS trg_shift_activities_updated_at ON shift_activities`);
+
+      await client.query(
+        `UPDATE shift_activities SET updated_at = created_at WHERE created_at IS NOT NULL`);
+
+      await client.query(`
+        CREATE TRIGGER trg_shifts_updated_at
+          BEFORE UPDATE ON shifts
+          FOR EACH ROW EXECUTE FUNCTION zet_updated_at()`);
+      await client.query(`
+        CREATE TRIGGER trg_shift_activities_updated_at
+          BEFORE UPDATE ON shift_activities
+          FOR EACH ROW EXECUTE FUNCTION zet_updated_at()`);
+
+      // Pas nu mag de oude weg: een functie waar nog een trigger aan hangt,
+      // laat zich niet droppen.
+      await client.query(`DROP FUNCTION IF EXISTS shifts_zet_updated_at()`);
+
+      // De schakelaar waar #410 om draait. Een activiteit gaat ALTIJD mee in
+      // de agendafeed — het uur is wat je op je telefoon nodig hebt — maar de
+      // OMSCHRIJVING alleen als de medewerker daar zelf voor kiest.
+      //
+      // Standaard uit, en dat is de hele reden dat deze kolom bestaat. De feed
+      // heeft geen login; het token in de URL is de beveiliging. In productie
+      // staat in dat omschrijvingsveld onder meer "Eind evaluatie Lois",
+      // "AZ sint-lucas met J." en "Samen met kamer 12 collect & go doen" —
+      // jongeren bij naam, een ziekenhuisbezoek, een kamernummer. Dat mag niet
+      // buiten de app komen omdat iemand anders een vinkje vergat.
+      await client.query(
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS ical_omschrijvingen BOOLEAN NOT NULL DEFAULT false`);
+
+      // Wanneer die schakelaar voor het laatst omging. Zonder dit zou het
+      // omzetten ervan NIETS doen aan een agenda die de activiteiten al heeft:
+      // de SEQUENCE van een activiteit komt uit haar eigen `updated_at`, en die
+      // verandert niet als een gebruiker zijn eigen voorkeur wijzigt. De feed
+      // neemt daarom het hoogste van de twee. Dat is dezelfde fout als #409,
+      // één laag dieper.
+      await client.query(
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS ical_voorkeur_gewijzigd TIMESTAMP`);
+    }
   }
 ];
 
