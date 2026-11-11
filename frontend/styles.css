@@ -5588,32 +5588,49 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* Niet-werkzaam indicator — grey bar across empty cell (#173) */
-.vrij-indicator {
+/* #415: een afwezigheid op een dag ZONDER dienst.
+   Hier stond `.vrij-indicator`: een streepje in een gestreept vlak met een
+   stippellijn, en alleen voor het type `vrij`. Dat is vervangen.
+
+   Een lege cel is 143,7px breed waar een dienstblok van acht uur er 67 krijgt,
+   dus hier is plaats voor het WOORD. Het lint in de hoek van #401 was een
+   antwoord op krapte die hier niet bestaat.
+
+   De kleuren zijn die van een foutmelding, net als bij het lint — dat is wat
+   een afwezigheid in de rij laat opvallen tussen lege cellen. Maar lichter:
+   een volle rode band op elke lege verlofdag zou over een hele week schreeuwen,
+   en dit staat naast dienstblokken die zelf al kleur dragen.
+
+   `pointer-events: none` is hier wezenlijk: de cel blijft zich gedragen zoals
+   hij deed, dus klikken opent een nieuwe dienst. Een overlay die de klik
+   opslokt zonder zelf iets te doen was precies de fout bij `.vrij-indicator`
+   (#400). Daarom staat er ook geen tooltip op: die vraagt hover, en het woord
+   staat er al. */
+.afwezig-cel {
     position: absolute;
-    inset: 6px 4px;
+    inset: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: repeating-linear-gradient(
-        135deg,
-        transparent,
-        transparent 4px,
-        rgba(0,0,0,0.04) 4px,
-        rgba(0,0,0,0.04) 8px
-    );
-    border: 1px dashed var(--border-color, #d1d5db);
-    border-radius: 4px;
-    color: var(--text-secondary, #9ca3af);
-    opacity: 0.7;
-    /* #400: hier stond `cursor: help`. In dit bestand betekent dat "alleen
-       uitleg, klikken doet niets" — zo werkt .shift-block-indicator, en die
-       wordt in drag-handler.js ook echt van de klik uitgezonderd. Deze overlay
-       niet: de klik valt door naar de cel eronder en opent "nieuwe dienst". De
-       muisaanwijzer beloofde dus iets anders dan er gebeurde. Zonder eigen
-       cursor gedraagt de cel zich als elke andere lege cel. */
+    pointer-events: none;
     z-index: 1;
+    border-radius: 5px;
+    border: 1px solid var(--alert-error-border);
+    background: var(--alert-error-bg);
+    overflow: hidden;
 }
-.vrij-indicator:hover { opacity: 1; }
+
+.afwezig-cel-woord {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--alert-error-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 4px;
+}
 
 .no-shifts-message {
     padding: 60px 40px;

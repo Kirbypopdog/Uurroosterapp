@@ -119,6 +119,30 @@ function afwezigheidsLabel(type) {
     return 'Afwezig';
 }
 
+// #415: een afwezigheid op een dag ZONDER dienst.
+//
+// Het lint hieronder hangt aan een dienstblok, dus wie die dag niets ingepland
+// had, was in de planning niet te zien als afwezig. Je merkte het pas als je er
+// een dienst probeerde te zetten — of helemaal niet, als niemand dat probeerde.
+// Karen bracht het op: ze wil kunnen laten zien dat ze verlof heeft op een dag
+// waar toch geen dienst staat.
+//
+// Dat is geen randgeval. In productie staan 116 afwezigheidsdagen op een dag
+// zonder dienst: 59 van de 108 verlofdagen, 48 van de 133 ziektedagen, en alle
+// zes de "andere" van Karen.
+//
+// Er stond al zoiets (#173), maar alleen voor het type `vrij` — net het type
+// dat in #402 verouderd is verklaard. De vier types die wél gebruikt worden
+// kregen niets.
+//
+// Een lege cel is 143,7px breed, waar een dienstblok van acht uur er 67 krijgt.
+// Hier is dus plaats voor het WOORD zelf; het lint in de hoek was een antwoord
+// op krapte die hier niet bestaat.
+function afwezigheidsCelMarkering(type) {
+    const woord = escapeHtml(afwezigheidsLabel(type));
+    return `<div class="afwezig-cel"><span class="afwezig-cel-woord">${woord}</span></div>`;
+}
+
 // #401: het type afwezigheid als een schuin LINTJE over de rechterbovenhoek.
 //
 // Drie ontwerpen sneuvelden hiervoor, en elk om een reden die het onthouden
@@ -1071,11 +1095,21 @@ function renderTimelineView() {
                         // Filter by visible teams (include shifts without team)
                         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
 
-                        // Toon "niet werkzaam" markering op lege cellen (#173)
+                        // #415: een afwezigheid op een dag zonder dienst. Dit
+                        // stond er alleen voor het type `vrij` (#173); zie
+                        // afwezigheidsCelMarkering() voor waarom dat te weinig was.
+                        //
+                        // Het label toont het TYPE en nooit het redenveld: bij
+                        // ziekte is dat gezondheidsinformatie (#152), en
+                        // `GET /availability` maakt `reason` juist daarom leeg
+                        // voor wie geen beheerder is. De oude tooltip zette hem
+                        // er wél in.
                         const cellAvail = getAvailability(emp.id, date);
-                        if (!shiftBlock && shifts.length === 0 && cellAvail?.type === 'vrij') {
-                            const nwReason = cellAvail.reason ? ` · ${escapeHtml(cellAvail.reason)}` : '';
-                            html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                        const celAfwezig = !!(cellAvail && cellAvail.type
+                            && (typeof teltAlsAfwezigheid === 'function'
+                                ? teltAlsAfwezigheid(cellAvail.type) : true));
+                        if (!shiftBlock && shifts.length === 0 && celAfwezig) {
+                            html += afwezigheidsCelMarkering(cellAvail.type);
                         }
 
                         const isDayView = AppState.viewMode === 'day';
@@ -1337,10 +1371,21 @@ function renderTimelineView() {
                             html += `<div class="shift-block-indicator${canRelease2 ? ' shift-block-indicator--clickable' : ''}" data-block-id="${shiftBlock2.id}" data-employee="${emp.id}" data-date="${date}" data-tooltip="${blockReasonLabel(shiftBlock2.reason)}${releaseTip2}" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
                         }
 
+                        // #415: een afwezigheid op een dag zonder dienst. Dit
+                        // stond er alleen voor het type `vrij` (#173); zie
+                        // afwezigheidsCelMarkering() voor waarom dat te weinig was.
+                        //
+                        // Het label toont het TYPE en nooit het redenveld: bij
+                        // ziekte is dat gezondheidsinformatie (#152), en
+                        // `GET /availability` maakt `reason` juist daarom leeg
+                        // voor wie geen beheerder is. De oude tooltip zette hem
+                        // er wél in.
                         const cellAvail2 = getAvailability(emp.id, date);
-                        if (!shiftBlock2 && shifts.length === 0 && cellAvail2?.type === 'vrij') {
-                            const nwReason2 = cellAvail2.reason ? ` · ${escapeHtml(cellAvail2.reason)}` : '';
-                            html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason2}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                        const celAfwezig2 = !!(cellAvail2 && cellAvail2.type
+                            && (typeof teltAlsAfwezigheid === 'function'
+                                ? teltAlsAfwezigheid(cellAvail2.type) : true));
+                        if (!shiftBlock2 && shifts.length === 0 && celAfwezig2) {
+                            html += afwezigheidsCelMarkering(cellAvail2.type);
                         }
 
                         // Doorloop van nachtshift: enkel tonen op maandag (zondag→maandag weekgrens) of in dagweergave
@@ -1631,7 +1676,7 @@ function calculateShiftColumns(shifts) {
 // In de browser bestaat `module` niet, dus dit heeft daar geen effect.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    afwezigheidsLabel, afwezigheidsLint,
+    afwezigheidsLabel, afwezigheidsLint, afwezigheidsCelMarkering,
     activiteitenBalkjes, tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN,
   };
 }

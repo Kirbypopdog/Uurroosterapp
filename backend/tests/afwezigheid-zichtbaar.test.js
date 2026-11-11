@@ -43,7 +43,13 @@ const { ABSENCE_LABELS } = (() => {
   return { ABSENCE_LABELS: labels };
 })();
 
-const { afwezigheidsLabel } = require(frontend('app-planner.js'));
+// `escapeHtml` is in de browser een global uit app-ui.js; app-planner.js gaat
+// ervan uit dat hij er is. In Node zetten we hem klaar met dezelfde vertaling.
+global.escapeHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
+const { afwezigheidsLabel, afwezigheidsCelMarkering } = require(frontend('app-planner.js'));
 
 describe('het label van een afwezigheidstype', () => {
   test('komt uit ABSENCE_TYPES en niet uit een eigen lijstje', () => {
@@ -175,5 +181,84 @@ describe('de opmaak van het lint', () => {
   // voor een lint.
   test('de rode gloed blijft', () => {
     expect(CSS).toMatch(/\.timeline-block\.absent-conflict \{\s*box-shadow:/);
+  });
+});
+
+// #415: een afwezigheid op een dag ZONDER dienst.
+//
+// Het lint hangt aan een dienstblok, dus wie die dag niets ingepland had was
+// in de planning niet te zien als afwezig. Je merkte het pas als je er een
+// dienst probeerde te zetten — of helemaal niet. In productie gaat het om 116
+// dagen: 59 van de 108 verlofdagen, 48 van de 133 ziektedagen, en alle zes de
+// "andere" van Karen, die dit opbracht.
+describe('afwezigheid op een lege cel (#415)', () => {
+  test('toont het woord, niet alleen een pictogram', () => {
+    expect(afwezigheidsCelMarkering('verlof')).toContain('>Verlof<');
+    expect(afwezigheidsCelMarkering('ziek')).toContain('>Ziekte<');
+  });
+
+  test('een onbekend type wordt neutraal "Afwezig"', () => {
+    expect(afwezigheidsCelMarkering('bestaat_niet')).toContain('>Afwezig<');
+  });
+
+  test('er komt nooit een ruw type in beeld', () => {
+    // Het label komt uit ABSENCE_LABELS; een type dat daar niet in staat valt
+    // terug op "Afwezig". Zo kan er nooit een databasewaarde of iets ergers
+    // in het scherm belanden.
+    expect(afwezigheidsCelMarkering('<script>alert(1)</script>')).toContain('>Afwezig<');
+    expect(afwezigheidsCelMarkering('<script>alert(1)</script>')).not.toContain('<script>');
+  });
+
+  describe('wat de planner rendert', () => {
+    const BRON = fs.readFileSync(frontend('app-planner.js'), 'utf8');
+
+    test('beide weergaven gebruiken hem', () => {
+      // De team-tak en de tak voor medewerkers zonder team.
+      const treffers = BRON.match(/html \+= afwezigheidsCelMarkering\(/g) || [];
+      expect(treffers).toHaveLength(2);
+    });
+
+    test('niet meer alleen voor het type `vrij`', () => {
+      // #173 toonde dit alleen bij `vrij`, net het type dat in #402 verouderd
+      // is verklaard. De vier types die wél gebruikt worden kregen niets.
+      expect(BRON).not.toMatch(/cellAvail2?\?\.type === 'vrij'/);
+    });
+
+    test('vraagt de gedeelde vlag, geen eigen lijstje', () => {
+      const treffers = BRON.match(/celAfwezig2? = !!\(cellAvail2? && cellAvail2?\.type/g) || [];
+      expect(treffers).toHaveLength(2);
+      expect(BRON).toMatch(/teltAlsAfwezigheid\(cellAvail\.type\)/);
+    });
+
+    test('het redenveld gaat er NIET in', () => {
+      // Bij ziekte is dat gezondheidsinformatie (#152), en GET /availability
+      // maakt `reason` juist daarom leeg voor wie geen beheerder is. De oude
+      // tooltip zette hem er wel in.
+      expect(BRON).not.toMatch(/cellAvail2?\.reason/);
+    });
+  });
+
+  describe('de opmaak', () => {
+    const CSS2 = fs.readFileSync(frontend('styles.css'), 'utf8');
+
+    test('vangt geen klikken, zodat de cel zich gedraagt zoals hij deed', () => {
+      // Een overlay die de klik opslokt zonder zelf iets te doen was de fout
+      // bij `.vrij-indicator` (#400).
+      const regel = CSS2.match(/\.afwezig-cel \{[\s\S]*?\n\}/);
+      expect(regel).not.toBeNull();
+      expect(regel[0]).toContain('pointer-events: none');
+    });
+
+    test('gebruikt de alert-tokens en geen hexwaarde', () => {
+      const regel = CSS2.match(/\.afwezig-cel \{[\s\S]*?\n\}/)[0]
+        + CSS2.match(/\.afwezig-cel-woord \{[\s\S]*?\n\}/)[0];
+      expect(regel).toContain('var(--alert-error-bg)');
+      expect(regel).toContain('var(--alert-error-text)');
+      expect(regel).not.toMatch(/#[0-9a-f]{3,6}\b/i);
+    });
+
+    test('de oude `.vrij-indicator` is weg', () => {
+      expect(CSS2).not.toMatch(/^\.vrij-indicator \{/m);
+    });
   });
 });

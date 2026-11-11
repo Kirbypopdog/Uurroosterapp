@@ -552,6 +552,31 @@ waar nog een trigger aan hangt laat zich niet droppen.
   **Les voor de volgende keer**: beoordeel dit soort blokken op WARE grootte.
   Alle drie de afgekeurde ontwerpen zagen er uitvergroot prima uit.
 
+  **Een afwezigheid op een dag ZONDER dienst** (#415): het lint hangt aan een
+  dienstblok, dus wie die dag niets ingepland had was in de planning niet te
+  zien als afwezig. Je merkte het pas als je er een dienst probeerde te zetten
+  — of helemaal niet. Karen bracht het op.
+
+  Geen randgeval: in productie staan **116 afwezigheidsdagen** op een dag
+  zonder dienst — 59 van de 108 verlofdagen, 48 van de 133 ziektedagen, en alle
+  zes de "andere" van Karen. Er stónd al zoiets (#173), maar alleen voor het
+  type `vrij`, net het type dat in #402 verouderd is verklaard.
+
+  `afwezigheidsCelMarkering()` zet het WOORD in de cel. Dat kan hier, want een
+  lege cel is 143,7px breed waar een dienstblok van acht uur er 67 krijgt — het
+  lint in de hoek was een antwoord op krapte die op deze plek niet bestaat.
+
+  Drie dingen die erbij horen:
+  - **Het redenveld gaat er NIET in.** De oude tooltip zette hem er wel in. Bij
+    ziekte is dat gezondheidsinformatie (#152), en `GET /availability` maakt
+    `reason` juist daarom leeg voor wie geen beheerder is.
+  - **`pointer-events: none`**, dus de cel blijft zich gedragen zoals hij deed.
+    Een overlay die de klik opslokt zonder zelf iets te doen was de fout bij
+    `.vrij-indicator` (#400). Daarom staat er ook geen tooltip op: die vraagt
+    hover, en het woord staat er al.
+  - Welke types meetellen komt van `teltAlsAfwezigheid()`, niet uit een eigen
+    lijstje.
+
   In de CSS staan nog twee stukken DODE stijl uit een oudere planner:
   `.absent-badge` en de hele `.shift-absent-conflict`-behandeling met rode
   diagonale strepen. Die horen bij `.shift-block`, en de tijdlijn gebruikt

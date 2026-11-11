@@ -134,13 +134,19 @@ describe('de vrij-markering in de planning', () => {
   // `cursor: help` betekent in dit bestand "alleen uitleg, klikken doet niets".
   // De klik viel door naar de cel eronder en opende "nieuwe dienst", dus de
   // aanwijzer beloofde iets anders dan er gebeurde.
-  test('de markering heeft geen eigen cursor meer', () => {
-    const blok = CSS.match(/\.vrij-indicator \{[\s\S]*?\}/);
+  //
+  // #415 heeft `.vrij-indicator` vervangen door `.afwezig-cel`, die voor ELK
+  // afwezigheidstype verschijnt en niet alleen voor `vrij`. Die lost het
+  // cursorprobleem definitiever op: hij vangt helemaal geen klikken meer, dus
+  // de cel gedraagt zich precies zoals een lege cel.
+  test('de markering vangt geen klikken en heeft geen eigen cursor', () => {
+    const blok = CSS.match(/\.afwezig-cel \{[\s\S]*?\n\}/);
     expect(blok).not.toBeNull();
     // Eerst het commentaar eruit: de toelichting bij deze wijziging NOEMT
     // `cursor: help`, en zonder die stap leest de test zijn eigen uitleg.
     const zonderUitleg = blok[0].replace(/\/\*[\s\S]*?\*\//g, '');
     expect(zonderUitleg).not.toMatch(/cursor:\s*help/);
+    expect(zonderUitleg).toMatch(/pointer-events:\s*none/);
   });
 
   // Ter vergelijking: die overlay is wél van de klik uitgezonderd, en mag
