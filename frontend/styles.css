@@ -5280,45 +5280,168 @@ body[data-view-mode="day"] .timeline-day-cell {
     min-width: 20px;
 }
 
-/* Activiteitenbalkje in een dienstblok (#406).
-   Vervangt de tekstchips van #163. De reden staat bij activiteitenBalkjes()
-   in app-planner.js; kort: het type zegt in de praktijk niets (96% is een
-   vergadering) en de chips kapten bij drie activiteiten hun eigen labels af.
+/* Activiteiten in een dienstblok: een wit pilletje met een pictogram en de
+   uren (#416). Vervangt het balkje van #406 en de tekstchips van #163; de
+   reden staat bij activiteitenPilletjes() in app-planner.js.
 
-   Het balkje heeft een EIGEN ondergrond in de oppervlaktekleur. Zonder die
-   ondergrond ligt de teamkleur eronder, en die verschilt per team — dezelfde
-   val als bij de chips hierboven en bij het watermerk in #401. De gekleurde
-   kern zit als binnenvlak in dat bedje. */
-.timeline-block .activity-band {
-    position: absolute;
-    bottom: 1px;
-    height: 4px;
-    z-index: 3;
-    cursor: pointer;
-    border-radius: 2px;
-    background: var(--act-donker);
-    /* De lichte ring is het "bedje": hij scheidt de kleur van de teamkleur
-       eronder, zodat het contrast van het balkje vastligt. */
-    box-shadow: 0 0 0 1px var(--surface-color);
+   Het pilletje heeft een EIGEN ondergrond. Zonder die ondergrond ligt de
+   teamkleur eronder, en die verschilt per team — de val van de chips in #163,
+   het watermerk in #401 en de streep in #406. Wit met bijna-zwarte tekst leest
+   op elk team hetzelfde.
+
+   Die twee kleuren komen bewust NIET uit het thema. Het dienstblok houdt in de
+   donkere modus zijn teamkleur (applyTeamColors() kent geen thema), dus een
+   pilletje dat mee zou omslaan stond daar donker op een helder blok. De tokens
+   hieronder worden daarom nergens voor body.dark-mode overschreven. */
+:root {
+    --pil-bg: #fffdf9;
+    --pil-tekst: #2b2a26;
 }
 
-/* In de dagweergave is het balkje breed genoeg voor tekst; dan is het geen
-   streepje meer maar een bandje met het uur en de omschrijving erin. Daar komt
-   de LICHTE achtergrond van het type terug, met de tekstkleur die bij #163 op
-   contrast is nagemeten. */
-.timeline-block .activity-band--tekst {
-    height: 14px;
-    border-radius: 3px 3px 0 0;
-    padding: 0 5px;
-    background: var(--act-licht);
-    color: var(--act-tekst);
+/* De maten hier (10 voor het pictogram, 3 ertussen, 4 + 5 vulling, 2 lucht aan
+   elke kant) staan ook als PIL_* in app-planner.js, waar ermee gerekend wordt
+   of een vorm past. Verander ze samen. */
+.timeline-block .activity-pil {
+    position: absolute;
+    /* Gecentreerd met marges en niet met left:50% + transform: een absoluut
+       element met alleen `left` krijgt als beschikbare breedte wat er RECHTS
+       van die left overblijft, dus de helft van het blok. Het pilletje klapte
+       daardoor zijn eigen tekst weg terwijl er ruimte genoeg was. */
+    left: 0;
+    right: 0;
+    /* Vlak onder de tijd, niet tegen de onderrand: 9px onder het midden is
+       3,5px onder een tijdregel van 11px. Het blok is 56px hoog als de naamcel
+       één urenregel heeft en 73px met twee; tegen de onderrand geplakt hing het
+       pilletje in dat hoge blok 12px los van de tijd waar het bij hoort. De
+       min() houdt het binnen een laag blok (mobiel). */
+    top: min(calc(50% + 9px), calc(100% - 17px));
+    margin: 0 auto;
+    width: fit-content;
+    max-width: calc(100% - 4px);
+    box-sizing: border-box;
+    height: 15px;
+    padding: 0 5px 0 4px;
+    border: 0;
+    border-radius: 8px;
+    z-index: 3;
+    cursor: pointer;
+    background: var(--pil-bg);
+    color: var(--pil-tekst);
+    box-shadow: 0 1px 2px rgba(43, 42, 38, 0.2);
+    transition: box-shadow 0.12s;
     font-size: 9px;
-    font-weight: 700;
-    line-height: 14px;
-    text-align: center;
+    font-weight: 600;
+    line-height: 15px;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    /* Het vangnet. pasPilletjesAan() kiest de vorm die past, maar tussen een
+       vensterwijziging en de herberekening, of als die stap ooit faalt, mag er
+       niets half staan. Wat niet naast het pictogram past zakt naar een tweede
+       regel en valt daar buiten de hoogte: het verdwijnt als geheel. Een
+       afgesneden tijd leest als een ANDERE tijd (#208). */
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-content: flex-start;
+    align-items: center;
+    column-gap: 3px;
+    overflow: hidden;
+}
+
+.timeline-block .activity-pil:hover {
+    box-shadow: 0 2px 5px rgba(43, 42, 38, 0.28);
+}
+
+.activity-pil-icoon {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    margin: 2.5px 0;
+    fill: none;
+    /* De kleur van de SOORT, uit dezelfde bron als het streepje in het
+       dienstvenster. Op wit halen ze alle zes de eis voor een pictogram (3). */
+    stroke: var(--act-donker);
+    stroke-width: 2.3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.activity-pil-tekst,
+.activity-pil-meer,
+.activity-pil-oms {
+    flex: 0 0 auto;
+    height: 15px;
+}
+
+/* Een lege span mag geen tussenruimte kosten. */
+.activity-pil-tekst:empty,
+.activity-pil-meer:empty,
+.activity-pil-oms:empty {
+    display: none;
+}
+
+.activity-pil-meer {
+    font-weight: 700;
+    color: var(--pil-tekst);
+    opacity: 0.72;
+}
+
+/* Alleen het pictogram: een rondje. Dat past in elk blok, ook in het smalste
+   (min-width 20px, waarvan 3 de linkerrand). */
+.timeline-block .activity-pil--kaal {
+    width: 15px;
+    max-width: 100%;
+    padding: 0;
+}
+
+/* Op een telefoon is het blok maar 35px hoog (de naamcel heeft daar geen
+   urenregels), dus onder de tijd is geen plaats: het pilletje viel er over de
+   tijd heen. Daar staan ze NAAST elkaar. Het blok is er breed genoeg voor,
+   want de telefoon toont één dag. Past het toch niet, dan krimpt het pilletje
+   en niet de tijd; pasPilletjesAan() trekt de breedte van de tijd af. */
+@media (max-width: 768px) {
+    .timeline-block:has(> .activity-pil--week) {
+        flex-direction: row;
+        gap: 4px;
+    }
+    .timeline-block:has(> .activity-pil--week) > .block-time {
+        flex: 0 0 auto;
+    }
+    .timeline-block > .activity-pil--week {
+        position: static;
+        margin: 0;
+        flex: 0 1 auto;
+        min-width: 15px;
+    }
+}
+
+/* Dagweergave: het pilletje staat op de echte uren van de activiteit. `left`
+   en `width` komen uit de inline stijl; de breedte is daar al 4px smaller
+   gemaakt, zodat er aan elke kant 2px lucht blijft en twee activiteiten die op
+   elkaar aansluiten niet tot één vlak versmelten. */
+.timeline-block .activity-pil--uren {
+    right: auto;
+    max-width: none;
+    margin: 0 2px;
+    padding: 0 6px 0 5px;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    column-gap: 4px;
+}
+
+.timeline-block .activity-pil--uren.activity-pil--kaal {
+    padding: 0;
+    justify-content: center;
+}
+
+/* De omschrijving is tekst, geen tijd: die mag met een beletselteken afkappen.
+   De tijd ervoor niet, en staat daarom vooraan (#406). */
+.activity-pil-oms {
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-weight: 500;
 }
 
 .timeline-block:hover {
@@ -5494,9 +5617,8 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* Short shift blocks — hide time text at <45min (#147).
-   Het activiteitenbalkje blijft wél staan, ook op een smal blok: het kost
-   geen hoogte en vecht dus met niets om ruimte, anders dan de chips van
-   vroeger die hier verborgen moesten worden (#406). */
+   Het activiteitenpilletje blijft wél staan, als rondje met alleen het
+   pictogram (#416). */
 .timeline-block--xs .block-time {
     display: none;
 }
@@ -5719,10 +5841,10 @@ body[data-view-mode="day"] .timeline-day-cell {
    teamkleuren, en blijven daarom hexwaarden en geen alert-tokens (#180).
 
    #406: elk type draagt nu drie waarden in plaats van drie losse declaraties.
-   --act-licht  het vlak waar tekst op staat (het bandje in de dagweergave,
-                het streepje in het dienstvenster)
-   --act-donker de verzadigde kleur voor het dunne balkje in de weekweergave;
-                een lichte tint van 4 pixels hoog is daar niet te zien
+   --act-licht  het vlak waar tekst op staat (het streepje in het
+                dienstvenster)
+   --act-donker de verzadigde kleur: de rand in het dienstvenster en, sinds
+                #416, het pictogram in het pilletje van het dienstblok
    --act-tekst  de tekstkleur die bij --act-licht is nagemeten
    Eén bron per type: de declaraties eronder lezen deze drie. */
 .activity-type-oudergesprek { --act-licht: #fbbf24; --act-donker: #d97706; --act-tekst: #78350f; } /* 5,43 */

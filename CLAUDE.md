@@ -34,7 +34,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 
 | Bestand | Doel |
 |---------|------|
-| `app-globals.js` | AppState, constanten, UndoManager, DOM object, IconHelper |
+| `app-globals.js` | AppState, constanten, UndoManager, DOM object, IconHelper, labels en pictogrammen van de activiteitstypes |
 | `app-permissions.js` | Rol-checks en permissiefuncties |
 | `app-ui.js` | Toast, modals, FocusTrap, tooltips, overlays |
 | `app-auth.js` | Login, logout, sessiecheck, rolevisibility |
@@ -104,7 +104,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `afwezigheid-zichtbaar.test.js` | Dat het type afwezigheid in het dienstblok staat en niet alleen in de tooltip (#401) |
 | `beschikbaar-weg.test.js` | Dat een dag zonder dienst "Vrij" heet in plaats van groen "Beschikbaar", en dat 'vrij' verouderd is maar herkend blijft (#402) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
-| `activiteiten-balkje.test.js` | Dat een activiteit als balkje op zijn echte uren staat, en dat het tijdlabel van een dienstblok niet afgekapt wordt (#404, #406) |
+| `activiteiten-pilletje.test.js` | Dat een activiteit als wit pilletje met pictogram en uren in het dienstblok staat, welke vorm er past, en dat het tijdlabel van een dienstblok niet afgekapt wordt (#404, #416) |
 | `activiteit-deelnemers.test.js` | Wie er in de deelnemerslijst van een activiteit komt, en wie er een activiteit voor anderen mag aanmaken (#408) |
 | `agenda-sequence.test.js` | Dat een gewijzigde dienst een hogere `SEQUENCE` krijgt in de agendafeed, en dat de migratie de trigger pas ná de backfill zet (#409) |
 | `vergadering-dubbel.test.js` | Dat een concept toepassen geen tweede Teamvergadering naast de bestaande zet (#407) |
@@ -501,7 +501,7 @@ waar nog een trigger aan hangt laat zich niet droppen.
 - **Meldingen** (#119): één component in `styles.css`, met vier soorten plus een neutrale. `.alert` is de canonieke naam (flex, dus met pictogram naast de tekst); `.info-box`, `.warning-banner`, `.validation-warning`, `.builder-11h-warnings` en `.leave-banner` delen dezelfde declaraties in plaats van ze te herhalen. Kleuren komen uit de `--alert-{error,warning,info,ok}-{bg,border,text}` tokens, die per thema omslaan, dus een nieuwe melding werkt automatisch in donkere modus. Voeg nooit een eigen achtergrond of rand toe aan een melding: gebruik `class="alert alert-warning"` en laat de tokens hun werk doen
 - **Kleuren** (#180): gebruik de tokens, nooit een hexwaarde. De warme palette staat bovenaan `styles.css`; voor alles wat een betekenis draagt zijn dat de `--alert-*`-tokens (zie Meldingen hierboven). Een hardgecodeerde kleur werkt per definitie maar in één thema, en dat is hoe de oude Tailwind-waarden hier binnenkwamen. Teamkleuren zijn de uitzondering: die horen bij een team en hebben hun eigen `--team-*`-tokens
 - **Zijbalk** (#162): de zijbalk is in BEIDE thema's donker, want hij is een eigen vlak en geen stuk pagina. Alles wat erin staat gebruikt daarom de `--sidebar-*`-tokens (`-bg`, `-text`, `-text-active`, `-label`, `-active-bg`, `-hover-bg`, `-line`) en nooit de tekstkleuren van de pagina zoals `--text-primary`. Een `body.dark-mode`-uitzondering op iets in de zijbalk is bijna altijd fout: die zou de zijbalk juist terug naar de paginakleuren trekken. De dekkingen zijn gemeten op contrast, niet gekozen op smaak: navigatietekst `.72` haalt 8,1 en het groepslabel `.55` haalt 5,4
-- **Dienstblok in de tijdlijn** (#163): het blok is smal, en dat bepaalt wat erin past. Nagemeten op 1440 pixels in weekweergave houdt een dienst van acht uur 59 pixels over: de tijd past daar op 9px en niet op 10. Grotere tekst knipt de tijd af, en een afgeknipte tijd leest als een ANDERE tijd. Verhoog die maten dus niet zonder opnieuw te meten. Activiteiten staan als chips met de volle afkorting op 9px (`ACTIVITY_TYPE_LABELS_SHORT`, `activiteitenChips()` in `app-planner.js`). Die ruimte komt uit de opmaak eromheen en niet uit de tekst: padding 2 in plaats van 3, linkerrand 1 in plaats van 2, tussenruimte 1 in plaats van 2. Twee chips passen daarmee in de 67 pixels van een dienst van acht uur, en ook in de smalste blok dat chips toont (zes uur). Kortere codes op een grotere letter zijn geprobeerd en afgewezen, want "Overl" lees je meteen en "OL" is een code die je eerst moet leren. De achtergronden van `.activity-type-*` zijn ondoorzichtig, want daaronder ligt de teamkleur en die verschilt per team; met doorzichtige chips hing het leescontrast dus af van wie er in welk team zit. Het verloop van het blok loopt van 78 naar 88 procent teamkleur en niet tot 100: bij de volle kleur zakte de tekst op drie van de vijf teams onder de contrasteis
+- **Dienstblok in de tijdlijn** (#163): het blok is smal, en dat bepaalt wat erin past. Nagemeten op 1440 pixels in weekweergave houdt een dienst van acht uur 59 pixels over: de tijd past daar op 9px en niet op 10. Grotere tekst knipt de tijd af, en een afgeknipte tijd leest als een ANDERE tijd. Verhoog die maten dus niet zonder opnieuw te meten. Activiteiten stonden hier als tekstchips; dat is via een balkje (#406) een pilletje geworden (#416, zie verderop). Wat ervan overblijft is de les: de achtergronden van `.activity-type-*` zijn ondoorzichtig, want onder een dienstblok ligt de teamkleur en die verschilt per team; met iets doorzichtigs hangt het leescontrast af van wie er in welk team zit. Het verloop van het blok loopt van 78 naar 88 procent teamkleur en niet tot 100: bij de volle kleur zakte de tekst op drie van de vijf teams onder de contrasteis
 - **Afwezigheid zichtbaar in de planning** (#401): een dienst van iemand die
   afwezig is kreeg alleen een rode GLOED om het blok, en het type stond
   uitsluitend in de tooltip. Je moest er dus met de muis op gaan staan om te
@@ -612,43 +612,79 @@ waar nog een trigger aan hangt laat zich niet droppen.
 
 - **Opstartscherm** (#389): `index.html` zet de klasse `session-restoring` op `<html>` zodra er een token in `sessionStorage` staat. Die verbergt het loginscherm (anders flitst dat voorbij bij wie al ingelogd is) en `#app-container` staat dan nog op `hidden`. In dat gat toont `#opstartscherm` het KADER van de app: dezelfde zijbalk op dezelfde plek, met vlakken waar de inhoud komt. Puur markup en CSS, dus het staat er al bij de eerste paint. **De klasse moet op élk pad weggehaald worden**: in `showApp()` (geslaagd), in de twee foutafhandelingen van `checkSession()` en in `showLogin()`. Vergeet je er één, dan blijft het opstartscherm over de app heen staan
 - **Stat-kaarten op home** (#166): twee reeksen, elk met een eigen doelgroep. `renderHomeEigenUren()` toont JOUW uren deze week en deze periode tegen je contract, plus wat op jou wacht; alleen voor wie meedraait in het rooster, want een adminaccount heeft geen diensten. `renderHomeStats()` toont de BEHEERcijfers en is er alleen voor admin en roosterverantwoordelijke. Zonder contracturen verschijnt er geen balk en geen "van": `32/0u` zou onzin zijn. De kleurregel is dezelfde als bij de uren in de planning: rood boven de norm, oranje eronder
-- **Activiteiten in het dienstblok** (#406): een balkje onderaan, op de uren
-  waarop de activiteit werkelijk valt. Het waren tekstchips met het TYPE erin,
-  en dat was het verkeerde veld: van de activiteiten in productie is 96% een
-  vergadering en heet 869× `Teamvergadering`, terwijl de omschrijving — in
-  99,9% van de rijen ingevuld — alleen in de tooltip stond. De chip toonde dus
-  bij bijna elke dienst hetzelfde woord.
+- **Activiteiten in het dienstblok** (#416): een wit pilletje vlak onder de
+  diensttijd, met het pictogram van de soort en de uren als GETAL: `👥 13–16u`.
+  Dit is de vierde vorm; `activiteitenPilletjes()` in `app-planner.js` vertelt
+  de hele geschiedenis. Kort:
 
-  Wat het balkje toevoegt is het enige dat ergens doorwerkt: WANNEER. Alle zes
-  de types verlagen de netto bezetting voor hun volle duur (#145), en het
-  balkje ligt nu recht onder de dip in de bezettingsbalk.
+  | | wat | waarom het niet bleef |
+  |---|---|---|
+  | #163 | tekstchips met het type | 96% is een vergadering, dus overal hetzelfde woord; drie chips sneden hun eigen tekst door (#405) |
+  | #406 | balkje van 4px op de echte uren | de weekweergave heeft geen urenschaal: een streepje op twee derde van 67px is geen tijdstip |
+  | #416 | pilletje met pictogram en uren | — |
 
-  Drie dingen zijn gemeten en niet gekozen:
+  **Weekweergave**: één pilletje per dienst. Het staat niet op de uren van de
+  activiteit, het ZEGT ze. Meer dan één activiteit: de eerste, met `+1` — dat
+  komt weinig voor (9 van de 414 diensten met een activiteit in zestig dagen).
+  Zo'n pilletje draagt geen `data-activity-id`, dus de klik opent het
+  dienstvenster waar ze allemaal in staan.
 
-  1. **Het balkje heeft een eigen lichte ring** (`box-shadow: 0 0 0 1px
-     var(--surface-color)`). Een gekleurde streep los op het blok hangt voor
-     zijn contrast af van de teamkleur eronder, en die verschilt per team —
-     dezelfde val als bij de chips in #163 en het watermerk in #401. Op cargo
-     verdween een neutrale streep bijna.
-  2. **De omschrijving staat alleen in de DAGweergave in het balkje.** Nagemeten
-     op een venster van 1440px: in de weekweergave is een dagcel 143,7px, een
-     uur dus 8,45px en een vergadering van drie uur 25px — daar past alleen
-     `Te…` in. In de dagweergave is diezelfde cel 1008px en dat balkje 178px.
-     De drempel van 2,5 uur komt daarvandaan; ook in de dagweergave krijgt een
-     overleg van één uur (59px) geen tekst.
-  3. **De tijd staat vóór de omschrijving.** Kapt het op een smaller venster
-     toch af, dan verdwijnt de omschrijving en blijft het uur heel. Andersom
-     lees je een half uur, en dat is de fout uit #208.
+  **Dagweergave**: één pilletje per activiteit, uitgerekt over de echte uren,
+  met de omschrijving erin. Daar is een uur 59px en ligt de bezettingsbalk er
+  recht boven, dus daar betekent de plaats wél iets.
 
-  Een nachtdienst die over TWEE dagcellen loopt krijgt géén balkje: de breedte
-  van zo'n blok is `calc(dag1% + 4px + dag2%)`, dus een percentage binnen het
-  blok is geen tijdstip. Liever niets dan verkeerd; de activiteit blijft in de
-  tooltip en in het dienstvenster staan.
+  **De vorm wordt GEMETEN, niet berekend uit een vaste maat.** Het pilletje
+  heeft 13px vulling en lucht rond zijn tekst nodig en zit dus dichter op de
+  rand dan het tijdlabel. `pasPilletjesAan()` leest na het tekenen de echte
+  breedte van elk blok en kiest de langste vorm die past:
 
-  Elk type draagt in `styles.css` drie waarden in plaats van drie losse
-  declaraties: `--act-licht` (het vlak waar tekst op staat), `--act-donker` (het
-  dunne balkje in de weekweergave — een lichte tint van 4px is daar niet te
-  zien) en `--act-tekst` (de bij #163 nagemeten tekstkleur). Eén bron per type.
+      👥 13–16u +1   →   👥 13–16u   →   👥 13u   →   👥
+
+  Rekenen met de maat van een scherm van 1440px klopt alleen dáár: in de proef
+  viel op een smaller venster bij 15 van de 28 testblokken het uur weg terwijl
+  het beginuur nog paste. Die functie draait ook bij een vensterwijziging, als
+  het weblettertype binnenkomt, en in `updateTimelineMobileDayAttribute()` —
+  het raster tekent alle zeven dagen en verbergt er zes, en een pilletje in een
+  verborgen kolom heeft geen breedte. Zonder dat laatste bleef na een tik op de
+  dagpijl elk pilletje een rondje.
+
+  Vijf dingen die je niet moet terugdraaien zonder opnieuw te meten:
+
+  1. **Het echte blok is 56 of 73px hoog**, niet de 36px waarop alle eerdere
+     proeven getekend waren. De rij krijgt zijn hoogte van de naamcel. Daarom
+     paste er niets en leek alles "clunky". Meet het blok in de echte app.
+  2. **Het pilletje staat 9px onder het midden**, niet tegen de onderrand: zo
+     hoort het bij de tijd, in een blok van 56 én van 73.
+  3. **Centreren met `left:0; right:0; margin:auto`**, niet met `left:50%`. Een
+     absoluut element met alleen `left` krijgt als beschikbare breedte wat er
+     rechts van overblijft — de helft van het blok — en klapte zijn eigen
+     tekst weg.
+  4. **`flex-wrap` is het vangnet.** Wat niet naast het pictogram past zakt
+     naar een tweede regel buiten de hoogte en verdwijnt als geheel. Nooit een
+     half getal (#208).
+  5. **Wit en bijna-zwart, in beide thema's** (`--pil-bg`, `--pil-tekst`). Het
+     dienstblok houdt in de donkere modus zijn teamkleur, dus een pilletje dat
+     omsloeg stond daar donker op een helder blok.
+
+  Op een **telefoon** is het blok 35px hoog; daar staat het pilletje NAAST de
+  tijd (`:has()` in een media query) en trekt `pasPilletjesAan()` de breedte
+  van de tijd af.
+
+  De **pictogrammen** staan inline in `ACTIVITY_TYPE_ICONS` (`app-globals.js`)
+  en niet als `data-lucide`: het pilletje bestaat in zijn smalste vorm úit het
+  pictogram, dus een weggevallen CDN (#396) gaf een leeg wit rondje. De kleur
+  van het pictogram is `--act-donker` van het type.
+
+  De maten staan TWEE keer: als `PIL_*` in `app-planner.js` (om te rekenen) en
+  in `styles.css` (om te tekenen). De test bewaakt dat ze gelijk blijven.
+
+  Een activiteit **buiten de diensturen** krijgt geen pilletje en telt niet mee
+  in `+1`. Een **nachtdienst over twee dagcellen** krijgt nu wél zijn
+  activiteit; het balkje kon dat niet omdat een percentage binnen dat blok geen
+  tijdstip is.
+
+  Elk type draagt in `styles.css` nog steeds drie waarden: `--act-licht`,
+  `--act-donker` en `--act-tekst`. Eén bron per type.
 
 - **Het tijdlabel van een dienstblok** (#404): het volle bereik verschijnt pas
   vanaf **7,5 uur** breedte, niet vanaf 6. `09:00-15:00` is 62,9px en een blok

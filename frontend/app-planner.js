@@ -258,98 +258,302 @@ function tijdLabelVoorBlok(startTime, endTime, zichtbaarUren) {
 }
 
 /**
- * Activiteiten in een dienstblok: een balkje op de uren waarop de activiteit
- * werkelijk valt (#406).
+ * Activiteiten in een dienstblok: een wit pilletje met een pictogram en de
+ * uren (#416).
  *
- * De geschiedenis hoort erbij, want dit is de derde vorm. #163 verving chips op
- * zeven pixels door een balkje; Victor koos toen voor chips terug, omdat je
- * daarmee ziet WAT er staat en niet alleen wanneer. Dat was juist — maar twee
- * dingen die toen niet bekend waren maken het nu anders:
+ * Dit is de vierde vorm, en de geschiedenis hoort erbij:
  *
- *  1. Het TYPE zegt in de praktijk niets. Van de activiteiten in productie is
- *     96% een vergadering, en 869 daarvan heten allemaal "Teamvergadering".
- *     De chip toonde dus bij bijna elke dienst hetzelfde woord, terwijl de
- *     omschrijving — in 99,9% van de rijen ingevuld — alleen in de tooltip
- *     stond. De chip toonde het veld met de minste inhoud.
- *  2. De chips pasten niet. Bij drie activiteiten kromp elke chip tot 19-21px
- *     en werd de tekst doorgesneden ("Overl" las als "Over"), zonder dat er
- *     ruimte was voor de puntjes van text-overflow (#405).
+ *  - #163  tekstchips met het TYPE. In de praktijk is 96% een vergadering, dus
+ *          de chip toonde bij bijna elke dienst hetzelfde woord, en bij drie
+ *          activiteiten sneed hij zijn eigen tekst door (#405).
+ *  - #406  een balkje van 4px op de echte uren. Dat zei WANNEER, maar de
+ *          weekweergave heeft geen urenschaal om het tegen af te lezen: een
+ *          streepje op twee derde van een blok van 67 pixels is geen tijdstip.
+ *          Victor vond het in gebruik te weinig zeggen.
+ *  - #416  dit. Het uur staat er nu als GETAL (`13–16u`), en de soort als
+ *          pictogram in plaats van als woord of kleurvlak.
  *
- * Wat het balkje wél toevoegt is de enige eigenschap die ergens doorwerkt:
- * WANNEER. Alle zes de types verlagen de netto bezetting voor hun volle duur
- * (#145), en tot nu toe was nergens te zien waar die dip vandaan kwam. Het
- * balkje ligt recht onder de bezettingsbalk.
+ * Wat er in de weg zat bij het ontwerpen: alle proefblokken waren 36 pixels
+ * hoog getekend, terwijl het echte blok 56 hoog is — de rij krijgt zijn hoogte
+ * van de naamcel (avatar, naam, urenregel). Er is dus ruimte voor een tweede
+ * regel onder de tijd. Meet het echte blok voor je hier iets aan verandert.
  *
- * Twee dingen zijn gemeten en niet gekozen:
+ * WEEKWEERGAVE: één pilletje per dienst, gecentreerd onderaan. Het staat niet
+ * op de uren van de activiteit — dat kan daar niets betekenen — maar het ZEGT
+ * de uren. Meer dan één activiteit: de eerste, met `+1`. Dat komt weinig voor
+ * (9 van de 414 diensten met een activiteit in zestig dagen productie).
  *
- * - Het balkje heeft een EIGEN lichte ondergrond. Een gekleurde streep los op
- *   het blok hangt voor zijn contrast af van de teamkleur eronder, en die
- *   verschilt per team — dezelfde val als bij de chips in #163 en het
- *   watermerk in #401. Op cargo verdween een neutrale streep bijna.
- * - De omschrijving staat ALLEEN in de dagweergave in het balkje. Nagemeten op
- *   een venster van 1440px: in de weekweergave is een dagcel 143,7px, dus een
- *   uur 8,45px en een vergadering van drie uur 25px breed. Daar past geen woord
- *   in, alleen "Te…". In de dagweergave is dezelfde cel 1008px, een uur 59px en
- *   diezelfde vergadering 178px — ruim genoeg voor "13:00-16:00 · Teamvergadering".
- *   De drempel van 2,5 uur komt daar vandaan: 2,5 × 59 = 148px, net genoeg.
- *   Ook in de dagweergave krijgt een overleg van een uur (59px) dus geen tekst.
- * - De TIJD staat vooraan en de omschrijving erachter. Wordt het op een smaller
- *   venster toch te krap, dan kapt `text-overflow` de omschrijving af en blijft
- *   het uur heel. Andersom zou je een half uur lezen, en dat is de fout uit #208.
+ * DAGWEERGAVE: één pilletje per activiteit, uitgerekt over de echte uren, met
+ * de omschrijving erin. Daar is een uur 59 pixels en ligt de bezettingsbalk er
+ * recht boven, dus daar betekent de plaats wél iets.
  *
- * Een nachtdienst die over TWEE dagcellen loopt krijgt geen balkje. De breedte
- * van zo'n blok is `calc(dag1% + 4px + dag2%)`, dus een percentage binnen het
- * blok komt niet overeen met een tijdstip; een balkje zou op de verkeerde plek
- * staan. Liever niets dan verkeerd — de activiteit blijft zichtbaar in de
- * tooltip van de dienst en in het dienstvenster. Het gaat in productie om
- * enkele rijen, en die staan bovendien grotendeels buiten hun eigen dienst.
+ * Een nachtdienst over twee dagcellen kreeg met het balkje niets, omdat een
+ * percentage binnen dat blok geen tijdstip is. Het weekpilletje hangt niet van
+ * een plaats af, dus die dienst toont zijn activiteit nu gewoon.
  *
- * @param {Array}  activiteiten  de activiteiten van deze dienst
- * @param {number} blokStartUur  het uur waarop het blok BEGINT zoals het getekend is
- * @param {number} blokUren      hoeveel uren breed het blok getekend is
- * @param {boolean} isDagweergave  in de dagweergave is er plaats voor tekst
- * @param {boolean} gesplitstBlok  true bij een nachtdienst over twee cellen
+ * Welke TEKST er in het pilletje komt beslist deze functie niet: dat hangt af
+ * van hoe breed het blok werkelijk getekend wordt, en dat weet alleen de
+ * browser. Hier gaan de mogelijke vormen als data-attributen mee;
+ * `pasPilletjesAan()` kiest na het tekenen de langste die past. Tot dan staat
+ * er alleen het pictogram — de vorm die altijd past, dus faalt die tweede stap,
+ * dan staat er te weinig maar nooit iets afgesnedens.
+ *
+ * @param {Array}  activiteiten  de activiteiten van deze medewerker op deze dag
+ * @param {object} blok
+ * @param {number} blok.dienstVan     het uur waarop de DIENST begint
+ * @param {number} blok.dienstTot     het uur waarop hij eindigt; bij een
+ *                                    nachtdienst kleiner dan dienstVan
+ * @param {number} blok.blokStartUur  het uur waarop het getekende blok begint
+ * @param {number} blok.blokUren      hoeveel uren breed het blok getekend is
+ * @param {boolean} blok.isDagweergave
  */
-function activiteitenBalkjes(activiteiten, blokStartUur, blokUren, isDagweergave, gesplitstBlok) {
-    if (!activiteiten || !activiteiten.length) return '';
-    if (gesplitstBlok) return '';
-    if (!(blokUren > 0)) return '';
+function activiteitenPilletjes(activiteiten, blok) {
+    if (!activiteiten || !activiteiten.length || !blok) return '';
 
     const naarUur = (t) => {
         const [u, m] = String(t).split(':').map(Number);
         if (!Number.isFinite(u)) return null;
         return u + (Number.isFinite(m) ? m : 0) / 60;
     };
-    const blokEindUur = blokStartUur + blokUren;
 
-    return activiteiten.map(act => {
-        const van = naarUur(act.startTime);
-        const tot = naarUur(act.endTime);
-        if (van === null || tot === null) return '';
-        // Alleen het deel dat binnen het getekende blok valt. Een activiteit die
-        // er helemaal buiten ligt — dat komt voor, de modal waarschuwt maar
-        // staat het toe — krijgt geen balkje in plaats van een balkje aan de rand.
-        const van2 = Math.max(van, blokStartUur);
-        const tot2 = Math.min(tot, blokEindUur);
-        if (!(tot2 > van2)) return '';
+    // Alleen wat binnen de DIENST valt. De activiteitenmodal waarschuwt bij een
+    // activiteit buiten de diensturen maar staat hem toe; zo'n activiteit hoort
+    // niet in het blok, want daar zou hij beweren dat hij in de dienst valt.
+    // Bij een nachtdienst loopt de dienst over middernacht: een uur vóór het
+    // begin van de dienst is dan een uur van de ochtend erna.
+    const nacht = blok.dienstTot <= blok.dienstVan;
+    const dienstEind = nacht ? blok.dienstTot + 24 : blok.dienstTot;
+    const binnenDienst = activiteiten
+        .map(act => {
+            let van = naarUur(act.startTime);
+            let tot = naarUur(act.endTime);
+            if (van === null || tot === null) return null;
+            if (nacht && van < blok.dienstVan) { van += 24; tot += 24; }
+            if (tot <= van) tot += 24;
+            if (!(Math.min(tot, dienstEind) > Math.max(van, blok.dienstVan))) return null;
+            return { act, van, tot };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.van - b.van);
+    if (!binnenDienst.length) return '';
 
-        const links = ((van2 - blokStartUur) / blokUren) * 100;
-        const breed = ((tot2 - van2) / blokUren) * 100;
-
+    const icoon = (type) => {
+        const pad = (typeof ACTIVITY_TYPE_ICONS !== 'undefined' && ACTIVITY_TYPE_ICONS[type]) || '';
+        return pad ? `<svg class="activity-pil-icoon" viewBox="0 0 24 24" aria-hidden="true">${pad}</svg>` : '';
+    };
+    const regel = ({ act }) => {
         const vol = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
-        const t = `${String(act.startTime).substring(0, 5)}-${String(act.endTime).substring(0, 5)}`;
-        const titel = escapeHtml(`${vol} ${t}${act.description ? ' — ' + act.description : ''}`);
+        const wat = act.description || vol;
+        // Het type alleen erbij als de omschrijving het niet al zegt:
+        // "Teamvergadering · Vergadering" is twee keer hetzelfde.
+        const soort = String(wat).toLowerCase().includes(String(vol).toLowerCase()) ? '' : ` · ${vol}`;
+        return `${activiteitUrenVoluit(act)} · ${wat}${soort}`;
+    };
 
-        // Tekst alleen waar hij werkelijk past: zie de drempel hierboven.
-        const tekst = act.description || vol;
-        const metTekst = !!isDagweergave && (tot2 - van2) >= 2.5;
-        const klasse = `activity-band activity-type-${escapeHtml(act.type)}${metTekst ? ' activity-band--tekst' : ''}`;
+    if (!blok.isDagweergave) {
+        const eerste = binnenDienst[0].act;
+        const meer = binnenDienst.length - 1;
+        // Eén activiteit: de klik opent die activiteit. Meer dan één: geen id,
+        // dus de klik valt door naar het blok en opent het dienstvenster, waar
+        // ze allemaal in staan.
+        const idAttr = meer ? '' : ` data-activity-id="${eerste.id}"`;
+        return `<span class="activity-pil activity-pil--week activity-pil--kaal activity-type-${escapeHtml(eerste.type)}"${idAttr}`
+             + ` data-bereik="${escapeHtml(activiteitUrenKort(eerste))}" data-start="${escapeHtml(activiteitStartKort(eerste))}"`
+             + ` data-meer="${meer ? '+' + meer : ''}"`
+             + ` data-tooltip="${escapeHtml(binnenDienst.map(regel).join('\n'))}">`
+             + icoon(eerste.type)
+             + `<span class="activity-pil-tekst"></span><span class="activity-pil-meer"></span></span>`;
+    }
 
-        return `<span class="${klasse}" style="left:${links.toFixed(2)}%;width:${breed.toFixed(2)}%"`
-             + ` data-activity-id="${act.id}" data-tooltip="${titel}">`
-             + (metTekst ? `${escapeHtml(t)} · ${escapeHtml(tekst)}` : '')
-             + `</span>`;
+    if (!(blok.blokUren > 0)) return '';
+    const blokEind = blok.blokStartUur + blok.blokUren;
+    return binnenDienst.map(({ act, van, tot }) => {
+        // Alleen het deel dat binnen het GETEKENDE blok valt: in de dagweergave
+        // stopt een nachtdienst bij middernacht.
+        const van2 = Math.max(van, blok.blokStartUur);
+        const tot2 = Math.min(tot, blokEind);
+        if (!(tot2 > van2)) return '';
+        const links = ((van2 - blok.blokStartUur) / blok.blokUren) * 100;
+        const breed = ((tot2 - van2) / blok.blokUren) * 100;
+        const vol = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
+        return `<span class="activity-pil activity-pil--uren activity-pil--kaal activity-type-${escapeHtml(act.type)}"`
+             + ` style="left:${links.toFixed(2)}%;width:calc(${breed.toFixed(2)}% - ${PIL_LUCHT}px)"`
+             + ` data-activity-id="${act.id}"`
+             + ` data-bereik="${escapeHtml(activiteitUrenKort(act))}" data-lang="${escapeHtml(activiteitUrenVoluit(act))}"`
+             + ` data-oms="${escapeHtml(act.description || vol)}"`
+             + ` data-tooltip="${escapeHtml(regel({ act }))}">`
+             + icoon(act.type)
+             + `<span class="activity-pil-tekst"></span><span class="activity-pil-oms"></span></span>`;
     }).join('');
+}
+
+// "13:00" → "13", "09:30" → "9:30". Zonder voorloopnul: het pilletje is smal.
+function _uurKort(t) {
+    const [u, m] = String(t).split(':').map(Number);
+    if (!Number.isFinite(u)) return '';
+    return m ? `${u}:${String(m).padStart(2, '0')}` : String(u);
+}
+// Valt de activiteit op hele uren, dan `13–16u`. Anders `9:30–16:30`, en dan
+// aan BEIDE kanten met minuten: `10–11:30` leest als tien tot elf.
+function activiteitUrenKort(act) {
+    const van = String(act.startTime).substring(0, 5);
+    const tot = String(act.endTime).substring(0, 5);
+    const heel = van.endsWith(':00') && tot.endsWith(':00');
+    if (heel) return `${_uurKort(van)}–${_uurKort(tot)}u`;
+    const metMin = (t) => { const [u, m] = t.split(':'); return `${Number(u)}:${m}`; };
+    return `${metMin(van)}–${metMin(tot)}`;
+}
+function activiteitStartKort(act) {
+    const van = String(act.startTime).substring(0, 5);
+    return van.endsWith(':00') ? `${_uurKort(van)}u` : _uurKort(van);
+}
+function activiteitUrenVoluit(act) {
+    return `${String(act.startTime).substring(0, 5)}–${String(act.endTime).substring(0, 5)}`;
+}
+
+// De maten van het pilletje. Ze staan ook in styles.css bij `.activity-pil`;
+// wie de ene verandert moet de andere meenemen, want hierop wordt gerekend of
+// een vorm past.
+const PIL_ICOON = 10;     // breedte van het pictogram
+const PIL_TUSSEN = 3;     // ruimte tussen pictogram en tekst, en tussen tekst en "+1"
+const PIL_VULLING = 9;    // 4 links en 5 rechts binnen het pilletje
+const PIL_LUCHT = 4;      // 2 links en 2 rechts tussen pilletje en rand van het blok
+
+/**
+ * Kiest de langste vorm van het weekpilletje die in `beschikbaarPx` past.
+ *
+ *     👥 13–16u +1   →   👥 13–16u   →   👥 13u   →   👥
+ *
+ * Er wordt nooit een getal doormidden gesneden: past een vorm niet, dan valt
+ * hij als geheel weg. Een afgekapte tijd leest als een ANDERE tijd (#208).
+ *
+ * Bij meer dan één activiteit gaat `+1` vóór het uur: liever weten dát er nog
+ * een is dan het uur van de eerste zien en de tweede missen.
+ *
+ * @param {{bereik:string, start:string, meer:string}} vormen
+ * @param {number} beschikbaarPx  de binnenbreedte van het blok
+ * @param {(tekst:string)=>number} meet  hoe breed een tekst getekend wordt
+ * @returns {{tekst:string, meer:string}}
+ */
+function kiesPilVorm(vormen, beschikbaarPx, meet) {
+    const nodig = (...delen) => PIL_ICOON
+        + delen.filter(Boolean).reduce((som, deel) => som + PIL_TUSSEN + meet(deel), 0)
+        + PIL_VULLING + PIL_LUCHT;
+    const past = (...delen) => nodig(...delen) <= beschikbaarPx;
+    const { bereik, start, meer } = vormen;
+    if (meer) {
+        if (past(bereik, meer)) return { tekst: bereik, meer };
+        if (past(meer)) return { tekst: '', meer };
+        return { tekst: '', meer: '' };
+    }
+    if (bereik && past(bereik)) return { tekst: bereik, meer: '' };
+    if (start && past(start)) return { tekst: start, meer: '' };
+    return { tekst: '', meer: '' };
+}
+
+/**
+ * Hetzelfde voor het pilletje in de dagweergave, dat zijn eigen breedte heeft:
+ *
+ *     👥 13:00–16:00 Teamvergadering   →   👥 13–16u   →   👥
+ *
+ * De omschrijving mag met een beletselteken afkappen — dat is tekst, geen
+ * tijd — maar er moet wel plaats zijn voor een paar letters, anders staat er
+ * alleen "T…".
+ */
+const PIL_OMS_MINSTENS = 28;
+function kiesPilVormUren(vormen, pilBreedtePx, meet) {
+    const binnen = pilBreedtePx - PIL_VULLING - PIL_ICOON;
+    const { bereik, lang, oms } = vormen;
+    if (lang && oms && binnen >= PIL_TUSSEN + meet(lang) + PIL_TUSSEN + PIL_OMS_MINSTENS) return { tekst: lang, oms };
+    if (lang && !oms && binnen >= PIL_TUSSEN + meet(lang)) return { tekst: lang, oms: '' };
+    if (bereik && binnen >= PIL_TUSSEN + meet(bereik)) return { tekst: bereik, oms: '' };
+    return { tekst: '', oms: '' };
+}
+
+/**
+ * Na het tekenen: geef elk pilletje de langste vorm die in zijn blok past.
+ *
+ * Waarom achteraf en niet bij het opbouwen van de HTML: de breedte van een
+ * dagkolom hangt af van het venster. Rekenen met de maat van een scherm van
+ * 1440 pixels — zoals `VOLLEDIG_BEREIK_VANAF_UREN` voor het tijdlabel doet —
+ * klopt alleen dáár. Het pilletje heeft rond zijn tekst 13 pixels vulling en
+ * lucht nodig, dus het zit dichter op de rand dan het tijdlabel: op een
+ * smaller venster viel in de proef bij 15 van de 28 testblokken het uur weg
+ * terwijl het beginuur nog paste. Meten lost dat op.
+ *
+ * Eerst alles LEZEN en dan pas schrijven, anders herberekent de browser de
+ * opmaak bij elk pilletje opnieuw. De tekst wordt gemeten op een canvas met
+ * het lettertype dat het pilletje werkelijk gebruikt, dus het klopt ook
+ * zolang het weblettertype nog niet geladen is.
+ */
+let _pilMeetCanvas = null;
+const _pilMeetCache = new Map();
+function pasPilletjesAan(wortel) {
+    const el = wortel || (typeof DOM !== 'undefined' ? DOM.rosterCalendar : null);
+    if (!el || typeof el.querySelectorAll !== 'function') return;
+    const pillen = el.querySelectorAll('.activity-pil');
+    if (!pillen.length) return;
+
+    const stijl = getComputedStyle(pillen[0]);
+    const font = `${stijl.fontWeight} ${stijl.fontSize} ${stijl.fontFamily}`;
+    if (!_pilMeetCanvas) _pilMeetCanvas = document.createElement('canvas');
+    const ctx = _pilMeetCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.font = font;
+    // `font-variant-numeric: tabular-nums` bestaat op een canvas niet overal;
+    // waar het ontbreekt meet het een fractie te smal, en vangt de afronding
+    // naar boven het op.
+    const meet = (tekst) => {
+        const sleutel = font + '|' + tekst;
+        if (!_pilMeetCache.has(sleutel)) _pilMeetCache.set(sleutel, Math.ceil(ctx.measureText(tekst).width) + 1);
+        return _pilMeetCache.get(sleutel);
+    };
+
+    const werk = [];
+    pillen.forEach(pil => {
+        const d = pil.dataset;
+        if (pil.classList.contains('activity-pil--uren')) {
+            const breedte = pil.offsetWidth;
+            if (!breedte) return;                       // verborgen dagkolom
+            const vorm = kiesPilVormUren({ bereik: d.bereik, lang: d.lang, oms: d.oms }, breedte, meet);
+            werk.push({ pil, tekst: vorm.tekst, extra: vorm.oms, extraKlasse: '.activity-pil-oms' });
+        } else {
+            const blok = pil.parentElement;
+            let breedte = blok ? blok.clientWidth : 0;
+            if (!breedte) return;
+            // Op een telefoon staat het pilletje NAAST de tijd in plaats van
+            // eronder (zie styles.css); dan is de tijd geen buur maar een
+            // concurrent, en gaat haar breedte van de ruimte af.
+            if (getComputedStyle(pil).position === 'static') {
+                const tijd = blok.querySelector('.block-time');
+                if (tijd && tijd.offsetWidth) breedte -= tijd.offsetWidth + 4;
+            }
+            const vorm = kiesPilVorm({ bereik: d.bereik, start: d.start, meer: d.meer }, breedte, meet);
+            werk.push({ pil, tekst: vorm.tekst, extra: vorm.meer, extraKlasse: '.activity-pil-meer' });
+        }
+    });
+    werk.forEach(({ pil, tekst, extra, extraKlasse }) => {
+        const tekstEl = pil.querySelector('.activity-pil-tekst');
+        const extraEl = pil.querySelector(extraKlasse);
+        if (tekstEl && tekstEl.textContent !== tekst) tekstEl.textContent = tekst;
+        if (extraEl && extraEl.textContent !== extra) extraEl.textContent = extra;
+        pil.classList.toggle('activity-pil--kaal', !tekst && !extra);
+    });
+}
+
+// Het venster verandert van maat, of het weblettertype komt later binnen dan
+// de eerste tekening: in beide gevallen past er iets anders. Dit hangt hier en
+// niet in `setupEventListeners`, zodat een oude app-init.js uit de cache er
+// niet over kan struikelen (#412).
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    let _pilResizeTimer = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(_pilResizeTimer);
+        _pilResizeTimer = setTimeout(() => pasPilletjesAan(), 120);
+    });
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => { _pilMeetCache.clear(); pasPilletjesAan(); }).catch(() => {});
+    }
 }
 
 function calcPlanningHourlyHeadcount(date, hour) {
@@ -1249,14 +1453,17 @@ function renderTimelineView() {
                             if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
                             else if (zichtbaarUren < 7.5) blockClass += ' timeline-block--sm';
 
-                            // #406: activiteiten als balkje onderaan, op de uren waar ze
-                            // werkelijk vallen. Zie activiteitenBalkjes() voor waarom
-                            // dit geen tekstchips meer zijn.
+                            // #416: activiteiten als wit pilletje met pictogram en uren.
+                            // Zie activiteitenPilletjes() voor waarom dit geen balkje
+                            // (#406) en geen tekstchip (#163) meer is.
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            const gesplitstBlok = isOvernight && !(dayOfWeek === 0 || isDayView);
-                            const actBalkjes = activiteitenBalkjes(
-                                shiftActivities, Math.max(startFrac, START_HOUR), breedteUren,
-                                isDayView, gesplitstBlok);
+                            const actPilletjes = activiteitenPilletjes(shiftActivities, {
+                                dienstVan: startFrac,
+                                dienstTot: endHour + endMin / 60,
+                                blokStartUur: Math.max(startFrac, START_HOUR),
+                                blokUren: breedteUren,
+                                isDagweergave: isDayView,
+                            });
 
                             // Welk label past er? Zie tijdLabelVoorBlok() (#147, #404).
                             const timeLabel = tijdLabelVoorBlok(shift.startTime, shift.endTime, zichtbaarUren);
@@ -1294,7 +1501,7 @@ function renderTimelineView() {
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 ${isAbsent ? afwezigheidsLint(availability.type) : ''}
                                 <span class="block-time">${timeLabel}</span>
-                                ${actBalkjes}
+                                ${actPilletjes}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -1515,14 +1722,17 @@ function renderTimelineView() {
                             if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
                             else if (zichtbaarUren < 7.5) blockClass += ' timeline-block--sm';
 
-                            // #406: activiteiten als balkje onderaan, op de uren waar ze
-                            // werkelijk vallen. Zie activiteitenBalkjes() voor waarom
-                            // dit geen tekstchips meer zijn.
+                            // #416: activiteiten als wit pilletje met pictogram en uren.
+                            // Zie activiteitenPilletjes() voor waarom dit geen balkje
+                            // (#406) en geen tekstchip (#163) meer is.
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            const gesplitstBlok = isOvernight && !(dayOfWeek === 0 || isDayView);
-                            const actBalkjes = activiteitenBalkjes(
-                                shiftActivities, Math.max(startFrac, START_HOUR), breedteUren,
-                                isDayView, gesplitstBlok);
+                            const actPilletjes = activiteitenPilletjes(shiftActivities, {
+                                dienstVan: startFrac,
+                                dienstTot: endHour + endMin / 60,
+                                blokStartUur: Math.max(startFrac, START_HOUR),
+                                blokUren: breedteUren,
+                                isDagweergave: isDayView,
+                            });
 
                             // Welk label past er? Zie tijdLabelVoorBlok() (#147, #404).
                             const timeLabel = tijdLabelVoorBlok(shift.startTime, shift.endTime, zichtbaarUren);
@@ -1560,7 +1770,7 @@ function renderTimelineView() {
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 ${isAbsent ? afwezigheidsLint(availability.type) : ''}
                                 <span class="block-time">${timeLabel}</span>
-                                ${actBalkjes}
+                                ${actPilletjes}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -1582,6 +1792,8 @@ function renderTimelineView() {
 
     DOM.rosterCalendar.innerHTML = html;
     IconHelper.init(DOM.rosterCalendar);
+    // #416: nu de blokken een breedte hebben, kan elk pilletje zijn vorm kiezen.
+    pasPilletjesAan(DOM.rosterCalendar);
 
     // Set team-header sticky offset based on actual header height
     const header = DOM.rosterCalendar.querySelector('.timeline-header');
@@ -1672,11 +1884,12 @@ function calculateShiftColumns(shifts) {
 
 // Keep old function for backwards compatibility if needed elsewhere
 
-// Zodat deze pure functies in Node getest kunnen worden (#401, #404, #406).
+// Zodat deze pure functies in Node getest kunnen worden (#401, #404, #416).
 // In de browser bestaat `module` niet, dus dit heeft daar geen effect.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     afwezigheidsLabel, afwezigheidsLint, afwezigheidsCelMarkering,
-    activiteitenBalkjes, tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN,
+    activiteitenPilletjes, kiesPilVorm, kiesPilVormUren, activiteitUrenKort, activiteitStartKort,
+    tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN,
   };
 }

@@ -541,11 +541,13 @@ function setupEventListeners() {
             await handleShiftDelete(shiftId);
         }
 
-        // Activity band/badge click → edit activity
-        // #406: `.activity-chip` is vervallen; het balkje in het dienstblok
-        // heet nu `.activity-band`. `.activity-badge` is het rijtje in het
-        // dienstvenster en blijft.
-        const activityEl = e.target.closest('.activity-band, .activity-badge');
+        // Activity pill/badge click → edit activity
+        // #416: het pilletje in het dienstblok heet `.activity-pil` (eerder
+        // `.activity-band`, daarvoor `.activity-chip`). `.activity-badge` is
+        // het rijtje in het dienstvenster en blijft. Een pilletje dat voor
+        // MEER dan één activiteit staat draagt geen id: dan opent alleen het
+        // dienstvenster, waar ze allemaal in staan.
+        const activityEl = e.target.closest('.activity-pil, .activity-badge');
         if (activityEl) {
             e.stopPropagation();
             const activityId = activityEl.dataset.activityId;

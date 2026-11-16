@@ -1472,6 +1472,11 @@ function updateTimelineMobileDayAttribute() {
     if (wrapper) {
         wrapper.setAttribute('data-mobile-day', AppState.mobileDayIndex);
     }
+    // #416: het raster tekent alle zeven dagen en verbergt er zes. Een pilletje
+    // in een verborgen kolom heeft geen breedte en kon zijn vorm dus nog niet
+    // kiezen; nu zijn dag zichtbaar wordt, kan dat wel. Zonder deze regel bleef
+    // na een tik op de pijl elk pilletje een rondje met alleen het pictogram.
+    if (typeof pasPilletjesAan === 'function') pasPilletjesAan();
 }
 
 function jumpToDate(date) {

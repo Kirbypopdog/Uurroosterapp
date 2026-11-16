@@ -82,10 +82,10 @@ describe('wat de planner rendert', () => {
 
   // De activiteiten blijven staan: het lint ligt in de hoek en vraagt geen
   // eigen regel. Bij het afgekeurde chipje was dat wél zo.
-  // #406: de chips zijn balkjes geworden; die liggen onderaan en komen het
-  // lint in de rechterbovenhoek dus evenmin in de weg.
+  // #406 maakte van de chips balkjes, #416 van de balkjes een pilletje; dat
+  // ligt onderaan en komt het lint in de rechterbovenhoek dus evenmin in de weg.
   test('de activiteiten blijven staan bij een afwezigheid', () => {
-    const treffers = BRON.match(/\$\{actBalkjes\}/g) || [];
+    const treffers = BRON.match(/\$\{actPilletjes\}/g) || [];
     expect(treffers.length).toBe(2);
   });
 
