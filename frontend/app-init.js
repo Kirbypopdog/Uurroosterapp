@@ -437,6 +437,46 @@ function setupEventListeners() {
     if (activityForm) {
         activityForm.addEventListener('submit', handleActivitySubmit);
     }
+    // #411: de telling, de knoptekst en de merkjes "buiten dienst" lopen mee
+    // met de vinkjes EN met de tijden — wie er op dat uur niet is hangt immers
+    // van die tijden af. Eén handler op de lijst in plaats van een listener
+    // per vinkje, want de lijst wordt bij elk openen opnieuw opgebouwd.
+    //
+    // #412: die functie staat in app-shifts.js, en hier stond hem kaal
+    // aanroepen. Haalt een bezoeker index.html en app-shifts.js nog uit zijn
+    // cache terwijl dit bestand al nieuw is — wat gebeurt als je de pagina
+    // herlaadt precies terwijl een deploy uitrolt — dan bestaat die functie
+    // niet en gooit `setupEventListeners` een ReferenceError. Dat brak niet de
+    // teller maar de HELE opstart: "Error during initialization" en een app die
+    // nergens meer op reageerde. Een ontbrekende functie hoort hoogstens zijn
+    // eigen stukje uit te schakelen.
+    const deelnemersLijst = document.getElementById('activity-deelnemers');
+    const telDeelnemers = typeof werkActiviteitDeelnemersBij === 'function'
+        ? werkActiviteitDeelnemersBij
+        : null;
+    if (deelnemersLijst && telDeelnemers) {
+        deelnemersLijst.addEventListener('change', telDeelnemers);
+        deelnemersLijst.addEventListener('click', (e) => {
+            const alles = e.target.closest('.activity-team-alles');
+            if (!alles) return;
+            e.preventDefault();
+            // Allemaal aan, of allemaal uit als ze al aanstonden. De persoon
+            // van de dienst zelf staat vast en blijft buiten schot.
+            const vinkjes = [...deelnemersLijst.querySelectorAll(
+                `.activity-deelnemer[data-team="${CSS.escape(alles.dataset.team || '')}"] input:not([data-zelf])`)];
+            if (vinkjes.length === 0) return;
+            const allesAan = vinkjes.every(v => v.checked);
+            vinkjes.forEach(v => { v.checked = !allesAan; });
+            telDeelnemers();
+        });
+    }
+    if (telDeelnemers) {
+        ['activity-start', 'activity-end'].forEach(id => {
+            document.getElementById(id)?.addEventListener('change', telDeelnemers);
+            document.getElementById(id)?.addEventListener('input', telDeelnemers);
+        });
+    }
+
     document.getElementById('activity-cancel-btn')?.addEventListener('click', closeActivityModal);
     document.getElementById('activity-delete-btn')?.addEventListener('click', handleActivityDelete);
     document.querySelectorAll('#activity-modal .modal-close').forEach(btn => {
@@ -501,8 +541,13 @@ function setupEventListeners() {
             await handleShiftDelete(shiftId);
         }
 
-        // Activity chip/badge click → edit activity
-        const activityEl = e.target.closest('.activity-chip, .activity-badge');
+        // Activity pill/badge click → edit activity
+        // #416: het pilletje in het dienstblok heet `.activity-pil` (eerder
+        // `.activity-band`, daarvoor `.activity-chip`). `.activity-badge` is
+        // het rijtje in het dienstvenster en blijft. Een pilletje dat voor
+        // MEER dan één activiteit staat draagt geen id: dan opent alleen het
+        // dienstvenster, waar ze allemaal in staan.
+        const activityEl = e.target.closest('.activity-pil, .activity-badge');
         if (activityEl) {
             e.stopPropagation();
             const activityId = activityEl.dataset.activityId;

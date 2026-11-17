@@ -33,6 +33,24 @@ function canManageAvailability(employeeId) {
     return false;
 }
 
+// Mag je een activiteit voor IEMAND ANDERS aanmaken? (#408)
+//
+// Dit is de frontendkant van de check in POST /shift-activities: daar wordt een
+// `medewerker` geweigerd die een andere userId meestuurt. De twee moeten
+// dezelfde grens trekken (regel 5 in CLAUDE.md) — staat de check alleen in de
+// backend, dan toont het scherm een deelnemerslijst die bij het opslaan
+// alsnog een 403 oplevert.
+// #418: een algemene activiteit (brandoefening, teamdag) zet iets voor
+// IEDEREEN in de planning en in ieders agenda. Dezelfde grens als in
+// POST /dag-activiteiten (regel 5): admin en roosterverantwoordelijke.
+function canManageDagActiviteiten() {
+    return ['admin', 'roosterverantwoordelijke'].includes(getEffectiveRole());
+}
+
+function canCreateActivityForOthers() {
+    return getEffectiveRole() !== 'medewerker';
+}
+
 // ===== SWAP REQUEST PERMISSIONS =====
 
 function canRequestSwap(shift) {
@@ -86,5 +104,5 @@ function getVisibleTeamsForRole() {
 // Zodat de pure rolchecks in Node getest kunnen worden. In de browser bestaat
 // `module` niet, dus dit heeft daar geen effect.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { canRequestSwap, canCancelSwap, canTargetRespondToSwap };
+  module.exports = { canRequestSwap, canCancelSwap, canTargetRespondToSwap, canCreateActivityForOthers, canManageDagActiviteiten };
 }

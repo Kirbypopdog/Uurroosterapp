@@ -385,6 +385,9 @@ function showApp() {
         }
     }
     switchView(AppState.currentView);
+    // Eén keer na een update: wat er nieuw is (patchnotes.js). Even later, zodat
+    // het scherm er eerst staat en het venster niet over een lege pagina komt.
+    if (typeof toonPatchNotes === 'function') setTimeout(() => toonPatchNotes(), 600);
 }
 
 // #294: de toegelaten weergaven stonden alleen in applyRoleVisibility, die ze

@@ -1068,6 +1068,67 @@ describe('GET /shift-activities', () => {
 
 // ===== POST /shift-activities =====
 
+describe('POST /shift-activities/batch (#408)', () => {
+  const act = (userId) => ({ userId, date: '2026-11-19', startTime: '13:00', endTime: '16:00', type: 'vergadering', description: 'Teamvergadering' });
+  const admin = () => `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`;
+
+  test('schrijft alle rijen in één transactie', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 11, userId: 3 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 12, userId: 7 }] });
+    const res = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', admin()).send({ activiteiten: [act(3), act(7)] });
+    expect(res.status).toBe(201);
+    expect(res.body.activities.map(a => a.id)).toEqual([11, 12]);
+    const sqls = pool.query.mock.calls.map(c => String(c[0]));
+    expect(sqls.filter(q => /INSERT INTO shift_activities/.test(q))).toHaveLength(2);
+  });
+
+  test('loopt er één mis, dan wordt alles teruggedraaid', async () => {
+    // Met een POST per persoon bleven de eersten opgeslagen staan, en opnieuw
+    // opslaan gaf hen de activiteit dubbel.
+    mockActiveUser();
+    const client = await pool.connect();
+    client.query.mockClear();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 11, userId: 3 }] })
+      .mockRejectedValueOnce(new Error('verbinding weg'));
+    const res = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', admin()).send({ activiteiten: [act(3), act(7)] });
+    expect(res.status).toBe(500);
+    const opdrachten = client.query.mock.calls.map(c => String(c[0]).trim().split(/\s+/)[0]);
+    expect(opdrachten).toContain('ROLLBACK');
+    expect(opdrachten).not.toContain('COMMIT');
+  });
+
+  test('een medewerker mag alleen voor zichzelf', async () => {
+    mockActiveUser();
+    const res = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', `Bearer ${makeToken({ id: 5, role: 'medewerker', name: 'U', team_id: 'vlot1' })}`)
+      .send({ activiteiten: [act(5), act(9)] });
+    expect(res.status).toBe(403);
+  });
+
+  test('dezelfde persoon twee keer wordt geweigerd', async () => {
+    mockActiveUser();
+    const res = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', admin()).send({ activiteiten: [act(3), act(3)] });
+    expect(res.status).toBe(400);
+  });
+
+  test('een lege lijst of een ontbrekend veld wordt geweigerd', async () => {
+    mockActiveUser();
+    const leeg = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', admin()).send({ activiteiten: [] });
+    expect(leeg.status).toBe(400);
+    mockActiveUser();
+    const half = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', admin()).send({ activiteiten: [{ userId: 3, date: '2026-11-19' }] });
+    expect(half.status).toBe(400);
+  });
+});
+
 describe('POST /shift-activities', () => {
   test('returns 400 when required fields are missing', async () => {
     mockActiveUser();
@@ -2625,7 +2686,8 @@ describe('GET /calendar/:token.ics', () => {
     pool.query
       .mockResolvedValueOnce({ rows: [{ id: 7, name: 'Karen Claes' }] }) // user by token
       .mockResolvedValueOnce({ rows: [{ id: 100, date: '2026-06-15', start_time: '12:00', end_time: '20:00', team: 'vlot1', notes: null, team_name: 'Vlot 1' }] }) // shifts
-      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] }); // settings.teams
+      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] }) // settings.teams
+      .mockResolvedValueOnce({ rows: [] }); // #410: activiteiten
 
     const res = await request(app).get('/api/v1/calendar/some-token.ics');
     expect(res.status).toBe(200);
@@ -2646,6 +2708,167 @@ describe('GET /calendar/:token.ics', () => {
     pool.query.mockResolvedValueOnce({ rows: [] });
     const res = await request(app).get('/api/v1/calendar/nope.ics');
     expect(res.status).toBe(404);
+  });
+
+  // #409: een gewijzigde dienst bleef in Outlook op zijn oude uren staan.
+  // Een abonnee-agenda koppelt een binnenkomende VEVENT op UID aan de afspraak
+  // die hij al heeft, en gebruikt SEQUENCE om te beslissen of dit een nieuwere
+  // versie is. Die stuurde de feed niet mee.
+  function arrangeFeed(updatedAt) {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 7, name: 'Karen Claes' }] })
+      .mockResolvedValueOnce({ rows: [{
+        id: 100, date: '2026-11-19', start_time: '09:00', end_time: '16:00',
+        team: 'vlot1', notes: null, team_name: 'Vlot 1', updated_at: updatedAt,
+      }] })
+      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] })
+      .mockResolvedValueOnce({ rows: [] });   // #410: geen activiteiten
+  }
+
+  test('elke gebeurtenis draagt een SEQUENCE en een LAST-MODIFIED (#409)', async () => {
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('SEQUENCE:');
+    expect(body).toContain('LAST-MODIFIED:20261008T124815Z');
+  });
+
+  test('DTSTAMP is het moment van de dienst, niet van het verzoek (#409)', async () => {
+    // Dit stond op "nu", één waarde voor het hele verzoek. Elke ophaling gaf
+    // dus elke gebeurtenis een nieuw stempel, ook de honderden die niet
+    // veranderd waren.
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('DTSTAMP:20261008T124815Z');
+  });
+
+  // #419: een dienst op een dag waarop je afwezig staat bleef in Outlook
+  // staan. De dienst blijft in de planning tot iemand hem overneemt (#401),
+  // dus de feed moet hem zelf weglaten — samen met de activiteiten van die
+  // dag. Er komt GEEN afwezigheid in de plaats (keuze van Victor; #152).
+  test('laat diensten en activiteiten op een afwezigheidsdag weg (#419)', async () => {
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    await request(app).get('/api/v1/calendar/t.ics');
+    const queries = pool.query.mock.calls.map(([sql, params]) => ({ sql: String(sql), params }));
+    const diensten = queries.find(q => /FROM shifts s/.test(q.sql));
+    const activiteiten = queries.find(q => /FROM shift_activities/.test(q.sql));
+    for (const q of [diensten, activiteiten]) {
+      expect(q.sql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM availability av/);
+      expect(q.sql).toMatch(/av\.user_id = \w+\.user_id AND av\.date = \w+\.date/);
+      expect(q.sql).toMatch(/av\.type = ANY\(\$4::text\[\]\)/);
+      // Elk afwezigheidstype telt, ook de verouderde: in de frontend staat
+      // teltAlsAfwezig voor elk ervan op true (#400).
+      expect(q.params[3]).toEqual(['verlof', 'ziek', 'overuren', 'vorming', 'andere', 'vrij']);
+    }
+  });
+
+  test('de feed zet nergens een afwezigheid in de agenda (#419)', async () => {
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).not.toMatch(/Afwezig|Verlof|Ziek/i);
+    const queries = pool.query.mock.calls.map(([sql]) => String(sql));
+    expect(queries.some(q => /SELECT[\s\S]*FROM availability(?! av)/.test(q))).toBe(false);
+  });
+
+  test('twee ophalingen zonder wijziging geven dezelfde SEQUENCE (#409)', async () => {
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const een = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const twee = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    const seq = (t) => /SEQUENCE:(\d+)/.exec(t)[1];
+    expect(seq(een)).toBe(seq(twee));
+  });
+
+  test('een gewijzigde dienst krijgt een HOGERE SEQUENCE (#409)', async () => {
+    // Dit is de hele fix: zonder een hoger getal laat Outlook staan wat hij heeft.
+    arrangeFeed(new Date('2026-10-06T07:33:10Z'));
+    const voor = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const na = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    const seq = (t) => Number(/SEQUENCE:(\d+)/.exec(t)[1]);
+    expect(seq(na)).toBeGreaterThan(seq(voor));
+  });
+
+  // #410: de activiteiten gaan mee als eigen gebeurtenis binnen de dienst.
+  // De TITEL hangt af van een keuze die de medewerker zelf maakt: standaard
+  // alleen het soort ("Overleg"), en pas met de schakelaar aan zijn eigen
+  // omschrijving. De feed heeft geen login, en in dat veld staan in productie
+  // namen van jongeren.
+  function arrangeMetActiviteit(omschrijvingenMee, voorkeurGewijzigd = null) {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{
+        id: 7, name: 'Karen Claes',
+        ical_omschrijvingen: omschrijvingenMee,
+        ical_voorkeur_gewijzigd: voorkeurGewijzigd,
+      }] })
+      .mockResolvedValueOnce({ rows: [{
+        id: 100, date: '2026-12-14', start_time: '09:30', end_time: '16:00',
+        team: 'vlot1', notes: null, team_name: 'Vlot 1',
+        updated_at: new Date('2026-10-08T12:48:15Z'),
+      }] })
+      .mockResolvedValueOnce({ rows: [{ value: { vlot1: { name: 'Vlot 1' } } }] })
+      .mockResolvedValueOnce({ rows: [{
+        id: 55, date: '2026-12-14', start_time: '15:00:00', end_time: '16:00:00',
+        type: 'overleg', description: 'Eind evaluatie Lois',
+        updated_at: new Date('2026-10-08T12:48:15Z'),
+      }] });
+  }
+
+  test('een activiteit komt als eigen gebeurtenis in de feed (#410)', async () => {
+    arrangeMetActiviteit(false);
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('UID:activiteit-55@hetvlot');
+    expect(body).toContain('DTSTART;TZID=Europe/Brussels:20261214T150000');
+    expect(body).toContain('DTEND;TZID=Europe/Brussels:20261214T160000');
+    // en de dienst staat er nog steeds naast
+    expect(body).toContain('UID:shift-100@hetvlot');
+  });
+
+  test('standaard staat er alleen het SOORT activiteit in (#410)', async () => {
+    arrangeMetActiviteit(false);
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('SUMMARY:Overleg');
+    expect(body).not.toContain('Lois');
+  });
+
+  test('met de schakelaar aan komt de omschrijving erin (#410)', async () => {
+    arrangeMetActiviteit(true);
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('SUMMARY:Eind evaluatie Lois');
+  });
+
+  test('de schakelaar omzetten verhoogt de SEQUENCE van de activiteit (#410)', async () => {
+    // Zonder dit verandert de titel wel in de feed, maar blijft elke agenda
+    // staan op wat hij al had: de SEQUENCE komt uit de activiteit zelf, en die
+    // beweegt niet als een gebruiker zijn eigen voorkeur wijzigt.
+    const seqVan = (t) => Number(/UID:activiteit-55@hetvlot[\s\S]*?SEQUENCE:(\d+)/.exec(t)[1]);
+    arrangeMetActiviteit(false);
+    const voor = seqVan((await request(app).get('/api/v1/calendar/t.ics')).text);
+    arrangeMetActiviteit(true, new Date('2026-11-11T18:52:00Z'));
+    const na = seqVan((await request(app).get('/api/v1/calendar/t.ics')).text);
+    expect(na).toBeGreaterThan(voor);
+  });
+
+  test('een activiteit zonder omschrijving valt terug op het type (#410)', async () => {
+    // Geen tweede lijstje met labels: `vergadering` wordt `Vergadering`.
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 7, name: 'K', ical_omschrijvingen: true, ical_voorkeur_gewijzigd: null }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ value: {} }] })
+      .mockResolvedValueOnce({ rows: [{
+        id: 56, date: '2026-12-14', start_time: '13:00:00', end_time: '16:00:00',
+        type: 'vergadering', description: '', updated_at: new Date('2026-10-08T12:48:15Z'),
+      }] });
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).toContain('SUMMARY:Vergadering');
+  });
+
+  test('zonder updated_at blijft de feed werken', async () => {
+    // Een database waar migratie 049 nog niet gedraaid heeft.
+    arrangeFeed(undefined);
+    const res = await request(app).get('/api/v1/calendar/t.ics');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('SEQUENCE:1');
+    expect(res.text).toContain('DTSTART;TZID=Europe/Brussels:20261119T090000');
   });
 });
 

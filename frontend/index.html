@@ -26,7 +26,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20261016a">
+    <link rel="stylesheet" href="styles.css?v=20261117b">
     <!-- #156: foutmonitoring. Inert zolang er geen DSN in config/monitoring.js
          staat; dan wordt er ook niets van een CDN gehaald. Staat bewust vóór de
          app-bestanden, zodat een fout tijdens het opstarten ook gemeld wordt. -->
@@ -211,6 +211,9 @@
                     </button>
                 </div>
                 <div class="sidebar-foot-actions">
+                    <button class="sidebar-icon-btn" id="patchnotes-btn" aria-label="Wat is er nieuw" data-tooltip="Wat is er nieuw">
+                        <i data-lucide="sparkles" class="lucide-sm"></i>
+                    </button>
                     <button class="sidebar-icon-btn" id="dark-mode-btn" aria-label="Donker thema" data-tooltip="Donker/licht thema">
                         <i data-lucide="moon" class="lucide-sm"></i>
                     </button>
@@ -274,6 +277,8 @@
                         <button class="view-toggle-btn" data-mode="day">Dag</button>
                         <button class="view-toggle-btn active" data-mode="week">Week</button>
                     </div>
+                    <!-- #418: alleen voor admin en roosterverantwoordelijke; renderPlanning zet hem aan. -->
+                    <button id="dagact-toevoegen-btn" class="btn btn-sm btn-secondary hidden" data-tooltip="Een activiteit voor iedereen op één dag, zoals een brandoefening of een teamdag"><i data-lucide="calendar-plus" class="lucide-sm"></i> Activiteit voor iedereen</button>
                     <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" data-tooltip="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
                 </div>
                 <div class="planning-controls-row hidden" id="planning-filters-row">
@@ -518,7 +523,13 @@
     <div id="activity-modal" class="modal hidden">
         <div class="modal-content modal-content--sm">
             <div class="modal-header">
-                <h2 id="activity-modal-title">Activiteit toevoegen</h2>
+                <div>
+                    <h2 id="activity-modal-title">Activiteit toevoegen</h2>
+                    <!-- #411: het venster zei nergens over welke dag het ging. Je
+                         opent het vanaf een dienst en daarna stond er alleen de
+                         titel, dus je kon niet nakijken of je goed zat. -->
+                    <div class="activity-modal-datum" id="activity-modal-datum"></div>
+                </div>
                 <button type="button" class="modal-close" aria-label="Sluiten"><i data-lucide="x"></i></button>
             </div>
             <form id="activity-form">
@@ -528,31 +539,47 @@
                 <input type="hidden" id="activity-date">
                 <input type="hidden" id="activity-shift-start">
                 <input type="hidden" id="activity-shift-end">
-                <div class="form-group">
-                    <label for="activity-type">Type *</label>
-                    <select id="activity-type" required>
-                        <option value="">-- Kies type --</option>
-                        <option value="oudergesprek">Oudergesprek</option>
-                        <option value="vorming">Vorming</option>
-                        <option value="overleg">Overleg</option>
-                        <option value="afspraak">Afspraak</option>
-                        <option value="vergadering">Vergadering</option>
-                        <option value="andere">Andere</option>
-                    </select>
-                </div>
-                <div class="form-row">
+                <!-- #411: type, van en tot horen bij elkaar en passen op één
+                     regel. Dat scheelt een rij in een venster dat met de
+                     deelnemerslijst toch al lang is. -->
+                <div class="form-row activity-hoofdrij">
                     <div class="form-group">
-                        <label for="activity-start">Starttijd *</label>
+                        <label for="activity-type">Type *</label>
+                        <select id="activity-type" required>
+                            <option value="">-- Kies type --</option>
+                            <option value="oudergesprek">Oudergesprek</option>
+                            <option value="vorming">Vorming</option>
+                            <option value="overleg">Overleg</option>
+                            <option value="afspraak">Afspraak</option>
+                            <option value="vergadering">Vergadering</option>
+                            <option value="andere">Andere</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="activity-start">Van *</label>
                         <input type="time" id="activity-start" required>
                     </div>
                     <div class="form-group">
-                        <label for="activity-end">Eindtijd *</label>
+                        <label for="activity-end">Tot *</label>
                         <input type="time" id="activity-end" required>
                     </div>
                 </div>
                 <div class="form-group">
                     <label for="activity-description">Omschrijving</label>
                     <input type="text" id="activity-description" placeholder="Bijv. Oudergesprek met Fam. Jansen">
+                </div>
+                <!-- #408: een vergadering is zelden van één persoon. In productie
+                     telt een vergadering gemiddeld 3,5 deelnemers, maar een
+                     activiteit staat per persoon in de database, dus moest je
+                     hem per persoon opnieuw intypen. -->
+                <div class="form-group hidden" id="activity-deelnemers-groep">
+                    <div class="activity-deelnemers-kop">
+                        <span class="activity-deelnemers-label" id="activity-deelnemers-label">Deelnemers</span>
+                        <span class="activity-deelnemers-telling" id="activity-deelnemers-telling"></span>
+                    </div>
+                    <div class="activity-deelnemers-wrap" id="activity-deelnemers-wrap">
+                        <div id="activity-deelnemers" class="activity-deelnemers"></div>
+                    </div>
                 </div>
                 <div class="modal-actions modal-actions-split">
                     <div class="modal-actions-left">
@@ -847,6 +874,88 @@
         </div>
     </div>
 
+    <!-- Dienst overnemen: de dienst, je hele week en een optioneel bericht in één
+         venster. Vervangt de berichtvraag en het "Weet je zeker" dat er
+         vroeger na elkaar kwamen. Inhoud komt uit openOvernameVenster(). -->
+    <div id="overname-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="overname-modal-titel">
+        <div class="modal-content overname-modal-content">
+            <div class="modal-header">
+                <h2 id="overname-modal-titel">Dienst overnemen</h2>
+            </div>
+            <div class="modal-body">
+                <div id="overname-dienst" class="overname-dienst"></div>
+                <div id="overname-meldingen"></div>
+                <div class="overname-week-kop">
+                    <span>Jouw week</span>
+                    <span id="overname-week-uren" class="overname-week-uren"></span>
+                </div>
+                <div id="overname-week" class="overname-week"></div>
+                <div id="overname-rust" class="overname-rust"></div>
+                <label for="overname-bericht" class="overname-bericht-label">Bericht <span class="overname-optioneel">(optioneel)</span></label>
+                <textarea id="overname-bericht" class="form-input overname-bericht" rows="2" maxlength="500"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="overname-annuleer">Annuleren</button>
+                <button type="button" class="btn btn-success" id="overname-ok">Dienst overnemen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- #418: algemene activiteit, aan een dag en niet aan een persoon. -->
+    <div id="dagact-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="dagact-modal-titel">
+        <div class="modal-content dagact-modal-content">
+            <div class="modal-header">
+                <h2 id="dagact-modal-titel">Activiteit voor iedereen</h2>
+            </div>
+            <form id="dagact-form" class="modal-body" novalidate>
+                <p class="dagact-uitleg">Staat bij iedereen in de planning, op het beginscherm en in de gekoppelde agenda. Telt niet mee in de bezetting.</p>
+                <div class="form-group">
+                    <label for="dagact-titel">Titel</label>
+                    <input type="text" id="dagact-titel" class="form-input" maxlength="120" required placeholder="bv. Brandoefening, Teamdag">
+                </div>
+                <div class="form-row dagact-rij">
+                    <div class="form-group">
+                        <label for="dagact-datum">Datum</label>
+                        <input type="date" id="dagact-datum" class="form-input" required>
+                    </div>
+                    <div class="form-group dagact-uur">
+                        <label for="dagact-van">Van</label>
+                        <input type="time" id="dagact-van" class="form-input">
+                    </div>
+                    <div class="form-group dagact-uur">
+                        <label for="dagact-tot">Tot</label>
+                        <input type="time" id="dagact-tot" class="form-input">
+                    </div>
+                </div>
+                <label class="dagact-heledag"><input type="checkbox" id="dagact-heledag"> Hele dag</label>
+                <div class="form-group">
+                    <label for="dagact-omschrijving">Omschrijving <span class="dagact-optioneel">(optioneel)</span></label>
+                    <textarea id="dagact-omschrijving" class="form-input" rows="2" maxlength="1000"></textarea>
+                </div>
+                <div id="dagact-fout" class="alert alert-error hidden" role="alert"></div>
+            </form>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger dagact-verwijder hidden" id="dagact-verwijder">Verwijderen</button>
+                <span class="dagact-actie-ruimte"></span>
+                <button type="button" class="btn btn-secondary" id="dagact-annuleer">Annuleren</button>
+                <button type="submit" form="dagact-form" class="btn btn-primary" id="dagact-ok">Opslaan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- "Wat is er nieuw": één keer na een update, inhoud uit patchnotes.js. -->
+    <div id="patchnotes-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="patchnotes-titel">
+        <div class="modal-content patchnotes-modal-content">
+            <div class="modal-header">
+                <h2 id="patchnotes-titel">Wat is er nieuw</h2>
+            </div>
+            <div id="patchnotes-inhoud" class="modal-body patchnotes-inhoud"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-primary" id="patchnotes-ok">Begrepen</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Input Prompt Modal (replaces browser prompt()) -->
     <div id="input-prompt-modal" class="modal hidden">
         <div class="modal-content input-prompt-content">
@@ -969,26 +1078,27 @@
     <script src="config/settings.js?v=20260611a"></script>
     <!-- Vóór data.js: data.js delegeert de verantwoordelijke-regels hiernaartoe. -->
     <script src="verantwoordelijke-regels.js?v=20261016a"></script>
-    <script src="data.js?v=20261016a"></script>
-    <script src="validation.js?v=20260611a"></script>
-    <script src="drag-handler.js?v=20260830a"></script>
-    <script src="app-globals.js?v=20260611a"></script>
-    <script src="app-permissions.js?v=20260611a"></script>
+    <script src="data.js?v=20261117b"></script>
+    <script src="validation.js?v=20261030a"></script>
+    <script src="drag-handler.js?v=20261117a"></script>
+    <script src="app-globals.js?v=20261117a"></script>
+    <script src="app-permissions.js?v=20261117a"></script>
     <script src="app-ui.js?v=20260830a"></script>
-    <script src="app-auth.js?v=20260611a"></script>
-    <script src="app-nav.js?v=20260830a"></script>
-    <script src="app-planner.js?v=20260830a"></script>
-    <script src="app-shifts.js?v=20260611a"></script>
-    <script src="app-swaps.js?v=20260611a"></script>
+    <script src="patchnotes.js?v=20261117a"></script>
+    <script src="app-auth.js?v=20261117a"></script>
+    <script src="app-nav.js?v=20261117a"></script>
+    <script src="app-planner.js?v=20261117a"></script>
+    <script src="app-shifts.js?v=20261117b"></script>
+    <script src="app-swaps.js?v=20261117b"></script>
     <script src="app-leave.js?v=20261016a"></script>
-    <script src="app-employees.js?v=20260830a"></script>
-    <script src="app-availability.js?v=20260830b"></script>
+    <script src="app-employees.js?v=20261111a"></script>
+    <script src="app-availability.js?v=20261101a"></script>
     <script src="app-builder.js?v=20261016a"></script>
     <script src="app-builder-editors.js?v=20260830a"></script>
     <script src="app-builder-drafts.js?v=20260830c"></script>
-    <script src="app-settings.js?v=20261016b"></script>
-    <script src="app-admin.js?v=20260830a"></script>
-    <script src="app-init.js?v=20260830a"></script>
+    <script src="app-settings.js?v=20261117a"></script>
+    <script src="app-admin.js?v=20261030a"></script>
+    <script src="app-init.js?v=20261114a"></script>
     <script>
         if (typeof lucide !== 'undefined') {
             lucide.createIcons();

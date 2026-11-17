@@ -34,7 +34,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 
 | Bestand | Doel |
 |---------|------|
-| `app-globals.js` | AppState, constanten, UndoManager, DOM object, IconHelper |
+| `app-globals.js` | AppState, constanten, UndoManager, DOM object, IconHelper, labels en pictogrammen van de activiteitstypes |
 | `app-permissions.js` | Rol-checks en permissiefuncties |
 | `app-ui.js` | Toast, modals, FocusTrap, tooltips, overlays |
 | `app-auth.js` | Login, logout, sessiecheck, rolevisibility |
@@ -57,6 +57,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `drag-handler.js` | Drag & drop shifts tussen medewerkers |
 | `styles.css` | Alle CSS inclusief responsive, themas |
 | `index.html` | HTML markup: modals, formulieren, planning grid |
+| `patchnotes.js` | "Wat is er nieuw": de notities per versie en het venster dat één keer na een update verschijnt (#421). Een nieuwe versie zet je BOVENAAN `PATCH_NOTES` |
 | `config/settings.js` | API URL auto-detect, shift templates, team kleuren |
 
 ### Backend (`backend/`)
@@ -100,7 +101,18 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
 | `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
 | `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
+| `vrij-telt-mee.test.js` | Dat 'vrij' overal als afwezigheid telt, en dat één bron dat bepaalt (#400) |
+| `afwezigheid-zichtbaar.test.js` | Dat het type afwezigheid in het dienstblok staat en niet alleen in de tooltip (#401) |
+| `beschikbaar-weg.test.js` | Dat een dag zonder dienst "Vrij" heet in plaats van groen "Beschikbaar", en dat 'vrij' verouderd is maar herkend blijft (#402) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
+| `activiteiten-pilletje.test.js` | Dat een activiteit als wit pilletje met pictogram en uren in het dienstblok staat, welke vorm er past, en dat het tijdlabel van een dienstblok niet afgekapt wordt (#404, #416) |
+| `dag-activiteiten.test.js` | Algemene activiteiten (aan een dag, niet aan een persoon): invoercontrole, rechten, agendafeed, chips in de dagkop en dat ze de bezetting niet raken (#418) |
+| `overname-overzicht.test.js` | Het venster bij "Overnemen": je week, je uren ervoor en erna, de rust tot de dienst ervóór en erná, en dat het de drie losse vragen vervangt (#417) |
+| `patchnotes.test.js` | Wanneer "Wat is er nieuw" verschijnt (één keer per versie, per gebruiker) en dat het in de app aangesloten is (#421) |
+| `activiteit-deelnemers.test.js` | Wie er in de deelnemerslijst van een activiteit komt, en wie er een activiteit voor anderen mag aanmaken (#408) |
+| `agenda-sequence.test.js` | Dat een gewijzigde dienst een hogere `SEQUENCE` krijgt in de agendafeed, en dat de migratie de trigger pas ná de backfill zet (#409) |
+| `vergadering-dubbel.test.js` | Dat een concept toepassen geen tweede Teamvergadering naast de bestaande zet (#407) |
+| `init-bestendig.test.js` | Dat `setupEventListeners` geen kale verwijzing naar een functie uit een ander bestand bevat, want één ontbrekende functie legde de hele opstart plat (#412) |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
@@ -115,7 +127,7 @@ sneller dan dit bestand (#291).
 
 ## Database Schema
 
-**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions, geplande_overnames, verstuurde_meldingen
+**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, dag_activiteiten, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions, geplande_overnames, verstuurde_meldingen
 
 Kernrelaties:
 - `shifts.user_id` → `users.id`
@@ -170,6 +182,8 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 
 ### Planning
 - `CRUD /api/v1/shift-activities` - Activiteiten binnen shifts
+- `POST /api/v1/shift-activities/batch` - Dezelfde activiteit voor meerdere mensen, in één transactie: alles of niets (#420)
+- `CRUD /api/v1/dag-activiteiten` - Algemene activiteiten aan een dag (#418). Lezen: iedereen; schrijven: admin en roosterverantwoordelijke
 - `CRUD /api/v1/schedule-drafts` - Roosterconcepten
 - `POST /api/v1/schedule-drafts/:id/apply` - Concept toepassen op datumbereik
 - `POST /api/v1/availability/sick-with-takeover` - Bulk ziekmelding + auto-takeover
@@ -372,6 +386,7 @@ die de mail net heeft uitgezet hem alsnog. De queries in `verlofmail.js` en
 
 ### Agendakoppeling (iCal)
 - `POST /api/v1/me/ical-token` - Persoonlijke feedlink aanmaken of vervangen
+- `PUT /api/v1/me/agenda-omschrijvingen` - Gaan de omschrijvingen van je activiteiten mee? (#410)
 - `GET /api/v1/calendar/:token.ics` - De feed zelf (geen auth, het token ís de auth)
 
 De feed geeft dertien maanden rooster (30 dagen terug, een jaar vooruit) plus de
@@ -401,6 +416,88 @@ geen rij per ophaling. Een agenda-app haalt elk kwartier op, dus dat zou een
 eindeloos groeiende tabel met verbindingsgegevens van medewerkers zijn: meer
 persoonsgegevens aanmaken om persoonsgegevens te beschermen.
 
+**Een gewijzigde dienst moet een hogere `SEQUENCE` krijgen** (#409). Een
+abonnee-agenda koppelt een binnenkomende VEVENT op `UID` aan de afspraak die hij
+al heeft, en gebruikt `SEQUENCE` om te beslissen of dit een nieuwere versie is.
+Stuur je er geen mee, dan houdt hij impliciet 0 aan en laat hij staan wat hij
+heeft: een dienst die van 13:00–23:00 naar 09:00–16:00 ging, bleef in Outlook op
+13:00–23:00 staan, maanden lang, terwijl de feed gewoon opgehaald werd.
+
+| regel | waarde |
+|---|---|
+| `SEQUENCE` | seconden tussen 1 jan 2020 en `shifts.updated_at`, minstens 1 |
+| `LAST-MODIFIED` | `updated_at` in UTC |
+| `DTSTAMP` | idem — per GEBEURTENIS, niet per verzoek |
+
+Dat laatste stond op "nu", één waarde voor het hele verzoek, dus elke ophaling
+gaf élke gebeurtenis een nieuw stempel: ruis in plaats van een signaal.
+
+Het ijkpunt is **2020 en niet de Unix-epoch**, anders staat het getal nu al op
+1,7 miljard en komt het in de buurt van wat een client in een 32-bits geheel
+getal kwijt kan. En het is **nooit 0**: elke bestaande koppeling heeft nog nooit
+een `SEQUENCE` gezien en houdt dus 0 aan, dus een minimum van 1 werkt elke
+bestaande agenda één keer helemaal bij — inclusief de dagen die er al verkeerd
+in stonden.
+
+**`shifts.updated_at` wordt door een TRIGGER bijgehouden**
+(`trg_shifts_updated_at`), niet door de routes. Diensten worden vanuit een stuk
+of zes routes geschreven — shifts, draft-apply, replace-employee, swaps, de
+bulkziekmelding, de import — en één daarvan vergeten betekent een agenda die
+stil achterloopt, precies de fout die hier wordt opgelost.
+
+**Let op de volgorde in migratie 049.** Migratie `000_base_schema` draait
+`schema.sql` bij élke opstart, en die maakt de trigger ook aan. Hij bestaat dus
+al wanneer 049 draait, en een `BEFORE UPDATE`-trigger vuurt óók op de backfill:
+die zette alle rijen op `created_at` en de trigger zette ze meteen weer op
+`NOW()`. De backfill deed dan niets, zonder één foutmelding. De migratie laat
+de trigger daarom eerst vallen, vult bij, en zet hem daarna terug. Dit kwam
+alleen aan het licht door de migratie tegen een ECHTE PostgreSQL te draaien; de
+testsuite draait met een gemockte database en ziet dit soort dingen niet.
+
+**Een dienst op een afwezigheidsdag gaat NIET mee** (#419). De dienst blijft
+in de planning staan tot iemand hem overneemt (#401), dus de feed stuurde hem
+door en wie verlof nam zag in Outlook nog steeds dat hij moest werken — 73
+diensten in het feedvenster, bij 9 mensen met een agendalink. De queries voor
+diensten én activiteiten sluiten nu elke dag uit waarop een rij in
+`availability` staat met een type uit `AFWEZIGHEIDSTYPES`. Er komt bewust
+GEEN afwezigheid in de plaats: de feed heeft geen login en ziekte is
+gezondheidsinformatie (#152). Een abonnee-agenda vervangt zijn inhoud bij elke
+ophaling, dus de dienst verdwijnt vanzelf, en komt terug als de afwezigheid
+geschrapt wordt.
+
+**Activiteiten gaan mee, hun omschrijving alleen op eigen verzoek** (#410). Een
+vergadering van 13 tot 16 uur stond niet in je agenda: je zag alleen de dienst.
+Elke activiteit is nu een eigen VEVENT (`UID:activiteit-<id>@hetvlot`) binnen
+die dienst.
+
+De TITEL is de keuze. Standaard staat er alleen het soort — `Overleg`,
+`Vergadering` — en pas met `users.ical_omschrijvingen` aan komt de eigen
+omschrijving erin. Dat is geen voorzichtigheid om de voorzichtigheid: de feed
+heeft geen login, en in dat veld staan in productie `Eind evaluatie Lois`,
+`AZ sint-lucas met J.` en `Samen met kamer 12 collect & go doen` — jongeren bij
+naam, een ziekenhuisbezoek, een kamernummer. De schakelaar staat per MEDEWERKER
+in zijn eigen profiel en is bewust geen beheerdersinstelling: het is zijn link.
+
+**Het omzetten van die schakelaar moet de SEQUENCE verhogen.** De SEQUENCE van
+een activiteit komt uit haar eigen `updated_at`, en die beweegt niet als een
+gebruiker zijn voorkeur wijzigt — dus zou de titel wel in de feed veranderen
+maar in de agenda blijven staan zoals hij was. Daarom legt
+`users.ical_voorkeur_gewijzigd` dat moment vast en neemt de feed
+`Math.max(seq(activiteit), seq(voorkeur))`. Dezelfde fout als #409, één laag
+dieper.
+
+**Geen tweede lijstje met labels.** Zonder omschrijving wordt `vergadering`
+gewoon `Vergadering`: alle zes de types zijn één Nederlands woord, dus een
+hoofdletter volstaat. Een labellijst aan de serverkant zou uiteenlopen met
+`ACTIVITY_TYPE_LABELS_FULL` in de frontend — de fout uit #400.
+
+**Eén trigger-functie voor beide tabellen.** `shifts_zet_updated_at` uit #409
+deed niets tabel-specifieks en heet sinds migratie 050 `zet_updated_at`;
+`shifts` en `shift_activities` hangen er allebei aan. Een tweede kopie ernaast
+zetten is precies diezelfde drift. Let op de volgorde in die migratie: de oude
+functie kan pas vallen nádat beide triggers omgehangen zijn, want een functie
+waar nog een trigger aan hangt laat zich niet droppen.
+
 ## Frontend Patronen
 
 - **DataStore** (`data.js`): Centrale data cache, alle API calls gaan hierdoor
@@ -421,15 +518,342 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
 - **Meldingen** (#119): één component in `styles.css`, met vier soorten plus een neutrale. `.alert` is de canonieke naam (flex, dus met pictogram naast de tekst); `.info-box`, `.warning-banner`, `.validation-warning`, `.builder-11h-warnings` en `.leave-banner` delen dezelfde declaraties in plaats van ze te herhalen. Kleuren komen uit de `--alert-{error,warning,info,ok}-{bg,border,text}` tokens, die per thema omslaan, dus een nieuwe melding werkt automatisch in donkere modus. Voeg nooit een eigen achtergrond of rand toe aan een melding: gebruik `class="alert alert-warning"` en laat de tokens hun werk doen
 - **Kleuren** (#180): gebruik de tokens, nooit een hexwaarde. De warme palette staat bovenaan `styles.css`; voor alles wat een betekenis draagt zijn dat de `--alert-*`-tokens (zie Meldingen hierboven). Een hardgecodeerde kleur werkt per definitie maar in één thema, en dat is hoe de oude Tailwind-waarden hier binnenkwamen. Teamkleuren zijn de uitzondering: die horen bij een team en hebben hun eigen `--team-*`-tokens
 - **Zijbalk** (#162): de zijbalk is in BEIDE thema's donker, want hij is een eigen vlak en geen stuk pagina. Alles wat erin staat gebruikt daarom de `--sidebar-*`-tokens (`-bg`, `-text`, `-text-active`, `-label`, `-active-bg`, `-hover-bg`, `-line`) en nooit de tekstkleuren van de pagina zoals `--text-primary`. Een `body.dark-mode`-uitzondering op iets in de zijbalk is bijna altijd fout: die zou de zijbalk juist terug naar de paginakleuren trekken. De dekkingen zijn gemeten op contrast, niet gekozen op smaak: navigatietekst `.72` haalt 8,1 en het groepslabel `.55` haalt 5,4
-- **Dienstblok in de tijdlijn** (#163): het blok is smal, en dat bepaalt wat erin past. Nagemeten op 1440 pixels in weekweergave houdt een dienst van acht uur 59 pixels over: de tijd past daar op 9px en niet op 10. Grotere tekst knipt de tijd af, en een afgeknipte tijd leest als een ANDERE tijd. Verhoog die maten dus niet zonder opnieuw te meten. Activiteiten staan als chips met de volle afkorting op 9px (`ACTIVITY_TYPE_LABELS_SHORT`, `activiteitenChips()` in `app-planner.js`). Die ruimte komt uit de opmaak eromheen en niet uit de tekst: padding 2 in plaats van 3, linkerrand 1 in plaats van 2, tussenruimte 1 in plaats van 2. Twee chips passen daarmee in de 67 pixels van een dienst van acht uur, en ook in de smalste blok dat chips toont (zes uur). Kortere codes op een grotere letter zijn geprobeerd en afgewezen, want "Overl" lees je meteen en "OL" is een code die je eerst moet leren. De achtergronden van `.activity-type-*` zijn ondoorzichtig, want daaronder ligt de teamkleur en die verschilt per team; met doorzichtige chips hing het leescontrast dus af van wie er in welk team zit. Het verloop van het blok loopt van 78 naar 88 procent teamkleur en niet tot 100: bij de volle kleur zakte de tekst op drie van de vijf teams onder de contrasteis
+- **Dienstblok in de tijdlijn** (#163): het blok is smal, en dat bepaalt wat erin past. Nagemeten op 1440 pixels in weekweergave houdt een dienst van acht uur 59 pixels over: de tijd past daar op 9px en niet op 10. Grotere tekst knipt de tijd af, en een afgeknipte tijd leest als een ANDERE tijd. Verhoog die maten dus niet zonder opnieuw te meten. Activiteiten stonden hier als tekstchips; dat is via een balkje (#406) een pilletje geworden (#416, zie verderop). Wat ervan overblijft is de les: de achtergronden van `.activity-type-*` zijn ondoorzichtig, want onder een dienstblok ligt de teamkleur en die verschilt per team; met iets doorzichtigs hangt het leescontrast af van wie er in welk team zit. Het verloop van het blok loopt van 78 naar 88 procent teamkleur en niet tot 100: bij de volle kleur zakte de tekst op drie van de vijf teams onder de contrasteis
+- **Afwezigheid zichtbaar in de planning** (#401): een dienst van iemand die
+  afwezig is kreeg alleen een rode GLOED om het blok, en het type stond
+  uitsluitend in de tooltip. Je moest er dus met de muis op gaan staan om te
+  zien dát een collega verlof had, en daardoor viel het niemand op.
+
+  Dat is géén randgeval: van de 29 verlofdagen in productie staat er op 28 nog
+  gewoon een dienst. De dienst blijft namelijk staan tot iemand hem overneemt of
+  verwijdert. De markering hoort dus op het BLOK, niet op de celachtergrond —
+  die ligt eronder.
+
+  Het type staat als een schuin **lintje** over de rechterbovenhoek
+  (`.afwezig-lint`). Het blok kreeg daarbij ook een EIGEN beige achtergrond uit
+  de alert-tokens, maar **die is er in #414 weer uit**: het lint heeft zijn
+  eigen ondergrond — precies waarom het de drie afgekeurde ontwerpen versloeg —
+  dus het leest op elke teamkleur hetzelfde, met of zonder beige eronder. Wat
+  het beige wél deed was de teamkleur wegnemen, en die draagt informatie: in
+  een rij vol blokken zie je daaraan bij welk team een dienst hoort. Een
+  afwezigheid is geen reden om dat te verbergen. Het signaal is het lint plus
+  de rode gloed.
+
+  **Drie ontwerpen sneuvelden hiervoor**, en elk om een reden die het onthouden
+  waard is:
+
+  1. **Een rood chipje op de regel van de activiteiten.** Niet te onderscheiden
+     van een activiteitenchip, dus "Verlof" las als nóg een activiteit. Wat het
+     verraadde was niet de tekst maar het PIL-VLAK eronder — kale tekst zonder
+     achtergrond leest niet als een chip.
+  2. **Het woord schuin maar DOORZICHTIG over de teamkleur.** Dezelfde val als
+     bij #163 met de chips: onder het blok ligt de teamkleur, en die verschilt
+     per team (blauw, paars, groen, roze, amber). Op het ene team las je het
+     woord, op het andere niet.
+  3. **Datzelfde woord als behang, herhaald.** Een tegelpatroon heeft een groot
+     vlak nodig; dit blok is ~75 bij 75 en dan lopen de woorden in elkaar — op
+     staging stond er letterlijk "VerlofVerlofVerlof".
+
+  Het lint lost alle drie tegelijk op: het heeft zijn **eigen ondergrond** (dus
+  leesbaar op elke teamkleur), het ligt in de **hoek** (dus de tijd blijft
+  gecentreerd en de activiteitenchips houden hun regel), en het is **één
+  element** in plaats van een patroon dat om ruimte vecht.
+
+  De tekst OP de band heeft een eigen token nodig, `--alert-lint-tekst`: hij
+  staat op `--alert-error-text` en niet op een achtergrondkleur. Nagerekend:
+  6,9 in de lichte modus en 6,0 in de donkere (eis 4,5). Een lang woord als
+  "Overuren" wordt met `text-overflow: ellipsis` afgekapt in plaats van over de
+  rand te vallen. Onder de 2,5 uur verdwijnt het lint, net als de tijd (#147);
+  dan blijft de rode rand het signaal.
+
+  **Les voor de volgende keer**: beoordeel dit soort blokken op WARE grootte.
+  Alle drie de afgekeurde ontwerpen zagen er uitvergroot prima uit.
+
+  **Een afwezigheid op een dag ZONDER dienst** (#415): het lint hangt aan een
+  dienstblok, dus wie die dag niets ingepland had was in de planning niet te
+  zien als afwezig. Je merkte het pas als je er een dienst probeerde te zetten
+  — of helemaal niet. Karen bracht het op.
+
+  Geen randgeval: in productie staan **116 afwezigheidsdagen** op een dag
+  zonder dienst — 59 van de 108 verlofdagen, 48 van de 133 ziektedagen, en alle
+  zes de "andere" van Karen. Er stónd al zoiets (#173), maar alleen voor het
+  type `vrij`, net het type dat in #402 verouderd is verklaard.
+
+  `afwezigheidsCelMarkering()` zet het WOORD in de cel. Dat kan hier, want een
+  lege cel is 143,7px breed waar een dienstblok van acht uur er 67 krijgt — het
+  lint in de hoek was een antwoord op krapte die op deze plek niet bestaat.
+
+  Drie dingen die erbij horen:
+  - **Het redenveld gaat er NIET in.** De oude tooltip zette hem er wel in. Bij
+    ziekte is dat gezondheidsinformatie (#152), en `GET /availability` maakt
+    `reason` juist daarom leeg voor wie geen beheerder is.
+  - **`pointer-events: none`**, dus de cel blijft zich gedragen zoals hij deed.
+    Een overlay die de klik opslokt zonder zelf iets te doen was de fout bij
+    `.vrij-indicator` (#400). Daarom staat er ook geen tooltip op: die vraagt
+    hover, en het woord staat er al.
+  - Welke types meetellen komt van `teltAlsAfwezigheid()`, niet uit een eigen
+    lijstje.
+
+  In de CSS staan nog twee stukken DODE stijl uit een oudere planner:
+  `.absent-badge` en de hele `.shift-absent-conflict`-behandeling met rode
+  diagonale strepen. Die horen bij `.shift-block`, en de tijdlijn gebruikt
+  `.timeline-block`. Ze worden nergens gerenderd.
+
+  Het label toont het TYPE, nooit het redenveld: `GET /availability` maakt
+  `reason` leeg voor wie geen beheerder is, en bij ziekte is dat
+  gezondheidsinformatie (#152).
+
 - **Hoe lang je ingelogd blijft** (#159): drie dingen die samen werken, en die je niet los van elkaar moet aanpassen.
   1. **Waar het token staat.** Niet rechtstreeks in de opslag maar via `bewaarToken()`, `leesToken()` en `wisToken()` in `data.js`. Het staat in `localStorage`, dus het overleeft het sluiten van een tabblad. `leesToken()` kijkt in ALLEBEI de opslagen, want er kan nog een token uit `sessionStorage` staan van vroeger en de terugval bij geblokkeerde `localStorage` schrijft daar ook naartoe; `wisToken()` leegt er allebei. De controle vóór de eerste paint in `index.html` doet hetzelfde nog eens inline, want `data.js` is daar nog niet geladen.
   2. **Het token is 7 dagen geldig en loopt mee.** `TOKEN_GELDIGHEID_UREN` in `middleware/auth.js`. Is een token over de helft, dan stuurt `requireAuth` een vers exemplaar mee in de header `X-Vernieuwd-Token` en bewaart `dataApiFetch` dat stilletjes. Die header staat in de CORS bij `exposedHeaders`; zonder dat is hij voor JavaScript onzichtbaar, zonder foutmelding. Door dat meelopen betekent dit getal alleen nog: HOE LANG JE WEG MAG BLIJVEN voor je opnieuw moet inloggen. Het heeft even op 24 uur gestaan; dat is teruggedraaid omdat een medewerker die zijn rooster één keer per week bekijkt dan élke keer opnieuw moest inloggen, en dat is de meerderheid. Verkort dit getal dus niet om een onbewaakte laptop te beschermen: daar gaat punt 3 over.
   3. **Vier uur niets aanraken en de sessie wordt gewist.** `INACTIEF_UITLOGGEN_MS` in `app-auth.js`. Dit werkt op een TIJDSTEMPEL in `localStorage` en niet op een aflopende timer: een timer telt niet door terwijl een laptop dicht is en bestaat niet meer na een herlading. Daarom wordt hij ook bij het OPSTARTEN nagekeken in `checkSession()` en niet alleen in de minuutcontrole. De stempel wordt hoogstens eens per minuut geschreven, dus een actieve gebruiker loopt nooit meer dan die minuut achter op een grens van vier uur.
 
   **Waarom alle drie.** De app bevat ziekmeldingen, dus gezondheidsgegevens (#152). De laptops worden gedeeld maar iedereen heeft zijn eigen login en dus zijn eigen browserprofiel, dus een collega komt niet zomaar in jouw opslag. Wat overblijft is de laptop die onbewaakt open blijft staan, en daar helpt alleen punt 3 tegen: een kortere geldigheid doet niets als het token op dat moment vers is.
+- **Een functie uit een ander bestand aanroepen in `setupEventListeners`**
+  (#412): zet er een `typeof ... === 'function'`-controle omheen als hij NIEUW
+  is. De frontend bestaat uit losse `<script>`-bestanden zonder bouwstap, dus
+  een bezoeker kan index.html en app-shifts.js uit zijn cache halen terwijl
+  app-init.js al nieuw is — dat gebeurt als je de pagina herlaadt precies
+  terwijl een deploy uitrolt. De functie bestaat dan niet, en omdat
+  `setupEventListeners` daar afbreekt wordt géén enkele listener daarná nog
+  opgehangen: de app laadt wel maar reageert nergens meer op, met alleen
+  `Error during initialization` in de console.
+
+  `typeof` op een niet-gedeclareerde naam gooit niets; `if (naam)` wél. Dat is
+  waarom die vorm er staat. Een ontbrekende functie hoort hoogstens zijn eigen
+  stukje uit te schakelen.
+
+  De cachebusters (`?v=`) helpen hier niet tegen: die staan ín index.html, dus
+  wie een oude index.html vasthoudt vraagt ook de oude URL's op — en krijgt van
+  de server toch de nieuwe inhoud, want de queryparameter zegt de server niets.
+
 - **Opstartscherm** (#389): `index.html` zet de klasse `session-restoring` op `<html>` zodra er een token in `sessionStorage` staat. Die verbergt het loginscherm (anders flitst dat voorbij bij wie al ingelogd is) en `#app-container` staat dan nog op `hidden`. In dat gat toont `#opstartscherm` het KADER van de app: dezelfde zijbalk op dezelfde plek, met vlakken waar de inhoud komt. Puur markup en CSS, dus het staat er al bij de eerste paint. **De klasse moet op élk pad weggehaald worden**: in `showApp()` (geslaagd), in de twee foutafhandelingen van `checkSession()` en in `showLogin()`. Vergeet je er één, dan blijft het opstartscherm over de app heen staan
 - **Stat-kaarten op home** (#166): twee reeksen, elk met een eigen doelgroep. `renderHomeEigenUren()` toont JOUW uren deze week en deze periode tegen je contract, plus wat op jou wacht; alleen voor wie meedraait in het rooster, want een adminaccount heeft geen diensten. `renderHomeStats()` toont de BEHEERcijfers en is er alleen voor admin en roosterverantwoordelijke. Zonder contracturen verschijnt er geen balk en geen "van": `32/0u` zou onzin zijn. De kleurregel is dezelfde als bij de uren in de planning: rood boven de norm, oranje eronder
+- **Activiteiten in het dienstblok** (#416): een wit pilletje vlak onder de
+  diensttijd, met het pictogram van de soort en de uren als GETAL: `👥 13–16u`.
+  Dit is de vierde vorm; `activiteitenPilletjes()` in `app-planner.js` vertelt
+  de hele geschiedenis. Kort:
+
+  | | wat | waarom het niet bleef |
+  |---|---|---|
+  | #163 | tekstchips met het type | 96% is een vergadering, dus overal hetzelfde woord; drie chips sneden hun eigen tekst door (#405) |
+  | #406 | balkje van 4px op de echte uren | de weekweergave heeft geen urenschaal: een streepje op twee derde van 67px is geen tijdstip |
+  | #416 | pilletje met pictogram en uren | — |
+
+  **Weekweergave**: één pilletje per dienst. Het staat niet op de uren van de
+  activiteit, het ZEGT ze. Meer dan één activiteit: de eerste, met `+1` — dat
+  komt weinig voor (9 van de 414 diensten met een activiteit in zestig dagen).
+  Zo'n pilletje draagt geen `data-activity-id`, dus de klik opent het
+  dienstvenster waar ze allemaal in staan.
+
+  **Dagweergave**: één pilletje per activiteit, uitgerekt over de echte uren,
+  met de omschrijving erin. Daar is een uur 59px en ligt de bezettingsbalk er
+  recht boven, dus daar betekent de plaats wél iets.
+
+  **De vorm wordt GEMETEN, niet berekend uit een vaste maat.** Het pilletje
+  heeft 13px vulling en lucht rond zijn tekst nodig en zit dus dichter op de
+  rand dan het tijdlabel. `pasPilletjesAan()` leest na het tekenen de echte
+  breedte van elk blok en kiest de langste vorm die past:
+
+      👥 13–16u +1   →   👥 13–16u   →   👥 13u   →   👥
+
+  Rekenen met de maat van een scherm van 1440px klopt alleen dáár: in de proef
+  viel op een smaller venster bij 15 van de 28 testblokken het uur weg terwijl
+  het beginuur nog paste. Die functie draait ook bij een vensterwijziging, als
+  het weblettertype binnenkomt, en in `updateTimelineMobileDayAttribute()` —
+  het raster tekent alle zeven dagen en verbergt er zes, en een pilletje in een
+  verborgen kolom heeft geen breedte. Zonder dat laatste bleef na een tik op de
+  dagpijl elk pilletje een rondje.
+
+  Vijf dingen die je niet moet terugdraaien zonder opnieuw te meten:
+
+  1. **Het echte blok is 56 of 73px hoog**, niet de 36px waarop alle eerdere
+     proeven getekend waren. De rij krijgt zijn hoogte van de naamcel. Daarom
+     paste er niets en leek alles "clunky". Meet het blok in de echte app.
+  2. **Het pilletje staat 9px onder het midden**, niet tegen de onderrand: zo
+     hoort het bij de tijd, in een blok van 56 én van 73.
+  3. **Centreren met `left:0; right:0; margin:auto`**, niet met `left:50%`. Een
+     absoluut element met alleen `left` krijgt als beschikbare breedte wat er
+     rechts van overblijft — de helft van het blok — en klapte zijn eigen
+     tekst weg.
+  4. **`flex-wrap` is het vangnet.** Wat niet naast het pictogram past zakt
+     naar een tweede regel buiten de hoogte en verdwijnt als geheel. Nooit een
+     half getal (#208).
+  5. **Wit en bijna-zwart, in beide thema's** (`--pil-bg`, `--pil-tekst`). Het
+     dienstblok houdt in de donkere modus zijn teamkleur, dus een pilletje dat
+     omsloeg stond daar donker op een helder blok.
+
+  Op een **telefoon** is het blok 35px hoog; daar staat het pilletje NAAST de
+  tijd (`:has()` in een media query) en trekt `pasPilletjesAan()` de breedte
+  van de tijd af.
+
+  De **pictogrammen** staan inline in `ACTIVITY_TYPE_ICONS` (`app-globals.js`)
+  en niet als `data-lucide`: het pilletje bestaat in zijn smalste vorm úit het
+  pictogram, dus een weggevallen CDN (#396) gaf een leeg wit rondje. De kleur
+  van het pictogram is `--act-donker` van het type.
+
+  De maten staan TWEE keer: als `PIL_*` in `app-planner.js` (om te rekenen) en
+  in `styles.css` (om te tekenen). De test bewaakt dat ze gelijk blijven.
+
+  Een activiteit **buiten de diensturen** krijgt geen pilletje en telt niet mee
+  in `+1`. Een **nachtdienst over twee dagcellen** krijgt nu wél zijn
+  activiteit; het balkje kon dat niet omdat een percentage binnen dat blok geen
+  tijdstip is.
+
+  Elk type draagt in `styles.css` nog steeds drie waarden: `--act-licht`,
+  `--act-donker` en `--act-tekst`. Eén bron per type.
+
+- **Het tijdlabel van een dienstblok** (#404): het volle bereik verschijnt pas
+  vanaf **7,5 uur** breedte, niet vanaf 6. `09:00-15:00` is 62,9px en een blok
+  van zes uur maar 50,4px, van zeven uur 59,2px. Alles daartussen werd
+  gecentreerd afgekapt tot `9:00-15:0`, en dat leest als een geldige tijd die
+  het niet is — dezelfde fout als bij het doorloopblok in #208. De drempel
+  staat als `VOLLEDIG_BEREIK_VANAF_UREN` in `app-planner.js`; verlaag hem niet
+  zonder opnieuw te meten.
+
+- **Geen dubbele teamvergaderingen** (#407): `draft-apply.js` ruimt vlak vóór
+  het invoegen de rijen op die het gaat schrijven, op `(user_id, date,
+  start_time, end_time)` met `type = 'vergadering'`. Dat is nodig naast de
+  opruiming op `draft_id`: de 879 vergaderingen in productie dateren allemaal
+  van vóór migratie 038 en dragen dat veld niet, dus die werden niet gevonden
+  en kregen er elk een tweede naast — 324 daarvan in de toekomst. Gok hier
+  NOOIT op `description = 'Teamvergadering'`: dat is in #376 afgewezen omdat
+  een handmatig ingevoerde vergadering net zo goed zo kan heten. De tuple is de
+  veilige sleutel, want een bestaande vergadering op dezelfde persoon, dag en
+  uur ÍS deze vergadering.
+
+- **Algemene activiteit** (#418): een brandoefening, een teamdag — iets dat
+  aan een DAG hangt en niet aan een persoon. Eigen tabel `dag_activiteiten`,
+  want `shift_activities.user_id` is verplicht en een rij per medewerker zou
+  bij elke nieuwe collega en elke vervanging bijgewerkt moeten worden.
+
+  | | |
+  |---|---|
+  | uren | optioneel; allebei leeg = hele dag (CHECK in de database) |
+  | wie maakt aan | admin en roosterverantwoordelijke (`canManageDagActiviteiten`, `requireRole`) |
+  | waar te zien | dagkop van de planning, beginscherm, agendafeed |
+  | bezetting | telt NIET mee — de app weet niet wie er van de vloer gaat |
+
+  **Planning**: chips in de dagkop, hoogstens twee en daarna `+n`, want een
+  derde regel duwt het hele raster omlaag. In de dagweergave en op een telefoon
+  is die kop verborgen; daar staat een balk boven het raster met een groep per
+  dag, en CSS toont de groep die past bij `data-mobile-day`. Bij het wisselen
+  van dag hoeft er dus niets opnieuw getekend te worden. Wie mag beheren krijgt
+  knoppen (klik = bewerken), de rest tekst met een tooltip.
+
+  **Aanmaken** via de knop "Activiteit voor iedereen" in de planningbalk of
+  rechtsklik op een dagkop. De klikken hangen in `app-shifts.js` zelf, niet in
+  `setupEventListeners` (#412).
+
+  **Agendafeed**: voor IEDEREEN met een gekoppelde agenda, of hij die dag werkt
+  of niet. Zonder uren een DATE-gebeurtenis met DTEND op de dag erna (iCal-einde
+  is exclusief). `TRANSP:TRANSPARENT`: een brandoefening maakt je niet bezet. De
+  titel gaat altijd mee, de omschrijving alleen met `ical_omschrijvingen` (#410).
+
+  De audit log weigert een onbekend `resource_type` via een CHECK, en
+  `logAudit` slikt die fout in. Zonder `dag_activiteit` in die lijst zou elke
+  regel STIL verdwijnen. Migratie 051 breidt hem uit.
+
+- **"Wat is er nieuw"** (#421): na een update verschijnt één keer een venster
+  met de wijzigingen in gewone taal (`patchnotes.js`, aangeroepen aan het eind
+  van `showApp()`). Gezien wordt per gebruiker in `localStorage` bewaard onder
+  `hetvlot_patchnotes_gezien_<id>`; sluiten op welke manier ook telt als gezien.
+  Een nieuwe versie zet je BOVENAAN `PATCH_NOTES` met een nieuwe `versie`, en
+  wie de vorige zag krijgt de nieuwe vanzelf. Schrijf voor collega's: wat ze
+  zien en wat ze ermee kunnen, zonder issuenummers (de test bewaakt dat). Het
+  sterretje onderaan de zijbalk opent het venster altijd opnieuw.
+
+- **Dienst overnemen** (#417): één venster (`openOvernameVenster()` in
+  `app-swaps.js`) met de dienst, je HELE week, je weekuren ervoor → erna tegen
+  je contract, en de rust tot je eigen dienst ervóór en erná. Het vervangt drie
+  vragen die vroeger na elkaar kwamen: de afwezigheidswaarschuwing (#318), de
+  berichtvraag (#348) en "Weet je zeker...?". Afwezig staan is nu een melding
+  IN het venster; wie daarna op "Dienst overnemen" drukt, heeft gekozen.
+
+  De rekenkant is `overnameOverzicht()`, puur. Twee dingen daarin:
+  - De rust gaat naar de DICHTSTBIJZIJNDE eigen dienst, met nachtdiensten die
+    de dag erna eindigen. Een dienst die met de nieuwe overlapt is geen rust
+    maar een botsing, en staat apart.
+  - De week wordt opgehaald als hij buiten de drie maanden valt die de planning
+    laadt; anders toonde het venster een lege week bij iemand die wél werkt.
+
+  Het venster toont wat de backend zal zeggen, maar de backend blijft de grens:
+  de rustweigering van #202 met "Toch overnemen" draait gewoon na de klik.
+  Alleen bij overnemen, bewust niet bij ruilen.
+
+- **Een activiteit voor meerdere mensen** (#408): een activiteit staat PER
+  PERSOON in de database; er is geen gedeelde gebeurtenis met deelnemers. In
+  productie zijn 254 werkelijke vergaderingen opgeslagen als 879 rijen,
+  gemiddeld 3,5 deelnemers per stuk. Voor de teamvergadering viel dat nooit op
+  — die genereert het concept — maar alles met de hand moest per persoon
+  opnieuw ingetypt worden.
+
+  Het activiteitenvenster heeft daarom een deelnemerslijst: wie die dag een
+  dienst heeft, met zijn uren erachter. Er worden nog steeds LOSSE rijen
+  geschreven; dit scheelt alleen de herhaling.
+
+  Voor meer dan één persoon gaat dat in ÉÉN verzoek naar
+  `POST /shift-activities/batch`, in één transactie (#420). Eerst was het een
+  POST per persoon: liep de derde mis, dan stonden de eerste twee al opgeslagen
+  en gaf opnieuw opslaan hen de activiteit dubbel. Iedereen staat er ook maar
+  één keer in, ook wie twee diensten op die dag heeft. Een echte gedeelde gebeurtenis
+  is een schemawijziging en een apart gesprek.
+
+  Vier dingen die erbij horen:
+  - **Alleen bij aanmaken.** Bij bewerken bewerk je één rij; de rijen van de
+    anderen blijven staan. Een vinkje zou het tegendeel suggereren.
+  - **De waarschuwing over diensturen geldt per ONTVANGER.** De een werkt tot
+    16:30 en de ander tot 12:30, dus dezelfde activiteit valt voor de een wél
+    en voor de ander niet binnen de dienst. De melding noemt wie.
+  - **Een medewerker ziet de lijst niet**: `canCreateActivityForOthers()` is de
+    frontendkant van de check in `POST /shift-activities` (regel 5).
+  - Id's worden als TEKST vergeleken. Een id komt als getal uit de API maar als
+    string uit een `dataset`; zonder dat zou de persoon voor wie de activiteit
+    al is er nóg eens in staan en een dubbele rij krijgen.
+
+  **Het venster zelf is in #411 herzien.** Beoordeeld met de dertien mensen die
+  op een echte dag ingepland stonden, niet met een handvol:
+
+  1. **De dag staat in de kop.** Je opent het venster vanaf een dienst, en
+     daarvóór stond er alleen de titel — je kon niet nakijken of je goed zat.
+  2. **Eén kolom, gegroepeerd per TEAM**, met de teamkleur en een "Allemaal"
+     per team. Het stond in twee kolommen die rij voor rij gevuld werden, dus
+     de volgorde sprong links-rechts-links en je kon geen naam opzoeken. En het
+     team is de structuur die er werkelijk in zit: de 294 gebeurtenissen in
+     productie zijn zonder uitzondering van één team.
+  3. **De persoon van de dienst staat IN de lijst**, bovenaan zijn eigen team,
+     vastgezet. Hij stond alleen tussen haakjes in het label. Let op: zijn
+     vinkje is uitgeschakeld maar telt wél mee voor `:checked`, dus de
+     verzamelaar in `handleActivitySubmit` sluit hem uit met `:not([data-zelf])`
+     — anders krijgt hij twee rijen.
+  4. **Wie er op het gekozen uur niet is, krijgt "buiten dienst"** en staat
+     gedimd, bijgewerkt terwijl je de tijden typt. Aanvinken blijft mogelijk;
+     soms komt iemand er speciaal voor.
+
+  **Twee stukken CSS die daar niets deden** (#413), allebei gevonden door te
+  METEN in plaats van te kijken:
+  - `grid-template-columns` op `.form-row` doet niets: die klasse wordt
+    verderop in `styles.css` opnieuw gedefinieerd als `display: flex` met
+    `.form-row .form-group { flex: 1 }`, en die regel wint op volgorde. Gebruik
+    `flex-basis` als je daar een kolom een eigen breedte wil geven.
+  - `.modal-content--sm` (450px) staat vóór `.modal-content` (600px) en verliest
+    dus bij gelijke specificiteit. Elk venster met die modifier is 600px. Het
+    activiteitenvenster heeft daarom een eigen `max-width: 520px`.
+
+  De deelnemerslijst krijgt een **vervaging onderaan** in plaats van een
+  hoogte die op de rijen past: teamkoppen zijn lager dan naamrijen, dus zo'n
+  veelvoud bestaat niet en er werd altijd een rij doormidden gesneden. De
+  scroll-listener wordt opgehangen in `app-shifts.js` zelf, niet in
+  `app-init.js` — zie #412 hieronder.
+
+  `dienstDektActiviteit()` beslist dat, en bestaat omdat de oude controle de
+  tijden als TEKST vergeleek (`startTime < shiftStart || endTime > shiftEnd`).
+  Bij een NACHTDIENST klopt dat niet: een overleg van 20:00 tot 21:00 binnen
+  een dienst van 18:00 tot 09:00 werd gemeld als buiten de uren, want
+  `"21:00" > "09:00"` is waar. Let in die functie ook op de lege tekst:
+  `Number('')` is 0 en dus "eindig", dus zonder controle leest een leeg
+  tijdveld als middernacht.
+
 - **Bezetting en activiteiten** (#145): `calcPlanningHourlyHeadcount()` in `app-planner.js` geeft `bruto` (wie een dienst heeft) en `netto` (bruto min wie op dat uur een activiteit heeft). ALLE zes de activiteittypes verminderen de netto bezetting, voor hun volle duur. Dat is nagevraagd en bevestigd: bij oudergesprek, vorming, overleg, vergadering, afspraak én andere staat de begeleider niet bij de groep. Er is bewust geen uitzondering per type en geen vinkje "ik blijf bereikbaar" per activiteit: dan moet iemand dat elke keer beoordelen en kan het vergeten worden, en te vaak waarschuwen is bij bezetting de veilige kant. Netto voedt precies drie plekken: de onderbezettingsmeldingen in `renderHomeAlerts`, de bezettingsbalk in de planning en `validateMinimumStaffing` in `validation.js`. Activiteittypes worden verder nergens in logica onderscheiden, alleen voor kleur en label
 - **Weekend- en vakantieverantwoordelijke**: je bent verantwoordelijk voor het WEEKEND, dus alleen in een week waarin het weekend open is. Staat het weekend dicht, dan is er niemand aan de beurt en toont de app niemand. Tijdens een vakantie staat de verantwoordelijke PER WEEK, aan te duiden in de roosterbouwer: in de kerstvakantie doet de ene persoon week 1 en een ander week 2. Een vakantieweek is daarmee uitgepraat — is er voor die week niemand aangeduid, dan is er niemand, en valt de app bewust NIET terug op de rotatie. Een vakantieweek verbruikt ook geen beurt, dus na de vakantie gaat de rotatie verder waar hij gebleven was.
 
@@ -502,6 +926,72 @@ persoonsgegevens aanmaken om persoonsgegevens te beschermen.
   bundel die met HTTP 200 binnenkomt en pas bij het uitvoeren stukloopt, gaat
   daar stilletjes langs. Toets daarom het RESULTAAT — staat `window.lucide` er
   na `load` niet, dan gaat `no-lucide` alsnog aan.
+
+- **Afwezigheidstypes: één oordeel, één plek** (#400): `ABSENCE_TYPES` in
+  `app-availability.js` is de enige plaats die zegt welke types als afwezigheid
+  tellen (`teltAlsAfwezig`). Maak nergens een eigen lijstje — `validation.js`,
+  `app-planner.js` (twee keer) en `app-admin.js` deden dat wel, en liepen
+  uiteen.
+
+  Het gevolg bij `vrij`: #173 voerde het in als "puur informatief, verlaagt de
+  bezetting NIET", #204 voegde het toe aan de AFWEZIG-lijst van de
+  bezettingsberekening — terecht, een vaste vrije dag betekent dat die persoon
+  niet op de vloer staat — maar de andere helft bleef staan. Je kon dus zonder
+  één waarschuwing een dienst op een vrije dag zetten, en die dienst telde
+  daarna niet mee in de bezetting: een dienst die er staat maar niet meetelt,
+  en een gat in de bezetting dat niemand meldt. `teltAlsAfwezig` staat nu op
+  `true` en de drie andere plekken vragen die vlag.
+
+  `app-admin.js` liet bij een herstel uit een JSON-backup elke `vrij`-rij
+  stilzwijgend vallen, omdat het type in zijn `allowedTypes` ontbrak. Die lijst
+  moet gelijk zijn aan `AFWEZIGHEIDSTYPES` in `backend/src/helpers/dienstregels.js`.
+
+  **Over de cursor**: `cursor: help` betekent in `styles.css` "alleen uitleg,
+  klikken doet niets" — zo werkt `.shift-block-indicator`, en die wordt in
+  `drag-handler.js` ook echt van de klik uitgezonderd. `.vrij-indicator` had die
+  cursor zonder die uitzondering, dus de klik viel door naar de cel en opende
+  "nieuwe dienst". Geef een overlay die cursor alleen als klikken er werkelijk
+  niets doet.
+
+  **"Beschikbaar" bestond niet echt** (#402). De afwezigheidstab had twee
+  takken: wie een basisrooster had kreeg op een niet-ingeplande dag "Vrij", wie
+  er geen had viel terug op "Beschikbaar" — een GROENE cel met een vinkje. Maar
+  de app weet alleen dat er geen dienst en geen afwezigheid staat; of iemand KAN
+  werken volgt daar niet uit. Bij een deeltijdse collega zonder basisrooster
+  stond er dus in het groen "beschikbaar" op precies de dagen dat ze niet kan.
+
+  Een dag zonder dienst heet nu voor iedereen "Vrij", met of zonder
+  basisrooster. Het verschil blijft bestaan als UITLEG in de tooltip ("Niet
+  ingepland volgens basisrooster" tegenover "Geen dienst ingepland"), niet als
+  bewering in kleur.
+
+  Daarmee is het TYPE `vrij` overbodig: niemand hoeft nog met de hand in te
+  geven wat de cel vanzelf toont. Het staat op `verouderd: true` — het wordt
+  niet meer aangeboden in het keuzemenu, maar blijft overal herkend. Dat laatste
+  moet: schrap je het uit `ABSENCE_TYPES`, dan valt het label van de bestaande
+  rijen terug op "Afwezig", gooit de import ze weg en kent de CHECK-constraint
+  van de database ze nog wel.
+
+  **`vorming` is óók verouderd** (#403), om een andere reden: het bestond zowel
+  als afwezigheidstype als als ACTIVITEITstype. Het hoort bij dat laatste — een
+  vorming doe je tijdens je dienst, je bent niet afwezig. De productiedata was
+  eenduidig: nul afwezigheidsrijen tegenover zeventien activiteiten. De
+  activiteit blijft dus gewoon bestaan.
+
+  Het keuzemenu voor afwezigheid houdt over: **Verlof, Ziekte, Overuren
+  opnemen, Andere**.
+
+  **Waarom `verouderd` en niet schrappen**, ook bij nul rijen: de backend
+  (`AFWEZIGHEIDSTYPES`), de import (`allowedTypes`) en de CHECK-constraint van
+  de database kennen het type nog. Het alleen in de frontend weghalen laat
+  precies die lijstjes uiteenlopen — de fout uit #400.
+
+  **Waarom het weekrooster hier geen antwoord is**: die ene collega heeft er
+  geen, en kan er geen hebben — haar begin- en eindtijden liggen nooit vast
+  (09:00-16:00, 12:00-16:00, 09:30-15:00, 11:00-17:30…), terwijl een weekrooster
+  vaste tijden per dag vraagt. Ze maakt haar rooster zelf per maand en wordt
+  door niemand ingepland, dus de "plan mij hier niet in"-kant van `vrij` deed
+  voor haar sowieso niets.
 
 - **Manuele sluitingsdagen**: opgeslagen als `settings.closedDates` (array `[{date, reason}]`). `isDayClosed()` checkt dit automatisch → drag-drop, shift aanmaken en beschikbaarheidstabel werken zonder extra aanpassingen
 - **Uren bij naam (planning view)**: In timeline- en maandweergave wordt per medewerker week- en periodetotaal getoond onder de naam (`X/Yu` formaat). Berekend via `getEmployeeHoursThisWeek(id, weekStartStr)` en `getEmployeeHoursThisPeriod(id, dateStr)` uit `data.js`. Kleur: rood = boven contractnorm, oranje = onder contractnorm. Periodenorm = `contractHours × 4` (vaste 4-weken-periodes verankerd aan het schooljaar via `getFourWeekPeriodDates()`). Een jaar telt 13 periodes van elk 4 weken.

@@ -72,6 +72,68 @@ router.post('/shift-activities', requireAuth, async (req, res) => {
   }
 });
 
+// Dezelfde activiteit voor meerdere mensen tegelijk (#408), in ÉÉN transactie.
+//
+// De frontend deed dit eerst met een POST per persoon. Liep de derde mis, dan
+// stonden de eerste twee al opgeslagen terwijl de gebruiker alleen een fout
+// zag; wie dan opnieuw op Opslaan drukte, gaf die twee de activiteit dubbel —
+// en dubbel telt ook dubbel in de bezetting (#145). Nu is het alles of niets.
+//
+// Elke rij blijft een rij per persoon; er is geen gedeelde gebeurtenis.
+const MAX_ONTVANGERS = 100;
+router.post('/shift-activities/batch', requireAuth, async (req, res) => {
+  const { activiteiten } = req.body || {};
+  if (!Array.isArray(activiteiten) || activiteiten.length === 0) {
+    return res.status(400).json({ error: 'activiteiten (niet-lege lijst) is verplicht' });
+  }
+  if (activiteiten.length > MAX_ONTVANGERS) {
+    return res.status(400).json({ error: `Hoogstens ${MAX_ONTVANGERS} activiteiten tegelijk` });
+  }
+  for (const a of activiteiten) {
+    if (!a || !a.userId || !a.date || !a.startTime || !a.endTime || !a.type) {
+      return res.status(400).json({ error: 'Verplichte velden ontbreken (userId, date, startTime, endTime, type)' });
+    }
+  }
+
+  // Dezelfde regel als POST /shift-activities: een medewerker alleen voor zichzelf.
+  const { role, id: currentUserId } = req.user;
+  if (role === 'medewerker' && activiteiten.some(a => Number(a.userId) !== currentUserId)) {
+    return res.status(403).json({ error: 'Je kunt alleen activiteiten voor jezelf aanmaken' });
+  }
+
+  // Twee keer dezelfde persoon in één verzoek is altijd een vergissing.
+  const personen = activiteiten.map(a => String(a.userId));
+  if (new Set(personen).size !== personen.length) {
+    return res.status(400).json({ error: 'Dezelfde persoon staat meer dan één keer in de lijst' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const rijen = [];
+    for (const a of activiteiten) {
+      const r = await client.query(`
+        INSERT INTO shift_activities (user_id, shift_id, date, start_time, end_time, type, description)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id, user_id as "userId", shift_id as "shiftId", date::text as "date", start_time as "startTime",
+                  end_time as "endTime", type, description, created_at as "createdAt"
+      `, [a.userId, a.shiftId || null, a.date, a.startTime, a.endTime, a.type, a.description || '']);
+      rijen.push(r.rows[0]);
+    }
+    await client.query('COMMIT');
+    for (const rij of rijen) {
+      await logAudit(req, 'CREATE', 'shift_activity', rij.id, { activity: rij });
+    }
+    res.status(201).json({ activities: rijen });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('POST /shift-activities/batch error:', err);
+    res.status(500).json({ error: 'Server error', detail: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 router.put('/shift-activities/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   const { startTime, endTime, type, description } = req.body || {};

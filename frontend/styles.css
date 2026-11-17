@@ -161,6 +161,8 @@
     --alert-error-bg:       #fbe9e7;
     --alert-error-border:   #eeb6b1;
     --alert-error-text:     #9a3a32;
+    /* Tekst OP een vlak in alert-error-text — het lint van #401. */
+    --alert-lint-tekst:     #ffffff;
     --alert-info-bg:        #eaf0f6;
     --alert-info-border:    #c5d3e2;
     --alert-info-text:      #3d5775;
@@ -228,6 +230,7 @@ body.dark-mode {
     /* Alert/status */
     --alert-warning-bg:     #2a1a08; --alert-warning-border: #5a380e; --alert-warning-text: #e8a83a;
     --alert-error-bg:       #2a0d0a; --alert-error-border:   #5a1f1a; --alert-error-text:   #e8706a;
+    --alert-lint-tekst:     #2a0d0a;
     --alert-info-bg:        #0a1520; --alert-info-border:    #1a2d40; --alert-info-text:    #7aa5c5;
     --alert-ok-bg:          #0d1a15; --alert-ok-border:      #1e3a30; --alert-ok-text:      #7ab89f;
     --warn-bg:              #2a1a08;
@@ -5277,34 +5280,168 @@ body[data-view-mode="day"] .timeline-day-cell {
     min-width: 20px;
 }
 
-/* Activiteitenchips in een dienstblok (#163).
-   De tekst is de volle afkorting ("Overl", "Vorm"): die lees je meteen, waar
-   een code als "OL" eerst geleerd moet worden.
-   De ACHTERGROND van .activity-type-* is ondoorzichtig gemaakt, want daaronder
-   ligt de teamkleur en die verschilt per team; zie daar. */
-.timeline-block .activity-chips-row {
+/* Activiteiten in een dienstblok: een wit pilletje met een pictogram en de
+   uren (#416). Vervangt het balkje van #406 en de tekstchips van #163; de
+   reden staat bij activiteitenPilletjes() in app-planner.js.
+
+   Het pilletje heeft een EIGEN ondergrond. Zonder die ondergrond ligt de
+   teamkleur eronder, en die verschilt per team — de val van de chips in #163,
+   het watermerk in #401 en de streep in #406. Wit met bijna-zwarte tekst leest
+   op elk team hetzelfde.
+
+   Die twee kleuren komen bewust NIET uit het thema. Het dienstblok houdt in de
+   donkere modus zijn teamkleur (applyTeamColors() kent geen thema), dus een
+   pilletje dat mee zou omslaan stond daar donker op een helder blok. De tokens
+   hieronder worden daarom nergens voor body.dark-mode overschreven. */
+:root {
+    --pil-bg: #fffdf9;
+    --pil-tekst: #2b2a26;
+}
+
+/* De maten hier (10 voor het pictogram, 3 ertussen, 4 + 5 vulling, 2 lucht aan
+   elke kant) staan ook als PIL_* in app-planner.js, waar ermee gerekend wordt
+   of een vorm past. Verander ze samen. */
+.timeline-block .activity-pil {
+    position: absolute;
+    /* Gecentreerd met marges en niet met left:50% + transform: een absoluut
+       element met alleen `left` krijgt als beschikbare breedte wat er RECHTS
+       van die left overblijft, dus de helft van het blok. Het pilletje klapte
+       daardoor zijn eigen tekst weg terwijl er ruimte genoeg was. */
+    left: 0;
+    right: 0;
+    /* Vlak onder de tijd, niet tegen de onderrand: 9px onder het midden is
+       3,5px onder een tijdregel van 11px. Het blok is 56px hoog als de naamcel
+       één urenregel heeft en 73px met twee; tegen de onderrand geplakt hing het
+       pilletje in dat hoge blok 12px los van de tijd waar het bij hoort. De
+       min() houdt het binnen een laag blok (mobiel). */
+    top: min(calc(50% + 9px), calc(100% - 17px));
+    margin: 0 auto;
+    width: fit-content;
+    max-width: calc(100% - 4px);
+    box-sizing: border-box;
+    height: 15px;
+    padding: 0 5px 0 4px;
+    border: 0;
+    border-radius: 8px;
+    z-index: 3;
+    cursor: pointer;
+    background: var(--pil-bg);
+    color: var(--pil-tekst);
+    box-shadow: 0 1px 2px rgba(43, 42, 38, 0.2);
+    transition: box-shadow 0.12s;
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 15px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    /* Het vangnet. pasPilletjesAan() kiest de vorm die past, maar tussen een
+       vensterwijziging en de herberekening, of als die stap ooit faalt, mag er
+       niets half staan. Wat niet naast het pictogram past zakt naar een tweede
+       regel en valt daar buiten de hoogte: het verdwijnt als geheel. Een
+       afgesneden tijd leest als een ANDERE tijd (#208). */
     display: flex;
-    gap: 1px;
-    flex-wrap: nowrap;
-    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-content: flex-start;
+    align-items: center;
+    column-gap: 3px;
     overflow: hidden;
 }
 
-.timeline-block .activity-chip {
-    /* Zeven pixels was te klein om prettig te lezen. De ruimte voor negen komt
-       uit de opmaak eromheen en niet uit de tekst: padding van 3 naar 2, de
-       linkerrand van 2 naar 1 en de tussenruimte van 2 naar 1. Dat scheelt zes
-       pixels per paar chips, ruim genoeg om de twee extra pixels lettergrootte
-       op te vangen.
-       Nagemeten op een dienst van acht uur, 67 pixels breed: twee chips hadden
-       op 7px met de oude opmaak 54 pixels nodig, op 9px met deze 57. */
-    padding: 0 2px;
-    font-size: 9px;
-    border-left-width: 1px;
-    border-radius: 2px;
-    line-height: 13px;
-    white-space: nowrap;
-    cursor: pointer;
+.timeline-block .activity-pil:hover {
+    box-shadow: 0 2px 5px rgba(43, 42, 38, 0.28);
+}
+
+.activity-pil-icoon {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    margin: 2.5px 0;
+    fill: none;
+    /* De kleur van de SOORT, uit dezelfde bron als het streepje in het
+       dienstvenster. Op wit halen ze alle zes de eis voor een pictogram (3). */
+    stroke: var(--act-donker);
+    stroke-width: 2.3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.activity-pil-tekst,
+.activity-pil-meer,
+.activity-pil-oms {
+    flex: 0 0 auto;
+    height: 15px;
+}
+
+/* Een lege span mag geen tussenruimte kosten. */
+.activity-pil-tekst:empty,
+.activity-pil-meer:empty,
+.activity-pil-oms:empty {
+    display: none;
+}
+
+.activity-pil-meer {
+    font-weight: 700;
+    color: var(--pil-tekst);
+    opacity: 0.72;
+}
+
+/* Alleen het pictogram: een rondje. Dat past in elk blok, ook in het smalste
+   (min-width 20px, waarvan 3 de linkerrand). */
+.timeline-block .activity-pil--kaal {
+    width: 15px;
+    max-width: 100%;
+    padding: 0;
+}
+
+/* Op een telefoon is het blok maar 35px hoog (de naamcel heeft daar geen
+   urenregels), dus onder de tijd is geen plaats: het pilletje viel er over de
+   tijd heen. Daar staan ze NAAST elkaar. Het blok is er breed genoeg voor,
+   want de telefoon toont één dag. Past het toch niet, dan krimpt het pilletje
+   en niet de tijd; pasPilletjesAan() trekt de breedte van de tijd af. */
+@media (max-width: 768px) {
+    .timeline-block:has(> .activity-pil--week) {
+        flex-direction: row;
+        gap: 4px;
+    }
+    .timeline-block:has(> .activity-pil--week) > .block-time {
+        flex: 0 0 auto;
+    }
+    .timeline-block > .activity-pil--week {
+        position: static;
+        margin: 0;
+        flex: 0 1 auto;
+        min-width: 15px;
+    }
+}
+
+/* Dagweergave: het pilletje staat op de echte uren van de activiteit. `left`
+   en `width` komen uit de inline stijl; de breedte is daar al 4px smaller
+   gemaakt, zodat er aan elke kant 2px lucht blijft en twee activiteiten die op
+   elkaar aansluiten niet tot één vlak versmelten. */
+.timeline-block .activity-pil--uren {
+    right: auto;
+    max-width: none;
+    margin: 0 2px;
+    padding: 0 6px 0 5px;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    column-gap: 4px;
+}
+
+.timeline-block .activity-pil--uren.activity-pil--kaal {
+    padding: 0;
+    justify-content: center;
+}
+
+/* De omschrijving is tekst, geen tijd: die mag met een beletselteken afkappen.
+   De tijd ervoor niet, en staat daarom vooraan (#406). */
+.activity-pil-oms {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
 }
 
 .timeline-block:hover {
@@ -5416,12 +5553,73 @@ body[data-view-mode="day"] .timeline-day-cell {
     text-align: left;
 }
 
-/* Short shift blocks — hide chips at <6u, hide time text at <45min (#147) */
-.timeline-block--sm .activity-chips-row {
+/* #401 gaf een blok met een afwezigheid ook een EIGEN beige achtergrond, los
+   van het team. #414 heeft dat er weer uit gehaald: het was niet nodig.
+
+   De redenering toen was dat het lint een bekende ondergrond nodig had. Dat
+   klopt niet — het lint hieronder heeft zijn EIGEN ondergrond, en dat is
+   precies waarom het de drie afgekeurde ontwerpen versloeg. Het leest dus op
+   elke teamkleur hetzelfde, met of zonder beige eronder.
+
+   Wat het beige wél deed is de teamkleur wegnemen, en die draagt informatie:
+   in een rij vol blokken zie je aan de kleur bij welk team een dienst hoort.
+   Een afwezigheid is geen reden om dat te verbergen. Het signaal blijft het
+   lint plus de rode gloed hierboven.
+
+   Niets vervangt dit blok — dat is de hele wijziging. */
+
+/* Het TYPE als een schuin lintje over de rechterbovenhoek.
+
+   Drie ontwerpen sneuvelden hiervoor; zie `afwezigheidsLint()` in
+   app-planner.js voor welke en waarom. Kort: een chipje was niet te
+   onderscheiden van een activiteitenchip, en een doorzichtig woord over de
+   teamkleur had op het ene team wél en op het andere geen contrast.
+
+   Het lint heeft zijn eigen ondergrond, dus het leest op elke teamkleur
+   hetzelfde. En het ligt in de HOEK, dus de tijd blijft gecentreerd staan en de
+   activiteitenchips houden hun regel — niets hoeft te wijken. */
+.afwezig-lint {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 2;
+    border-radius: inherit;
+}
+
+/* De band loopt van de bovenrand naar de rechterrand en steekt aan beide kanten
+   buiten het blok; de overflow hierboven snijdt hem af tot een nette hoek. */
+.afwezig-lint-band {
+    position: absolute;
+    top: 9px;
+    right: -30px;
+    width: 96px;
+    transform: rotate(34deg);
+    background: var(--alert-error-text);
+    color: var(--alert-lint-tekst);
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    line-height: 13px;
+    text-align: center;
+    text-transform: uppercase;
+    /* Een lang woord mag nooit over de rand van de band vallen. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+/* Onder de 2,5 uur is het blok ~20px breed; daar past geen lint meer. De tijd
+   verdwijnt daar al (#147), en de rode rand blijft het signaal. */
+.timeline-block--xs .afwezig-lint {
     display: none;
 }
-.timeline-block--xs .block-time,
-.timeline-block--xs .activity-chips-row {
+
+/* Short shift blocks — hide time text at <45min (#147).
+   Het activiteitenpilletje blijft wél staan, als rondje met alleen het
+   pictogram (#416). */
+.timeline-block--xs .block-time {
     display: none;
 }
 
@@ -5512,27 +5710,49 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* Niet-werkzaam indicator — grey bar across empty cell (#173) */
-.vrij-indicator {
+/* #415: een afwezigheid op een dag ZONDER dienst.
+   Hier stond `.vrij-indicator`: een streepje in een gestreept vlak met een
+   stippellijn, en alleen voor het type `vrij`. Dat is vervangen.
+
+   Een lege cel is 143,7px breed waar een dienstblok van acht uur er 67 krijgt,
+   dus hier is plaats voor het WOORD. Het lint in de hoek van #401 was een
+   antwoord op krapte die hier niet bestaat.
+
+   De kleuren zijn die van een foutmelding, net als bij het lint — dat is wat
+   een afwezigheid in de rij laat opvallen tussen lege cellen. Maar lichter:
+   een volle rode band op elke lege verlofdag zou over een hele week schreeuwen,
+   en dit staat naast dienstblokken die zelf al kleur dragen.
+
+   `pointer-events: none` is hier wezenlijk: de cel blijft zich gedragen zoals
+   hij deed, dus klikken opent een nieuwe dienst. Een overlay die de klik
+   opslokt zonder zelf iets te doen was precies de fout bij `.vrij-indicator`
+   (#400). Daarom staat er ook geen tooltip op: die vraagt hover, en het woord
+   staat er al. */
+.afwezig-cel {
     position: absolute;
-    inset: 6px 4px;
+    inset: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: repeating-linear-gradient(
-        135deg,
-        transparent,
-        transparent 4px,
-        rgba(0,0,0,0.04) 4px,
-        rgba(0,0,0,0.04) 8px
-    );
-    border: 1px dashed var(--border-color, #d1d5db);
-    border-radius: 4px;
-    color: var(--text-secondary, #9ca3af);
-    opacity: 0.7;
-    cursor: help;
+    pointer-events: none;
     z-index: 1;
+    border-radius: 5px;
+    border: 1px solid var(--alert-error-border);
+    background: var(--alert-error-bg);
+    overflow: hidden;
 }
-.vrij-indicator:hover { opacity: 1; }
+
+.afwezig-cel-woord {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--alert-error-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 4px;
+}
 
 .no-shifts-message {
     padding: 60px 40px;
@@ -5607,38 +5827,9 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 
 /* Activity chips within shift blocks */
-.shift-activities-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px;
-    margin-top: 2px;
-}
-
-.activity-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 9px;
-    font-weight: 600;
-    cursor: pointer;
-    border-left: 3px solid;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-    transition: filter 0.15s;
-}
-
-.activity-chip:hover {
-    filter: brightness(0.9);
-}
-
-.activity-chip-time {
-    opacity: 0.75;
-    font-weight: 500;
-}
+/* .shift-activities-chips, .activity-chip en .activity-chip-time stonden hier.
+   De chips in het dienstblok zijn in #406 vervangen door balkjes en de twee
+   andere klassen werden al nergens gerenderd. */
 
 /* #163: deze achtergronden waren doorzichtig (0,7 en bij vergadering zelfs 0,3).
    In een dienstblok ligt daar de teamkleur onder, die per team verschilt, dus
@@ -5647,40 +5838,226 @@ body[data-view-mode="day"] .timeline-day-cell {
    terwijl de eis 4,5 is.
    Ondoorzichtig maakt het contrast vast en voorspelbaar, ongeacht het blok
    eronder. Deze kleuren zijn de identiteit van een activiteitstype, net als de
-   teamkleuren, en blijven daarom hexwaarden en geen alert-tokens (#180). */
-.activity-type-oudergesprek {
-    background: #fbbf24;
-    border-color: #d97706;
-    color: #78350f;             /* 5,43 */
-}
-.activity-type-vorming {
-    background: #c4b5fd;
-    border-color: #7c3aed;
-    color: #4c1d95;             /* 5,93 */
-}
-.activity-type-overleg {
-    background: #6ee7b7;
-    border-color: #059669;
-    color: #064e3b;             /* 6,38 */
-}
-.activity-type-afspraak {
-    background: #93c5fd;
-    border-color: #3d6a5e;
-    color: #1e3a5f;             /* 6,38 */
-}
+   teamkleuren, en blijven daarom hexwaarden en geen alert-tokens (#180).
+
+   #406: elk type draagt nu drie waarden in plaats van drie losse declaraties.
+   --act-licht  het vlak waar tekst op staat (het streepje in het
+                dienstvenster)
+   --act-donker de verzadigde kleur: de rand in het dienstvenster en, sinds
+                #416, het pictogram in het pilletje van het dienstblok
+   --act-tekst  de tekstkleur die bij --act-licht is nagemeten
+   Eén bron per type: de declaraties eronder lezen deze drie. */
+.activity-type-oudergesprek { --act-licht: #fbbf24; --act-donker: #d97706; --act-tekst: #78350f; } /* 5,43 */
+.activity-type-vorming      { --act-licht: #c4b5fd; --act-donker: #7c3aed; --act-tekst: #4c1d95; } /* 5,93 */
+.activity-type-overleg      { --act-licht: #6ee7b7; --act-donker: #059669; --act-tekst: #064e3b; } /* 6,38 */
+.activity-type-afspraak     { --act-licht: #93c5fd; --act-donker: #2563eb; --act-tekst: #1e3a5f; } /* 6,38 */
+/* De donkere kleur van afspraak stond op #3d6a5e, een groenige rand onder een
+   blauwe chip. Dat viel niet op zolang het alleen een randje van 1px was; als
+   balkje van 4px leest het als een ander type dan de chip ernaast. Nu het
+   blauw dat bij #93c5fd hoort. */
 /* Vergadering haalde ondoorzichtig nog maar 3,30: zijn amber en zijn tekst
    lagen te dicht bijeen. En het felle amber van oudergesprek zat er zo dicht
    tegenaan dat je de twee niet uit elkaar hield. Nu donker amber met witte
-   tekst: leesbaar op 5,56 en duidelijk anders dan oudergesprek (verschil 3,33). */
-.activity-type-vergadering {
-    background: #a3521b;
-    border-color: #7c3d12;
-    color: #ffffff;             /* 5,56 */
-}
+   tekst: leesbaar op 5,56 en duidelijk anders dan oudergesprek (verschil 3,33).
+   Hier is --act-licht dus de donkere en --act-tekst het wit. */
+.activity-type-vergadering  { --act-licht: #a3521b; --act-donker: #7c3d12; --act-tekst: #ffffff; } /* 5,56 */
+.activity-type-andere       { --act-licht: #d1d5db; --act-donker: #6b7280; --act-tekst: #1f2937; } /* 9,96 */
+
+.activity-type-oudergesprek,
+.activity-type-vorming,
+.activity-type-overleg,
+.activity-type-afspraak,
+.activity-type-vergadering,
 .activity-type-andere {
-    background: #d1d5db;
-    border-color: #6b7280;
-    color: #1f2937;             /* 9,96 */
+    background: var(--act-licht);
+    border-color: var(--act-donker);
+    color: var(--act-tekst);
+}
+
+/* Deelnemers aan een activiteit (#408), venster herzien in #411.
+   Eén kolom en gegroepeerd per TEAM. Het stond in twee kolommen die rij voor
+   rij gevuld werden, dus de volgorde sprong links-rechts-links en je kon geen
+   naam opzoeken. En de structuur die er werkelijk in zit was onzichtbaar: de
+   vergaderingen in productie zijn zonder uitzondering van één team. */
+.activity-deelnemers-kop {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+.activity-deelnemers-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+.activity-deelnemers-telling {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* #413: de lijst is 240px hoog en een rij 28px, dus er werd altijd een rij
+   doormidden gesneden — en bij een teamkop sneed dat dwars door de letters.
+   Dat las als kapot in plaats van als "er is meer".
+   Oplossing is niet een hoogte die precies op de rijen past: teamkoppen zijn
+   lager dan naamrijen, dus zo'n veelvoud bestaat niet. In plaats daarvan een
+   vervaging onderaan, die verdwijnt zodra je onderaan bent. */
+.activity-deelnemers-wrap {
+    position: relative;
+}
+.activity-deelnemers-wrap::after {
+    content: '';
+    position: absolute;
+    left: 1px;
+    right: 1px;
+    bottom: 1px;
+    height: 28px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    border-radius: 0 0 var(--radius-sm, 6px) var(--radius-sm, 6px);
+    background: linear-gradient(to bottom,
+        rgba(0, 0, 0, 0) 0%,
+        var(--surface-color) 100%);
+}
+.activity-deelnemers-wrap.is-scrollbaar:not(.is-onderaan)::after {
+    opacity: 1;
+}
+
+.activity-deelnemers {
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--surface-color);
+}
+
+/* De teamkop plakt bovenaan bij het scrollen: in een lijst van dertien namen
+   wil je blijven zien onder welk team je zit. */
+.activity-team-kop {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 9px;
+    background: var(--surface-2);
+    border-top: 1px solid var(--border-color);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+.activity-team-kop:first-child { border-top: none; }
+.activity-team-stip {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.activity-team-naam { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-team-alles {
+    margin-left: auto;
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 0;
+    font: 600 11px/1.3 inherit;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--primary-color, #2f6f5e);
+}
+.activity-team-alles:hover { text-decoration: underline; }
+
+/* Twee klassen diep, want `.form-group label` zet display:block en wint het
+   anders van een enkele klasse. Dan vallen de naam en de uren onder elkaar en
+   knipt de naam niet meer af — zichtbaar bij een lange naam als
+   "Marie-Louise Van den Berghe". */
+.activity-deelnemers .activity-deelnemer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 0;
+    padding: 4px 9px;
+    cursor: pointer;
+    font-weight: 400;
+    font-size: 13px;
+}
+.activity-deelnemers .activity-deelnemer:hover { background: var(--surface-2); }
+
+/* De persoon van wie het dienstvenster openstond. Zijn vinkje staat vast: hij
+   is de reden dat dit venster er is.
+   Géén eigen achtergrond: die was dezelfde tint als de teamkop er vlak boven,
+   dus de twee liepen in elkaar over en zijn naam las als een stuk van de kop.
+   Het grijze vinkje en "deze dienst" onderscheiden hem al. */
+.activity-deelnemers .activity-deelnemer--zelf .activity-deelnemer-naam {
+    font-weight: 600;
+}
+
+.activity-deelnemer-naam {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.activity-deelnemer-uren {
+    color: var(--text-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+/* #413: "deze dienst" stond in dezelfde grijstint en grootte als de uren er
+   vlak naast, dus de twee lazen als één brok: "deze dienst 07:30-16:30". Als
+   omlijnd merkje is het een label bij de naam en geen deel van de tijd. */
+.activity-deelnemer-vast {
+    font-size: 10px;
+    white-space: nowrap;
+    padding: 1px 5px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-secondary);
+}
+.activity-deelnemer-uren { font-variant-numeric: tabular-nums; }
+
+/* Wie er op het gekozen uur niet is. Niet verbergen en niet blokkeren — soms
+   komt iemand er speciaal voor — maar wel zichtbaar vóór het opslaan in
+   plaats van erna in een bevestigingsvenster. */
+.activity-deelnemers .activity-deelnemer--buiten .activity-deelnemer-naam,
+.activity-deelnemers .activity-deelnemer--buiten .activity-deelnemer-uren {
+    opacity: 0.75;
+}
+.activity-deelnemer-buiten {
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--alert-warning-bg);
+    color: var(--alert-warning-text);
+}
+
+/* Type, van en tot op één regel (#411).
+   #413: dit stond als `grid-template-columns` en deed NIETS. `.form-row` is
+   verderop in dit bestand opnieuw gedefinieerd als `display: flex` met
+   `.form-row .form-group { flex: 1 }`, en die regel wint op volgorde. Alle
+   drie de velden waren daardoor 173px breed — twee daarvan voor "13:00".
+   Nagemeten: het tijdveld heeft 120px nodig, inclusief het klokje dat de
+   browser erin zet. */
+.form-row.activity-hoofdrij .form-group:nth-child(n+2) {
+    flex: 0 0 120px;
+}
+
+/* #413: het venster was 600px. `.modal-content--sm` (450px) staat eerder in
+   dit bestand dan `.modal-content` (600px) en verliest dus — die modifier doet
+   al een tijd niets. Hier niet globaal rechtgezet, want dat verandert ook het
+   venster "week kopiëren"; zie de bevinding bij #413.
+   520px is gemeten op de langste naam in productie, "Marie-Louise Van den
+   Berghe": die past met zijn uren en het merkje erbij zonder af te kappen. */
+#activity-modal .modal-content {
+    max-width: 520px;
 }
 
 /* Add activity button on shift block */
@@ -6200,6 +6577,16 @@ body[data-view-mode="day"] .timeline-day-cell {
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+/* #411: de dag onder de titel van het activiteitenvenster. `align-items:center`
+   op .modal-header zou de titel nu scheef zetten tegenover het kruisje, dus
+   deze kop lijnt bovenaan uit. */
+#activity-modal .modal-header { align-items: flex-start; }
+.activity-modal-datum {
+    margin-top: 3px;
+    font-size: 13px;
+    color: var(--text-secondary);
 }
 
 .modal-header h2 {
@@ -6957,6 +7344,36 @@ body[data-view-mode="day"] .timeline-day-cell {
 }
 .profile-ical-waarschuwing svg { flex-shrink: 0; margin-top: 2px; }
 .profile-ical-gebruik { font-size: 12px; color: var(--text-secondary); }
+
+/* #410: de keuze of je omschrijvingen meegaan in je agendafeed. Het vinkje
+   staat links en de uitleg ernaast, want die uitleg is hier het belangrijkste
+   deel: wat je aanzet is niet "meer detail" maar "deze tekst verlaat de app". */
+.profile-ical-omschrijvingen {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    max-width: 520px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.profile-ical-omschrijvingen:hover { background: var(--surface-2); }
+.profile-ical-omschrijvingen input { margin-top: 2px; flex-shrink: 0; }
+.profile-ical-omschrijvingen strong {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.profile-ical-omschrijvingen em {
+    display: block;
+    margin-top: 2px;
+    font-style: normal;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
 
 /* #387: het venster dat een gegenereerd wachtwoord één keer toont. Groot en
    in een vaste letterbreedte, want dit wordt overgetypt of voorgelezen. */
@@ -7984,9 +8401,18 @@ body[data-view-mode="day"] .timeline-day-cell {
     font-weight: 600;
 }
 
-.legend-chip.available {
-    background: var(--color-success-light);
-    color: var(--ok-text);
+/* #402: "Beschikbaar" bestaat niet meer als toestand. De cel zei in het GROEN
+   dat iemand kon werken, terwijl de app alleen weet dat er geen dienst staat.
+   De legende volgt de cel: beige met een stippellijn, net als .not-scheduled. */
+.legend-chip.not-scheduled {
+    background: var(--bg-color);
+    color: var(--text-secondary);
+    border: 1px dashed var(--line-strong);
+}
+body.dark-mode .legend-chip.not-scheduled {
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    border-color: var(--line);
 }
 
 .legend-chip.absent {
@@ -10638,6 +11064,209 @@ body[data-view-mode="day"] .timeline-day-cell {
 
 .confirm-modal-content #confirm-modal-cancel {
     min-width: 100px;
+}
+
+/* ===== "Wat is er nieuw" (patchnotes.js) ===== */
+.patchnotes-modal-content { max-width: 560px; }
+.patchnotes-inhoud { max-height: min(62vh, 560px); overflow-y: auto; }
+.patchnotes-datum { margin: 0 0 12px; font-size: 13px; color: var(--text-secondary); }
+.patchnotes-sectie + .patchnotes-sectie { margin-top: 16px; }
+.patchnotes-sectie h3 { margin: 0 0 6px; font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.patchnotes-sectie ul { margin: 0; padding-left: 20px; }
+.patchnotes-sectie li { margin: 4px 0; font-size: 14px; line-height: 1.5; color: var(--text-primary); }
+.patchnotes-voetnoot {
+    margin: 18px 0 0;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+/* ===== Algemene activiteiten (#418) =====
+   Aan een dag, niet aan een persoon. In de dagkop als chips; in de dagweergave
+   en op een telefoon (waar die kop verborgen is) in een balk boven het raster.
+   De kleur komt uit de info-tokens: het is informatie, geen waarschuwing, en
+   het slaat vanzelf om in de donkere modus. */
+.dagact-lijst {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    width: 100%;
+    margin-top: 4px;
+}
+.dagact-chip {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 1px 6px;
+    border: 1px solid var(--alert-info-border);
+    border-radius: 6px;
+    background: var(--alert-info-bg);
+    color: var(--alert-info-text);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: center;
+    /* Een titel mag afkappen; het is tekst, geen tijd. Het uur staat vooraan,
+       dus dat blijft staan (#406). */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
+}
+button.dagact-chip { cursor: pointer; }
+button.dagact-chip:hover { filter: brightness(0.97); box-shadow: 0 0 0 1px var(--alert-info-border); }
+.dagact-chip--meer { width: auto; align-self: center; padding: 0 8px; cursor: help; }
+
+.dagact-balk { display: none; }
+.dagact-balk .dagact-lijst { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; margin: 0; }
+.dagact-balk .dagact-chip { width: auto; font-size: 12px; line-height: 20px; padding: 2px 10px; }
+.dagact-balk-dag { display: none; }
+
+body[data-view-mode="day"] .dagact-balk { display: block; margin: 0 0 10px; }
+.timeline-view-wrapper[data-mobile-day="0"] .dagact-balk-dag[data-dag="0"],
+.timeline-view-wrapper[data-mobile-day="1"] .dagact-balk-dag[data-dag="1"],
+.timeline-view-wrapper[data-mobile-day="2"] .dagact-balk-dag[data-dag="2"],
+.timeline-view-wrapper[data-mobile-day="3"] .dagact-balk-dag[data-dag="3"],
+.timeline-view-wrapper[data-mobile-day="4"] .dagact-balk-dag[data-dag="4"],
+.timeline-view-wrapper[data-mobile-day="5"] .dagact-balk-dag[data-dag="5"],
+.timeline-view-wrapper[data-mobile-day="6"] .dagact-balk-dag[data-dag="6"] { display: block; }
+
+@media (max-width: 768px) {
+    .dagact-balk { display: block; margin: 0 0 8px; }
+}
+
+.dagact-modal-content { max-width: 480px; }
+.dagact-uitleg { font-size: 13px; color: var(--text-secondary); margin: 0 0 12px; }
+/* Datum op een eigen regel, de twee uren eronder naast elkaar. Drie velden
+   naast elkaar liepen over de rand zodra de browser het uur met AM/PM toont. */
+.dagact-rij { flex-wrap: wrap; row-gap: 0; }
+.dagact-rij .form-group:first-child { flex: 1 1 100%; }
+.dagact-rij .form-group.dagact-uur { flex: 1 1 0; min-width: 0; }
+.dagact-rij .form-input { min-width: 0; width: 100%; box-sizing: border-box; }
+.dagact-heledag { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; margin: -4px 0 12px; cursor: pointer; }
+.dagact-optioneel { font-weight: 400; color: var(--text-secondary); }
+.dagact-actie-ruimte { flex: 1; }
+#dagact-fout { margin-top: 4px; }
+.home-dagact-item { cursor: pointer; }
+
+/* ===== Dienst overnemen: overzicht van je week ===== */
+.overname-modal-content {
+    max-width: 560px;
+}
+
+.overname-dienst {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    border-left: 4px solid var(--overname-team, var(--primary-color));
+    margin-bottom: 12px;
+}
+.overname-dienst-wanneer { font-weight: 700; font-size: 15px; color: var(--text-primary); }
+.overname-dienst-wie { font-size: 13px; color: var(--text-secondary); }
+.overname-dienst-notitie { font-size: 13px; color: var(--text-secondary); font-style: italic; }
+
+#overname-meldingen .alert { margin-bottom: 10px; }
+
+.overname-week-kop {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+.overname-week-uren {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+.overname-week-uren .boven { color: var(--alert-error-text); }
+
+.overname-week {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+    margin-bottom: 10px;
+}
+.overname-dag {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-height: 72px;
+    padding: 5px 4px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    text-align: center;
+}
+.overname-dag.is-dag-zelf {
+    background: var(--alert-ok-bg);
+    box-shadow: inset 0 0 0 1.5px var(--alert-ok-border);
+}
+.overname-dag-naam {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+.overname-dag-nr { font-size: 14px; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
+.overname-dag-dienst {
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1.25;
+    font-variant-numeric: tabular-nums;
+    padding: 3px 2px;
+    border-radius: 5px;
+    background: var(--surface-color);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+/* De nieuwe dienst: in de kleur van "goed", met een stippelrand, zodat hij als
+   VOORSTEL leest en niet als iets wat er al staat. */
+.overname-dag-dienst.is-nieuw {
+    background: var(--alert-ok-bg);
+    color: var(--alert-ok-text);
+    border: 1.5px dashed var(--alert-ok-border);
+}
+.overname-dag-dienst.is-botsing {
+    background: var(--alert-error-bg);
+    color: var(--alert-error-text);
+    border-color: var(--alert-error-border);
+}
+.overname-dag-leeg { font-size: 11px; color: var(--text-secondary); opacity: .6; margin-top: 6px; }
+
+.overname-rust {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+}
+.overname-rust .te-kort { color: var(--alert-error-text); font-weight: 600; }
+
+.overname-bericht-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: var(--text-primary); }
+.overname-optioneel { font-weight: 400; color: var(--text-secondary); }
+.overname-bericht { width: 100%; resize: vertical; min-height: 44px; }
+
+/* Op een telefoon is een dagkolom ~44px: de tijd past daar op twee regels. */
+@media (max-width: 480px) {
+    .overname-week { gap: 2px; }
+    .overname-dag { padding: 4px 1px; min-height: 64px; }
+    .overname-dag-dienst { font-size: 9.5px; padding: 2px 1px; }
 }
 
 /* ===== ROOSTERBOUWER (Schedule Builder) ===== */

@@ -3239,6 +3239,16 @@ function setupSettingsCollapsibles(scope = document) {
         const d = parseDateOnly(dateStr);
         const label = d.toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' });
 
+        // #418: een algemene activiteit op deze dag. Alleen wie hem ook mag
+        // bewaren ziet de optie.
+        if (typeof canManageDagActiviteiten === 'function' && canManageDagActiviteiten()
+            && typeof openDagActiviteitVenster === 'function') {
+            const actBtn = document.createElement('button');
+            actBtn.innerHTML = `${IconHelper.html('calendar-plus', 'xs')} Activiteit voor iedereen`;
+            actBtn.addEventListener('click', () => { closeDayContextMenu(); openDagActiviteitVenster(dateStr); });
+            menu.appendChild(actBtn);
+        }
+
         if (!isClosed) {
             const closeBtn = document.createElement('button');
             closeBtn.innerHTML = `${IconHelper.html(ICONS.lock, 'xs')} Dag sluiten`;

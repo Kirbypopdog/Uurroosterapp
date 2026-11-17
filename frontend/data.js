@@ -168,6 +168,7 @@ const DataStore = {
     },
     shifts: [],
     activities: [],
+    dagActiviteiten: [], // #418: algemene activiteiten, aan een dag en niet aan een persoon
     availability: [],
     shiftBlocks: [],
     swapRequests: [],
@@ -380,6 +381,14 @@ function _getInitialWindowEnd() {
     const d = new Date(); d.setMonth(d.getMonth() + 3); return formatDateYYYYMMDD(d);
 }
 
+// #418: algemene activiteiten worden ver vooruit gepland (een teamdag in
+// maart, in november al vastgelegd). Met het venster van de diensten (drie
+// maanden) werd zo'n activiteit opgeslagen maar nergens getoond, en maakte de
+// beheerder ze een tweede keer aan. Het zijn er weinig, dus twee jaar kan.
+function _getDagActiviteitenVensterEind() {
+    const d = new Date(); d.setMonth(d.getMonth() + 24); return formatDateYYYYMMDD(d);
+}
+
 async function loadDataFromAPI() {
     try {
         // Load all data in parallel - users now includes employee/schedule data
@@ -392,7 +401,7 @@ async function loadDataFromAPI() {
         const echteRol = AppState.currentUser?.role;
         const magConcepten = ['admin', 'roosterverantwoordelijke',
             'hoofdverantwoordelijke', 'teamverantwoordelijke'].includes(echteRol);
-        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData, leaveRoundsData, swapRequestsData] = await Promise.all([
+        const [usersData, shiftsData, availabilityData, shiftBlocksData, settingsData, draftsData, activitiesData, leaveRoundsData, swapRequestsData, dagActiviteitenData] = await Promise.all([
             dataApiFetch('/users').catch(err => { loadErrors.push('users'); console.error('[LoadData] Failed to load users:', err); return { users: [] }; }),
             dataApiFetch(`/shifts?startDate=${_getInitialWindowStart()}&endDate=${_getInitialWindowEnd()}`).catch(err => { loadErrors.push('shifts'); console.error('[LoadData] Failed to load shifts:', err); return { shifts: [] }; }),
             // #378: hetzelfde venster als de diensten, maar een jaar breed, want
@@ -427,7 +436,9 @@ async function loadDataFromAPI() {
             // startpagina precies bij het inloggen, en las de sleepbescherming
             // uit #175 een lege lijst. Wie inlogde, home bekeek en weer wegging
             // miste elke ruil- of overnamevraag.
-            dataApiFetch('/swap-requests').catch(err => { loadErrors.push('ruilverzoeken'); console.error('[LoadData] Failed to load swap-requests:', err); return { swapRequests: [] }; })
+            dataApiFetch('/swap-requests').catch(err => { loadErrors.push('ruilverzoeken'); console.error('[LoadData] Failed to load swap-requests:', err); return { swapRequests: [] }; }),
+            // #418: zelfde venster als de diensten.
+            dataApiFetch(`/dag-activiteiten?startDate=${_getInitialWindowStart()}&endDate=${_getDagActiviteitenVensterEind()}`).catch(err => { loadErrors.push('algemene activiteiten'); console.error('[LoadData] Failed to load dag-activiteiten:', err); return { dagActiviteiten: [] }; })
         ]);
 
         if (loadErrors.length > 0) {
@@ -455,6 +466,7 @@ async function loadDataFromAPI() {
         DataStore.shiftBlocks = (Array.isArray(shiftBlocksData) ? shiftBlocksData : []).map(normalizeShiftBlock);
         AppState.leaveRounds = leaveRoundsData.rounds || [];
         DataStore.swapRequests = swapRequestsData.swapRequests || [];
+        DataStore.dagActiviteiten = dagActiviteitenData.dagActiviteiten || [];
 
         // Merge API settings with defaults
         const apiSettings = settingsData.settings || {};
@@ -867,6 +879,47 @@ async function refreshActivities() {
         console.error('[Refresh] Failed to refresh activities:', error);
         return [];
     }
+}
+
+// ===== ALGEMENE ACTIVITEITEN (#418) =====
+// Aan een DAG, niet aan een persoon: een brandoefening, een teamdag. Ze staan
+// in de dagkop van de planning, op het beginscherm en in de agendafeed, en ze
+// verlagen de bezetting NIET.
+
+function getDagActiviteiten(datum) {
+    return (DataStore.dagActiviteiten || [])
+        .filter(a => a.date === datum)
+        .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+}
+
+async function refreshDagActiviteiten() {
+    const data = await dataApiFetch(`/dag-activiteiten?startDate=${_getInitialWindowStart()}&endDate=${_getDagActiviteitenVensterEind()}`);
+    DataStore.dagActiviteiten = data.dagActiviteiten || [];
+}
+
+async function bewaarDagActiviteit(waarden, id = null) {
+    await dataApiFetch(id ? `/dag-activiteiten/${id}` : '/dag-activiteiten', {
+        method: id ? 'PUT' : 'POST',
+        body: JSON.stringify(waarden),
+    });
+    await refreshDagActiviteiten();
+}
+
+async function verwijderDagActiviteit(id) {
+    await dataApiFetch(`/dag-activiteiten/${id}`, { method: 'DELETE' });
+    await refreshDagActiviteiten();
+}
+
+// #408: dezelfde activiteit voor meerdere mensen, in één verzoek en één
+// transactie: alles of niets. Eén verversing achteraf in plaats van één per
+// persoon.
+async function addActivities(lijst) {
+    const data = await dataApiFetch('/shift-activities/batch', {
+        method: 'POST',
+        body: JSON.stringify({ activiteiten: lijst }),
+    });
+    await refreshActivities();
+    return (data.activities || []).map(normalizeActivity);
 }
 
 async function addActivity(activityData) {

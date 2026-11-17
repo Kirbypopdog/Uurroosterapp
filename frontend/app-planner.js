@@ -110,6 +110,62 @@ function renderPlanning() {
 let _bezettingIndex = null;
 let _bezettingBron = null;
 
+// #401: het label van een afwezigheidstype, uit de ene bron die dat bepaalt
+// (ABSENCE_TYPES in app-availability.js). Dat bestand laadt ná dit bestand,
+// dus de controle is nodig; de terugval is bewust het neutrale "Afwezig" en
+// niet het ruwe type, want `ziek` in beeld is iets anders dan "Ziekte".
+function afwezigheidsLabel(type) {
+    if (typeof ABSENCE_LABELS !== 'undefined' && ABSENCE_LABELS[type]) return ABSENCE_LABELS[type];
+    return 'Afwezig';
+}
+
+// #415: een afwezigheid op een dag ZONDER dienst.
+//
+// Het lint hieronder hangt aan een dienstblok, dus wie die dag niets ingepland
+// had, was in de planning niet te zien als afwezig. Je merkte het pas als je er
+// een dienst probeerde te zetten — of helemaal niet, als niemand dat probeerde.
+// Karen bracht het op: ze wil kunnen laten zien dat ze verlof heeft op een dag
+// waar toch geen dienst staat.
+//
+// Dat is geen randgeval. In productie staan 116 afwezigheidsdagen op een dag
+// zonder dienst: 59 van de 108 verlofdagen, 48 van de 133 ziektedagen, en alle
+// zes de "andere" van Karen.
+//
+// Er stond al zoiets (#173), maar alleen voor het type `vrij` — net het type
+// dat in #402 verouderd is verklaard. De vier types die wél gebruikt worden
+// kregen niets.
+//
+// Een lege cel is 143,7px breed, waar een dienstblok van acht uur er 67 krijgt.
+// Hier is dus plaats voor het WOORD zelf; het lint in de hoek was een antwoord
+// op krapte die hier niet bestaat.
+function afwezigheidsCelMarkering(type) {
+    const woord = escapeHtml(afwezigheidsLabel(type));
+    return `<div class="afwezig-cel"><span class="afwezig-cel-woord">${woord}</span></div>`;
+}
+
+// #401: het type afwezigheid als een schuin LINTJE over de rechterbovenhoek.
+//
+// Drie ontwerpen sneuvelden hiervoor, en elk om een reden die het onthouden
+// waard is:
+//
+//  1. Een rood chipje op de regel van de activiteiten. Niet te onderscheiden
+//     van een activiteitenchip, dus "Verlof" las als nóg een activiteit. Wat
+//     het verraadde was niet de tekst maar het PIL-VLAK eronder.
+//  2. Het woord schuin maar doorzichtig over de teamkleur. Onder het blok ligt
+//     de teamkleur, en die verschilt per team — op het ene team las je het
+//     woord, op het andere niet. Dezelfde val als bij #163 met de chips.
+//  3. Datzelfde woord als behang, herhaald. Een tegelpatroon heeft een groot
+//     vlak nodig; dit blok is ~75 bij 75 en dan lopen de woorden in elkaar.
+//
+// Het lint lost alle drie tegelijk op: het heeft zijn EIGEN ondergrond (dus
+// leesbaar op elke teamkleur), het ligt in de hoek (dus het raakt de
+// gecentreerde tijd niet en hoeft niets te delen met de activiteitenchips), en
+// het is één element in plaats van een patroon dat om ruimte vecht.
+function afwezigheidsLint(type) {
+    const woord = escapeHtml(afwezigheidsLabel(type));
+    return `<span class="afwezig-lint" aria-hidden="true"><span class="afwezig-lint-band">${woord}</span></span>`;
+}
+
 function _bouwBezettingIndex() {
     const shifts = DataStore.shifts || [];
     const activities = DataStore.activities || [];
@@ -171,33 +227,372 @@ function _bezetting() {
 }
 
 /**
- * #163: de activiteitenchips stonden op zeven pixels, afgekort tot vier à vijf
- * letters ("Overl", "Vorm"). Dat was voor veel mensen niet te lezen, en groter
- * kon niet: op 8px hadden twee chips al 61 pixels nodig terwijl een dienst van
- * acht uur er 59 geeft.
+ * Welk tijdlabel past er in een dienstblok van deze breedte? (#147, #208, #404)
  *
- * Ik heb het eerst omgebouwd naar een balkje onderaan op de juiste uren. Victor
- * vond de chips beter, omdat je daarmee ziet WAT er staat en niet alleen
- * wanneer. Terecht, en het echte probleem was de tekst en niet de vorm.
+ * Een volledig bereik als "09:00-15:00" is 62,9px breed. Nagemeten op een
+ * venster van 1440px is een dagcel 143,7px en één uur dus 8,45px:
  *
- * De codes zijn nu twee letters (zie ACTIVITY_TYPE_LABELS_SHORT). Nagemeten:
- * "Overl" op 7px is 25 pixels breed, "OL" op 11px is 23. Er passen er dus
- * evenveel, maar de letter is de helft groter. De volledige naam en de tijd
- * staan in de tooltip.
+ *   6 uur   -> 50,4px   te smal
+ *   7 uur   -> 59,2px   te smal
+ *   7,5 uur -> 63,4px   past net
+ *   8 uur   -> 67,2px   past
  *
- * @param {Array} activiteiten  de activiteiten van deze dienst
+ * De drempel stond op 6 uur, waardoor alles tussen 6 en 7,5 uur gecentreerd
+ * werd afgekapt tot "9:00-15:0". Dat leest als een ándere tijd — dezelfde fout
+ * als bij het doorloopblok in #208 en bij de activiteitenchips in #405. Onder
+ * de drempel alleen de starttijd: die is ondubbelzinnig, een afgeknipte reeks
+ * niet.
+ *
+ * @param {string} startTime     begintijd van de dienst
+ * @param {string} endTime       eindtijd van de dienst
+ * @param {number} zichtbaarUren hoeveel uren van de tijdlijn het blok beslaat
+ *                               (iets anders dan de duur: een nachtdienst kan
+ *                               op een geknipte cel veel smaller uitkomen)
  */
-function activiteitenChips(activiteiten) {
-    if (!activiteiten || !activiteiten.length) return '';
-    const chips = activiteiten.map(act => {
-        const kort = ACTIVITY_TYPE_LABELS_SHORT[act.type] || act.type;
+const VOLLEDIG_BEREIK_VANAF_UREN = 7.5;
+
+function tijdLabelVoorBlok(startTime, endTime, zichtbaarUren) {
+    return zichtbaarUren < VOLLEDIG_BEREIK_VANAF_UREN
+        ? startTime
+        : `${startTime}-${endTime}`;
+}
+
+/**
+ * Activiteiten in een dienstblok: een wit pilletje met een pictogram en de
+ * uren (#416).
+ *
+ * Dit is de vierde vorm, en de geschiedenis hoort erbij:
+ *
+ *  - #163  tekstchips met het TYPE. In de praktijk is 96% een vergadering, dus
+ *          de chip toonde bij bijna elke dienst hetzelfde woord, en bij drie
+ *          activiteiten sneed hij zijn eigen tekst door (#405).
+ *  - #406  een balkje van 4px op de echte uren. Dat zei WANNEER, maar de
+ *          weekweergave heeft geen urenschaal om het tegen af te lezen: een
+ *          streepje op twee derde van een blok van 67 pixels is geen tijdstip.
+ *          Victor vond het in gebruik te weinig zeggen.
+ *  - #416  dit. Het uur staat er nu als GETAL (`13–16u`), en de soort als
+ *          pictogram in plaats van als woord of kleurvlak.
+ *
+ * Wat er in de weg zat bij het ontwerpen: alle proefblokken waren 36 pixels
+ * hoog getekend, terwijl het echte blok 56 hoog is — de rij krijgt zijn hoogte
+ * van de naamcel (avatar, naam, urenregel). Er is dus ruimte voor een tweede
+ * regel onder de tijd. Meet het echte blok voor je hier iets aan verandert.
+ *
+ * WEEKWEERGAVE: één pilletje per dienst, gecentreerd onderaan. Het staat niet
+ * op de uren van de activiteit — dat kan daar niets betekenen — maar het ZEGT
+ * de uren. Meer dan één activiteit: de eerste, met `+1`. Dat komt weinig voor
+ * (9 van de 414 diensten met een activiteit in zestig dagen productie).
+ *
+ * DAGWEERGAVE: één pilletje per activiteit, uitgerekt over de echte uren, met
+ * de omschrijving erin. Daar is een uur 59 pixels en ligt de bezettingsbalk er
+ * recht boven, dus daar betekent de plaats wél iets.
+ *
+ * Een nachtdienst over twee dagcellen kreeg met het balkje niets, omdat een
+ * percentage binnen dat blok geen tijdstip is. Het weekpilletje hangt niet van
+ * een plaats af, dus die dienst toont zijn activiteit nu gewoon.
+ *
+ * Welke TEKST er in het pilletje komt beslist deze functie niet: dat hangt af
+ * van hoe breed het blok werkelijk getekend wordt, en dat weet alleen de
+ * browser. Hier gaan de mogelijke vormen als data-attributen mee;
+ * `pasPilletjesAan()` kiest na het tekenen de langste die past. Tot dan staat
+ * er alleen het pictogram — de vorm die altijd past, dus faalt die tweede stap,
+ * dan staat er te weinig maar nooit iets afgesnedens.
+ *
+ * @param {Array}  activiteiten  de activiteiten van deze medewerker op deze dag
+ * @param {object} blok
+ * @param {number} blok.dienstVan     het uur waarop de DIENST begint
+ * @param {number} blok.dienstTot     het uur waarop hij eindigt; bij een
+ *                                    nachtdienst kleiner dan dienstVan
+ * @param {number} blok.blokStartUur  het uur waarop het getekende blok begint
+ * @param {number} blok.blokUren      hoeveel uren breed het blok getekend is
+ * @param {boolean} blok.isDagweergave
+ */
+function activiteitenPilletjes(activiteiten, blok) {
+    if (!activiteiten || !activiteiten.length || !blok) return '';
+
+    const naarUur = (t) => {
+        const [u, m] = String(t).split(':').map(Number);
+        if (!Number.isFinite(u)) return null;
+        return u + (Number.isFinite(m) ? m : 0) / 60;
+    };
+
+    // Alleen wat binnen de DIENST valt. De activiteitenmodal waarschuwt bij een
+    // activiteit buiten de diensturen maar staat hem toe; zo'n activiteit hoort
+    // niet in het blok, want daar zou hij beweren dat hij in de dienst valt.
+    // Bij een nachtdienst loopt de dienst over middernacht: een uur vóór het
+    // begin van de dienst is dan een uur van de ochtend erna.
+    const nacht = blok.dienstTot <= blok.dienstVan;
+    const dienstEind = nacht ? blok.dienstTot + 24 : blok.dienstTot;
+    const binnenDienst = activiteiten
+        .map(act => {
+            let van = naarUur(act.startTime);
+            let tot = naarUur(act.endTime);
+            if (van === null || tot === null) return null;
+            if (nacht && van < blok.dienstVan) { van += 24; tot += 24; }
+            if (tot <= van) tot += 24;
+            if (!(Math.min(tot, dienstEind) > Math.max(van, blok.dienstVan))) return null;
+            return { act, van, tot };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.van - b.van);
+    if (!binnenDienst.length) return '';
+
+    const icoon = (type) => {
+        const pad = (typeof ACTIVITY_TYPE_ICONS !== 'undefined' && ACTIVITY_TYPE_ICONS[type]) || '';
+        return pad ? `<svg class="activity-pil-icoon" viewBox="0 0 24 24" aria-hidden="true">${pad}</svg>` : '';
+    };
+    const regel = ({ act }) => {
         const vol = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
-        const t = `${String(act.startTime).substring(0, 5)}-${String(act.endTime).substring(0, 5)}`;
-        const titel = escapeHtml(`${vol} ${t}${act.description ? ' — ' + act.description : ''}`);
-        return `<span class="activity-chip activity-type-${escapeHtml(act.type)}"`
-             + ` data-activity-id="${act.id}" data-tooltip="${titel}">${escapeHtml(kort)}</span>`;
+        const wat = act.description || vol;
+        // Het type alleen erbij als de omschrijving het niet al zegt:
+        // "Teamvergadering · Vergadering" is twee keer hetzelfde.
+        const soort = String(wat).toLowerCase().includes(String(vol).toLowerCase()) ? '' : ` · ${vol}`;
+        return `${activiteitUrenVoluit(act)} · ${wat}${soort}`;
+    };
+
+    if (!blok.isDagweergave) {
+        const eerste = binnenDienst[0].act;
+        const meer = binnenDienst.length - 1;
+        // Eén activiteit: de klik opent die activiteit. Meer dan één: geen id,
+        // dus de klik valt door naar het blok en opent het dienstvenster, waar
+        // ze allemaal in staan.
+        const idAttr = meer ? '' : ` data-activity-id="${eerste.id}"`;
+        return `<span class="activity-pil activity-pil--week activity-pil--kaal activity-type-${escapeHtml(eerste.type)}"${idAttr}`
+             + ` data-bereik="${escapeHtml(activiteitUrenKort(eerste))}" data-start="${escapeHtml(activiteitStartKort(eerste))}"`
+             + ` data-meer="${meer ? '+' + meer : ''}"`
+             + ` data-tooltip="${escapeHtml(binnenDienst.map(regel).join('\n'))}">`
+             + icoon(eerste.type)
+             + `<span class="activity-pil-tekst"></span><span class="activity-pil-meer"></span></span>`;
+    }
+
+    if (!(blok.blokUren > 0)) return '';
+    const blokEind = blok.blokStartUur + blok.blokUren;
+    return binnenDienst.map(({ act, van, tot }) => {
+        // Alleen het deel dat binnen het GETEKENDE blok valt: in de dagweergave
+        // stopt een nachtdienst bij middernacht.
+        const van2 = Math.max(van, blok.blokStartUur);
+        const tot2 = Math.min(tot, blokEind);
+        if (!(tot2 > van2)) return '';
+        const links = ((van2 - blok.blokStartUur) / blok.blokUren) * 100;
+        const breed = ((tot2 - van2) / blok.blokUren) * 100;
+        const vol = ACTIVITY_TYPE_LABELS_FULL[act.type] || act.type;
+        return `<span class="activity-pil activity-pil--uren activity-pil--kaal activity-type-${escapeHtml(act.type)}"`
+             + ` style="left:${links.toFixed(2)}%;width:calc(${breed.toFixed(2)}% - ${PIL_LUCHT}px)"`
+             + ` data-activity-id="${act.id}"`
+             + ` data-bereik="${escapeHtml(activiteitUrenKort(act))}" data-lang="${escapeHtml(activiteitUrenVoluit(act))}"`
+             + ` data-oms="${escapeHtml(act.description || vol)}"`
+             + ` data-tooltip="${escapeHtml(regel({ act }))}">`
+             + icoon(act.type)
+             + `<span class="activity-pil-tekst"></span><span class="activity-pil-oms"></span></span>`;
     }).join('');
-    return `<div class="activity-chips-row">${chips}</div>`;
+}
+
+// "13:00" → "13", "09:30" → "9:30". Zonder voorloopnul: het pilletje is smal.
+function _uurKort(t) {
+    const [u, m] = String(t).split(':').map(Number);
+    if (!Number.isFinite(u)) return '';
+    return m ? `${u}:${String(m).padStart(2, '0')}` : String(u);
+}
+// Valt de activiteit op hele uren, dan `13–16u`. Anders `9:30–16:30`, en dan
+// aan BEIDE kanten met minuten: `10–11:30` leest als tien tot elf.
+function activiteitUrenKort(act) {
+    const van = String(act.startTime).substring(0, 5);
+    const tot = String(act.endTime).substring(0, 5);
+    const heel = van.endsWith(':00') && tot.endsWith(':00');
+    if (heel) return `${_uurKort(van)}–${_uurKort(tot)}u`;
+    const metMin = (t) => { const [u, m] = t.split(':'); return `${Number(u)}:${m}`; };
+    return `${metMin(van)}–${metMin(tot)}`;
+}
+function activiteitStartKort(act) {
+    const van = String(act.startTime).substring(0, 5);
+    return van.endsWith(':00') ? `${_uurKort(van)}u` : _uurKort(van);
+}
+function activiteitUrenVoluit(act) {
+    return `${String(act.startTime).substring(0, 5)}–${String(act.endTime).substring(0, 5)}`;
+}
+
+// De maten van het pilletje. Ze staan ook in styles.css bij `.activity-pil`;
+// wie de ene verandert moet de andere meenemen, want hierop wordt gerekend of
+// een vorm past.
+const PIL_ICOON = 10;     // breedte van het pictogram
+const PIL_TUSSEN = 3;     // ruimte tussen pictogram en tekst, en tussen tekst en "+1"
+const PIL_VULLING = 9;    // 4 links en 5 rechts binnen het pilletje
+const PIL_LUCHT = 4;      // 2 links en 2 rechts tussen pilletje en rand van het blok
+
+/**
+ * Kiest de langste vorm van het weekpilletje die in `beschikbaarPx` past.
+ *
+ *     👥 13–16u +1   →   👥 13–16u   →   👥 13u   →   👥
+ *
+ * Er wordt nooit een getal doormidden gesneden: past een vorm niet, dan valt
+ * hij als geheel weg. Een afgekapte tijd leest als een ANDERE tijd (#208).
+ *
+ * Bij meer dan één activiteit gaat `+1` vóór het uur: liever weten dát er nog
+ * een is dan het uur van de eerste zien en de tweede missen.
+ *
+ * @param {{bereik:string, start:string, meer:string}} vormen
+ * @param {number} beschikbaarPx  de binnenbreedte van het blok
+ * @param {(tekst:string)=>number} meet  hoe breed een tekst getekend wordt
+ * @returns {{tekst:string, meer:string}}
+ */
+function kiesPilVorm(vormen, beschikbaarPx, meet) {
+    const nodig = (...delen) => PIL_ICOON
+        + delen.filter(Boolean).reduce((som, deel) => som + PIL_TUSSEN + meet(deel), 0)
+        + PIL_VULLING + PIL_LUCHT;
+    const past = (...delen) => nodig(...delen) <= beschikbaarPx;
+    const { bereik, start, meer } = vormen;
+    if (meer) {
+        if (past(bereik, meer)) return { tekst: bereik, meer };
+        if (past(meer)) return { tekst: '', meer };
+        return { tekst: '', meer: '' };
+    }
+    if (bereik && past(bereik)) return { tekst: bereik, meer: '' };
+    if (start && past(start)) return { tekst: start, meer: '' };
+    return { tekst: '', meer: '' };
+}
+
+/**
+ * Hetzelfde voor het pilletje in de dagweergave, dat zijn eigen breedte heeft:
+ *
+ *     👥 13:00–16:00 Teamvergadering   →   👥 13–16u   →   👥
+ *
+ * De omschrijving mag met een beletselteken afkappen — dat is tekst, geen
+ * tijd — maar er moet wel plaats zijn voor een paar letters, anders staat er
+ * alleen "T…".
+ */
+const PIL_OMS_MINSTENS = 28;
+function kiesPilVormUren(vormen, pilBreedtePx, meet) {
+    const binnen = pilBreedtePx - PIL_VULLING - PIL_ICOON;
+    const { bereik, lang, oms } = vormen;
+    if (lang && oms && binnen >= PIL_TUSSEN + meet(lang) + PIL_TUSSEN + PIL_OMS_MINSTENS) return { tekst: lang, oms };
+    if (lang && !oms && binnen >= PIL_TUSSEN + meet(lang)) return { tekst: lang, oms: '' };
+    if (bereik && binnen >= PIL_TUSSEN + meet(bereik)) return { tekst: bereik, oms: '' };
+    return { tekst: '', oms: '' };
+}
+
+/**
+ * Na het tekenen: geef elk pilletje de langste vorm die in zijn blok past.
+ *
+ * Waarom achteraf en niet bij het opbouwen van de HTML: de breedte van een
+ * dagkolom hangt af van het venster. Rekenen met de maat van een scherm van
+ * 1440 pixels — zoals `VOLLEDIG_BEREIK_VANAF_UREN` voor het tijdlabel doet —
+ * klopt alleen dáár. Het pilletje heeft rond zijn tekst 13 pixels vulling en
+ * lucht nodig, dus het zit dichter op de rand dan het tijdlabel: op een
+ * smaller venster viel in de proef bij 15 van de 28 testblokken het uur weg
+ * terwijl het beginuur nog paste. Meten lost dat op.
+ *
+ * Eerst alles LEZEN en dan pas schrijven, anders herberekent de browser de
+ * opmaak bij elk pilletje opnieuw. De tekst wordt gemeten op een canvas met
+ * het lettertype dat het pilletje werkelijk gebruikt, dus het klopt ook
+ * zolang het weblettertype nog niet geladen is.
+ */
+let _pilMeetCanvas = null;
+const _pilMeetCache = new Map();
+function pasPilletjesAan(wortel) {
+    const el = wortel || (typeof DOM !== 'undefined' ? DOM.rosterCalendar : null);
+    if (!el || typeof el.querySelectorAll !== 'function') return;
+    const pillen = el.querySelectorAll('.activity-pil');
+    if (!pillen.length) return;
+
+    const stijl = getComputedStyle(pillen[0]);
+    const font = `${stijl.fontWeight} ${stijl.fontSize} ${stijl.fontFamily}`;
+    if (!_pilMeetCanvas) _pilMeetCanvas = document.createElement('canvas');
+    const ctx = _pilMeetCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.font = font;
+    // `font-variant-numeric: tabular-nums` bestaat op een canvas niet overal;
+    // waar het ontbreekt meet het een fractie te smal, en vangt de afronding
+    // naar boven het op.
+    const meet = (tekst) => {
+        const sleutel = font + '|' + tekst;
+        if (!_pilMeetCache.has(sleutel)) _pilMeetCache.set(sleutel, Math.ceil(ctx.measureText(tekst).width) + 1);
+        return _pilMeetCache.get(sleutel);
+    };
+
+    const werk = [];
+    pillen.forEach(pil => {
+        const d = pil.dataset;
+        if (pil.classList.contains('activity-pil--uren')) {
+            const breedte = pil.offsetWidth;
+            if (!breedte) return;                       // verborgen dagkolom
+            const vorm = kiesPilVormUren({ bereik: d.bereik, lang: d.lang, oms: d.oms }, breedte, meet);
+            werk.push({ pil, tekst: vorm.tekst, extra: vorm.oms, extraKlasse: '.activity-pil-oms' });
+        } else {
+            const blok = pil.parentElement;
+            let breedte = blok ? blok.clientWidth : 0;
+            if (!breedte) return;
+            // Op een telefoon staat het pilletje NAAST de tijd in plaats van
+            // eronder (zie styles.css); dan is de tijd geen buur maar een
+            // concurrent, en gaat haar breedte van de ruimte af.
+            if (getComputedStyle(pil).position === 'static') {
+                const tijd = blok.querySelector('.block-time');
+                if (tijd && tijd.offsetWidth) breedte -= tijd.offsetWidth + 4;
+            }
+            const vorm = kiesPilVorm({ bereik: d.bereik, start: d.start, meer: d.meer }, breedte, meet);
+            werk.push({ pil, tekst: vorm.tekst, extra: vorm.meer, extraKlasse: '.activity-pil-meer' });
+        }
+    });
+    werk.forEach(({ pil, tekst, extra, extraKlasse }) => {
+        const tekstEl = pil.querySelector('.activity-pil-tekst');
+        const extraEl = pil.querySelector(extraKlasse);
+        if (tekstEl && tekstEl.textContent !== tekst) tekstEl.textContent = tekst;
+        if (extraEl && extraEl.textContent !== extra) extraEl.textContent = extra;
+        pil.classList.toggle('activity-pil--kaal', !tekst && !extra);
+    });
+}
+
+// Het venster verandert van maat, of het weblettertype komt later binnen dan
+// de eerste tekening: in beide gevallen past er iets anders. Dit hangt hier en
+// niet in `setupEventListeners`, zodat een oude app-init.js uit de cache er
+// niet over kan struikelen (#412).
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    let _pilResizeTimer = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(_pilResizeTimer);
+        _pilResizeTimer = setTimeout(() => pasPilletjesAan(), 120);
+    });
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => { _pilMeetCache.clear(); pasPilletjesAan(); }).catch(() => {});
+    }
+}
+
+/**
+ * #418: het label van een algemene activiteit. Met uren "14:00 Brandoefening",
+ * zonder uren alleen de titel: dan geldt ze de hele dag.
+ */
+function dagActiviteitTekst(a) {
+    return a.startTime ? `${a.startTime} ${a.titel}` : a.titel;
+}
+function dagActiviteitTooltip(a) {
+    const wanneer = a.startTime ? `${a.startTime}–${a.endTime}` : 'Hele dag';
+    return `${wanneer} · ${a.titel}${a.omschrijving ? `\n${a.omschrijving}` : ''}`;
+}
+
+/**
+ * De chips van de algemene activiteiten van één dag.
+ *
+ * Er staan er hoogstens TWEE, en daarna "+n": de dagkop is een kaartje van
+ * ~140 pixels breed boven elke kolom, en een derde regel duwt het hele raster
+ * omlaag. Wie meer wil zien, gaat erop staan of opent de dag. In de balk van
+ * de dagweergave is er wél plaats, dus daar staan ze allemaal.
+ *
+ * Wie mag beheren krijgt een knop (klik = bewerken), de anderen tekst met een
+ * tooltip. Een knop die niets doet is een valse belofte (#400).
+ */
+const DAGACT_ZICHTBAAR = 2;
+function dagActiviteitenChips(activiteiten, magBeheren, maxZichtbaar = DAGACT_ZICHTBAAR) {
+    if (!activiteiten || !activiteiten.length) return '';
+    const tag = magBeheren ? 'button' : 'span';
+    const zichtbaar = activiteiten.slice(0, maxZichtbaar);
+    const rest = activiteiten.slice(maxZichtbaar);
+    const chips = zichtbaar.map(a =>
+        `<${tag}${magBeheren ? ' type="button"' : ''} class="dagact-chip" data-dagact-id="${a.id}"`
+        + ` data-tooltip="${escapeHtml(dagActiviteitTooltip(a))}" data-tooltip-pos="bottom">`
+        + `${escapeHtml(dagActiviteitTekst(a))}</${tag}>`).join('');
+    const meer = rest.length
+        ? `<span class="dagact-chip dagact-chip--meer" data-tooltip="${escapeHtml(rest.map(dagActiviteitTooltip).join('\n'))}" data-tooltip-pos="bottom">+${rest.length}</span>`
+        : '';
+    return `<span class="dagact-lijst">${chips}${meer}</span>`;
 }
 
 function calcPlanningHourlyHeadcount(date, hour) {
@@ -710,11 +1105,11 @@ function renderOvernightContinuation(empId, date, START_HOUR, TOTAL_HOURS) {
             // blok van 20 pixels waar het er 40 nodig heeft. Je las dan "→07:0"
             // of "→0…", en dat leest als een ander tijdstip. Dezelfde regel als
             // bij de gewone blokken: onder 2,5 zichtbare uren geen label, onder
-            // de 6 uur geen activiteitenchips.
+            // de 7,5 uur geen volledig tijdbereik (#404).
             const doorloopUren = endFrac > START_HOUR ? endFrac - START_HOUR : 0;
             let doorloopKlasse = '';
             if (doorloopUren < 2.5)    doorloopKlasse = ' timeline-block--xs';
-            else if (doorloopUren < 6) doorloopKlasse = ' timeline-block--sm';
+            else if (doorloopUren < 7.5) doorloopKlasse = ' timeline-block--sm';
             html += `<div class="timeline-block team-${prevShift.team} nacht overnight-continuation${doorloopKlasse}"
                          data-shift-id="${prevShift.id}"
                          data-employee-id="${prevShift.employeeId}"
@@ -830,6 +1225,20 @@ function renderTimelineView() {
 
     // Header row with days
     const _todayStr = formatDateYYYYMMDD(new Date());
+    // #418: algemene activiteiten in de dagkop. In de dagweergave en op een
+    // telefoon is die kop verborgen; daar staat dezelfde informatie in een
+    // balk boven het raster, één groep per dag, en CSS toont de groep van de
+    // dag die zichtbaar is (zie `.dagact-balk` in styles.css). Zo hoeft er bij
+    // het wisselen van dag niets opnieuw getekend te worden.
+    const magDagactBeheren = typeof canManageDagActiviteiten === 'function' && canManageDagActiviteiten();
+    const dagactKnop = document.getElementById('dagact-toevoegen-btn');
+    if (dagactKnop) dagactKnop.classList.toggle('hidden', !magDagactBeheren);
+    const balkGroepen = weekDates.map((d, i) => {
+        const chips = dagActiviteitenChips(getDagActiviteiten(d), magDagactBeheren, Infinity);
+        return chips ? `<div class="dagact-balk-dag" data-dag="${i}">${chips}</div>` : '';
+    }).join('');
+    if (balkGroepen) html += `<div class="dagact-balk">${balkGroepen}</div>`;
+
     html += '<div class="timeline-header">';
     html += '<div class="timeline-name-header">Medewerker</div>';
     weekDates.forEach((date) => {
@@ -863,6 +1272,7 @@ function renderTimelineView() {
         html += `<div class="${headerClass}" data-date="${date}"${holidayTip}>
             <span class="day-name">${dayName}</span>
             <span class="day-num">${dateNum}${feestdagBadge}${closedBadge}</span>
+            ${dagActiviteitenChips(getDagActiviteiten(date), magDagactBeheren)}
         </div>`;
     });
     html += '</div>';
@@ -943,11 +1353,21 @@ function renderTimelineView() {
                         // Filter by visible teams (include shifts without team)
                         shifts = shifts.filter(s => !s.team || AppState.visibleTeams.includes(s.team));
 
-                        // Toon "niet werkzaam" markering op lege cellen (#173)
+                        // #415: een afwezigheid op een dag zonder dienst. Dit
+                        // stond er alleen voor het type `vrij` (#173); zie
+                        // afwezigheidsCelMarkering() voor waarom dat te weinig was.
+                        //
+                        // Het label toont het TYPE en nooit het redenveld: bij
+                        // ziekte is dat gezondheidsinformatie (#152), en
+                        // `GET /availability` maakt `reason` juist daarom leeg
+                        // voor wie geen beheerder is. De oude tooltip zette hem
+                        // er wél in.
                         const cellAvail = getAvailability(emp.id, date);
-                        if (!shiftBlock && shifts.length === 0 && cellAvail?.type === 'vrij') {
-                            const nwReason = cellAvail.reason ? ` · ${escapeHtml(cellAvail.reason)}` : '';
-                            html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                        const celAfwezig = !!(cellAvail && cellAvail.type
+                            && (typeof teltAlsAfwezigheid === 'function'
+                                ? teltAlsAfwezigheid(cellAvail.type) : true));
+                        if (!shiftBlock && shifts.length === 0 && celAfwezig) {
+                            html += afwezigheidsCelMarkering(cellAvail.type);
                         }
 
                         const isDayView = AppState.viewMode === 'day';
@@ -963,8 +1383,11 @@ function renderTimelineView() {
                             const availability = getAvailability(shift.employeeId, date);
 
                             // Check if employee is absent - this is a conflict!
-                            const validAbsenceTypes = ['verlof', 'ziek', 'overuren', 'vorming', 'andere'];
-                            const isAbsent = availability && availability.type && validAbsenceTypes.includes(availability.type);
+                            // #400: hier stond een eigen lijstje dat 'vrij' uitsloot. Of een type
+                            // als afwezigheid telt staat in ABSENCE_TYPES, en nergens anders.
+                            const isAbsent = !!(availability && availability.type
+                                && (typeof teltAlsAfwezigheid === 'function'
+                                    ? teltAlsAfwezigheid(availability.type) : true));
 
                             const [startHour, startMin] = shift.startTime.split(':').map(Number);
                             const [endHour, endMin] = shift.endTime.split(':').map(Number);
@@ -1039,9 +1462,16 @@ function renderTimelineView() {
                             if (isOvernight) {
                                 titleText += ' (nachtdienst)';
                             }
+                            // #401: het type stond alleen nog in de tooltip, dus je moest
+                            // met de muis op het blok gaan staan om te zien dát er
+                            // iemand verlof had. Het label gaat nu ook in het blok zelf,
+                            // zie `afwezigLabel` hieronder.
+                            //
+                            // ABSENCE_LABELS komt uit ABSENCE_TYPES (app-availability.js).
+                            // Hier stond een eigen kopie van die labels; dat is precies
+                            // het soort tweede lijstje dat in #400 uiteenliep.
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'vrij': 'Vrij' };
-                                titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
+                                titleText = `CONFLICT: ${afwezigheidsLabel(availability.type)}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
                                 titleText += `\n${validation.errors.map(e => e.message).join('\n')}`;
@@ -1075,20 +1505,22 @@ function renderTimelineView() {
                             // "22:00-07:00" 57px, dus ruwweg 2,5 en 6 uur breedte.
                             const zichtbaarUren = Math.max(0, breedteUren || 0);
                             if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
-                            else if (zichtbaarUren < 6) blockClass += ' timeline-block--sm';
+                            else if (zichtbaarUren < 7.5) blockClass += ' timeline-block--sm';
 
-                            // #163: activiteiten als balkje onderaan, op de uren waar ze
-                            // vallen, in plaats van als tekstchips die om breedte vochten.
+                            // #416: activiteiten als wit pilletje met pictogram en uren.
+                            // Zie activiteitenPilletjes() voor waarom dit geen balkje
+                            // (#406) en geen tekstchip (#163) meer is.
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            const actChips = activiteitenChips(shiftActivities);
+                            const actPilletjes = activiteitenPilletjes(shiftActivities, {
+                                dienstVan: startFrac,
+                                dienstTot: endHour + endMin / 60,
+                                blokStartUur: Math.max(startFrac, START_HOUR),
+                                blokUren: breedteUren,
+                                isDagweergave: isDayView,
+                            });
 
-                            // Show only start time when block is too narrow for full range (#147)
-                            // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
-                            // niet, dus dan alleen de starttijd. Die is
-                            // ondubbelzinnig, een afgeknipte reeks niet.
-                            const timeLabel = zichtbaarUren < 6
-                                ? shift.startTime
-                                : `${shift.startTime}-${shift.endTime}`;
+                            // Welk label past er? Zie tijdLabelVoorBlok() (#147, #404).
+                            const timeLabel = tijdLabelVoorBlok(shift.startTime, shift.endTime, zichtbaarUren);
 
                             // #274: een dienstblok is een div en stond dus niet
                             // in de tabvolgorde; met het toetsenbord was er geen
@@ -1121,8 +1553,9 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
+                                ${isAbsent ? afwezigheidsLint(availability.type) : ''}
                                 <span class="block-time">${timeLabel}</span>
-                                ${actChips}
+                                ${actPilletjes}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -1199,10 +1632,21 @@ function renderTimelineView() {
                             html += `<div class="shift-block-indicator${canRelease2 ? ' shift-block-indicator--clickable' : ''}" data-block-id="${shiftBlock2.id}" data-employee="${emp.id}" data-date="${date}" data-tooltip="${blockReasonLabel(shiftBlock2.reason)}${releaseTip2}" data-tooltip-pos="top">${IconHelper.html('circle-slash', 'xs')}</div>`;
                         }
 
+                        // #415: een afwezigheid op een dag zonder dienst. Dit
+                        // stond er alleen voor het type `vrij` (#173); zie
+                        // afwezigheidsCelMarkering() voor waarom dat te weinig was.
+                        //
+                        // Het label toont het TYPE en nooit het redenveld: bij
+                        // ziekte is dat gezondheidsinformatie (#152), en
+                        // `GET /availability` maakt `reason` juist daarom leeg
+                        // voor wie geen beheerder is. De oude tooltip zette hem
+                        // er wél in.
                         const cellAvail2 = getAvailability(emp.id, date);
-                        if (!shiftBlock2 && shifts.length === 0 && cellAvail2?.type === 'vrij') {
-                            const nwReason2 = cellAvail2.reason ? ` · ${escapeHtml(cellAvail2.reason)}` : '';
-                            html += `<div class="vrij-indicator" data-tooltip="Vrij${nwReason2}" data-tooltip-pos="top">${IconHelper.html('minus', 'xs')}</div>`;
+                        const celAfwezig2 = !!(cellAvail2 && cellAvail2.type
+                            && (typeof teltAlsAfwezigheid === 'function'
+                                ? teltAlsAfwezigheid(cellAvail2.type) : true));
+                        if (!shiftBlock2 && shifts.length === 0 && celAfwezig2) {
+                            html += afwezigheidsCelMarkering(cellAvail2.type);
                         }
 
                         // Doorloop van nachtshift: enkel tonen op maandag (zondag→maandag weekgrens) of in dagweergave
@@ -1216,8 +1660,11 @@ function renderTimelineView() {
                             const availability = getAvailability(shift.employeeId, date);
 
                             // Check if employee is absent - this is a conflict!
-                            const validAbsenceTypes = ['verlof', 'ziek', 'overuren', 'vorming', 'andere'];
-                            const isAbsent = availability && availability.type && validAbsenceTypes.includes(availability.type);
+                            // #400: hier stond een eigen lijstje dat 'vrij' uitsloot. Of een type
+                            // als afwezigheid telt staat in ABSENCE_TYPES, en nergens anders.
+                            const isAbsent = !!(availability && availability.type
+                                && (typeof teltAlsAfwezigheid === 'function'
+                                    ? teltAlsAfwezigheid(availability.type) : true));
 
                             const [startHour, startMin] = shift.startTime.split(':').map(Number);
                             const [endHour, endMin] = shift.endTime.split(':').map(Number);
@@ -1285,9 +1732,16 @@ function renderTimelineView() {
                             if (isOvernight) {
                                 titleText += ' (nachtdienst)';
                             }
+                            // #401: het type stond alleen nog in de tooltip, dus je moest
+                            // met de muis op het blok gaan staan om te zien dát er
+                            // iemand verlof had. Het label gaat nu ook in het blok zelf,
+                            // zie `afwezigLabel` hieronder.
+                            //
+                            // ABSENCE_LABELS komt uit ABSENCE_TYPES (app-availability.js).
+                            // Hier stond een eigen kopie van die labels; dat is precies
+                            // het soort tweede lijstje dat in #400 uiteenliep.
                             if (isAbsent) {
-                                const absenceLabels = { 'verlof': 'Verlof', 'ziek': 'Ziekte', 'overuren': 'Overuren', 'vorming': 'Vorming', 'andere': 'Afwezig', 'vrij': 'Vrij' };
-                                titleText = `CONFLICT: ${absenceLabels[availability.type] || 'Afwezig'}\n${titleText}`;
+                                titleText = `CONFLICT: ${afwezigheidsLabel(availability.type)}\n${titleText}`;
                             }
                             if (!validation.isValid && validation.errors.length > 0) {
                                 titleText += `\n${validation.errors.map(e => e.message).join('\n')}`;
@@ -1320,20 +1774,22 @@ function renderTimelineView() {
                             // "22:00-07:00" 57px, dus ruwweg 2,5 en 6 uur breedte.
                             const zichtbaarUren = Math.max(0, breedteUren || 0);
                             if (zichtbaarUren < 2.5)    blockClass += ' timeline-block--xs';
-                            else if (zichtbaarUren < 6) blockClass += ' timeline-block--sm';
+                            else if (zichtbaarUren < 7.5) blockClass += ' timeline-block--sm';
 
-                            // #163: activiteiten als balkje onderaan, op de uren waar ze
-                            // vallen, in plaats van als tekstchips die om breedte vochten.
+                            // #416: activiteiten als wit pilletje met pictogram en uren.
+                            // Zie activiteitenPilletjes() voor waarom dit geen balkje
+                            // (#406) en geen tekstchip (#163) meer is.
                             const shiftActivities = getActivitiesByEmployee(shift.employeeId, shift.date);
-                            const actChips = activiteitenChips(shiftActivities);
+                            const actPilletjes = activiteitenPilletjes(shiftActivities, {
+                                dienstVan: startFrac,
+                                dienstTot: endHour + endMin / 60,
+                                blokStartUur: Math.max(startFrac, START_HOUR),
+                                blokUren: breedteUren,
+                                isDagweergave: isDayView,
+                            });
 
-                            // Show only start time when block is too narrow for full range (#147)
-                            // Onder ongeveer drie uur breedte past "22:00-07:00" (57px)
-                            // niet, dus dan alleen de starttijd. Die is
-                            // ondubbelzinnig, een afgeknipte reeks niet.
-                            const timeLabel = zichtbaarUren < 6
-                                ? shift.startTime
-                                : `${shift.startTime}-${shift.endTime}`;
+                            // Welk label past er? Zie tijdLabelVoorBlok() (#147, #404).
+                            const timeLabel = tijdLabelVoorBlok(shift.startTime, shift.endTime, zichtbaarUren);
 
                             // #274: een dienstblok is een div en stond dus niet
                             // in de tabvolgorde; met het toetsenbord was er geen
@@ -1366,8 +1822,9 @@ function renderTimelineView() {
                                          data-tooltip="${tooltipText}" data-tooltip-pos="bottom">
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
+                                ${isAbsent ? afwezigheidsLint(availability.type) : ''}
                                 <span class="block-time">${timeLabel}</span>
-                                ${actChips}
+                                ${actPilletjes}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
                         });
@@ -1389,6 +1846,8 @@ function renderTimelineView() {
 
     DOM.rosterCalendar.innerHTML = html;
     IconHelper.init(DOM.rosterCalendar);
+    // #416: nu de blokken een breedte hebben, kan elk pilletje zijn vorm kiezen.
+    pasPilletjesAan(DOM.rosterCalendar);
 
     // Set team-header sticky offset based on actual header height
     const header = DOM.rosterCalendar.querySelector('.timeline-header');
@@ -1478,3 +1937,14 @@ function calculateShiftColumns(shifts) {
 // renderShiftBlock removed — was dead code (never called, timeline renders inline in renderTimelineView)
 
 // Keep old function for backwards compatibility if needed elsewhere
+
+// Zodat deze pure functies in Node getest kunnen worden (#401, #404, #416).
+// In de browser bestaat `module` niet, dus dit heeft daar geen effect.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    afwezigheidsLabel, afwezigheidsLint, afwezigheidsCelMarkering,
+    activiteitenPilletjes, kiesPilVorm, kiesPilVormUren, activiteitUrenKort, activiteitStartKort,
+    dagActiviteitenChips, dagActiviteitTekst, DAGACT_ZICHTBAAR,
+    tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN,
+  };
+}

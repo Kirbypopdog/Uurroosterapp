@@ -22,6 +22,216 @@ function beschrijfVerzoekDienst(verzoek) {
     return `${wie}${datum}${tijd}.`;
 }
 
+/**
+ * Het overzicht dat je ziet als je op "Overnemen" drukt.
+ *
+ * Victor vroeg het zo: je neemt een dienst over zonder te zien wat je die week
+ * al hebt. Pas in de planning merkte je dat het je derde late op rij werd, of
+ * dat je boven je contracturen uitkwam. Het venster toont daarom je HELE week,
+ * met de nieuwe dienst erin, je uren ervoor en erna, en de rust tot de dienst
+ * ervóór en erná.
+ *
+ * Puur, zodat het in Node te toetsen is. De uren per dienst komen van buiten
+ * (`urenVan`), omdat die met het nachtforfait rekenen en dat in data.js staat.
+ *
+ * @param {object} invoer
+ * @param {{date:string,startTime:string,endTime:string}} invoer.dienst  de dienst die je overneemt
+ * @param {Array} invoer.eigenDiensten  jouw diensten van de week, plus de dag ervoor en erna
+ * @param {string} invoer.weekStart     maandag van de week van die dienst (YYYY-MM-DD)
+ * @param {number} invoer.minRust       de ingestelde minimale rust in uren
+ * @param {(dienst)=>number} invoer.urenVan
+ */
+function overnameOverzicht({ dienst, eigenDiensten, weekStart, minRust, urenVan }) {
+    const tijd = (t) => String(t || '').substring(0, 5);
+    // De tijdrekening van validation.js, en geen eigen kopie: de grens bij
+    // gelijke begin- en eindtijd is daar al eens rechtgezet (#295), en een
+    // kopie zou die correctie missen en het oneens worden met de backend.
+    const begin = (x) => parseDateTime(x.date, x.startTime);
+    const einde = (x) => getShiftEndDateTime(x);
+    const plusDagen = (datum, n) => {
+        const [j, m, d] = datum.split('-').map(Number);
+        const x = new Date(j, m - 1, d + n);
+        return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+    };
+
+    const nieuw = { ...dienst, startTime: tijd(dienst.startTime), endTime: tijd(dienst.endTime), nieuw: true };
+    const eigen = (eigenDiensten || []).map(x => ({ ...x, startTime: tijd(x.startTime), endTime: tijd(x.endTime) }));
+    const weekEind = plusDagen(weekStart, 6);
+
+    const dagen = [];
+    for (let i = 0; i < 7; i++) {
+        const datum = plusDagen(weekStart, i);
+        const diensten = eigen.filter(x => x.date === datum);
+        if (nieuw.date === datum) diensten.push(nieuw);
+        diensten.sort((a, b) => a.startTime.localeCompare(b.startTime));
+        dagen.push({ datum, diensten });
+    }
+
+    // De rust tot de dichtstbijzijnde eigen dienst ervóór en erná. Een dienst
+    // die met de nieuwe overlapt is geen kwestie van rust maar van op twee
+    // plekken tegelijk staan; die gaat apart.
+    const nb = begin(nieuw), ne = einde(nieuw);
+    let ervoor = null, erna = null;
+    const overlap = [];
+    eigen.forEach(x => {
+        const xb = begin(x), xe = einde(x);
+        if (xb < ne && xe > nb) { overlap.push(x); return; }
+        if (xe <= nb && (!ervoor || xe > einde(ervoor))) ervoor = x;
+        if (xb >= ne && (!erna || xb < begin(erna))) erna = x;
+    });
+    const uur = 3600000;
+    const rust = (van, tot) => Math.round(((tot - van) / uur) * 10) / 10;
+    const rustVoor = ervoor ? { dienst: ervoor, uren: rust(einde(ervoor), nb) } : null;
+    const rustNa = erna ? { dienst: erna, uren: rust(ne, begin(erna)) } : null;
+    if (rustVoor) rustVoor.teKort = rustVoor.uren < minRust;
+    if (rustNa) rustNa.teKort = rustNa.uren < minRust;
+
+    const inWeek = (x) => x.date >= weekStart && x.date <= weekEind;
+    const somUren = eigen.filter(inWeek).reduce((s, x) => s + (Number(urenVan(x)) || 0), 0);
+    const nieuweUren = Number(urenVan(nieuw)) || 0;
+
+    return {
+        dagen,
+        rustVoor,
+        rustNa,
+        overlap,
+        weekUrenVoor: Math.round(somUren * 10) / 10,
+        weekUrenNa: Math.round((somUren + nieuweUren) * 10) / 10,
+        nieuweUren: Math.round(nieuweUren * 10) / 10,
+    };
+}
+
+/**
+ * Opent het overzichtsvenster bij "Overnemen" en wacht op het antwoord.
+ *
+ * Eén venster in plaats van drie stappen: vroeger kwam er eerst een
+ * waarschuwing als je die dag afwezig stond (#318), daarna een vraag om een
+ * bericht (#348) en dan nog "Weet je zeker...?". Die staan nu allemaal hier,
+ * naast je week. Afwezig staan is daarbij een melding in het venster en geen
+ * aparte vraag meer: wie op "Dienst overnemen" drukt terwijl hij die melding
+ * ziet, heeft gekozen.
+ *
+ * De rustcontrole van de backend (#202) blijft de echte grens; dit venster
+ * toont alleen vooraf wat die zal zeggen.
+ *
+ * @returns {Promise<{notes:string}|null>} null als er geannuleerd werd
+ */
+async function openOvernameVenster(verzoek) {
+    const modal = document.getElementById('overname-modal');
+    if (!modal || !verzoek) return null;
+
+    const ik = AppState.currentUser?.id;
+    const datum = verzoek.requester_shift_date;
+    const dienst = {
+        date: datum,
+        startTime: String(verzoek.requester_shift_start || '').substring(0, 5),
+        endTime: String(verzoek.requester_shift_end || '').substring(0, 5),
+    };
+    const weekStart = formatDateYYYYMMDD(getMonday(parseDateOnly(datum)));
+    const plusDagen = (d, n) => { const x = parseDateOnly(d); x.setDate(x.getDate() + n); return formatDateYYYYMMDD(x); };
+    const van = plusDagen(weekStart, -1);
+    const tot = plusDagen(weekStart, 7);
+
+    // De planning laadt drie maanden vooruit. Een overname kan verder liggen;
+    // dan haal je die week zelf op, anders zou het venster een lege week tonen
+    // terwijl je er wel diensten hebt.
+    let eigen = getShiftsByEmployee(ik, van, tot);
+    const geladenTot = (DataStore.shifts || []).reduce((m, x) => (x.date > m ? x.date : m), '');
+    if (tot > geladenTot) {
+        try {
+            const data = await dataApiFetch(`/shifts?startDate=${van}&endDate=${tot}`);
+            eigen = (data.shifts || []).filter(x => String(x.userId ?? x.employeeId) === String(ik));
+        } catch (e) { /* dan toont het venster wat er geladen is */ }
+    }
+
+    const minRust = Number(DataStore.settings?.rules?.minHoursBetweenShifts) || 11;
+    const o = overnameOverzicht({
+        dienst, eigenDiensten: eigen, weekStart, minRust,
+        urenVan: (x) => calculateShiftHours({ ...x, startTime: String(x.startTime).substring(0, 5), endTime: String(x.endTime).substring(0, 5) }),
+    });
+
+    // --- de dienst zelf ---
+    const team = verzoek.requester_shift_team;
+    const teamKleur = DataStore.settings?.teams?.[team]?.color;
+    const kader = document.getElementById('overname-dienst');
+    kader.style.setProperty('--overname-team', teamKleur || '');
+    kader.innerHTML = `
+        <span class="overname-dienst-wanneer">${escapeHtml(formatDate(datum))} · ${escapeHtml(dienst.startTime)}–${escapeHtml(dienst.endTime)}</span>
+        <span class="overname-dienst-wie">${escapeHtml(getTeamName(team) || 'Onbekend team')}${verzoek.requester_name ? ` · van ${escapeHtml(verzoek.requester_name)}` : ''} · ${String(o.nieuweUren).replace('.', ',')}u</span>
+        ${verzoek.message ? `<span class="overname-dienst-notitie">“${escapeHtml(verzoek.message)}”</span>` : ''}`;
+
+    // --- meldingen: afwezig, overlap ---
+    const meldingen = [];
+    const afw = getAvailability(ik, datum);
+    if (afw && afw.type) {
+        const label = (typeof ABSENCE_LABELS !== 'undefined' && ABSENCE_LABELS[afw.type]) || afw.type;
+        meldingen.push(`<div class="alert alert-warning">Je staat die dag genoteerd als <strong>${escapeHtml(label.toLowerCase())}</strong>. Neem je de dienst toch over, dan staan je afwezigheid en je dienst allebei in de planning.</div>`);
+    }
+    if (o.overlap.length) {
+        const x = o.overlap[0];
+        meldingen.push(`<div class="alert alert-error">Je hebt op dat moment al een dienst (${escapeHtml(formatDateShort(parseDateOnly(x.date)))} ${escapeHtml(x.startTime)}–${escapeHtml(x.endTime)}). Overnemen zal geweigerd worden.</div>`);
+    }
+    document.getElementById('overname-meldingen').innerHTML = meldingen.join('');
+
+    // --- de week ---
+    const NAMEN = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
+    const botsend = new Set(o.overlap.map(x => `${x.date}|${x.startTime}`));
+    document.getElementById('overname-week').innerHTML = o.dagen.map((d, i) => {
+        const nr = parseDateOnly(d.datum).getDate();
+        const blokjes = d.diensten.map(x => {
+            const cls = x.nieuw ? ' is-nieuw' : botsend.has(`${x.date}|${x.startTime}`) ? ' is-botsing' : '';
+            const titel = x.nieuw ? 'De dienst die je overneemt' : 'Je eigen dienst';
+            return `<span class="overname-dag-dienst${cls}" title="${titel}">${escapeHtml(x.startTime)}<br>${escapeHtml(x.endTime)}</span>`;
+        }).join('');
+        return `<div class="overname-dag${d.datum === datum ? ' is-dag-zelf' : ''}" aria-label="${escapeHtml(formatDate(d.datum))}">
+            <span class="overname-dag-naam">${NAMEN[i]}</span><span class="overname-dag-nr">${nr}</span>
+            ${blokjes || '<span class="overname-dag-leeg">vrij</span>'}</div>`;
+    }).join('');
+
+    // --- uren ---
+    const contract = Number(getEmployee(ik)?.contractHours) || 0;
+    const fmt = (n) => String(n).replace('.', ',');
+    const boven = contract && o.weekUrenNa > contract;
+    document.getElementById('overname-week-uren').innerHTML =
+        `${fmt(o.weekUrenVoor)}u → <span class="${boven ? 'boven' : ''}">${fmt(o.weekUrenNa)}u</span>${contract ? ` van ${fmt(contract)}u` : ''}`;
+
+    // --- rust ---
+    const rustRegel = (r, woord) => {
+        if (!r) return `<span>Geen eigen dienst ${woord} in de buurt.</span>`;
+        const x = r.dienst;
+        const wanneer = `${formatDateShort(parseDateOnly(x.date))} ${x.startTime}–${x.endTime}`;
+        return `<span class="${r.teKort ? 'te-kort' : ''}">${fmt(r.uren)}u rust ${woord === 'ervoor' ? 'na' : 'tot'} je dienst ${woord} (${escapeHtml(wanneer)})${r.teKort ? ` — minder dan ${fmt(minRust)}u` : ''}</span>`;
+    };
+    document.getElementById('overname-rust').innerHTML = rustRegel(o.rustVoor, 'ervoor') + rustRegel(o.rustNa, 'erna');
+
+    const bericht = document.getElementById('overname-bericht');
+    bericht.value = '';
+    const ok = document.getElementById('overname-ok');
+    const annuleer = document.getElementById('overname-annuleer');
+
+    toonModal(modal);
+    setTimeout(() => ok.focus(), 50);
+
+    return new Promise((resolve) => {
+        const klaar = (waarde) => {
+            verbergModal(modal);
+            ok.removeEventListener('click', bijOk);
+            annuleer.removeEventListener('click', bijAnnuleer);
+            modal.removeEventListener('mousedown', bijAchtergrond);
+            document.removeEventListener('keydown', bijToets);
+            resolve(waarde);
+        };
+        const bijOk = () => klaar({ notes: bericht.value.trim() });
+        const bijAnnuleer = () => klaar(null);
+        const bijAchtergrond = (e) => { if (e.target === modal) klaar(null); };
+        const bijToets = (e) => { if (e.key === 'Escape') klaar(null); };
+        ok.addEventListener('click', bijOk);
+        annuleer.addEventListener('click', bijAnnuleer);
+        modal.addEventListener('mousedown', bijAchtergrond);
+        document.addEventListener('keydown', bijToets);
+    });
+}
+
 async function renderSwaps() {
     const swapsList = DOM.swapsView.querySelector('#swaps-list');
 
@@ -661,65 +871,60 @@ function attachSwapActionListeners() {
         btn.addEventListener('click', async () => {
             const requestId = parseInt(btn.dataset.requestId);
 
-            // #318: eerst vragen, vóór het berichtvenster. Anders typ je een
-            // bericht en krijg je pas daarna te horen dat je die dag afwezig
-            // staat.
+            // Eén venster met de dienst, je hele week, de rust ervoor en erna en
+            // een optioneel bericht. Het vervangt de afwezigheidsvraag (#318),
+            // de berichtvraag (#348) en het "Weet je zeker" van vroeger.
             const verzoek = (DataStore.swapRequests || []).find(r => Number(r.id) === requestId);
-            if (!await bevestigBijEigenAfwezigheid(
-                    verzoek?.requester_shift_date,
-                    'Neem je de dienst toch over, dan werk je die dag.')) return;
-
-            // #348: de vraag ging alleen over het optionele bericht, terwijl je
-            // met deze stap een dienst op je naam zet. De onderliggende kaart is
-            // op dat moment verduisterd, dus de gegevens moeten in de vraag zelf.
-            const notes = await showInputPrompt(
-                `${beschrijfVerzoekDienst(verzoek)}\n\nWil je een bericht toevoegen? (optioneel)`,
-                'Dienst overnemen', '', 'Dienst overnemen');
-
-            if (notes !== null) {
-                if (await showConfirm('Weet je zeker dat je deze dienst wilt overnemen?')) {
-                    try {
-                        // #285: de tweede verversing die hier stond was dubbel
-                        // werk, en een fout erin belandde in de catch hieronder
-                        // met de tekst "Fout bij overnemen" terwijl de overname
-                        // al gelukt was. acceptTakeoverRequest ververst zelf en
-                        // meldt of dat lukte.
-                        const uitkomst = await acceptTakeoverRequest(requestId, notes);
-                        if (meldNaMutatie(uitkomst, 'Dienst overgenomen. Je ziet hem nu in je planning.')) {
-                            switchView('planning');
-                        } else {
-                            renderSwaps();
-                        }
-                    } catch (error) {
-                        // #202: zie de toelichting bij de ruilknop hierboven.
-                        if (magRusttijdOverrulen(error)) {
-                            if (!await bevestigRusttijdOverride(error, 'Toch overnemen')) {
-                                // Bewust afgezien: dat is geen fout, dus ook geen foutmelding.
-                                showToast('Dienst niet overgenomen.', 'info');
-                                return;
-                            }
-                            try {
-                                const tweedeUitkomst = await acceptTakeoverRequest(requestId, notes, true);
-                                if (tweedeUitkomst && tweedeUitkomst.ververst === false) {
-                                    showToast('Dienst overgenomen, met minder dan 11 uur rust. Het scherm kon niet bijgewerkt worden; herlaad de pagina.', 'warning', 6000);
-                                    renderSwaps();
-                                } else {
-                                    showToast('Dienst overgenomen, met minder dan 11 uur rust.', 'warning');
-                                    switchView('planning');
-                                }
-                                return;
-                            } catch (tweede) {
-                                console.error('Error accepting takeover (force):', tweede);
-                                showToast('Fout bij overnemen: ' + getUserFriendlyError(tweede), 'error');
-                                return;
-                            }
-                        }
-                        console.error('Error accepting takeover:', error);
-                        showToast('Fout bij overnemen: ' + getUserFriendlyError(error), 'error');
+            const antwoord = await openOvernameVenster(verzoek);
+            if (antwoord) {
+                const notes = antwoord.notes;
+                try {
+                    // #285: de tweede verversing die hier stond was dubbel
+                    // werk, en een fout erin belandde in de catch hieronder
+                    // met de tekst "Fout bij overnemen" terwijl de overname
+                    // al gelukt was. acceptTakeoverRequest ververst zelf en
+                    // meldt of dat lukte.
+                    const uitkomst = await acceptTakeoverRequest(requestId, notes);
+                    if (meldNaMutatie(uitkomst, 'Dienst overgenomen. Je ziet hem nu in je planning.')) {
+                        switchView('planning');
+                    } else {
+                        renderSwaps();
                     }
+                } catch (error) {
+                    // #202: zie de toelichting bij de ruilknop hierboven.
+                    if (magRusttijdOverrulen(error)) {
+                        if (!await bevestigRusttijdOverride(error, 'Toch overnemen')) {
+                            // Bewust afgezien: dat is geen fout, dus ook geen foutmelding.
+                            showToast('Dienst niet overgenomen.', 'info');
+                            return;
+                        }
+                        try {
+                            const tweedeUitkomst = await acceptTakeoverRequest(requestId, notes, true);
+                            if (tweedeUitkomst && tweedeUitkomst.ververst === false) {
+                                showToast('Dienst overgenomen, met minder dan 11 uur rust. Het scherm kon niet bijgewerkt worden; herlaad de pagina.', 'warning', 6000);
+                                renderSwaps();
+                            } else {
+                                showToast('Dienst overgenomen, met minder dan 11 uur rust.', 'warning');
+                                switchView('planning');
+                            }
+                            return;
+                        } catch (tweede) {
+                            console.error('Error accepting takeover (force):', tweede);
+                            showToast('Fout bij overnemen: ' + getUserFriendlyError(tweede), 'error');
+                            return;
+                        }
+                    }
+                    console.error('Error accepting takeover:', error);
+                    showToast('Fout bij overnemen: ' + getUserFriendlyError(error), 'error');
                 }
             }
         });
     });
 }
 
+
+
+// Zodat de pure functies in Node getest kunnen worden.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { overnameOverzicht };
+}

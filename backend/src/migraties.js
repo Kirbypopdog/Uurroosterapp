@@ -945,6 +945,168 @@ const MIGRATIONS = [
         CREATE UNIQUE INDEX IF NOT EXISTS idx_verstuurde_meldingen_uniek
           ON verstuurde_meldingen (soort, sleutel)`);
     }
+  },
+  {
+    name: '049_shifts_updated_at',
+    up: async (client) => {
+      // #409: een gewijzigde dienst bleef in een gekoppelde agenda op zijn
+      // oude uren staan. De iCal-feed stuurde geen SEQUENCE mee, en zonder
+      // die teller ziet een abonnee-agenda een gebeurtenis die hij al heeft en
+      // laat hij staan wat hij heeft.
+      //
+      // Die teller moet zeggen WANNEER de dienst veranderde, en dat wist de
+      // database niet: `shifts` had alleen `created_at`.
+      await client.query(
+        `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()`);
+
+      // De trigger gaat er eerst AF, en dat is geen schoonheidsfoutje.
+      // Migratie 000 draait `schema.sql` bij elke opstart, en die maakt de
+      // trigger hieronder ook aan. Hij bestaat hier dus al, en een BEFORE
+      // UPDATE-trigger vuurt ook op de backfill: die zette alle rijen netjes
+      // op `created_at` en de trigger zette ze meteen weer op NOW(). De
+      // backfill deed dan niets, zonder één foutmelding.
+      await client.query(`DROP TRIGGER IF EXISTS trg_shifts_updated_at ON shifts`);
+
+      // Bestaande rijen krijgen hun aanmaakmoment en niet het moment van deze
+      // migratie: dat is wat we werkelijk weten. Dat het daardoor lijkt alsof
+      // ze sindsdien niet veranderd zijn, is voor de agenda's geen probleem —
+      // zij hebben nog nooit een SEQUENCE gezien en houden dus impliciet 0
+      // aan, terwijl de feed er vanaf nu een veel hogere meestuurt. Elke
+      // bestaande koppeling wordt daarmee één keer helemaal bijgewerkt, ook
+      // de dagen die er al verkeerd in stonden.
+      await client.query(`UPDATE shifts SET updated_at = created_at WHERE created_at IS NOT NULL`);
+
+      // Een TRIGGER en niet een hand vol losse UPDATE-statements. Diensten
+      // worden vanuit een stuk of zes routes geschreven (shifts, draft-apply,
+      // replace-employee, swaps, de bulkziekmelding, de import). Eén daarvan
+      // vergeten betekent een agenda die stil achterloopt — precies de fout
+      // die hier wordt opgelost. De trigger kan niet overgeslagen worden.
+      await client.query(`
+        CREATE OR REPLACE FUNCTION shifts_zet_updated_at() RETURNS trigger AS $$
+        BEGIN
+          NEW.updated_at = NOW();
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql`);
+      await client.query(`
+        CREATE TRIGGER trg_shifts_updated_at
+          BEFORE UPDATE ON shifts
+          FOR EACH ROW EXECUTE FUNCTION shifts_zet_updated_at()`);
+    }
+  },
+  {
+    name: '050_agenda_activiteiten',
+    up: async (client) => {
+      // #410: de activiteiten gaan mee in de agendafeed, en dan geldt voor hen
+      // hetzelfde als voor een dienst in #409: zonder een SEQUENCE die omhoog
+      // gaat, laat een abonnee-agenda staan wat hij al heeft.
+      //
+      // De functie uit 049 heette `shifts_zet_updated_at` maar doet niets
+      // tabel-specifieks. Een tweede kopie ernaast zetten voor
+      // `shift_activities` is precies de drift die hier vaker is misgegaan
+      // (#400), dus hij wordt hernoemd naar iets algemeens en allebei de
+      // triggers wijzen ernaar.
+      await client.query(`
+        CREATE OR REPLACE FUNCTION zet_updated_at() RETURNS trigger AS $$
+        BEGIN
+          NEW.updated_at = NOW();
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql`);
+
+      await client.query(
+        `ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()`);
+
+      // Eerst de triggers eraf. Zelfde reden als in 049: migratie 000 draait
+      // `schema.sql` bij elke opstart en maakt ze ook aan, dus ze bestaan hier
+      // al — en een BEFORE UPDATE-trigger vuurt óók op de backfill, die daarmee
+      // stilletjes niets zou doen.
+      await client.query(`DROP TRIGGER IF EXISTS trg_shifts_updated_at ON shifts`);
+      await client.query(`DROP TRIGGER IF EXISTS trg_shift_activities_updated_at ON shift_activities`);
+
+      await client.query(
+        `UPDATE shift_activities SET updated_at = created_at WHERE created_at IS NOT NULL`);
+
+      await client.query(`
+        CREATE TRIGGER trg_shifts_updated_at
+          BEFORE UPDATE ON shifts
+          FOR EACH ROW EXECUTE FUNCTION zet_updated_at()`);
+      await client.query(`
+        CREATE TRIGGER trg_shift_activities_updated_at
+          BEFORE UPDATE ON shift_activities
+          FOR EACH ROW EXECUTE FUNCTION zet_updated_at()`);
+
+      // Pas nu mag de oude weg: een functie waar nog een trigger aan hangt,
+      // laat zich niet droppen.
+      await client.query(`DROP FUNCTION IF EXISTS shifts_zet_updated_at()`);
+
+      // De schakelaar waar #410 om draait. Een activiteit gaat ALTIJD mee in
+      // de agendafeed — het uur is wat je op je telefoon nodig hebt — maar de
+      // OMSCHRIJVING alleen als de medewerker daar zelf voor kiest.
+      //
+      // Standaard uit, en dat is de hele reden dat deze kolom bestaat. De feed
+      // heeft geen login; het token in de URL is de beveiliging. In productie
+      // staat in dat omschrijvingsveld onder meer "Eind evaluatie Lois",
+      // "AZ sint-lucas met J." en "Samen met kamer 12 collect & go doen" —
+      // jongeren bij naam, een ziekenhuisbezoek, een kamernummer. Dat mag niet
+      // buiten de app komen omdat iemand anders een vinkje vergat.
+      await client.query(
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS ical_omschrijvingen BOOLEAN NOT NULL DEFAULT false`);
+
+      // Wanneer die schakelaar voor het laatst omging. Zonder dit zou het
+      // omzetten ervan NIETS doen aan een agenda die de activiteiten al heeft:
+      // de SEQUENCE van een activiteit komt uit haar eigen `updated_at`, en die
+      // verandert niet als een gebruiker zijn eigen voorkeur wijzigt. De feed
+      // neemt daarom het hoogste van de twee. Dat is dezelfde fout als #409,
+      // één laag dieper.
+      await client.query(
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS ical_voorkeur_gewijzigd TIMESTAMP`);
+    }
+  },
+  {
+    name: '051_dag_activiteiten',
+    up: async (client) => {
+      // #418: een activiteit die niet aan een persoon hangt maar aan een DAG,
+      // zoals een brandoefening of een teamdag. `shift_activities` kan dat
+      // niet dragen: daar is `user_id` verplicht, en een rij per medewerker
+      // zou bij elke nieuwe collega en elke vervanging moeten bijgewerkt
+      // worden. Het is een andere soort ding, dus een eigen tabel.
+      //
+      // Uren zijn optioneel: allebei leeg is de hele dag. De CHECK houdt
+      // tegen dat er maar één van de twee ingevuld is — dat is geen
+      // "hele dag" en ook geen tijdvak.
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS dag_activiteiten (
+          id SERIAL PRIMARY KEY,
+          date DATE NOT NULL,
+          start_time TIME,
+          end_time TIME,
+          titel TEXT NOT NULL,
+          omschrijving TEXT NOT NULL DEFAULT '',
+          created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          CONSTRAINT dag_activiteiten_uren_check CHECK (
+            (start_time IS NULL AND end_time IS NULL)
+            OR (start_time IS NOT NULL AND end_time IS NOT NULL AND end_time > start_time)
+          )
+        )`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_dag_activiteiten_date ON dag_activiteiten(date)`);
+
+      // Dezelfde trigger als bij diensten en activiteiten (#409, #410): de
+      // agendafeed leidt zijn SEQUENCE af uit updated_at.
+      await client.query(`DROP TRIGGER IF EXISTS trg_dag_activiteiten_updated_at ON dag_activiteiten`);
+      await client.query(`
+        CREATE TRIGGER trg_dag_activiteiten_updated_at
+          BEFORE UPDATE ON dag_activiteiten
+          FOR EACH ROW EXECUTE FUNCTION zet_updated_at()`);
+
+      // De audit log kent per soort een vaste lijst; zonder deze uitbreiding
+      // weigert de database de regel en verdwijnt hij stil (logAudit slikt
+      // de fout in).
+      await client.query(`ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_resource_type_check`);
+      await client.query(`ALTER TABLE audit_log ADD CONSTRAINT audit_log_resource_type_check CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings', 'system', 'shift_activity', 'shift_block', 'dag_activiteit'))`);
+    }
   }
 ];
 

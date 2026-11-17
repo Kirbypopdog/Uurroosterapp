@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS users (
   -- geen toegangstabel.
   ical_token_created TIMESTAMPTZ,
   ical_last_access TIMESTAMPTZ,
+  -- #410: gaan de OMSCHRIJVINGEN van je activiteiten mee in de agendafeed?
+  -- Standaard niet. De feed heeft geen login en in dat veld staan in productie
+  -- namen van jongeren, een ziekenhuisbezoek en een kamernummer; dat hoort
+  -- alleen buiten de app te komen als de medewerker daar zelf voor kiest.
+  ical_omschrijvingen BOOLEAN NOT NULL DEFAULT false,
+  -- Wanneer die keuze voor het laatst omging. De feed neemt het hoogste van
+  -- deze en de `updated_at` van de activiteit als SEQUENCE; zonder dat zou het
+  -- omzetten niets doen aan een agenda die de activiteiten al heeft (#409).
+  ical_voorkeur_gewijzigd TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -53,8 +62,34 @@ CREATE TABLE IF NOT EXISTS shifts (
   -- De verwijzing naar schedule_drafts staat onderaan dit bestand, want die
   -- tabel wordt pas verderop aangemaakt.
   draft_id TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP DEFAULT NOW(),
+  -- #409: wanneer deze dienst voor het laatst veranderde. De iCal-feed leidt
+  -- hier zijn SEQUENCE en LAST-MODIFIED uit af; zonder die twee laat een
+  -- abonnee-agenda een gebeurtenis staan zoals hij hem al had, en bleef een
+  -- gewijzigde dienst in Outlook op zijn oude uren staan.
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- #409: de kolom hierboven wordt door een TRIGGER onderhouden en niet door de
+-- routes. Diensten worden vanuit een stuk of zes routes geschreven (shifts,
+-- draft-apply, replace-employee, swaps, de bulkziekmelding, de import); een
+-- daarvan vergeten betekent een agenda die stil achterloopt, en dat is precies
+-- de fout die hier wordt opgelost. De trigger kan niet overgeslagen worden.
+--
+-- #410: de functie is algemeen en heet daarom niet meer naar `shifts`;
+-- `shift_activities` gebruikt hem ook. Een tweede kopie ernaast zetten is
+-- precies de drift die hier vaker is misgegaan (#400).
+CREATE OR REPLACE FUNCTION zet_updated_at() RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_shifts_updated_at ON shifts;
+CREATE TRIGGER trg_shifts_updated_at
+  BEFORE UPDATE ON shifts
+  FOR EACH ROW EXECUTE FUNCTION zet_updated_at();
 
 -- Availability (afwezigheid/verlof) - references users directly
 CREATE TABLE IF NOT EXISTS availability (
@@ -160,8 +195,40 @@ CREATE TABLE IF NOT EXISTS shift_activities (
   -- kan de opruiming bij het toepassen niet zien welke vergaderingen ze mag
   -- weghalen (#376). De verwijzing staat onderaan dit bestand.
   draft_id TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP DEFAULT NOW(),
+  -- #410: wanneer deze activiteit voor het laatst veranderde. De agendafeed
+  -- leidt hier zijn SEQUENCE uit af; zie de dienst hierboven (#409).
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+DROP TRIGGER IF EXISTS trg_shift_activities_updated_at ON shift_activities;
+CREATE TRIGGER trg_shift_activities_updated_at
+  BEFORE UPDATE ON shift_activities
+  FOR EACH ROW EXECUTE FUNCTION zet_updated_at();
+
+-- Algemene activiteiten (#418): aan een DAG, niet aan een persoon. Bv. een
+-- brandoefening of een teamdag. Allebei de uren leeg = de hele dag.
+CREATE TABLE IF NOT EXISTS dag_activiteiten (
+  id SERIAL PRIMARY KEY,
+  date DATE NOT NULL,
+  start_time TIME,
+  end_time TIME,
+  titel TEXT NOT NULL,
+  omschrijving TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  CONSTRAINT dag_activiteiten_uren_check CHECK (
+    (start_time IS NULL AND end_time IS NULL)
+    OR (start_time IS NOT NULL AND end_time IS NOT NULL AND end_time > start_time)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_dag_activiteiten_date ON dag_activiteiten(date);
+
+DROP TRIGGER IF EXISTS trg_dag_activiteiten_updated_at ON dag_activiteiten;
+CREATE TRIGGER trg_dag_activiteiten_updated_at
+  BEFORE UPDATE ON dag_activiteiten
+  FOR EACH ROW EXECUTE FUNCTION zet_updated_at();
 
 -- Audit log (tracks all changes)
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -169,7 +236,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   actor_name TEXT NOT NULL,
   action TEXT NOT NULL CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'CANCEL', 'LOGIN', 'REPLACE', 'IMPORT', 'MIGRATE')),
-  resource_type TEXT NOT NULL CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings', 'system', 'shift_activity', 'shift_block')),
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings', 'system', 'shift_activity', 'shift_block', 'dag_activiteit')),
   resource_id TEXT,
   details JSONB DEFAULT '{}',
   created_at TIMESTAMP DEFAULT NOW()

@@ -90,6 +90,13 @@ const DragHandler = {
             return; // Let mobile use click-to-edit only
         }
 
+        // #416: een pilletje met één activiteit opent DIE activiteit (app-init.js).
+        // Zonder deze regel nam het blok de klik óók, en stonden het
+        // activiteitenvenster en het dienstvenster tegelijk open. Een pilletje
+        // voor meerdere activiteiten heeft geen id en laat de klik wél door naar
+        // het dienstvenster, waar ze allemaal staan.
+        if (e.target.closest('.activity-pil[data-activity-id]')) return;
+
         // Find if clicked on shift block, resize handle, or empty cell
         const shiftBlock = e.target.closest('.timeline-block');
         const emptyCell = e.target.closest('.timeline-day-cell');
@@ -708,6 +715,9 @@ const DragHandler = {
         const vanToetsenbord = e.detail === 0;
         const opMobiel = window.matchMedia('(max-width: 767px)').matches;
         if (!vanToetsenbord && !opMobiel) return;
+
+        // Zie handleMouseDown: het pilletje van één activiteit is van de activiteit.
+        if (e.target.closest('.activity-pil[data-activity-id]')) return;
 
         const shiftBlock = e.target.closest('.timeline-block');
         const dayCell = e.target.closest('.timeline-day-cell');
