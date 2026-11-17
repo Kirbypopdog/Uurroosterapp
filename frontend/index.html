@@ -26,7 +26,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20261114a">
+    <link rel="stylesheet" href="styles.css?v=20261117a">
     <!-- #156: foutmonitoring. Inert zolang er geen DSN in config/monitoring.js
          staat; dan wordt er ook niets van een CDN gehaald. Staat bewust vóór de
          app-bestanden, zodat een fout tijdens het opstarten ook gemeld wordt. -->
@@ -869,6 +869,33 @@
         </div>
     </div>
 
+    <!-- Dienst overnemen: de dienst, je hele week en een optioneel bericht in één
+         venster. Vervangt de berichtvraag en het "Weet je zeker" dat er
+         vroeger na elkaar kwamen. Inhoud komt uit openOvernameVenster(). -->
+    <div id="overname-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="overname-modal-titel">
+        <div class="modal-content overname-modal-content">
+            <div class="modal-header">
+                <h2 id="overname-modal-titel">Dienst overnemen</h2>
+            </div>
+            <div class="modal-body">
+                <div id="overname-dienst" class="overname-dienst"></div>
+                <div id="overname-meldingen"></div>
+                <div class="overname-week-kop">
+                    <span>Jouw week</span>
+                    <span id="overname-week-uren" class="overname-week-uren"></span>
+                </div>
+                <div id="overname-week" class="overname-week"></div>
+                <div id="overname-rust" class="overname-rust"></div>
+                <label for="overname-bericht" class="overname-bericht-label">Bericht <span class="overname-optioneel">(optioneel)</span></label>
+                <textarea id="overname-bericht" class="form-input overname-bericht" rows="2" maxlength="500"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="overname-annuleer">Annuleren</button>
+                <button type="button" class="btn btn-success" id="overname-ok">Dienst overnemen</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Input Prompt Modal (replaces browser prompt()) -->
     <div id="input-prompt-modal" class="modal hidden">
         <div class="modal-content input-prompt-content">
@@ -1001,7 +1028,7 @@
     <script src="app-nav.js?v=20261114a"></script>
     <script src="app-planner.js?v=20261114a"></script>
     <script src="app-shifts.js?v=20261111c"></script>
-    <script src="app-swaps.js?v=20260611a"></script>
+    <script src="app-swaps.js?v=20261117a"></script>
     <script src="app-leave.js?v=20261016a"></script>
     <script src="app-employees.js?v=20261111a"></script>
     <script src="app-availability.js?v=20261101a"></script>

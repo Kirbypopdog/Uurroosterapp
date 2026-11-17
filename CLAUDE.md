@@ -105,6 +105,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `beschikbaar-weg.test.js` | Dat een dag zonder dienst "Vrij" heet in plaats van groen "Beschikbaar", en dat 'vrij' verouderd is maar herkend blijft (#402) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
 | `activiteiten-pilletje.test.js` | Dat een activiteit als wit pilletje met pictogram en uren in het dienstblok staat, welke vorm er past, en dat het tijdlabel van een dienstblok niet afgekapt wordt (#404, #416) |
+| `overname-overzicht.test.js` | Het venster bij "Overnemen": je week, je uren ervoor en erna, de rust tot de dienst ervóór en erná, en dat het de drie losse vragen vervangt (#417) |
 | `activiteit-deelnemers.test.js` | Wie er in de deelnemerslijst van een activiteit komt, en wie er een activiteit voor anderen mag aanmaken (#408) |
 | `agenda-sequence.test.js` | Dat een gewijzigde dienst een hogere `SEQUENCE` krijgt in de agendafeed, en dat de migratie de trigger pas ná de backfill zet (#409) |
 | `vergadering-dubbel.test.js` | Dat een concept toepassen geen tweede Teamvergadering naast de bestaande zet (#407) |
@@ -704,6 +705,24 @@ waar nog een trigger aan hangt laat zich niet droppen.
   een handmatig ingevoerde vergadering net zo goed zo kan heten. De tuple is de
   veilige sleutel, want een bestaande vergadering op dezelfde persoon, dag en
   uur ÍS deze vergadering.
+
+- **Dienst overnemen** (#417): één venster (`openOvernameVenster()` in
+  `app-swaps.js`) met de dienst, je HELE week, je weekuren ervoor → erna tegen
+  je contract, en de rust tot je eigen dienst ervóór en erná. Het vervangt drie
+  vragen die vroeger na elkaar kwamen: de afwezigheidswaarschuwing (#318), de
+  berichtvraag (#348) en "Weet je zeker...?". Afwezig staan is nu een melding
+  IN het venster; wie daarna op "Dienst overnemen" drukt, heeft gekozen.
+
+  De rekenkant is `overnameOverzicht()`, puur. Twee dingen daarin:
+  - De rust gaat naar de DICHTSTBIJZIJNDE eigen dienst, met nachtdiensten die
+    de dag erna eindigen. Een dienst die met de nieuwe overlapt is geen rust
+    maar een botsing, en staat apart.
+  - De week wordt opgehaald als hij buiten de drie maanden valt die de planning
+    laadt; anders toonde het venster een lege week bij iemand die wél werkt.
+
+  Het venster toont wat de backend zal zeggen, maar de backend blijft de grens:
+  de rustweigering van #202 met "Toch overnemen" draait gewoon na de klik.
+  Alleen bij overnemen, bewust niet bij ruilen.
 
 - **Een activiteit voor meerdere mensen** (#408): een activiteit staat PER
   PERSOON in de database; er is geen gedeelde gebeurtenis met deelnemers. In
