@@ -2680,6 +2680,34 @@ describe('GET /calendar/:token.ics', () => {
     expect(body).toContain('DTSTAMP:20261008T124815Z');
   });
 
+  // #419: een dienst op een dag waarop je afwezig staat bleef in Outlook
+  // staan. De dienst blijft in de planning tot iemand hem overneemt (#401),
+  // dus de feed moet hem zelf weglaten — samen met de activiteiten van die
+  // dag. Er komt GEEN afwezigheid in de plaats (keuze van Victor; #152).
+  test('laat diensten en activiteiten op een afwezigheidsdag weg (#419)', async () => {
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    await request(app).get('/api/v1/calendar/t.ics');
+    const queries = pool.query.mock.calls.map(([sql, params]) => ({ sql: String(sql), params }));
+    const diensten = queries.find(q => /FROM shifts s/.test(q.sql));
+    const activiteiten = queries.find(q => /FROM shift_activities/.test(q.sql));
+    for (const q of [diensten, activiteiten]) {
+      expect(q.sql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM availability av/);
+      expect(q.sql).toMatch(/av\.user_id = \w+\.user_id AND av\.date = \w+\.date/);
+      expect(q.sql).toMatch(/av\.type = ANY\(\$4::text\[\]\)/);
+      // Elk afwezigheidstype telt, ook de verouderde: in de frontend staat
+      // teltAlsAfwezig voor elk ervan op true (#400).
+      expect(q.params[3]).toEqual(['verlof', 'ziek', 'overuren', 'vorming', 'andere', 'vrij']);
+    }
+  });
+
+  test('de feed zet nergens een afwezigheid in de agenda (#419)', async () => {
+    arrangeFeed(new Date('2026-10-08T12:48:15Z'));
+    const body = (await request(app).get('/api/v1/calendar/t.ics')).text;
+    expect(body).not.toMatch(/Afwezig|Verlof|Ziek/i);
+    const queries = pool.query.mock.calls.map(([sql]) => String(sql));
+    expect(queries.some(q => /SELECT[\s\S]*FROM availability(?! av)/.test(q))).toBe(false);
+  });
+
   test('twee ophalingen zonder wijziging geven dezelfde SEQUENCE (#409)', async () => {
     arrangeFeed(new Date('2026-10-08T12:48:15Z'));
     const een = (await request(app).get('/api/v1/calendar/t.ics')).text;

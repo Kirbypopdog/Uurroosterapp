@@ -4,6 +4,7 @@
 const { maakRouter } = require('../veilige-router');
 const { pool } = require('../db');
 const { requireAuth, requireAdmin, requireRole } = require('../middleware/auth');
+const { AFWEZIGHEIDSTYPES } = require('../helpers/dienstregels');
 const { logAudit } = require('../helpers/audit');
 const { formatDateYYYYMMDD, formatICalDateTime, icalUtcStempel, icalSequence } = require('../utils');
 const crypto = require('crypto');
@@ -109,6 +110,33 @@ router.post('/me/ical-token', requireAuth, async (req, res) => {
 });
 
 /**
+ * #419: een dienst op een dag waarop je afwezig staat, hoort niet in je agenda.
+ *
+ * De dienst blijft in de PLANNING staan tot iemand hem overneemt of
+ * verwijdert — van de verlofdagen in productie heeft bijna elke dag er nog
+ * een (#401). De feed stuurde hem dus gewoon mee, en wie verlof nam zag in
+ * Outlook nog steeds dat hij moest werken.
+ *
+ * Twee keuzes van Victor:
+ * - De dienst gaat ERUIT, en dat is alles: er komt geen afwezigheid in de
+ *   plaats. De feed heeft geen login, en "ziek" is gezondheidsinformatie
+ *   (#152); het neutrale woord "afwezig" is ook al meer dan nodig.
+ * - De activiteiten van die dag gaan mee weg: ze vallen binnen een dienst die
+ *   je niet doet.
+ *
+ * Een abonnee-agenda vervangt bij elke ophaling zijn inhoud door de feed, dus
+ * een gebeurtenis die er niet meer in staat verdwijnt. Wordt de afwezigheid
+ * later geschrapt, dan komt de dienst gewoon terug.
+ *
+ * Elk type telt: dezelfde lijst als de backend kent (AFWEZIGHEIDSTYPES), en in
+ * de frontend staat `teltAlsAfwezig` voor elk ervan op true (#400).
+ */
+const GEEN_AFWEZIGHEID = (alias) => `NOT EXISTS (
+             SELECT 1 FROM availability av
+              WHERE av.user_id = ${alias}.user_id AND av.date = ${alias}.date
+                AND av.type = ANY($4::text[]))`;
+
+/**
  * #418: een algemene activiteit als VEVENT.
  *
  * Zonder uren is het een gebeurtenis voor de HELE dag: DTSTART en DTEND als
@@ -177,19 +205,21 @@ router.get('/calendar/:token.ics', async (req, res) => {
          FROM shifts s
          LEFT JOIN teams t ON t.id = s.team
          WHERE s.user_id = $1 AND s.date >= $2 AND s.date <= $3
+           AND ${GEEN_AFWEZIGHEID('s')}
          ORDER BY s.date, s.start_time`,
-        [user.id, formatDateYYYYMMDD(from), formatDateYYYYMMDD(to)]
+        [user.id, formatDateYYYYMMDD(from), formatDateYYYYMMDD(to), AFWEZIGHEIDSTYPES]
       ),
       pool.query(`SELECT value FROM settings WHERE key = 'teams'`),
       // #410: de activiteiten gaan mee als eigen gebeurtenis. Zonder dat zag je
       // op je telefoon alleen "Vlot 2, 13:00-23:00" en niet dat je van 13 tot
       // 16 uur in de teamvergadering zat.
       pool.query(
-        `SELECT id, date::text, start_time::text, end_time::text, type, description, updated_at
-         FROM shift_activities
-         WHERE user_id = $1 AND date >= $2 AND date <= $3
-         ORDER BY date, start_time`,
-        [user.id, formatDateYYYYMMDD(from), formatDateYYYYMMDD(to)]
+        `SELECT sa.id, sa.date::text, sa.start_time::text, sa.end_time::text, sa.type, sa.description, sa.updated_at
+         FROM shift_activities sa
+         WHERE sa.user_id = $1 AND sa.date >= $2 AND sa.date <= $3
+           AND ${GEEN_AFWEZIGHEID('sa')}
+         ORDER BY sa.date, sa.start_time`,
+        [user.id, formatDateYYYYMMDD(from), formatDateYYYYMMDD(to), AFWEZIGHEIDSTYPES]
       ),
       // #418: de algemene activiteiten (brandoefening, teamdag) gaan naar
       // IEDEREEN met een gekoppelde agenda, of hij die dag werkt of niet.

@@ -451,6 +451,17 @@ de trigger daarom eerst vallen, vult bij, en zet hem daarna terug. Dit kwam
 alleen aan het licht door de migratie tegen een ECHTE PostgreSQL te draaien; de
 testsuite draait met een gemockte database en ziet dit soort dingen niet.
 
+**Een dienst op een afwezigheidsdag gaat NIET mee** (#419). De dienst blijft
+in de planning staan tot iemand hem overneemt (#401), dus de feed stuurde hem
+door en wie verlof nam zag in Outlook nog steeds dat hij moest werken — 73
+diensten in het feedvenster, bij 9 mensen met een agendalink. De queries voor
+diensten én activiteiten sluiten nu elke dag uit waarop een rij in
+`availability` staat met een type uit `AFWEZIGHEIDSTYPES`. Er komt bewust
+GEEN afwezigheid in de plaats: de feed heeft geen login en ziekte is
+gezondheidsinformatie (#152). Een abonnee-agenda vervangt zijn inhoud bij elke
+ophaling, dus de dienst verdwijnt vanzelf, en komt terug als de afwezigheid
+geschrapt wordt.
+
 **Activiteiten gaan mee, hun omschrijving alleen op eigen verzoek** (#410). Een
 vergadering van 13 tot 16 uur stond niet in je agenda: je zag alleen de dienst.
 Elke activiteit is nu een eigen VEVENT (`UID:activiteit-<id>@hetvlot`) binnen
