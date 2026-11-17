@@ -144,6 +144,7 @@ function renderHome() {
     html += '<div class="home-grid">';
     html += renderHomeShifts(user);
     html += '<div class="home-grid-zij">';
+    html += renderHomeDagActiviteiten();
     html += renderHomeWeekendInfo();
     html += renderHomeNuAanHetWerk();
     html += '</div>';
@@ -170,8 +171,8 @@ function renderHome() {
         });
     });
 
-    // Shift items: navigate to that week in planning view
-    container.querySelectorAll('.home-shift-item[data-shift-date]').forEach(item => {
+    // Shift items (en #418: algemene activiteiten): naar die week in de planning
+    container.querySelectorAll('.home-shift-item[data-shift-date], .home-dagact-item[data-shift-date]').forEach(item => {
         item.addEventListener('click', () => {
             const dateStr = item.dataset.shiftDate;
             setCurrentWeek(parseDateOnly(dateStr));
@@ -1074,6 +1075,44 @@ function renderHomeTeamCoverage(role, user) {
     `;
 }
 
+/**
+ * #418: de algemene activiteiten van vandaag en de komende zeven dagen. Er
+ * verschijnt alleen een kaart als er iets is: een lege kaart "geen
+ * activiteiten" zou er bijna altijd staan en zegt niets.
+ */
+const HOME_DAGACT_DAGEN = 7;
+function komendeDagActiviteiten(alle, vandaag, dagen = HOME_DAGACT_DAGEN) {
+    const [j, m, d] = vandaag.split('-').map(Number);
+    const eind = new Date(j, m - 1, d + dagen);
+    const tot = `${eind.getFullYear()}-${String(eind.getMonth() + 1).padStart(2, '0')}-${String(eind.getDate()).padStart(2, '0')}`;
+    return (alle || [])
+        .filter(a => a.date >= vandaag && a.date <= tot)
+        .sort((a, b) => a.date.localeCompare(b.date) || (a.startTime || '').localeCompare(b.startTime || ''));
+}
+
+function renderHomeDagActiviteiten() {
+    const vandaag = formatDateYYYYMMDD(new Date());
+    const lijst = komendeDagActiviteiten(DataStore.dagActiviteiten, vandaag);
+    if (!lijst.length) return '';
+    const rijen = lijst.map(a => {
+        const isVandaag = a.date === vandaag;
+        const dag = isVandaag ? 'Vandaag' : formatDateShort(parseDateOnly(a.date));
+        const wanneer = a.startTime ? `${a.startTime}–${a.endTime}` : 'hele dag';
+        return `<div class="shift-list-item home-dagact-item" data-shift-date="${a.date}">
+            <div>
+                <span class="${isVandaag ? 'fw-600' : ''}">${escapeHtml(a.titel)}</span>
+                ${a.omschrijving ? `<div class="text-sm text-muted">${escapeHtml(a.omschrijving)}</div>` : ''}
+            </div>
+            <span class="text-sm text-muted">${escapeHtml(dag)} · ${escapeHtml(wanneer)}</span>
+        </div>`;
+    }).join('');
+    return `
+        <div class="home-card">
+            <div class="home-card-header">Activiteiten voor iedereen</div>
+            <div class="home-card-body">${rijen}</div>
+        </div>`;
+}
+
 function renderHomeWeekendInfo() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1614,5 +1653,5 @@ function formatWeekRange(start, end) {
 // Zodat dienstLooptNu in Node getest kan worden. In de browser bestaat `module`
 // niet, dus dit heeft daar geen effect.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { dienstLooptNu };
+  module.exports = { dienstLooptNu, komendeDagActiviteiten };
 }

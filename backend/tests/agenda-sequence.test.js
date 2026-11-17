@@ -120,7 +120,13 @@ describe('de activiteiten in de agendafeed (#410)', () => {
     expect(migratie050).toMatch(/CREATE OR REPLACE FUNCTION zet_updated_at\(\)/);
     expect(migratie050).toMatch(/DROP FUNCTION IF EXISTS shifts_zet_updated_at\(\)/);
     expect(schema).not.toMatch(/FUNCTION shifts_zet_updated_at/);
-    expect((schema.match(/EXECUTE FUNCTION zet_updated_at\(\)/g) || []).length).toBe(2);
+    // Elke trigger hangt aan diezelfde ene functie. Het waren er twee (shifts,
+    // shift_activities); #418 voegde dag_activiteiten toe. Geteld wordt dus
+    // niet een vast aantal, maar dat er geen enkele trigger een eigen kopie heeft.
+    const alle = schema.match(/EXECUTE FUNCTION \w+\(\)/g) || [];
+    const algemeen = schema.match(/EXECUTE FUNCTION zet_updated_at\(\)/g) || [];
+    expect(algemeen.length).toBeGreaterThanOrEqual(2);
+    expect(algemeen.length).toBe(alle.length);
   });
 
   test('de oude functie gaat er pas AF nadat de triggers omgehangen zijn', () => {

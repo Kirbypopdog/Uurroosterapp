@@ -206,13 +206,37 @@ CREATE TRIGGER trg_shift_activities_updated_at
   BEFORE UPDATE ON shift_activities
   FOR EACH ROW EXECUTE FUNCTION zet_updated_at();
 
+-- Algemene activiteiten (#418): aan een DAG, niet aan een persoon. Bv. een
+-- brandoefening of een teamdag. Allebei de uren leeg = de hele dag.
+CREATE TABLE IF NOT EXISTS dag_activiteiten (
+  id SERIAL PRIMARY KEY,
+  date DATE NOT NULL,
+  start_time TIME,
+  end_time TIME,
+  titel TEXT NOT NULL,
+  omschrijving TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  CONSTRAINT dag_activiteiten_uren_check CHECK (
+    (start_time IS NULL AND end_time IS NULL)
+    OR (start_time IS NOT NULL AND end_time IS NOT NULL AND end_time > start_time)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_dag_activiteiten_date ON dag_activiteiten(date);
+
+DROP TRIGGER IF EXISTS trg_dag_activiteiten_updated_at ON dag_activiteiten;
+CREATE TRIGGER trg_dag_activiteiten_updated_at
+  BEFORE UPDATE ON dag_activiteiten
+  FOR EACH ROW EXECUTE FUNCTION zet_updated_at();
+
 -- Audit log (tracks all changes)
 CREATE TABLE IF NOT EXISTS audit_log (
   id SERIAL PRIMARY KEY,
   actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   actor_name TEXT NOT NULL,
   action TEXT NOT NULL CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'CANCEL', 'LOGIN', 'REPLACE', 'IMPORT', 'MIGRATE')),
-  resource_type TEXT NOT NULL CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings', 'system', 'shift_activity', 'shift_block')),
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings', 'system', 'shift_activity', 'shift_block', 'dag_activiteit')),
   resource_id TEXT,
   details JSONB DEFAULT '{}',
   created_at TIMESTAMP DEFAULT NOW()

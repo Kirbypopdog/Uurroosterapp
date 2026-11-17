@@ -105,6 +105,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `beschikbaar-weg.test.js` | Dat een dag zonder dienst "Vrij" heet in plaats van groen "Beschikbaar", en dat 'vrij' verouderd is maar herkend blijft (#402) |
 | `herinneringen.test.js` | De geplande herinneringen: wanneer ze vertrekken, naar wie, en dat ze maar één keer vertrekken (#397) |
 | `activiteiten-pilletje.test.js` | Dat een activiteit als wit pilletje met pictogram en uren in het dienstblok staat, welke vorm er past, en dat het tijdlabel van een dienstblok niet afgekapt wordt (#404, #416) |
+| `dag-activiteiten.test.js` | Algemene activiteiten (aan een dag, niet aan een persoon): invoercontrole, rechten, agendafeed, chips in de dagkop en dat ze de bezetting niet raken (#418) |
 | `overname-overzicht.test.js` | Het venster bij "Overnemen": je week, je uren ervoor en erna, de rust tot de dienst ervóór en erná, en dat het de drie losse vragen vervangt (#417) |
 | `activiteit-deelnemers.test.js` | Wie er in de deelnemerslijst van een activiteit komt, en wie er een activiteit voor anderen mag aanmaken (#408) |
 | `agenda-sequence.test.js` | Dat een gewijzigde dienst een hogere `SEQUENCE` krijgt in de agendafeed, en dat de migratie de trigger pas ná de backfill zet (#409) |
@@ -124,7 +125,7 @@ sneller dan dit bestand (#291).
 
 ## Database Schema
 
-**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions, geplande_overnames, verstuurde_meldingen
+**Tabellen**: teams, users, shifts, availability, settings, shift_blocks, shift_swap_requests, audit_log, schedule_drafts, shift_activities, dag_activiteiten, leave_rounds, leave_round_blocks, leave_round_entries, leave_round_submissions, geplande_overnames, verstuurde_meldingen
 
 Kernrelaties:
 - `shifts.user_id` → `users.id`
@@ -179,6 +180,7 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 
 ### Planning
 - `CRUD /api/v1/shift-activities` - Activiteiten binnen shifts
+- `CRUD /api/v1/dag-activiteiten` - Algemene activiteiten aan een dag (#418). Lezen: iedereen; schrijven: admin en roosterverantwoordelijke
 - `CRUD /api/v1/schedule-drafts` - Roosterconcepten
 - `POST /api/v1/schedule-drafts/:id/apply` - Concept toepassen op datumbereik
 - `POST /api/v1/availability/sick-with-takeover` - Bulk ziekmelding + auto-takeover
@@ -705,6 +707,38 @@ waar nog een trigger aan hangt laat zich niet droppen.
   een handmatig ingevoerde vergadering net zo goed zo kan heten. De tuple is de
   veilige sleutel, want een bestaande vergadering op dezelfde persoon, dag en
   uur ÍS deze vergadering.
+
+- **Algemene activiteit** (#418): een brandoefening, een teamdag — iets dat
+  aan een DAG hangt en niet aan een persoon. Eigen tabel `dag_activiteiten`,
+  want `shift_activities.user_id` is verplicht en een rij per medewerker zou
+  bij elke nieuwe collega en elke vervanging bijgewerkt moeten worden.
+
+  | | |
+  |---|---|
+  | uren | optioneel; allebei leeg = hele dag (CHECK in de database) |
+  | wie maakt aan | admin en roosterverantwoordelijke (`canManageDagActiviteiten`, `requireRole`) |
+  | waar te zien | dagkop van de planning, beginscherm, agendafeed |
+  | bezetting | telt NIET mee — de app weet niet wie er van de vloer gaat |
+
+  **Planning**: chips in de dagkop, hoogstens twee en daarna `+n`, want een
+  derde regel duwt het hele raster omlaag. In de dagweergave en op een telefoon
+  is die kop verborgen; daar staat een balk boven het raster met een groep per
+  dag, en CSS toont de groep die past bij `data-mobile-day`. Bij het wisselen
+  van dag hoeft er dus niets opnieuw getekend te worden. Wie mag beheren krijgt
+  knoppen (klik = bewerken), de rest tekst met een tooltip.
+
+  **Aanmaken** via de knop "Activiteit voor iedereen" in de planningbalk of
+  rechtsklik op een dagkop. De klikken hangen in `app-shifts.js` zelf, niet in
+  `setupEventListeners` (#412).
+
+  **Agendafeed**: voor IEDEREEN met een gekoppelde agenda, of hij die dag werkt
+  of niet. Zonder uren een DATE-gebeurtenis met DTEND op de dag erna (iCal-einde
+  is exclusief). `TRANSP:TRANSPARENT`: een brandoefening maakt je niet bezet. De
+  titel gaat altijd mee, de omschrijving alleen met `ical_omschrijvingen` (#410).
+
+  De audit log weigert een onbekend `resource_type` via een CHECK, en
+  `logAudit` slikt die fout in. Zonder `dag_activiteit` in die lijst zou elke
+  regel STIL verdwijnen. Migratie 051 breidt hem uit.
 
 - **Dienst overnemen** (#417): één venster (`openOvernameVenster()` in
   `app-swaps.js`) met de dienst, je HELE week, je weekuren ervoor → erna tegen

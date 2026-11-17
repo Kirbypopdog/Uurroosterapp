@@ -1062,6 +1062,51 @@ const MIGRATIONS = [
       await client.query(
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS ical_voorkeur_gewijzigd TIMESTAMP`);
     }
+  },
+  {
+    name: '051_dag_activiteiten',
+    up: async (client) => {
+      // #418: een activiteit die niet aan een persoon hangt maar aan een DAG,
+      // zoals een brandoefening of een teamdag. `shift_activities` kan dat
+      // niet dragen: daar is `user_id` verplicht, en een rij per medewerker
+      // zou bij elke nieuwe collega en elke vervanging moeten bijgewerkt
+      // worden. Het is een andere soort ding, dus een eigen tabel.
+      //
+      // Uren zijn optioneel: allebei leeg is de hele dag. De CHECK houdt
+      // tegen dat er maar één van de twee ingevuld is — dat is geen
+      // "hele dag" en ook geen tijdvak.
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS dag_activiteiten (
+          id SERIAL PRIMARY KEY,
+          date DATE NOT NULL,
+          start_time TIME,
+          end_time TIME,
+          titel TEXT NOT NULL,
+          omschrijving TEXT NOT NULL DEFAULT '',
+          created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          CONSTRAINT dag_activiteiten_uren_check CHECK (
+            (start_time IS NULL AND end_time IS NULL)
+            OR (start_time IS NOT NULL AND end_time IS NOT NULL AND end_time > start_time)
+          )
+        )`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_dag_activiteiten_date ON dag_activiteiten(date)`);
+
+      // Dezelfde trigger als bij diensten en activiteiten (#409, #410): de
+      // agendafeed leidt zijn SEQUENCE af uit updated_at.
+      await client.query(`DROP TRIGGER IF EXISTS trg_dag_activiteiten_updated_at ON dag_activiteiten`);
+      await client.query(`
+        CREATE TRIGGER trg_dag_activiteiten_updated_at
+          BEFORE UPDATE ON dag_activiteiten
+          FOR EACH ROW EXECUTE FUNCTION zet_updated_at()`);
+
+      // De audit log kent per soort een vaste lijst; zonder deze uitbreiding
+      // weigert de database de regel en verdwijnt hij stil (logAudit slikt
+      // de fout in).
+      await client.query(`ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_resource_type_check`);
+      await client.query(`ALTER TABLE audit_log ADD CONSTRAINT audit_log_resource_type_check CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings', 'system', 'shift_activity', 'shift_block', 'dag_activiteit'))`);
+    }
   }
 ];
 

@@ -108,6 +108,50 @@ router.post('/me/ical-token', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * #418: een algemene activiteit als VEVENT.
+ *
+ * Zonder uren is het een gebeurtenis voor de HELE dag: DTSTART en DTEND als
+ * DATE, met DTEND op de dag erna (die is in iCal exclusief). Met uren gaat het
+ * zoals bij een dienst, in Brusselse tijd.
+ *
+ * De TITEL gaat altijd mee — die zet een beheerder voor iedereen, het is het
+ * hele punt van de gebeurtenis. De OMSCHRIJVING volgt dezelfde schakelaar als
+ * de omschrijving van een activiteit (#410): de feed heeft geen login.
+ */
+function dagActiviteitEvent(a, { omschrijvingenMee, voorkeurSeq, nu }) {
+  const datum = String(a.date).slice(0, 10);
+  const compact = (d) => d.replace(/-/g, '');
+  const dagErna = (d) => {
+    const [j, m, dd] = d.split('-').map(Number);
+    const x = new Date(Date.UTC(j, m - 1, dd + 1));
+    return x.toISOString().slice(0, 10);
+  };
+  const gewijzigd = icalUtcStempel(a.updated_at) || nu;
+  const seq = Math.max(icalSequence(a.updated_at), voorkeurSeq || 1);
+  const lines = [
+    'BEGIN:VEVENT',
+    `UID:dag-activiteit-${a.id}@hetvlot`,
+    `DTSTAMP:${gewijzigd}`,
+    `LAST-MODIFIED:${gewijzigd}`,
+    `SEQUENCE:${seq}`,
+  ];
+  if (a.start_time && a.end_time) {
+    lines.push(`DTSTART;TZID=Europe/Brussels:${formatICalDateTime(datum, String(a.start_time).slice(0, 5))}`);
+    lines.push(`DTEND;TZID=Europe/Brussels:${formatICalDateTime(datum, String(a.end_time).slice(0, 5))}`);
+  } else {
+    lines.push(`DTSTART;VALUE=DATE:${compact(datum)}`);
+    lines.push(`DTEND;VALUE=DATE:${compact(dagErna(datum))}`);
+  }
+  lines.push(`SUMMARY:${icalEscape(a.titel || 'Activiteit')}`);
+  if (omschrijvingenMee && a.omschrijving) lines.push(`DESCRIPTION:${icalEscape(a.omschrijving)}`);
+  // Een algemene activiteit blokkeert je agenda niet: je bent niet bezet
+  // omdat er een brandoefening is.
+  lines.push('TRANSP:TRANSPARENT');
+  lines.push('END:VEVENT');
+  return lines.join('\r\n');
+}
+
 // GET /calendar/:token.ics - Publieke iCal feed (token = auth)
 router.get('/calendar/:token.ics', async (req, res) => {
   try {
@@ -126,7 +170,7 @@ router.get('/calendar/:token.ics', async (req, res) => {
 
     const from = new Date(); from.setDate(from.getDate() - 30);
     const to   = new Date(); to.setDate(to.getDate() + 365);
-    const [shiftsResult, teamsSettingResult, activiteitenResult] = await Promise.all([
+    const [shiftsResult, teamsSettingResult, activiteitenResult, dagActiviteitenResult] = await Promise.all([
       pool.query(
         `SELECT s.id, s.date::text, s.start_time, s.end_time, s.team, s.notes,
                 s.updated_at, t.name as team_name
@@ -146,7 +190,17 @@ router.get('/calendar/:token.ics', async (req, res) => {
          WHERE user_id = $1 AND date >= $2 AND date <= $3
          ORDER BY date, start_time`,
         [user.id, formatDateYYYYMMDD(from), formatDateYYYYMMDD(to)]
-      )
+      ),
+      // #418: de algemene activiteiten (brandoefening, teamdag) gaan naar
+      // IEDEREEN met een gekoppelde agenda, of hij die dag werkt of niet.
+      pool.query(
+        `SELECT id, date::text, to_char(start_time, 'HH24:MI') AS start_time,
+                to_char(end_time, 'HH24:MI') AS end_time, titel, omschrijving, updated_at
+         FROM dag_activiteiten
+         WHERE date >= $1 AND date <= $2
+         ORDER BY date, start_time NULLS FIRST`,
+        [formatDateYYYYMMDD(from), formatDateYYYYMMDD(to)]
+      ).catch(() => ({ rows: [] }))
     ]);
     // settings.teams is the primary display name source (may differ from teams table)
     const teamNameMap = teamsSettingResult.rows.length ? teamsSettingResult.rows[0].value : {};
@@ -247,7 +301,10 @@ router.get('/calendar/:token.ics', async (req, res) => {
       ].join('\r\n');
     });
 
-    const events = dienstEvents.concat(activiteitEvents).join('\r\n');
+    const dagEvents = (dagActiviteitenResult.rows || []).map(a =>
+      dagActiviteitEvent(a, { omschrijvingenMee, voorkeurSeq, nu }));
+
+    const events = dienstEvents.concat(activiteitEvents, dagEvents).join('\r\n');
 
     const ical = [
       'BEGIN:VCALENDAR',
@@ -290,3 +347,4 @@ router.put('/me/onboarding-flags', requireAuth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.dagActiviteitEvent = dagActiviteitEvent;

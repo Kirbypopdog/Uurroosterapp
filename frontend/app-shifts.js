@@ -1433,10 +1433,146 @@ async function deleteShiftConfirm(shiftId) {
 }
 
 
+// ===== ALGEMENE ACTIVITEITEN (#418) =====
+// Aan een DAG, niet aan een persoon: een brandoefening, een teamdag. Alleen
+// admin en roosterverantwoordelijke maken ze aan (canManageDagActiviteiten,
+// dezelfde grens als de backend). Ze verlagen de bezetting niet.
+
+/**
+ * Zet de invoer van het venster om naar wat de backend verwacht, of geeft een
+ * foutmelding. Dezelfde regels als `controleer()` in routes/dag-activiteiten.js;
+ * de backend blijft de grens, dit is er om de melding meteen te tonen in
+ * plaats van na een rondreis.
+ */
+function dagActiviteitUitVenster({ datum, titel, heleDag, van, tot, omschrijving }) {
+    const t = String(titel || '').trim();
+    const oms = String(omschrijving || '').trim();
+    if (!datum) return { fout: 'Kies een datum.' };
+    if (!t) return { fout: 'Geef de activiteit een titel.' };
+    if (heleDag) return { waarden: { date: datum, titel: t, omschrijving: oms, startTime: null, endTime: null } };
+    if (!van || !tot) return { fout: 'Vul een begin- en einduur in, of vink "Hele dag" aan.' };
+    if (tot <= van) return { fout: 'Het einduur moet na het beginuur liggen.' };
+    return { waarden: { date: datum, titel: t, omschrijving: oms, startTime: van, endTime: tot } };
+}
+
+function openDagActiviteitVenster(datum, bestaand = null) {
+    if (typeof canManageDagActiviteiten === 'function' && !canManageDagActiviteiten()) return;
+    const modal = document.getElementById('dagact-modal');
+    if (!modal) return;
+    const $ = (id) => document.getElementById(id);
+    const fout = $('dagact-fout');
+    const heleDag = $('dagact-heledag');
+    const zetUren = () => {
+        modal.querySelectorAll('.dagact-uur input').forEach(i => { i.disabled = heleDag.checked; });
+    };
+
+    $('dagact-modal-titel').textContent = bestaand ? 'Activiteit voor iedereen bewerken' : 'Activiteit voor iedereen';
+    $('dagact-titel').value = bestaand?.titel || '';
+    $('dagact-datum').value = bestaand?.date || datum || formatDateYYYYMMDD(new Date());
+    $('dagact-van').value = bestaand?.startTime || '';
+    $('dagact-tot').value = bestaand?.endTime || '';
+    $('dagact-omschrijving').value = bestaand?.omschrijving || '';
+    heleDag.checked = bestaand ? !bestaand.startTime : false;
+    zetUren();
+    fout.classList.add('hidden');
+    $('dagact-verwijder').classList.toggle('hidden', !bestaand);
+    toonModal(modal);
+    setTimeout(() => $('dagact-titel').focus(), 50);
+
+    const form = $('dagact-form');
+    const sluit = () => {
+        verbergModal(modal);
+        form.removeEventListener('submit', bijBewaren);
+        form.removeEventListener('input', wisFout);
+        heleDag.removeEventListener('change', zetUren);
+        $('dagact-annuleer').removeEventListener('click', sluit);
+        $('dagact-verwijder').removeEventListener('click', bijVerwijderen);
+        modal.removeEventListener('mousedown', bijAchtergrond);
+        document.removeEventListener('keydown', bijToets);
+    };
+    const toonFout = (tekst) => { fout.textContent = tekst; fout.classList.remove('hidden'); };
+    // Wie de fout verbetert, hoeft hem niet meer te zien staan.
+    const wisFout = () => fout.classList.add('hidden');
+    const herteken = () => {
+        if (AppState.currentView === 'planning' && typeof renderPlanning === 'function') renderPlanning();
+        if (AppState.currentView === 'home' && typeof renderHome === 'function') renderHome();
+    };
+    const bijBewaren = async (e) => {
+        e.preventDefault();
+        const { fout: melding, waarden } = dagActiviteitUitVenster({
+            datum: $('dagact-datum').value, titel: $('dagact-titel').value, heleDag: heleDag.checked,
+            van: $('dagact-van').value, tot: $('dagact-tot').value, omschrijving: $('dagact-omschrijving').value,
+        });
+        if (melding) { toonFout(melding); return; }
+        const ok = $('dagact-ok');
+        ok.disabled = true;
+        try {
+            await bewaarDagActiviteit(waarden, bestaand?.id || null);
+            sluit();
+            showToast(bestaand ? 'Activiteit bijgewerkt.' : 'Activiteit toegevoegd voor iedereen.', 'success');
+            herteken();
+        } catch (err) {
+            toonFout('Opslaan mislukt: ' + getUserFriendlyError(err));
+        } finally {
+            ok.disabled = false;
+        }
+    };
+    const bijVerwijderen = async () => {
+        if (!bestaand) return;
+        const zeker = await showConfirm(
+            `"${bestaand.titel}" verdwijnt bij iedereen uit de planning en uit de gekoppelde agenda.`,
+            'Activiteit verwijderen', { confirmText: 'Verwijderen', danger: true });
+        if (!zeker) return;
+        try {
+            await verwijderDagActiviteit(bestaand.id);
+            sluit();
+            showToast('Activiteit verwijderd.', 'success');
+            herteken();
+        } catch (err) {
+            toonFout('Verwijderen mislukt: ' + getUserFriendlyError(err));
+        }
+    };
+    const bijAchtergrond = (e) => { if (e.target === modal) sluit(); };
+    const bijToets = (e) => { if (e.key === 'Escape' && !modal.classList.contains('hidden')) sluit(); };
+    form.addEventListener('submit', bijBewaren);
+    form.addEventListener('input', wisFout);
+    heleDag.addEventListener('change', zetUren);
+    $('dagact-annuleer').addEventListener('click', sluit);
+    $('dagact-verwijder').addEventListener('click', bijVerwijderen);
+    modal.addEventListener('mousedown', bijAchtergrond);
+    document.addEventListener('keydown', bijToets);
+}
+
+// De klikken hangen HIER en niet in setupEventListeners: een oude app-init.js
+// uit de cache kan dan niet over een ontbrekende functie struikelen (#412).
+if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
+    document.addEventListener('click', (e) => {
+        if (!e.target || typeof e.target.closest !== 'function') return;
+        const chip = e.target.closest('button.dagact-chip[data-dagact-id]');
+        if (chip) {
+            e.stopPropagation();
+            const id = Number(chip.dataset.dagactId);
+            const a = (DataStore.dagActiviteiten || []).find(x => Number(x.id) === id);
+            if (a) openDagActiviteitVenster(a.date, a);
+            return;
+        }
+        if (e.target.closest('#dagact-toevoegen-btn')) {
+            // Standaard de dag die je bekijkt: in de dagweergave die dag,
+            // anders vandaag als die in de week valt, en anders de maandag.
+            const week = getWeekDates(formatDateYYYYMMDD(AppState.currentWeekStart));
+            const vandaag = formatDateYYYYMMDD(new Date());
+            const datum = AppState.viewMode === 'day' ? week[AppState.mobileDayIndex || 0]
+                : (week.includes(vandaag) ? vandaag : week[0]);
+            openDagActiviteitVenster(datum);
+        }
+    });
+}
+
 // Zodat de pure keuzelogica in Node getest kan worden (#408). In de browser
 // bestaat `module` niet, dus dit heeft daar geen effect.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     activiteitDeelnemerKandidaten, activiteitDeelnemersPerTeam, dienstDektActiviteit,
+    dagActiviteitUitVenster,
   };
 }

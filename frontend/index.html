@@ -274,6 +274,8 @@
                         <button class="view-toggle-btn" data-mode="day">Dag</button>
                         <button class="view-toggle-btn active" data-mode="week">Week</button>
                     </div>
+                    <!-- #418: alleen voor admin en roosterverantwoordelijke; renderPlanning zet hem aan. -->
+                    <button id="dagact-toevoegen-btn" class="btn btn-sm btn-secondary hidden" data-tooltip="Een activiteit voor iedereen op één dag, zoals een brandoefening of een teamdag"><i data-lucide="calendar-plus" class="lucide-sm"></i> Activiteit voor iedereen</button>
                     <button id="planning-controls-toggle" class="btn btn-sm btn-secondary active" data-tooltip="Filters tonen/verbergen"><i data-lucide="sliders-horizontal" class="lucide-sm"></i> Filters</button>
                 </div>
                 <div class="planning-controls-row hidden" id="planning-filters-row">
@@ -896,6 +898,48 @@
         </div>
     </div>
 
+    <!-- #418: algemene activiteit, aan een dag en niet aan een persoon. -->
+    <div id="dagact-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="dagact-modal-titel">
+        <div class="modal-content dagact-modal-content">
+            <div class="modal-header">
+                <h2 id="dagact-modal-titel">Activiteit voor iedereen</h2>
+            </div>
+            <form id="dagact-form" class="modal-body" novalidate>
+                <p class="dagact-uitleg">Staat bij iedereen in de planning, op het beginscherm en in de gekoppelde agenda. Telt niet mee in de bezetting.</p>
+                <div class="form-group">
+                    <label for="dagact-titel">Titel</label>
+                    <input type="text" id="dagact-titel" class="form-input" maxlength="120" required placeholder="bv. Brandoefening, Teamdag">
+                </div>
+                <div class="form-row dagact-rij">
+                    <div class="form-group">
+                        <label for="dagact-datum">Datum</label>
+                        <input type="date" id="dagact-datum" class="form-input" required>
+                    </div>
+                    <div class="form-group dagact-uur">
+                        <label for="dagact-van">Van</label>
+                        <input type="time" id="dagact-van" class="form-input">
+                    </div>
+                    <div class="form-group dagact-uur">
+                        <label for="dagact-tot">Tot</label>
+                        <input type="time" id="dagact-tot" class="form-input">
+                    </div>
+                </div>
+                <label class="dagact-heledag"><input type="checkbox" id="dagact-heledag"> Hele dag</label>
+                <div class="form-group">
+                    <label for="dagact-omschrijving">Omschrijving <span class="dagact-optioneel">(optioneel)</span></label>
+                    <textarea id="dagact-omschrijving" class="form-input" rows="2" maxlength="1000"></textarea>
+                </div>
+                <div id="dagact-fout" class="alert alert-error hidden" role="alert"></div>
+            </form>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-danger dagact-verwijder hidden" id="dagact-verwijder">Verwijderen</button>
+                <span class="dagact-actie-ruimte"></span>
+                <button type="button" class="btn btn-secondary" id="dagact-annuleer">Annuleren</button>
+                <button type="submit" form="dagact-form" class="btn btn-primary" id="dagact-ok">Opslaan</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Input Prompt Modal (replaces browser prompt()) -->
     <div id="input-prompt-modal" class="modal hidden">
         <div class="modal-content input-prompt-content">
@@ -1018,16 +1062,16 @@
     <script src="config/settings.js?v=20260611a"></script>
     <!-- Vóór data.js: data.js delegeert de verantwoordelijke-regels hiernaartoe. -->
     <script src="verantwoordelijke-regels.js?v=20261016a"></script>
-    <script src="data.js?v=20261016a"></script>
+    <script src="data.js?v=20261117a"></script>
     <script src="validation.js?v=20261030a"></script>
     <script src="drag-handler.js?v=20260830a"></script>
     <script src="app-globals.js?v=20261114a"></script>
-    <script src="app-permissions.js?v=20261101b"></script>
+    <script src="app-permissions.js?v=20261117a"></script>
     <script src="app-ui.js?v=20260830a"></script>
     <script src="app-auth.js?v=20260611a"></script>
-    <script src="app-nav.js?v=20261114a"></script>
-    <script src="app-planner.js?v=20261114a"></script>
-    <script src="app-shifts.js?v=20261111c"></script>
+    <script src="app-nav.js?v=20261117a"></script>
+    <script src="app-planner.js?v=20261117a"></script>
+    <script src="app-shifts.js?v=20261117a"></script>
     <script src="app-swaps.js?v=20261117a"></script>
     <script src="app-leave.js?v=20261016a"></script>
     <script src="app-employees.js?v=20261111a"></script>
@@ -1035,7 +1079,7 @@
     <script src="app-builder.js?v=20261016a"></script>
     <script src="app-builder-editors.js?v=20260830a"></script>
     <script src="app-builder-drafts.js?v=20260830c"></script>
-    <script src="app-settings.js?v=20261016b"></script>
+    <script src="app-settings.js?v=20261117a"></script>
     <script src="app-admin.js?v=20261030a"></script>
     <script src="app-init.js?v=20261114a"></script>
     <script>

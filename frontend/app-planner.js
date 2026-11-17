@@ -556,6 +556,45 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     }
 }
 
+/**
+ * #418: het label van een algemene activiteit. Met uren "14:00 Brandoefening",
+ * zonder uren alleen de titel: dan geldt ze de hele dag.
+ */
+function dagActiviteitTekst(a) {
+    return a.startTime ? `${a.startTime} ${a.titel}` : a.titel;
+}
+function dagActiviteitTooltip(a) {
+    const wanneer = a.startTime ? `${a.startTime}–${a.endTime}` : 'Hele dag';
+    return `${wanneer} · ${a.titel}${a.omschrijving ? `\n${a.omschrijving}` : ''}`;
+}
+
+/**
+ * De chips van de algemene activiteiten van één dag.
+ *
+ * Er staan er hoogstens TWEE, en daarna "+n": de dagkop is een kaartje van
+ * ~140 pixels breed boven elke kolom, en een derde regel duwt het hele raster
+ * omlaag. Wie meer wil zien, gaat erop staan of opent de dag. In de balk van
+ * de dagweergave is er wél plaats, dus daar staan ze allemaal.
+ *
+ * Wie mag beheren krijgt een knop (klik = bewerken), de anderen tekst met een
+ * tooltip. Een knop die niets doet is een valse belofte (#400).
+ */
+const DAGACT_ZICHTBAAR = 2;
+function dagActiviteitenChips(activiteiten, magBeheren, maxZichtbaar = DAGACT_ZICHTBAAR) {
+    if (!activiteiten || !activiteiten.length) return '';
+    const tag = magBeheren ? 'button' : 'span';
+    const zichtbaar = activiteiten.slice(0, maxZichtbaar);
+    const rest = activiteiten.slice(maxZichtbaar);
+    const chips = zichtbaar.map(a =>
+        `<${tag}${magBeheren ? ' type="button"' : ''} class="dagact-chip" data-dagact-id="${a.id}"`
+        + ` data-tooltip="${escapeHtml(dagActiviteitTooltip(a))}" data-tooltip-pos="bottom">`
+        + `${escapeHtml(dagActiviteitTekst(a))}</${tag}>`).join('');
+    const meer = rest.length
+        ? `<span class="dagact-chip dagact-chip--meer" data-tooltip="${escapeHtml(rest.map(dagActiviteitTooltip).join('\n'))}" data-tooltip-pos="bottom">+${rest.length}</span>`
+        : '';
+    return `<span class="dagact-lijst">${chips}${meer}</span>`;
+}
+
 function calcPlanningHourlyHeadcount(date, hour) {
     const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
     const index = _bezetting();
@@ -1186,6 +1225,20 @@ function renderTimelineView() {
 
     // Header row with days
     const _todayStr = formatDateYYYYMMDD(new Date());
+    // #418: algemene activiteiten in de dagkop. In de dagweergave en op een
+    // telefoon is die kop verborgen; daar staat dezelfde informatie in een
+    // balk boven het raster, één groep per dag, en CSS toont de groep van de
+    // dag die zichtbaar is (zie `.dagact-balk` in styles.css). Zo hoeft er bij
+    // het wisselen van dag niets opnieuw getekend te worden.
+    const magDagactBeheren = typeof canManageDagActiviteiten === 'function' && canManageDagActiviteiten();
+    const dagactKnop = document.getElementById('dagact-toevoegen-btn');
+    if (dagactKnop) dagactKnop.classList.toggle('hidden', !magDagactBeheren);
+    const balkGroepen = weekDates.map((d, i) => {
+        const chips = dagActiviteitenChips(getDagActiviteiten(d), magDagactBeheren, Infinity);
+        return chips ? `<div class="dagact-balk-dag" data-dag="${i}">${chips}</div>` : '';
+    }).join('');
+    if (balkGroepen) html += `<div class="dagact-balk">${balkGroepen}</div>`;
+
     html += '<div class="timeline-header">';
     html += '<div class="timeline-name-header">Medewerker</div>';
     weekDates.forEach((date) => {
@@ -1219,6 +1272,7 @@ function renderTimelineView() {
         html += `<div class="${headerClass}" data-date="${date}"${holidayTip}>
             <span class="day-name">${dayName}</span>
             <span class="day-num">${dateNum}${feestdagBadge}${closedBadge}</span>
+            ${dagActiviteitenChips(getDagActiviteiten(date), magDagactBeheren)}
         </div>`;
     });
     html += '</div>';
@@ -1890,6 +1944,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     afwezigheidsLabel, afwezigheidsLint, afwezigheidsCelMarkering,
     activiteitenPilletjes, kiesPilVorm, kiesPilVormUren, activiteitUrenKort, activiteitStartKort,
+    dagActiviteitenChips, dagActiviteitTekst, DAGACT_ZICHTBAAR,
     tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN,
   };
 }

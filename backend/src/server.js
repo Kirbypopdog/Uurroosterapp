@@ -310,6 +310,9 @@ v1.use(require('./routes/shifts'));
 // ===== SHIFT ACTIVITIES API =====  (verhuisd naar routes/shift-activities.js, #157)
 v1.use(require('./routes/shift-activities'));
 
+// ===== ALGEMENE ACTIVITEITEN (aan een dag, niet aan een persoon) =====  (#418)
+v1.use(require('./routes/dag-activiteiten'));
+
 // ===== AVAILABILITY API =====  (verhuisd naar routes/availability.js, #157)
 v1.use(require('./routes/availability'));
 
