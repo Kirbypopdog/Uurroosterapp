@@ -213,3 +213,25 @@ describe('bezetting', () => {
     expect(planner.slice(begin, eind)).not.toMatch(/dagActiviteit/);
   });
 });
+
+describe('na de review', () => {
+  const F = (f) => fs.readFileSync(path.join(__dirname, '../../frontend', f), 'utf8');
+
+  test('ver vooruit geplande activiteiten worden ook geladen', () => {
+    // Met het venster van de diensten (drie maanden) werd een teamdag in maart
+    // wel opgeslagen maar nergens getoond.
+    const data = F('data.js');
+    expect(data).toMatch(/function _getDagActiviteitenVensterEind\(\) \{\s*const d = new Date\(\); d\.setMonth\(d\.getMonth\(\) \+ 24\)/);
+    const aanroepen = data.match(/\/dag-activiteiten\?startDate=\$\{[^}]+\}&endDate=\$\{(\w+)\(\)\}/g) || [];
+    expect(aanroepen).toHaveLength(2);
+    aanroepen.forEach(a => expect(a).toContain('_getDagActiviteitenVensterEind()'));
+  });
+
+  test('Escape in "Activiteit verwijderen" sluit het bewerkvenster niet mee', () => {
+    const bron = F('app-shifts.js');
+    const begin = bron.indexOf('const bijToets = (e) => {');
+    const blok = bron.slice(begin, bron.indexOf('};', begin));
+    expect(blok).toContain("document.getElementById('confirm-modal')");
+    expect(blok).toMatch(/if \(bevestiging && !bevestiging\.classList\.contains\('hidden'\)\) return;/);
+  });
+});

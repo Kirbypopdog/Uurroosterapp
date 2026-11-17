@@ -57,6 +57,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `drag-handler.js` | Drag & drop shifts tussen medewerkers |
 | `styles.css` | Alle CSS inclusief responsive, themas |
 | `index.html` | HTML markup: modals, formulieren, planning grid |
+| `patchnotes.js` | "Wat is er nieuw": de notities per versie en het venster dat één keer na een update verschijnt (#421). Een nieuwe versie zet je BOVENAAN `PATCH_NOTES` |
 | `config/settings.js` | API URL auto-detect, shift templates, team kleuren |
 
 ### Backend (`backend/`)
@@ -107,6 +108,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `activiteiten-pilletje.test.js` | Dat een activiteit als wit pilletje met pictogram en uren in het dienstblok staat, welke vorm er past, en dat het tijdlabel van een dienstblok niet afgekapt wordt (#404, #416) |
 | `dag-activiteiten.test.js` | Algemene activiteiten (aan een dag, niet aan een persoon): invoercontrole, rechten, agendafeed, chips in de dagkop en dat ze de bezetting niet raken (#418) |
 | `overname-overzicht.test.js` | Het venster bij "Overnemen": je week, je uren ervoor en erna, de rust tot de dienst ervóór en erná, en dat het de drie losse vragen vervangt (#417) |
+| `patchnotes.test.js` | Wanneer "Wat is er nieuw" verschijnt (één keer per versie, per gebruiker) en dat het in de app aangesloten is (#421) |
 | `activiteit-deelnemers.test.js` | Wie er in de deelnemerslijst van een activiteit komt, en wie er een activiteit voor anderen mag aanmaken (#408) |
 | `agenda-sequence.test.js` | Dat een gewijzigde dienst een hogere `SEQUENCE` krijgt in de agendafeed, en dat de migratie de trigger pas ná de backfill zet (#409) |
 | `vergadering-dubbel.test.js` | Dat een concept toepassen geen tweede Teamvergadering naast de bestaande zet (#407) |
@@ -180,6 +182,7 @@ Alle endpoints zijn bereikbaar via `/api/v1/<pad>`. Backward-compat alias op roo
 
 ### Planning
 - `CRUD /api/v1/shift-activities` - Activiteiten binnen shifts
+- `POST /api/v1/shift-activities/batch` - Dezelfde activiteit voor meerdere mensen, in één transactie: alles of niets (#420)
 - `CRUD /api/v1/dag-activiteiten` - Algemene activiteiten aan een dag (#418). Lezen: iedereen; schrijven: admin en roosterverantwoordelijke
 - `CRUD /api/v1/schedule-drafts` - Roosterconcepten
 - `POST /api/v1/schedule-drafts/:id/apply` - Concept toepassen op datumbereik
@@ -751,6 +754,15 @@ waar nog een trigger aan hangt laat zich niet droppen.
   `logAudit` slikt die fout in. Zonder `dag_activiteit` in die lijst zou elke
   regel STIL verdwijnen. Migratie 051 breidt hem uit.
 
+- **"Wat is er nieuw"** (#421): na een update verschijnt één keer een venster
+  met de wijzigingen in gewone taal (`patchnotes.js`, aangeroepen aan het eind
+  van `showApp()`). Gezien wordt per gebruiker in `localStorage` bewaard onder
+  `hetvlot_patchnotes_gezien_<id>`; sluiten op welke manier ook telt als gezien.
+  Een nieuwe versie zet je BOVENAAN `PATCH_NOTES` met een nieuwe `versie`, en
+  wie de vorige zag krijgt de nieuwe vanzelf. Schrijf voor collega's: wat ze
+  zien en wat ze ermee kunnen, zonder issuenummers (de test bewaakt dat). Het
+  sterretje onderaan de zijbalk opent het venster altijd opnieuw.
+
 - **Dienst overnemen** (#417): één venster (`openOvernameVenster()` in
   `app-swaps.js`) met de dienst, je HELE week, je weekuren ervoor → erna tegen
   je contract, en de rust tot je eigen dienst ervóór en erná. Het vervangt drie
@@ -778,7 +790,13 @@ waar nog een trigger aan hangt laat zich niet droppen.
 
   Het activiteitenvenster heeft daarom een deelnemerslijst: wie die dag een
   dienst heeft, met zijn uren erachter. Er worden nog steeds LOSSE rijen
-  geschreven; dit scheelt alleen de herhaling. Een echte gedeelde gebeurtenis
+  geschreven; dit scheelt alleen de herhaling.
+
+  Voor meer dan één persoon gaat dat in ÉÉN verzoek naar
+  `POST /shift-activities/batch`, in één transactie (#420). Eerst was het een
+  POST per persoon: liep de derde mis, dan stonden de eerste twee al opgeslagen
+  en gaf opnieuw opslaan hen de activiteit dubbel. Iedereen staat er ook maar
+  één keer in, ook wie twee diensten op die dag heeft. Een echte gedeelde gebeurtenis
   is een schemawijziging en een apart gesprek.
 
   Vier dingen die erbij horen:

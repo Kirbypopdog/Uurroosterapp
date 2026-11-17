@@ -8,6 +8,11 @@
 
 const fs = require('fs');
 const path = require('path');
+// De rekenkant gebruikt de tijdfuncties uit validation.js, die in de browser
+// als globals bestaan.
+const { parseDateTime, getShiftEndDateTime } = require('../../frontend/validation.js');
+global.parseDateTime = parseDateTime;
+global.getShiftEndDateTime = getShiftEndDateTime;
 const { overnameOverzicht } = require('../../frontend/app-swaps.js');
 
 const acht = () => 8;
@@ -167,5 +172,16 @@ describe('het venster vervangt de drie losse vragen', () => {
     for (const id of ['overname-modal', 'overname-week', 'overname-rust', 'overname-bericht', 'overname-ok']) {
       expect(HTML).toContain(`id="${id}"`);
     }
+  });
+});
+
+describe('geen eigen tijdrekening', () => {
+  test('de rust komt uit parseDateTime en getShiftEndDateTime van validation.js', () => {
+    // Daar is de grens bij gelijke begin- en eindtijd al eens rechtgezet (#295).
+    const bron = fs.readFileSync(path.join(__dirname, '../../frontend/app-swaps.js'), 'utf8');
+    const f = bron.slice(bron.indexOf('function overnameOverzicht'), bron.indexOf('async function openOvernameVenster'));
+    expect(f).toContain('parseDateTime(x.date, x.startTime)');
+    expect(f).toContain('getShiftEndDateTime(x)');
+    expect(f).not.toMatch(/setDate\(e\.getDate\(\) \+ 1\)/);
   });
 });

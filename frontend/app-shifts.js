@@ -1042,8 +1042,21 @@ function dienstDektActiviteit(dienstVan, dienstTot, actVan, actTot) {
  * de waarschuwing krijgt.
  */
 function activiteitDeelnemerKandidaten(shifts, userId, date, zoekMedewerker) {
+    // Eén rij per PERSOON, niet per dienst: wie twee diensten op die dag heeft
+    // (een gesplitste dienst, of een reserve naast een gewone) stond er anders
+    // twee keer in, en "Allemaal" gaf hem de activiteit dubbel. De vroegste
+    // dienst wordt getoond.
+    const gezien = new Set();
     return (shifts || [])
         .filter(sh => sh.date === date && String(sh.employeeId) !== String(userId))
+        .slice()
+        .sort((a, b) => String(a.startTime || '').localeCompare(String(b.startTime || '')))
+        .filter(sh => {
+            const sleutel = String(sh.employeeId);
+            if (gezien.has(sleutel)) return false;
+            gezien.add(sleutel);
+            return true;
+        })
         .map(sh => ({ shift: sh, emp: zoekMedewerker(sh.employeeId) }))
         .filter(x => x.emp)
         .sort((a, b) => (a.emp.name || '').localeCompare(b.emp.name || '', 'nl'));
@@ -1376,14 +1389,15 @@ async function handleActivitySubmit(e) {
             await updateActivity(parseInt(id, 10), { startTime, endTime, type, description });
         } else {
             // Eén rij per persoon: het schema kent geen gedeelde gebeurtenis.
-            // Op volgorde en niet met Promise.all, want addActivity ververst na
-            // elke aanroep de cache; parallel zou dat door elkaar laten lopen.
-            for (const o of ontvangers) {
-                await addActivity({
-                    userId: o.userId, shiftId: o.shiftId, date,
-                    startTime, endTime, type, description,
-                });
-            }
+            // Voor meer dan één persoon in ÉÉN verzoek en één transactie: een
+            // fout halverwege liet vroeger de eersten opgeslagen staan, en wie
+            // dan opnieuw opsloeg gaf hen de activiteit dubbel.
+            const rijen = ontvangers.map(o => ({
+                userId: o.userId, shiftId: o.shiftId, date,
+                startTime, endTime, type, description,
+            }));
+            if (rijen.length > 1) await addActivities(rijen);
+            else await addActivity(rijen[0]);
         }
         closeActivityModal();
         renderPlanning();
@@ -1533,7 +1547,14 @@ function openDagActiviteitVenster(datum, bestaand = null) {
         }
     };
     const bijAchtergrond = (e) => { if (e.target === modal) sluit(); };
-    const bijToets = (e) => { if (e.key === 'Escape' && !modal.classList.contains('hidden')) sluit(); };
+    // Staat er een bevestiging bovenop (bv. "Activiteit verwijderen"), dan is
+    // Escape voor DIE vraag; anders sloot hij ook dit venster eronder.
+    const bijToets = (e) => {
+        if (e.key !== 'Escape' || modal.classList.contains('hidden')) return;
+        const bevestiging = document.getElementById('confirm-modal');
+        if (bevestiging && !bevestiging.classList.contains('hidden')) return;
+        sluit();
+    };
     form.addEventListener('submit', bijBewaren);
     form.addEventListener('input', wisFout);
     heleDag.addEventListener('change', zetUren);

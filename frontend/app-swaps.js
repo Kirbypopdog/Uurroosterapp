@@ -43,17 +43,11 @@ function beschrijfVerzoekDienst(verzoek) {
  */
 function overnameOverzicht({ dienst, eigenDiensten, weekStart, minRust, urenVan }) {
     const tijd = (t) => String(t || '').substring(0, 5);
-    const moment = (datum, t) => {
-        const [j, m, d] = datum.split('-').map(Number);
-        const [u, min] = tijd(t).split(':').map(Number);
-        return new Date(j, m - 1, d, u, min || 0, 0, 0);
-    };
-    const begin = (x) => moment(x.date, x.startTime);
-    const einde = (x) => {
-        const b = begin(x), e = moment(x.date, x.endTime);
-        if (e <= b) e.setDate(e.getDate() + 1);
-        return e;
-    };
+    // De tijdrekening van validation.js, en geen eigen kopie: de grens bij
+    // gelijke begin- en eindtijd is daar al eens rechtgezet (#295), en een
+    // kopie zou die correctie missen en het oneens worden met de backend.
+    const begin = (x) => parseDateTime(x.date, x.startTime);
+    const einde = (x) => getShiftEndDateTime(x);
     const plusDagen = (datum, n) => {
         const [j, m, d] = datum.split('-').map(Number);
         const x = new Date(j, m - 1, d + n);

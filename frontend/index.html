@@ -26,7 +26,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20261117a">
+    <link rel="stylesheet" href="styles.css?v=20261117b">
     <!-- #156: foutmonitoring. Inert zolang er geen DSN in config/monitoring.js
          staat; dan wordt er ook niets van een CDN gehaald. Staat bewust vóór de
          app-bestanden, zodat een fout tijdens het opstarten ook gemeld wordt. -->
@@ -211,6 +211,9 @@
                     </button>
                 </div>
                 <div class="sidebar-foot-actions">
+                    <button class="sidebar-icon-btn" id="patchnotes-btn" aria-label="Wat is er nieuw" data-tooltip="Wat is er nieuw">
+                        <i data-lucide="sparkles" class="lucide-sm"></i>
+                    </button>
                     <button class="sidebar-icon-btn" id="dark-mode-btn" aria-label="Donker thema" data-tooltip="Donker/licht thema">
                         <i data-lucide="moon" class="lucide-sm"></i>
                     </button>
@@ -940,6 +943,19 @@
         </div>
     </div>
 
+    <!-- "Wat is er nieuw": één keer na een update, inhoud uit patchnotes.js. -->
+    <div id="patchnotes-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="patchnotes-titel">
+        <div class="modal-content patchnotes-modal-content">
+            <div class="modal-header">
+                <h2 id="patchnotes-titel">Wat is er nieuw</h2>
+            </div>
+            <div id="patchnotes-inhoud" class="modal-body patchnotes-inhoud"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-primary" id="patchnotes-ok">Begrepen</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Input Prompt Modal (replaces browser prompt()) -->
     <div id="input-prompt-modal" class="modal hidden">
         <div class="modal-content input-prompt-content">
@@ -1062,17 +1078,18 @@
     <script src="config/settings.js?v=20260611a"></script>
     <!-- Vóór data.js: data.js delegeert de verantwoordelijke-regels hiernaartoe. -->
     <script src="verantwoordelijke-regels.js?v=20261016a"></script>
-    <script src="data.js?v=20261117a"></script>
+    <script src="data.js?v=20261117b"></script>
     <script src="validation.js?v=20261030a"></script>
-    <script src="drag-handler.js?v=20260830a"></script>
-    <script src="app-globals.js?v=20261114a"></script>
+    <script src="drag-handler.js?v=20261117a"></script>
+    <script src="app-globals.js?v=20261117a"></script>
     <script src="app-permissions.js?v=20261117a"></script>
     <script src="app-ui.js?v=20260830a"></script>
-    <script src="app-auth.js?v=20260611a"></script>
+    <script src="patchnotes.js?v=20261117a"></script>
+    <script src="app-auth.js?v=20261117a"></script>
     <script src="app-nav.js?v=20261117a"></script>
     <script src="app-planner.js?v=20261117a"></script>
-    <script src="app-shifts.js?v=20261117a"></script>
-    <script src="app-swaps.js?v=20261117a"></script>
+    <script src="app-shifts.js?v=20261117b"></script>
+    <script src="app-swaps.js?v=20261117b"></script>
     <script src="app-leave.js?v=20261016a"></script>
     <script src="app-employees.js?v=20261111a"></script>
     <script src="app-availability.js?v=20261101a"></script>

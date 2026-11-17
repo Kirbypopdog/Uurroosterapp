@@ -1068,6 +1068,67 @@ describe('GET /shift-activities', () => {
 
 // ===== POST /shift-activities =====
 
+describe('POST /shift-activities/batch (#408)', () => {
+  const act = (userId) => ({ userId, date: '2026-11-19', startTime: '13:00', endTime: '16:00', type: 'vergadering', description: 'Teamvergadering' });
+  const admin = () => `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`;
+
+  test('schrijft alle rijen in één transactie', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 11, userId: 3 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 12, userId: 7 }] });
+    const res = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', admin()).send({ activiteiten: [act(3), act(7)] });
+    expect(res.status).toBe(201);
+    expect(res.body.activities.map(a => a.id)).toEqual([11, 12]);
+    const sqls = pool.query.mock.calls.map(c => String(c[0]));
+    expect(sqls.filter(q => /INSERT INTO shift_activities/.test(q))).toHaveLength(2);
+  });
+
+  test('loopt er één mis, dan wordt alles teruggedraaid', async () => {
+    // Met een POST per persoon bleven de eersten opgeslagen staan, en opnieuw
+    // opslaan gaf hen de activiteit dubbel.
+    mockActiveUser();
+    const client = await pool.connect();
+    client.query.mockClear();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 11, userId: 3 }] })
+      .mockRejectedValueOnce(new Error('verbinding weg'));
+    const res = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', admin()).send({ activiteiten: [act(3), act(7)] });
+    expect(res.status).toBe(500);
+    const opdrachten = client.query.mock.calls.map(c => String(c[0]).trim().split(/\s+/)[0]);
+    expect(opdrachten).toContain('ROLLBACK');
+    expect(opdrachten).not.toContain('COMMIT');
+  });
+
+  test('een medewerker mag alleen voor zichzelf', async () => {
+    mockActiveUser();
+    const res = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', `Bearer ${makeToken({ id: 5, role: 'medewerker', name: 'U', team_id: 'vlot1' })}`)
+      .send({ activiteiten: [act(5), act(9)] });
+    expect(res.status).toBe(403);
+  });
+
+  test('dezelfde persoon twee keer wordt geweigerd', async () => {
+    mockActiveUser();
+    const res = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', admin()).send({ activiteiten: [act(3), act(3)] });
+    expect(res.status).toBe(400);
+  });
+
+  test('een lege lijst of een ontbrekend veld wordt geweigerd', async () => {
+    mockActiveUser();
+    const leeg = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', admin()).send({ activiteiten: [] });
+    expect(leeg.status).toBe(400);
+    mockActiveUser();
+    const half = await request(app).post('/api/v1/shift-activities/batch')
+      .set('Authorization', admin()).send({ activiteiten: [{ userId: 3, date: '2026-11-19' }] });
+    expect(half.status).toBe(400);
+  });
+});
+
 describe('POST /shift-activities', () => {
   test('returns 400 when required fields are missing', async () => {
     mockActiveUser();

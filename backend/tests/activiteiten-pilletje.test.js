@@ -365,3 +365,19 @@ describe('tijdLabelVoorBlok (#404)', () => {
     expect(VOLLEDIG_BEREIK_VANAF_UREN).toBe(7.5);
   });
 });
+
+describe('na de review', () => {
+  const F = (f) => fs.readFileSync(path.join(__dirname, '../../frontend', f), 'utf8');
+
+  test('een klik op het pilletje van één activiteit opent niet óók het dienstvenster', () => {
+    // De sleepafhandeling nam de klik op het blok over en opende het
+    // dienstvenster onder het activiteitenvenster.
+    const drag = F('drag-handler.js');
+    const guards = drag.match(/if \(e\.target\.closest\('\.activity-pil\[data-activity-id\]'\)\) return;/g) || [];
+    expect(guards).toHaveLength(2);  // muis én toetsenbord/telefoon
+  });
+
+  test('de korte codes van de oude chips zijn weg', () => {
+    expect(F('app-globals.js')).not.toContain('ACTIVITY_TYPE_LABELS_SHORT');
+  });
+});

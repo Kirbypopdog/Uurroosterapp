@@ -117,6 +117,20 @@ describe('wie mag er een activiteit voor iemand anders aanmaken', () => {
   });
 });
 
+describe('één rij per persoon in de lijst', () => {
+  test('wie twee diensten heeft, staat er één keer in, met zijn vroegste dienst', () => {
+    // Anders gaf "Allemaal" hem de activiteit twee keer.
+    const shifts = [
+      { id: 1, employeeId: 9, date: '2026-11-19', startTime: '17:00', endTime: '22:00' },
+      { id: 2, employeeId: 9, date: '2026-11-19', startTime: '07:30', endTime: '12:00' },
+      { id: 3, employeeId: 7, date: '2026-11-19', startTime: '09:00', endTime: '17:00' },
+    ];
+    const lijst = activiteitDeelnemerKandidaten(shifts, 3, '2026-11-19', zoek);
+    expect(lijst.map(k => k.emp.id)).toEqual([7, 9]);
+    expect(lijst.find(k => k.emp.id === 9).shift.id).toBe(2);
+  });
+});
+
 describe('wat het formulier doet met de deelnemers', () => {
   const BRON = fs.readFileSync(frontend('app-shifts.js'), 'utf8');
   const HTML = fs.readFileSync(frontend('index.html'), 'utf8');
@@ -128,8 +142,14 @@ describe('wat het formulier doet met de deelnemers', () => {
   });
 
   test('er wordt één rij per aangevinkte persoon geschreven', () => {
-    expect(BRON).toMatch(/for \(const o of ontvangers\)/);
     expect(BRON).toContain('userId: o.userId, shiftId: o.shiftId');
+  });
+
+  test('meer dan één persoon gaat in één verzoek, alles of niets', () => {
+    // Met een POST per persoon bleven bij een fout halverwege de eersten
+    // opgeslagen staan, en opnieuw opslaan gaf hen de activiteit dubbel.
+    expect(BRON).toMatch(/if \(rijen\.length > 1\) await addActivities\(rijen\)/);
+    expect(BRON).not.toMatch(/for \(const o of ontvangers\)\s*\{\s*await addActivity/);
   });
 
   test('de waarschuwing over diensturen kijkt naar ELKE ontvanger', () => {

@@ -106,3 +106,14 @@ describe("het type 'vorming' is verouderd als afwezigheid", () => {
     expect(globals).toMatch(/vorming/);
   });
 });
+
+describe('kleuren uit de tokens (#180)', () => {
+  test('de legende "Vrij" gebruikt tokens en geen hexwaarden', () => {
+    const css = require('fs').readFileSync(require('path').join(__dirname, '../../frontend/styles.css'), 'utf8');
+    const i = css.indexOf('.legend-chip.not-scheduled {');
+    const blok = css.slice(i, css.indexOf('}', i));
+    expect(blok).not.toMatch(/#[0-9a-f]{3,6}\b/i);
+    expect(blok).toContain('var(--bg-color)');
+    expect(blok).toContain('var(--line-strong)');
+  });
+});

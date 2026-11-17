@@ -381,6 +381,14 @@ function _getInitialWindowEnd() {
     const d = new Date(); d.setMonth(d.getMonth() + 3); return formatDateYYYYMMDD(d);
 }
 
+// #418: algemene activiteiten worden ver vooruit gepland (een teamdag in
+// maart, in november al vastgelegd). Met het venster van de diensten (drie
+// maanden) werd zo'n activiteit opgeslagen maar nergens getoond, en maakte de
+// beheerder ze een tweede keer aan. Het zijn er weinig, dus twee jaar kan.
+function _getDagActiviteitenVensterEind() {
+    const d = new Date(); d.setMonth(d.getMonth() + 24); return formatDateYYYYMMDD(d);
+}
+
 async function loadDataFromAPI() {
     try {
         // Load all data in parallel - users now includes employee/schedule data
@@ -430,7 +438,7 @@ async function loadDataFromAPI() {
             // miste elke ruil- of overnamevraag.
             dataApiFetch('/swap-requests').catch(err => { loadErrors.push('ruilverzoeken'); console.error('[LoadData] Failed to load swap-requests:', err); return { swapRequests: [] }; }),
             // #418: zelfde venster als de diensten.
-            dataApiFetch(`/dag-activiteiten?startDate=${_getInitialWindowStart()}&endDate=${_getInitialWindowEnd()}`).catch(err => { loadErrors.push('algemene activiteiten'); console.error('[LoadData] Failed to load dag-activiteiten:', err); return { dagActiviteiten: [] }; })
+            dataApiFetch(`/dag-activiteiten?startDate=${_getInitialWindowStart()}&endDate=${_getDagActiviteitenVensterEind()}`).catch(err => { loadErrors.push('algemene activiteiten'); console.error('[LoadData] Failed to load dag-activiteiten:', err); return { dagActiviteiten: [] }; })
         ]);
 
         if (loadErrors.length > 0) {
@@ -885,7 +893,7 @@ function getDagActiviteiten(datum) {
 }
 
 async function refreshDagActiviteiten() {
-    const data = await dataApiFetch(`/dag-activiteiten?startDate=${_getInitialWindowStart()}&endDate=${_getInitialWindowEnd()}`);
+    const data = await dataApiFetch(`/dag-activiteiten?startDate=${_getInitialWindowStart()}&endDate=${_getDagActiviteitenVensterEind()}`);
     DataStore.dagActiviteiten = data.dagActiviteiten || [];
 }
 
@@ -900,6 +908,18 @@ async function bewaarDagActiviteit(waarden, id = null) {
 async function verwijderDagActiviteit(id) {
     await dataApiFetch(`/dag-activiteiten/${id}`, { method: 'DELETE' });
     await refreshDagActiviteiten();
+}
+
+// #408: dezelfde activiteit voor meerdere mensen, in één verzoek en één
+// transactie: alles of niets. Eén verversing achteraf in plaats van één per
+// persoon.
+async function addActivities(lijst) {
+    const data = await dataApiFetch('/shift-activities/batch', {
+        method: 'POST',
+        body: JSON.stringify({ activiteiten: lijst }),
+    });
+    await refreshActivities();
+    return (data.activities || []).map(normalizeActivity);
 }
 
 async function addActivity(activityData) {
