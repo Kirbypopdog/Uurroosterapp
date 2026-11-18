@@ -76,8 +76,8 @@ function mockLeaveRoundClient(round, doelRol = 'medewerker') {
       // #309: PUT /leave-rounds/:id/entries kijkt eerst welke rol de
       // doelgebruiker heeft, want een beheeraccount draait niet mee in het
       // rooster en mag geen verlof invullen.
-      if (/SELECT role FROM users/i.test(sql)) {
-        return Promise.resolve({ rows: doelRol ? [{ role: doelRol }] : [] });
+      if (/SELECT role, main_team FROM users/i.test(sql)) {
+        return Promise.resolve({ rows: doelRol ? [{ role: doelRol, main_team: 'vlot2' }] : [] });
       }
       if (/FROM leave_rounds/i.test(sql)) return Promise.resolve({ rows: round ? [round] : [] });
       return Promise.resolve({ rows: [], rowCount: 0 });
@@ -3894,7 +3894,10 @@ describe('Verlofrondes', () => {
 
   test('POST submit blokkeert bij een gesloten ronde', async () => {
     mockActiveUser();
-    pool.query.mockResolvedValueOnce({ rows: [{ status: 'gesloten' }] });
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ role: 'medewerker', main_team: 'vlot2' }] }) // wie ben ik
+      .mockResolvedValueOnce({ rows: [] })                                          // leaveTeams: niet ingesteld
+      .mockResolvedValueOnce({ rows: [{ status: 'gesloten' }] });
     const res = await request(app)
       .post('/api/v1/leave-rounds/1/submit')
       .set('Authorization', `Bearer ${makeToken(medewerker)}`);
@@ -3938,8 +3941,8 @@ describe('Verlofrondes', () => {
     mockClient.query.mockImplementation((sql) => {
       if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
       // #309: de handler kijkt eerst welke rol de doelgebruiker heeft
-      if (sql.includes('SELECT role FROM users')) {
-        return Promise.resolve({ rows: doelRol ? [{ role: doelRol }] : [] });
+      if (sql.includes('SELECT role, main_team FROM users')) {
+        return Promise.resolve({ rows: doelRol ? [{ role: doelRol, main_team: 'vlot2' }] : [] });
       }
       if (sql.includes('FROM leave_rounds WHERE id')) {
         return Promise.resolve({ rows: [{ status: 'open', start_date: '2026-09-01', end_date: '2027-08-31' }] });
@@ -4053,9 +4056,45 @@ describe('Verlofrondes', () => {
     expect(schrijf).toBeUndefined();
   });
 
+  test('PUT entries weigert een team dat zijn verlof niet via de ronde aanvraagt', async () => {
+    mockActiveUser();
+    const client = {
+      query: jest.fn().mockImplementation((sql) => {
+        if (/SELECT role, main_team FROM users/i.test(sql)) return Promise.resolve({ rows: [{ role: 'medewerker', main_team: 'jobstudent' }] });
+        if (sql.includes("key = 'leaveTeams'")) return Promise.resolve({ rows: [{ value: ['vlot1', 'vlot2'] }] });
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      }),
+      release: jest.fn()
+    };
+    pool.connect.mockResolvedValueOnce(client);
+    const res = await request(app)
+      .put('/api/v1/leave-rounds/6/entries')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ entries: [{ date: '2026-12-21', status: 'verlof' }] });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/team/i);
+    expect(client.query.mock.calls.some(([q]) => /INSERT|DELETE/i.test(q))).toBe(false);
+  });
+
+  test('POST submit weigert een team dat zijn verlof niet via de ronde aanvraagt', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ role: 'medewerker', main_team: 'jobstudent' }] })
+      .mockResolvedValueOnce({ rows: [{ value: ['vlot1', 'vlot2'] }] })
+      .mockResolvedValue({ rows: [] });
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/submit')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({});
+    expect(res.status).toBe(403);
+    expect(pool.query.mock.calls.some(([q]) => /INSERT INTO leave_round_submissions/.test(q))).toBe(false);
+  });
+
   test('POST submit blijft werken voor een medewerker (#309)', async () => {
     mockActiveUser();
     pool.query
+      .mockResolvedValueOnce({ rows: [{ role: 'medewerker', main_team: 'vlot2' }] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ status: 'open' }] })
       .mockResolvedValue({ rows: [] });
     const res = await request(app)

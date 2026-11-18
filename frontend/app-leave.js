@@ -181,6 +181,22 @@ function leaveBlockProgress(block, entryMap) {
     return { totaal: dagen.length, ingevuld, klaar: ingevuld === dagen.length };
 }
 
+// Wie hoort er in een verlofronde? Actieve medewerkers uit een team dat zijn
+// verlof via de ronde aanvraagt. Zie draaitMeeInVerlof() in app-permissions.js.
+function leaveDeelnemers() {
+    return getAllEmployees(true).filter(e => draaitMeeInVerlof(e));
+}
+
+// Doet de ingelogde gebruiker zelf mee? Op de eigen account en niet op
+// getEffectiveRole(): een admin die een rol simuleert blijft een adminaccount
+// (#309). Het hoofdteam komt uit DataStore.users als het op de sessie ontbreekt.
+function leaveIkDoeMee() {
+    const ik = AppState.currentUser;
+    if (!ik) return false;
+    const volledig = (DataStore.users || []).find(u => String(u.id) === String(ik.id));
+    return draaitMeeInVerlof({ ...volledig, ...ik, mainTeam: ik.mainTeam ?? volledig?.mainTeam });
+}
+
 // ===== HOOFDWEERGAVE =====
 
 async function renderLeave() {
@@ -192,9 +208,11 @@ async function renderLeave() {
     // rol beschrijft hij wat het scherm er wél doet.
     const beschrijving = document.getElementById('leave-view-description');
     if (beschrijving) {
-        beschrijving.textContent = AppState.currentUser?.role === 'admin'
-            ? 'Volg de verlofrondes op, keur in en verwerk ze in de planning'
-            : 'Duid je verlof aan voor de vakantieperiodes';
+        beschrijving.textContent = leaveIkDoeMee()
+            ? 'Duid je verlof aan voor de vakantieperiodes'
+            : canManageLeave()
+                ? 'Volg de verlofrondes op, keur in en verwerk ze in de planning'
+                : 'Bekijk de verlofrondes van je collega\'s';
     }
 
     container.innerHTML = '<p class="no-items-text">Laden…</p>';
@@ -273,8 +291,8 @@ function renderLeaveRoundCard(r) {
     // #309: voor een beheeraccount is er niets zelf te doen, want het draait
     // niet mee in het rooster. "nog in te vullen" was daar een opdracht die
     // nergens toe leidde.
-    const beheeraccount = AppState.currentUser?.role === 'admin';
-    const eigen = beheeraccount        ? ''
+    const doetNietMee = !leaveIkDoeMee();
+    const eigen = doetNietMee          ? ''
                : r.myApproved === true  ? '<span class="leave-card-status leave-card-klaar">goedgekeurd</span>'
                : r.myApproved === false ? '<span class="leave-card-status leave-card-afgewezen">afgewezen</span>'
                : r.mySubmittedAt        ? '<span class="leave-card-status leave-card-bezig">ingediend</span>'
@@ -331,7 +349,7 @@ function renderLeaveRoundHtml(rounds, data) {
         // draait niet mee in het rooster. De kaarten die erheen leiden zijn voor
         // die rol al weg; deze regel vangt een blijven hangen leaveScreen op,
         // want die overleeft een hertekening.
-        const block = AppState.currentUser?.role === 'admin'
+        const block = !leaveIkDoeMee()
             ? null
             : blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
         if (block) return renderLeaveBlokScherm(round, block, entries, submissions);
@@ -367,8 +385,8 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
     // getEffectiveRole(): een admin die een rol simuleert heeft nog steeds een
     // adminaccount, dus indienen zou nog steeds tot niets leiden. De backend
     // weigert het nu ook.
-    const beheeraccount = AppState.currentUser?.role === 'admin';
-    const bewerkbaar = round.status === 'open' && !beheeraccount;
+    const doetNietMee = !leaveIkDoeMee();
+    const bewerkbaar = round.status === 'open' && !doetNietMee;
 
     const groep = (titel, lijst) => !lijst.length ? '' : `
         <div class="leave-group">
@@ -391,9 +409,11 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
             </div>
         </div>
 
-        ${beheeraccount ? `
+        ${doetNietMee ? `
             <div class="leave-banner leave-banner-info">
-                Dit beheeraccount draait niet mee in het rooster, dus er valt voor jou geen verlof in te vullen.
+                ${AppState.currentUser?.role === 'admin'
+                    ? 'Dit beheeraccount draait niet mee in het rooster, dus er valt voor jou geen verlof in te vullen.'
+                    : 'Jouw team vraagt zijn verlof niet aan via deze ronde, dus er valt voor jou niets in te vullen.'}
                 Volg de ronde op via <strong>Overzicht iedereen</strong>.
             </div>` : `
             ${renderLeaveStatusBanner(round, mySub, alleKlaar)}
@@ -678,7 +698,7 @@ function leaveWeekWens(week, entryMap) {
 // Elke cel toont wat het voorstel is (kleur) én waarop dat gebaseerd is (de
 // wens als letter). Klikken wisselt tussen verlof en werken.
 function renderLeaveVerdeelScherm(round, block, entries, submissions) {
-    const medewerkers = getAllEmployees(true);
+    const medewerkers = leaveDeelnemers();
     const perUser = {};
     // #377: wat er GELDT en wat er GEVRAAGD is, apart. De kleur van een cel
     // volgt de verdeling, de letter volgt de wens.
@@ -810,7 +830,7 @@ function leaveWeekShortLabel(week) {
 // ===== OVERZICHT (matrix zoals de Excel) =====
 
 function renderLeaveMatrix(round, blocks, entries, submissions) {
-    const medewerkers = getAllEmployees(true);
+    const medewerkers = leaveDeelnemers();
     const perUser = {};
     entries.forEach(e => {
         const id = Number(e.userId);
@@ -1515,7 +1535,7 @@ async function resyncLeaveClosedDays(data) {
 
 function exportLeaveRound(data) {
     const { round, blocks = [], entries } = data;
-    const medewerkers = getAllEmployees(true);
+    const medewerkers = leaveDeelnemers();
     const perUser = {};
     const gevraagdPerUser = {};
     entries.forEach(e => {

@@ -15,6 +15,7 @@ const TOEGESTANE_SETTINGS = {
   coverageTeams:       'array',
   dismissedAlerts:     'array',
   holidayPeriods:      'array',
+  leaveTeams:          'array',
   schedule_drafts:     'array',
   email_notifications: 'object',
   holidayRules:        'object',

@@ -488,6 +488,9 @@ async function loadDataFromAPI() {
             schoolYearStart: apiSettings.school_year_start || DataStore.settings.schoolYearStart,
             teamMeetings: apiSettings.team_meetings || DataStore.settings.teamMeetings,
             coverageTeams: apiSettings.coverageTeams || DataStore.settings.coverageTeams,
+            // Welke teams hun verlof via de verlofrondes aanvragen. Ontbreekt de
+            // instelling, dan blijft hij undefined en doet elk team mee.
+            leaveTeams: apiSettings.leaveTeams || DataStore.settings.leaveTeams,
             shiftTemplates: apiSettings.shiftTemplates || DataStore.settings.shiftTemplates,
             nachtForfait: apiSettings.nachtForfait ?? DataStore.settings.nachtForfait,
             dismissedAlerts: apiSettings.dismissedAlerts || DataStore.settings.dismissedAlerts || []
@@ -1391,6 +1394,9 @@ async function refreshSettings() {
             schoolYearStart: apiSettings.school_year_start || DataStore.settings.schoolYearStart,
             teamMeetings: apiSettings.team_meetings || DataStore.settings.teamMeetings,
             coverageTeams: apiSettings.coverageTeams || DataStore.settings.coverageTeams,
+            // Welke teams hun verlof via de verlofrondes aanvragen. Ontbreekt de
+            // instelling, dan blijft hij undefined en doet elk team mee.
+            leaveTeams: apiSettings.leaveTeams || DataStore.settings.leaveTeams,
             shiftTemplates: apiSettings.shiftTemplates || DataStore.settings.shiftTemplates,
             nachtForfait: apiSettings.nachtForfait ?? DataStore.settings.nachtForfait
         });

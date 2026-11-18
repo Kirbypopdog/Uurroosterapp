@@ -1127,6 +1127,7 @@ function renderSettingsTeams(container) {
                 <div class="team-legend">
                     <span class="team-legend-item">Bezetting = telt mee in bezettingsberekening</span>
                     <span class="team-legend-item">Weekend = draait mee in weekendverantwoordelijke rotatie</span>
+                    <span class="team-legend-item">Verlof = vraagt verlof aan via de verlofrondes</span>
                 </div>
                 <div class="teams-list" id="teams-config">
                     ${renderTeamsConfig()}
@@ -1314,6 +1315,13 @@ async function openAddTeamModal() {
         if (!ct.includes(teamId)) { ct.push(teamId); }
         DataStore.settings.coverageTeams = ct;
         await saveSettings('coverageTeams', ct);
+
+        // Een nieuw team doet mee aan de verlofrondes, net zoals het meetelt
+        // voor de bezetting. Zonder instelling doet al elk team mee.
+        if (Array.isArray(DataStore.settings.leaveTeams) && !DataStore.settings.leaveTeams.includes(teamId)) {
+            DataStore.settings.leaveTeams = [...DataStore.settings.leaveTeams, teamId];
+            await saveSettings('leaveTeams', DataStore.settings.leaveTeams);
+        }
 
         syncTeamFilters();
         applyTeamColors();
@@ -2131,6 +2139,8 @@ async function ensureTeamsLoaded() {
 function renderTeamsConfig() {
     const coverageTeams = DataStore.settings.coverageTeams || Object.keys(DataStore.settings.teams || {});
     const eligibleTeams = DataStore.settings.responsibleRotation?.eligibleTeams || [];
+    // Zonder instelling doet elk team mee aan de verlofrondes (zoals vroeger).
+    const leaveTeams = Array.isArray(DataStore.settings.leaveTeams) ? DataStore.settings.leaveTeams : null;
     const sortedTeamIds = getTeamOrder();
     let html = '';
     sortedTeamIds.forEach(teamId => {
@@ -2138,6 +2148,7 @@ function renderTeamsConfig() {
         const teamName = escapeHtml(team.name);
         const inCoverage = coverageTeams.includes(teamId);
         const inWeekend = eligibleTeams.includes(teamId);
+        const inVerlof = !leaveTeams || leaveTeams.includes(teamId);
         html += `
         <div class="team-config-item" data-team-id="${teamId}" draggable="true">
             <span class="team-drag-handle" data-tooltip="Versleep om volgorde te wijzigen">&#8942;</span>
@@ -2152,6 +2163,10 @@ function renderTeamsConfig() {
                     <label class="team-toggle-label" data-tooltip="Draait mee in weekendverantwoordelijke rotatie">
                         <input type="checkbox" class="eligible-team-cb" data-team-id="${teamId}" ${inWeekend ? 'checked' : ''} onchange="saveTeamToggles()" />
                         <span>Weekend</span>
+                    </label>
+                    <label class="team-toggle-label" data-tooltip="Vraagt verlof aan via de verlofrondes">
+                        <input type="checkbox" class="leave-team-cb" data-team-id="${teamId}" ${inVerlof ? 'checked' : ''} onchange="saveTeamToggles()" />
+                        <span>Verlof</span>
                     </label>
                 </div>
             </div>
@@ -2881,6 +2896,26 @@ async function saveTeamToggles() {
         console.error('Error saving responsibleRotation:', e);
         DataStore.settings.responsibleRotation.eligibleTeams = vorigeEligible;
         mislukt.push('weekendrotatie');
+    }
+
+    // Teams die hun verlof via de verlofrondes aanvragen. Alles uitvinken mag:
+    // dan doet niemand mee, en dat is een geldige keuze.
+    const leaveTeams = [];
+    document.querySelectorAll('.leave-team-cb').forEach(cb => {
+        if (cb.checked) leaveTeams.push(cb.dataset.teamId);
+    });
+    const vorigeLeave = DataStore.settings.leaveTeams;
+    const leaveGewijzigd = JSON.stringify(Array.isArray(vorigeLeave) ? vorigeLeave : Object.keys(DataStore.settings.teams || {}))
+        !== JSON.stringify(leaveTeams);
+    if (leaveGewijzigd) {
+        DataStore.settings.leaveTeams = leaveTeams;
+        try {
+            await saveSettings('leaveTeams', leaveTeams);
+        } catch (e) {
+            console.error('Error saving leaveTeams:', e);
+            DataStore.settings.leaveTeams = vorigeLeave;
+            mislukt.push('verlofteams');
+        }
     }
 
     if (mislukt.length > 0) {
