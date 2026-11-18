@@ -138,7 +138,12 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     // vanaf de overnamedatum. 'behouden' is de veilige standaard: dat is echt
     // werk waar al op gerekend is.
     eigenDienstenVervanger = 'behouden',
+    // Wisselt de vertrekker alleen van functie of team, dan blijft hij in
+    // dienst: geen deactivatie, en alleen de verzoeken over diensten die
+    // verhuizen worden ingetrokken. Zie geplande_overnames.vertrekker_blijft_actief.
+    vertrekkerBlijftActief = false,
   } = req.body;
+  const blijftActief = vertrekkerBlijftActief === true;
   const newUserId = Number(replacementUserId);
 
   if (!oldUserId || !newUserId) {
@@ -195,6 +200,30 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     if (newUser.active === false) {
       await client.query('ROLLBACK').catch(() => {});
       return res.status(409).json({ error: `${newUser.name} is niet actief en kan geen diensten overnemen` });
+    }
+
+    // De vertrekker neemt zelf al het rooster van iemand anders over, op een
+    // LATERE datum? Dan bevat zijn rooster vanaf die datum al de diensten van
+    // die ander, en zou deze vervanging ze mee doorschuiven — net als zijn
+    // plaats in de roosterconcepten. De goede volgorde is omgekeerd: eerst
+    // zijn eigen vervanging, dan de overname waarin hij zelf de vervanger is.
+    const grens = transferShiftsFrom || vandaag;
+    const inkomend = await client.query(
+      `SELECT g.ingangsdatum::text AS ingangsdatum, u.name AS van
+         FROM geplande_overnames g JOIN users u ON u.id = g.oude_gebruiker
+        WHERE g.nieuwe_gebruiker = $1 AND g.status = 'gepland' AND g.ingangsdatum > $2
+        ORDER BY g.ingangsdatum LIMIT 1`,
+      [oldUserId, grens]
+    );
+    if (inkomend.rows.length > 0) {
+      const r = inkomend.rows[0];
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(409).json({
+        error: `${oldUser.name} neemt vanaf ${r.ingangsdatum} zelf het rooster van ${r.van} over. ` +
+          `Die diensten zouden nu mee naar ${newUser.name} verhuizen. Annuleer die overname, ` +
+          `stel eerst deze vervanging in en daarna opnieuw die van ${r.van}.`,
+        volgorde: true,
+      });
     }
 
     // 1. Het rooster van de vertrekker overnemen: het weekrooster, maar ook het
@@ -307,12 +336,26 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     //     weg is, en aanvaarden verzette de dienst van de VERVANGER. Meeverhuizen
     //     is geen alternatief: dan erft de vervanger een vraag die zij nooit
     //     gesteld heeft.
-    const verzoekenResult = gaatLaterIn ? { rowCount: 0 } : await client.query(
-      `UPDATE shift_swap_requests
-          SET status = 'cancelled', responded_at = NOW(), response_notes = $2
-        WHERE status = 'pending' AND (requester_user_id = $1 OR target_user_id = $1)`,
-      [oldUserId, `Ingetrokken: ${oldUser.name} is vervangen`]
-    );
+    //
+    //     Blijft de vertrekker in dienst, dan alleen de verzoeken over diensten
+    //     die verhuisd zijn: zijn verzoek over een dienst van vóór de
+    //     ingangsdatum is gewoon nog geldig.
+    const verzoekenResult = gaatLaterIn ? { rowCount: 0 }
+      : blijftActief
+        ? (transferShiftsFrom ? await client.query(
+            `UPDATE shift_swap_requests r
+                SET status = 'cancelled', responded_at = NOW(), response_notes = $2
+              WHERE r.status = 'pending' AND (r.requester_user_id = $1 OR r.target_user_id = $1)
+                AND EXISTS (SELECT 1 FROM shifts s
+                             WHERE s.id IN (r.requester_shift_id, r.target_shift_id) AND s.date >= $3)`,
+            [oldUserId, `Ingetrokken: de dienst is overgegaan naar ${newUser.name}`, transferShiftsFrom]
+          ) : { rowCount: 0 })
+        : await client.query(
+            `UPDATE shift_swap_requests
+                SET status = 'cancelled', responded_at = NOW(), response_notes = $2
+              WHERE status = 'pending' AND (requester_user_id = $1 OR target_user_id = $1)`,
+            [oldUserId, `Ingetrokken: ${oldUser.name} is vervangen`]
+          );
     const verzoekenGeannuleerd = verzoekenResult.rowCount;
 
     // 3. De vertrekker deactiveren, of de overname vastleggen voor later.
@@ -326,11 +369,12 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       );
       await client.query(
         `INSERT INTO geplande_overnames
-           (oude_gebruiker, nieuwe_gebruiker, ingangsdatum, aangemaakt_door, aangemaakt_door_naam)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [oldUserId, newUserId, transferShiftsFrom, req.user.id, req.user.name]
+           (oude_gebruiker, nieuwe_gebruiker, ingangsdatum, aangemaakt_door, aangemaakt_door_naam,
+            vertrekker_blijft_actief)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [oldUserId, newUserId, transferShiftsFrom, req.user.id, req.user.name, blijftActief]
       );
-    } else {
+    } else if (!blijftActief) {
       await client.query(
         `UPDATE users SET active = false WHERE id = $1`,
         [oldUserId]
@@ -400,6 +444,8 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       verzoekenGeannuleerd,
       eigenDienstenVerwijderd,
       gaatLaterIn,
+      vertrekkerBlijftActief: blijftActief,
+      vertrekkerBlijftActief: blijftActief,
       transferFrom: transferShiftsFrom || null,
       scheduleCopied: true,
       teamOvergenomen: oldUser.main_team || null,
@@ -416,6 +462,7 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       verzoekenGeannuleerd,
       eigenDienstenVerwijderd,
       gaatLaterIn,
+      vertrekkerBlijftActief: blijftActief,
       ingangsdatum: gaatLaterIn ? transferShiftsFrom : null,
       teamOvergenomen: oldUser.main_team || null,
       contracturenOvergenomen,

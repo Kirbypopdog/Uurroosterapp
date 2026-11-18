@@ -99,6 +99,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
 | `cdn-scripts.test.js` | Dat elke verwijzing naar een pakket-CDN in `index.html` een bestandspad én een vaste versie draagt (#396) |
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
+| `overnames-blijft-actief.test.js` | Dat een geplande overname met "blijft in dienst" de vertrekker op de ingangsdatum niet deactiveert |
 | `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
 | `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
 | `vrij-telt-mee.test.js` | Dat 'vrij' overal als afwezigheid telt, en dat één bron dat bepaalt (#400) |
@@ -113,6 +114,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `agenda-sequence.test.js` | Dat een gewijzigde dienst een hogere `SEQUENCE` krijgt in de agendafeed, en dat de migratie de trigger pas ná de backfill zet (#409) |
 | `vergadering-dubbel.test.js` | Dat een concept toepassen geen tweede Teamvergadering naast de bestaande zet (#407) |
 | `init-bestendig.test.js` | Dat `setupEventListeners` geen kale verwijzing naar een functie uit een ander bestand bevat, want één ontbrekende functie legde de hele opstart plat (#412) |
+| `verlof-teams.test.js` | Welke teams meedoen aan de verlofrondes (`settings.leaveTeams`): matrix, mails, herinneringen, invullen en indienen, en dat frontend en backend dezelfde grens trekken |
 | `routes-inventaris.test.js` | Bewaakt dat er bij het verplaatsen van routes geen pad verdwijnt of van naam verandert (#157). Komt er bewust een endpoint bij of gaat er een weg, werk dan `routes-inventaris.json` in dezelfde commit bij |
 
 Aantallen staan hier bewust niet bij; `npm test` noemt ze en ze verouderen
@@ -312,6 +314,21 @@ schreef het zijn eigen verouderde `DataStore`-kopie meteen weer terug over de
 waarde die de route net gezet had. Om dezelfde reden ververst `replaceEmployee()`
 in `data.js` nu ook de instellingen.
 
+**Wisselt de vertrekker alleen van team of functie**, vink dan "blijft in dienst"
+aan (`vertrekkerBlijftActief`, bewaard als
+`geplande_overnames.vertrekker_blijft_actief`, migratie 052). Hij wordt dan
+NIET gedeactiveerd, en alleen de verzoeken over diensten vanaf de ingangsdatum
+vervallen. Zonder dat vinkje liep een ketting als "Justine neemt Bryans rooster
+over vanaf 26 november, Bryan dat van Marie vanaf 30 november" stuk: Bryan werd
+op 26 november gedeactiveerd, de tweede overname verviel dan op "niet actief",
+en Marie's diensten stonden al op naam van iemand zonder rij in de planning.
+
+**De volgorde in zo'n ketting doet ertoe**: eerst de vervanging van wie
+doorschuift (Bryan → Justine), dan die waarin hij zelf de vervanger is
+(Marie → Bryan). Omgekeerd zou de tweede Marie's diensten, die dan al bij Bryan
+staan, mee naar Justine schuiven, net als zijn plek in de concepten. De route
+weigert dat met een **409** en `volgorde: true`.
+
 Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
 ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.
 Ze laten staan betekende dat de tegenpartij een verzoek zag van iemand die weg
@@ -506,6 +523,7 @@ waar nog een trigger aan hangt laat zich niet droppen.
 - **Scroll preservation**: ScrollY wordt bewaard bij planner re-renders
 - **Validation**: `validation.js` draait client-side checks voor shift toewijzingen
 - **Verlofplanning**: één ronde = één SCHOOLJAAR, opgebouwd uit blokken (`leave_round_blocks`) die verwijzen naar `settings.holidayPeriods` — dus geen tweede plek waar vakantiedatums staan. Modus staat per BLOK: `binair` (kleine vakanties: werken/verlof) of `voorkeur` (zomer: werken/liever_niet/zeker_niet). De UI groepeert blokken in tabs zoals de Excel: alle binaire blokken samen onder "Kleine vakanties", de voorkeurblokken onder "Zomer". Invulling per DAG (week-snelknoppen in de UI, want de praktijk vult per werkweek + weekend apart in). Een dag moet binnen één van de blokken vallen — de schoolweken ertussen zijn geen geldige invoer. Bij een voorkeurblok legt de beheerder ná het sluiten de definitieve verdeling vast (entries op `verlof` zetten) vóór `apply`. Matrix zichtbaar voor iedereen; invullen enkel voor jezelf en enkel per WEEK — er is geen dag-modus meer, ook niet voor beheerders.
+- **Welke teams doen mee aan een verlofronde**: niet elk team vraagt zijn verlof via een ronde aan — jobstudenten, stagiairs en het kantoor niet. Instellingen > Teams heeft daarvoor een vinkje **Verlof**, naast Bezetting en Weekend, bewaard als `settings.leaveTeams` (team-id's). Ontbreekt de instelling, dan doet elk team mee, zoals vroeger. Wie niet meedoet krijgt geen mail bij het openen, geen herinnering, geen rij in de matrix, geen taak op het beginscherm en een uitleg in plaats van het invulscherm; de backend weigert invullen en indienen met een 403. De regel staat twee keer: `draaitMeeInVerlof()` in `app-permissions.js` en `doetMeeAanVerlof()` in `helpers/verlofmail.js`, en `verlof-teams.test.js` toetst ze tegen dezelfde gevallen. Het telt op het HOOFDteam (`main_team`). Let op: `data.js` neemt bij het laden alleen een vaste lijst instellingen over (twee keer: laden en herladen); een nieuwe instelling die daar ontbreekt werkt alleen in de browser van wie hem net aanklikte.
 - **Zomerronde afwerken**: `apply` neemt alleen entries met status `verlof` over, terwijl een voorkeurblok enkel `werken`/`liever_niet`/`zeker_niet` bevat. Zonder tussenstap levert een zomerronde dus niets op. De beheerder legt daarom eerst de verdeling vast via het verdeelscherm (`AppState.leaveScreen = 'verdelen'`, knop "Verlof verdelen" bij een gesloten ronde). `leaveVerdeelVoorstel()` zet een voorstel klaar: wie iets anders dan werken vroeg krijgt verlof, wie niets invulde krijgt werken. Bewust géén bezettings- of eerlijkheidsregels — die komen later. Opslaan gebeurt via het blok-scoped entries-endpoint, nooit via `PUT /leave-rounds/:id/entries`: dat vervangt álle entries van een gebruiker in de ronde en zou de kleine vakanties wissen.
 - **Statusovergangen van een ronde**: `concept` → `open` → `gesloten` → `toegepast`, en vanuit `gesloten` kan je terug naar `open` met de knop "Ronde heropenen". Terug vanuit `toegepast` kan NIET, en dat is een beslissing (#386): het verlof staat dan in de planning, en een heropende ronde zou daarvan los gaan lopen. Een fout in een toegepaste ronde herstel je via "Verlof verdelen" en opnieuw toepassen — `apply` stemt de planning dan af (#384). De knop verschijnt daarom alleen bij `gesloten`; hem ook bij `toegepast` tonen levert enkel de 409 van de backend op.
 
@@ -710,6 +728,13 @@ waar nog een trigger aan hangt laat zich niet droppen.
   het niet is — dezelfde fout als bij het doorloopblok in #208. De drempel
   staat als `VOLLEDIG_BEREIK_VANAF_UREN` in `app-planner.js`; verlaag hem niet
   zonder opnieuw te meten.
+
+  Die drempel is alleen nog de EERSTE tekening. Daarna meet
+  `pasTijdlabelsAan()` (aangeroepen vanuit `pasPilletjesAan()`, dus op
+  dezelfde momenten) de echte breedte en kiest `kiesTijdLabel()`: het volle
+  bereik waar het past, anders het beginuur. Op een telefoon en in de
+  dagweergave is een blok van zeven uur twee keer zo breed als op de
+  computer, en daar stond eerst toch alleen "09:00".
 
 - **Geen dubbele teamvergaderingen** (#407): `draft-apply.js` ruimt vlak vóór
   het invoegen de rijen op die het gaat schrijven, op `(user_id, date,

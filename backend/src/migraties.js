@@ -1107,6 +1107,19 @@ const MIGRATIONS = [
       await client.query(`ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_resource_type_check`);
       await client.query(`ALTER TABLE audit_log ADD CONSTRAINT audit_log_resource_type_check CHECK (resource_type IN ('shift', 'availability', 'swap_request', 'user', 'settings', 'system', 'shift_activity', 'shift_block', 'dag_activiteit'))`);
     }
+  },
+  {
+    name: '052_vertrekker_blijft_actief',
+    up: async (client) => {
+      // Een vervanging ging ervan uit dat de vertrekker VERTREKT: op de
+      // ingangsdatum werd hij gedeactiveerd. Maar iemand kan ook van team
+      // wisselen en zelf het rooster van een ander overnemen. Werd hij dan
+      // gedeactiveerd, dan verviel zijn eigen geplande overname ("niet
+      // actief"), en stonden de diensten die hij al gekregen had op naam van
+      // iemand zonder rij in de planning.
+      await client.query(
+        `ALTER TABLE geplande_overnames ADD COLUMN IF NOT EXISTS vertrekker_blijft_actief BOOLEAN NOT NULL DEFAULT FALSE`);
+    }
   }
 ];
 

@@ -23,7 +23,7 @@ const path = require('path');
 const {
   activiteitenPilletjes, kiesPilVorm, kiesPilVormUren,
   activiteitUrenKort, activiteitStartKort,
-  tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN,
+  tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN, kiesTijdLabel,
 } = require('../../frontend/app-planner.js');
 
 let volgnummer = 7;
@@ -366,6 +366,37 @@ describe('tijdLabelVoorBlok (#404)', () => {
   });
 });
 
+describe('het tijdlabel kiest op de echte breedte', () => {
+  // Op een telefoon is een blok van zeven uur ~120px breed, maar de uren-
+  // drempel van #404 gaf er toch alleen "09:00". Nu beslist de gemeten breedte.
+  const meet = (t) => t.length * 5.5;   // "09:00-16:00" = 60,5px
+  const vormen = { bereik: '09:00-16:00', start: '09:00' };
+
+  test('waar het past: het volle bereik', () => {
+    expect(kiesTijdLabel(vormen, 120, meet)).toBe('09:00-16:00');
+    expect(kiesTijdLabel(vormen, 60.5, meet)).toBe('09:00-16:00');
+  });
+
+  test('waar het niet past: alleen het beginuur, nooit een half bereik', () => {
+    expect(kiesTijdLabel(vormen, 60, meet)).toBe('09:00');
+    expect(kiesTijdLabel(vormen, 10, meet)).toBe('09:00');
+  });
+
+  const BRON = fs.readFileSync(path.join(__dirname, '../../frontend/app-planner.js'), 'utf8');
+  test('beide renderpaden geven het label zijn twee vormen mee', () => {
+    const n = BRON.split('<span class="block-time" data-bereik="${shift.startTime}-${shift.endTime}" data-start="${shift.startTime}">').length - 1;
+    expect(n).toBe(2);
+  });
+
+  test('het meten hangt aan dezelfde momenten als het pilletje', () => {
+    const f = BRON.slice(BRON.indexOf('function pasPilletjesAan'));
+    // vóór de vroege return bij "geen pilletjes", anders draait het niet op
+    // een dag zonder activiteiten
+    const kop = f.slice(0, f.indexOf('if (!pillen.length) return;'));
+    expect(kop).toContain('pasTijdlabelsAan(el)');
+  });
+});
+
 describe('na de review', () => {
   const F = (f) => fs.readFileSync(path.join(__dirname, '../../frontend', f), 'utf8');
 
@@ -379,5 +410,31 @@ describe('na de review', () => {
 
   test('de korte codes van de oude chips zijn weg', () => {
     expect(F('app-globals.js')).not.toContain('ACTIVITY_TYPE_LABELS_SHORT');
+  });
+});
+
+describe('op een telefoon (iPhone)', () => {
+  const F = (f) => fs.readFileSync(path.join(__dirname, '../../frontend', f), 'utf8');
+  const css = F('styles.css');
+
+  test('geen :has() en geen flexrij meer: Safari liet die omslaan over de tijd', () => {
+    // In Chromium stond het pilletje netjes naast de tijd; op de iPhone zakte
+    // het eronder en lag het over de tijd van Sam, Victor en Thomas.
+    expect(css).not.toMatch(/\.timeline-block:has\(> \.activity-pil--week\)/);
+  });
+
+  test('een rondje links in het blok, met plaats vrij voor de tijd', () => {
+    const i = css.indexOf('@media (max-width: 768px) {\n    .timeline-block.met-pil {');
+    expect(i).toBeGreaterThan(-1);
+    const blok = css.slice(i, css.indexOf('\n}\n', i));
+    expect(blok).toMatch(/\.timeline-block\.met-pil \{\s*padding-left: 23px;/);
+    expect(blok).toMatch(/position: absolute;/);
+    expect(blok).toMatch(/left: 4px !important;/);
+    expect(blok).toMatch(/\.activity-pil-tekst,[\s\S]*display: none;/);
+    expect(blok).toMatch(/\.resize-handle \{\s*display: none;/);
+  });
+
+  test('het blok krijgt de klasse in beide tekenpaden', () => {
+    expect((F('app-planner.js').match(/if \(actPilletjes\) blockClass \+= ' met-pil';/g) || []).length).toBe(2);
   });
 });

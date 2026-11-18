@@ -8,6 +8,8 @@ const { logAudit } = require('../helpers/audit');
 const {
   ontvangersVanRonde,
   nietIngediend,
+  verlofTeams,
+  doetMeeAanVerlof,
   verstuurRondeGeopend,
   verstuurRondeHerinnering
 } = require('../helpers/verlofmail');
@@ -493,13 +495,21 @@ router.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
     // #309: een adminaccount draait niet mee in het rooster, dus invulling voor
     // dat account leidt nergens toe. Dit geldt ook wanneer een beheerder het
     // voor iemand anders doet, want de doelgebruiker kan zelf een admin zijn.
-    const doelRes = await client.query('SELECT role FROM users WHERE id = $1', [targetUserId]);
+    const doelRes = await client.query('SELECT role, main_team FROM users WHERE id = $1', [targetUserId]);
     if (doelRes.rows.length === 0) {
       return res.status(404).json({ error: 'Medewerker niet gevonden' });
     }
     if (!isRoosterMedewerker(doelRes.rows[0].role)) {
       return res.status(403).json({
         error: 'Een beheeraccount draait niet mee in het rooster en kan geen verlof invullen.'
+      });
+    }
+    // Een team dat zijn verlof niet via de ronde aanvraagt (jobstudenten,
+    // kantoor) kan er ook niets in zetten: het scherm biedt het niet aan, en
+    // de backend trekt dezelfde grens (regel 5).
+    if (!doetMeeAanVerlof(doelRes.rows[0], await verlofTeams(client))) {
+      return res.status(403).json({
+        error: 'Dit team vraagt zijn verlof niet aan via een verlofronde.'
       });
     }
 
@@ -615,6 +625,13 @@ router.post('/leave-rounds/:id/submit', requireAuth, async (req, res) => {
     if (!isRoosterMedewerker(req.user.role)) {
       return res.status(403).json({
         error: 'Een beheeraccount draait niet mee in het rooster en kan geen verlof indienen.'
+      });
+    }
+
+    const ikRes = await pool.query('SELECT role, main_team FROM users WHERE id = $1', [req.user.id]);
+    if (!doetMeeAanVerlof(ikRes.rows[0] || { role: req.user.role }, await verlofTeams())) {
+      return res.status(403).json({
+        error: 'Dit team vraagt zijn verlof niet aan via een verlofronde.'
       });
     }
 

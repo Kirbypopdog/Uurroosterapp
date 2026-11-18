@@ -266,7 +266,9 @@ CREATE TABLE IF NOT EXISTS geplande_overnames (
   aangemaakt_door INTEGER REFERENCES users(id) ON DELETE SET NULL,
   aangemaakt_door_naam TEXT,
   aangemaakt_op   TIMESTAMP DEFAULT NOW(),
-  uitgevoerd_op   TIMESTAMP
+  uitgevoerd_op   TIMESTAMP,
+  -- Wisselt de vertrekker alleen van team, dan blijft zijn account actief.
+  vertrekker_blijft_actief BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON shift_swap_requests(status);

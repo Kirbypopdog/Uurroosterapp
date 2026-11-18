@@ -95,6 +95,27 @@ function canTargetRespondToSwap(swapRequest) {
            swapRequest.status === 'pending';
 }
 
+/**
+ * Doet deze gebruiker mee aan de verlofrondes?
+ *
+ * Niet elk team vraagt zijn verlof aan via een ronde: jobstudenten, stagiairs
+ * en het kantoor doen dat anders. Welke teams wél, staat in Instellingen >
+ * Teams onder "Verlof" (`settings.leaveTeams`). Ontbreekt die instelling, dan
+ * doet elk team mee, zoals vroeger.
+ *
+ * Een adminaccount doet nooit mee (#309). Dezelfde regel staat aan de
+ * serverkant als `doetMeeAanVerlof()` in backend/src/helpers/verlofmail.js
+ * (regel 5); de test bewaakt dat ze hetzelfde zeggen.
+ */
+function draaitMeeInVerlof(user, verlofTeams) {
+    if (arguments.length < 2) {
+        verlofTeams = (typeof DataStore !== 'undefined' && DataStore.settings) ? DataStore.settings.leaveTeams : undefined;
+    }
+    if (!user || user.role === 'admin' || user.active === false) return false;
+    if (!Array.isArray(verlofTeams)) return true;
+    return verlofTeams.map(String).includes(String(user.mainTeam ?? user.main_team));
+}
+
 function getVisibleTeamsForRole() {
     // Iedereen met een login kan alle teams zien in de planner
     return getTeamOrder();
@@ -104,5 +125,5 @@ function getVisibleTeamsForRole() {
 // Zodat de pure rolchecks in Node getest kunnen worden. In de browser bestaat
 // `module` niet, dus dit heeft daar geen effect.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { canRequestSwap, canCancelSwap, canTargetRespondToSwap, canCreateActivityForOthers, canManageDagActiviteiten };
+  module.exports = { canRequestSwap, canCancelSwap, canTargetRespondToSwap, canCreateActivityForOthers, canManageDagActiviteiten, draaitMeeInVerlof };
 }

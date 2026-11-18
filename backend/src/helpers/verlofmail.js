@@ -21,17 +21,46 @@ const ONTVANGER_KOLOMMEN = `
 `;
 
 /**
+ * Welke teams vragen hun verlof aan via een verlofronde? Instelling
+ * `leaveTeams` (Instellingen > Teams > "Verlof"). Jobstudenten, stagiairs en
+ * het kantoor doen dat niet, en kregen toch de mail, de herinnering en een
+ * rij in de matrix.
+ *
+ * `null` = de instelling bestaat nog niet = elk team doet mee. Dat was het
+ * gedrag tot nu toe, dus een database zonder deze instelling verandert niet.
+ */
+async function verlofTeams(client = pool) {
+  const res = await client.query(`SELECT value FROM settings WHERE key = 'leaveTeams'`);
+  const waarde = res.rows[0] && res.rows[0].value;
+  return Array.isArray(waarde) ? waarde.map(String) : null;
+}
+
+/**
+ * Doet deze gebruiker mee aan de verlofrondes? Dezelfde regel als
+ * `draaitMeeInVerlof()` in frontend/app-permissions.js: geen adminaccount
+ * (#309), en zijn hoofdteam staat in `leaveTeams`.
+ */
+function doetMeeAanVerlof(gebruiker, teams) {
+  if (!gebruiker || gebruiker.role === 'admin' || gebruiker.active === false) return false;
+  if (!Array.isArray(teams)) return true;
+  return teams.includes(String(gebruiker.main_team ?? gebruiker.mainTeam));
+}
+
+/**
  * Wie moet een verlofronde invullen? Dezelfde groep als de matrix toont:
- * actieve accounts die MEEDRAAIEN in het rooster. Een adminaccount hoort daar
- * niet bij — zie `isRoosterMedewerker` in routes/leave.js (#309): die kan niet
- * indienen, dus een herinnering sturen zou een opdracht zijn die hij niet kan
- * uitvoeren.
+ * actieve accounts die MEEDRAAIEN in het rooster, uit een team dat verlof
+ * aanvraagt. Een adminaccount hoort daar niet bij — zie `isRoosterMedewerker`
+ * in routes/leave.js (#309): die kan niet indienen, dus een herinnering sturen
+ * zou een opdracht zijn die hij niet kan uitvoeren.
  */
 async function ontvangersVanRonde(client = pool) {
+  const teams = await verlofTeams(client);
   const res = await client.query(
     `SELECT ${ONTVANGER_KOLOMMEN} FROM users
       WHERE active IS NOT FALSE AND role <> 'admin'
-      ORDER BY name`
+        AND ($1::text[] IS NULL OR main_team = ANY($1::text[]))
+      ORDER BY name`,
+    [teams]
   );
   return res.rows;
 }
@@ -55,15 +84,17 @@ async function beheerders(client = pool) {
  * de groep die een herinnering nodig heeft.
  */
 async function nietIngediend(roundId, client = pool) {
+  const teams = await verlofTeams(client);
   const res = await client.query(
     `SELECT ${ONTVANGER_KOLOMMEN} FROM users u
       WHERE u.active IS NOT FALSE AND u.role <> 'admin'
+        AND ($2::text[] IS NULL OR u.main_team = ANY($2::text[]))
         AND NOT EXISTS (
           SELECT 1 FROM leave_round_submissions s
            WHERE s.round_id = $1 AND s.user_id = u.id AND s.submitted_at IS NOT NULL
         )
       ORDER BY u.name`,
-    [roundId]
+    [roundId, teams]
   );
   return res.rows;
 }
@@ -77,6 +108,8 @@ async function verstuurRondeHerinnering(ontvangers, ronde, opties) {
 }
 
 module.exports = {
+  verlofTeams,
+  doetMeeAanVerlof,
   ontvangersVanRonde,
   beheerders,
   nietIngediend,

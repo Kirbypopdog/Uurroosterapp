@@ -5394,27 +5394,6 @@ body[data-view-mode="day"] .timeline-day-cell {
     padding: 0;
 }
 
-/* Op een telefoon is het blok maar 35px hoog (de naamcel heeft daar geen
-   urenregels), dus onder de tijd is geen plaats: het pilletje viel er over de
-   tijd heen. Daar staan ze NAAST elkaar. Het blok is er breed genoeg voor,
-   want de telefoon toont één dag. Past het toch niet, dan krimpt het pilletje
-   en niet de tijd; pasPilletjesAan() trekt de breedte van de tijd af. */
-@media (max-width: 768px) {
-    .timeline-block:has(> .activity-pil--week) {
-        flex-direction: row;
-        gap: 4px;
-    }
-    .timeline-block:has(> .activity-pil--week) > .block-time {
-        flex: 0 0 auto;
-    }
-    .timeline-block > .activity-pil--week {
-        position: static;
-        margin: 0;
-        flex: 0 1 auto;
-        min-width: 15px;
-    }
-}
-
 /* Dagweergave: het pilletje staat op de echte uren van de activiteit. `left`
    en `width` komen uit de inline stijl; de breedte is daar al 4px smaller
    gemaakt, zodat er aan elke kant 2px lucht blijft en twee activiteiten die op
@@ -5442,6 +5421,57 @@ body[data-view-mode="day"] .timeline-day-cell {
     overflow: hidden;
     text-overflow: ellipsis;
     font-weight: 500;
+}
+
+/* Op een telefoon is het blok maar ~35px hoog: onder de tijd is geen plaats.
+   Daar staat het pilletje als RONDJE met alleen het pictogram, vast tegen de
+   rechterrand en verticaal gecentreerd, en houdt het blok rechts plaats vrij
+   zodat de tijd er nooit onder schuift. Links en niet rechts: rechtsboven
+   ligt het lintje van een afwezigheid (#401). De uren en de omschrijving staan in
+   het venster dat een tik opent.
+
+   Eerst stond het pilletje hier NAAST de tijd, met `:has()` en een flexrij.
+   In Chromium klopte dat, maar Safari op de iPhone liet de rij omslaan en
+   het pilletje over de tijd schuiven. Dit hangt aan een gewone klasse
+   (`met-pil`, gezet in renderTimelineView) en aan absolute positie: geen
+   flexgedrag dat per browser anders uitvalt. */
+@media (max-width: 768px) {
+    .timeline-block.met-pil {
+        padding-left: 23px;
+    }
+    .timeline-block.met-pil .activity-pil,
+    .timeline-block.met-pil .activity-pil--uren,
+    .timeline-block.met-pil .activity-pil--kaal {
+        position: absolute;
+        top: 50%;
+        left: 4px !important;
+        right: auto;
+        bottom: auto;
+        width: 15px !important;
+        max-width: none;
+        height: 15px;
+        margin: -7.5px 0 0;
+        padding: 0;
+        justify-content: center;
+        flex-wrap: nowrap;
+        column-gap: 0;
+    }
+    .timeline-block.met-pil .activity-pil-tekst,
+    .timeline-block.met-pil .activity-pil-meer,
+    .timeline-block.met-pil .activity-pil-oms {
+        display: none;
+    }
+    /* In de dagweergave kan een dienst meer dan één pilletje hebben; op deze
+       plek is er maar ruimte voor één rondje. */
+    .timeline-block.met-pil .activity-pil ~ .activity-pil {
+        display: none;
+    }
+    /* Slepen staat op een telefoon uit (drag-handler.js), maar de grepen
+       stonden er nog en bleven na een tik als lichtere strook in het blok
+       hangen: :hover blijft op een aanraakscherm plakken. */
+    .timeline-block .resize-handle {
+        display: none;
+    }
 }
 
 .timeline-block:hover {

@@ -945,7 +945,11 @@ function renderHomeRequests(user) {
     // Een lopende verlofronde die nog op jou wacht hoort hier ook thuis:
     // anders zie je pas dat je iets moet invullen als je de verloftab opent.
     // Geldt voor iedereen — ook een lead vult zijn eigen verlof in.
-    const verlofTaken = (AppState.leaveRounds || []).filter(r =>
+    // Niet voor wie zijn verlof niet via een ronde aanvraagt (jobstudenten,
+    // kantoor): voor hen is het geen taak. typeof-wacht: app-leave.js kan
+    // uit een oudere cache komen (#412).
+    const ikDoeMee = typeof leaveIkDoeMee === 'function' ? leaveIkDoeMee() : true;
+    const verlofTaken = !ikDoeMee ? [] : (AppState.leaveRounds || []).filter(r =>
         r.status === 'open' && (!r.mySubmittedAt || r.myApproved === false)
     );
 
