@@ -23,7 +23,7 @@ const path = require('path');
 const {
   activiteitenPilletjes, kiesPilVorm, kiesPilVormUren,
   activiteitUrenKort, activiteitStartKort,
-  tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN,
+  tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN, kiesTijdLabel,
 } = require('../../frontend/app-planner.js');
 
 let volgnummer = 7;
@@ -363,6 +363,37 @@ describe('tijdLabelVoorBlok (#404)', () => {
     // Op 6 werd alles tussen 6 en 7,5 uur gecentreerd afgekapt tot "9:00-15:0",
     // en dat leest als een geldige tijd die het niet is.
     expect(VOLLEDIG_BEREIK_VANAF_UREN).toBe(7.5);
+  });
+});
+
+describe('het tijdlabel kiest op de echte breedte', () => {
+  // Op een telefoon is een blok van zeven uur ~120px breed, maar de uren-
+  // drempel van #404 gaf er toch alleen "09:00". Nu beslist de gemeten breedte.
+  const meet = (t) => t.length * 5.5;   // "09:00-16:00" = 60,5px
+  const vormen = { bereik: '09:00-16:00', start: '09:00' };
+
+  test('waar het past: het volle bereik', () => {
+    expect(kiesTijdLabel(vormen, 120, meet)).toBe('09:00-16:00');
+    expect(kiesTijdLabel(vormen, 60.5, meet)).toBe('09:00-16:00');
+  });
+
+  test('waar het niet past: alleen het beginuur, nooit een half bereik', () => {
+    expect(kiesTijdLabel(vormen, 60, meet)).toBe('09:00');
+    expect(kiesTijdLabel(vormen, 10, meet)).toBe('09:00');
+  });
+
+  const BRON = fs.readFileSync(path.join(__dirname, '../../frontend/app-planner.js'), 'utf8');
+  test('beide renderpaden geven het label zijn twee vormen mee', () => {
+    const n = BRON.split('<span class="block-time" data-bereik="${shift.startTime}-${shift.endTime}" data-start="${shift.startTime}">').length - 1;
+    expect(n).toBe(2);
+  });
+
+  test('het meten hangt aan dezelfde momenten als het pilletje', () => {
+    const f = BRON.slice(BRON.indexOf('function pasPilletjesAan'));
+    // vóór de vroege return bij "geen pilletjes", anders draait het niet op
+    // een dag zonder activiteiten
+    const kop = f.slice(0, f.indexOf('if (!pillen.length) return;'));
+    expect(kop).toContain('pasTijdlabelsAan(el)');
   });
 });
 

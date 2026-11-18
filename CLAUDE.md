@@ -711,6 +711,13 @@ waar nog een trigger aan hangt laat zich niet droppen.
   staat als `VOLLEDIG_BEREIK_VANAF_UREN` in `app-planner.js`; verlaag hem niet
   zonder opnieuw te meten.
 
+  Die drempel is alleen nog de EERSTE tekening. Daarna meet
+  `pasTijdlabelsAan()` (aangeroepen vanuit `pasPilletjesAan()`, dus op
+  dezelfde momenten) de echte breedte en kiest `kiesTijdLabel()`: het volle
+  bereik waar het past, anders het beginuur. Op een telefoon en in de
+  dagweergave is een blok van zeven uur twee keer zo breed als op de
+  computer, en daar stond eerst toch alleen "09:00".
+
 - **Geen dubbele teamvergaderingen** (#407): `draft-apply.js` ruimt vlak vóór
   het invoegen de rijen op die het gaat schrijven, op `(user_id, date,
   start_time, end_time)` met `type = 'vergadering'`. Dat is nodig naast de

@@ -258,6 +258,61 @@ function tijdLabelVoorBlok(startTime, endTime, zichtbaarUren) {
 }
 
 /**
+ * Na het tekenen: het tijdlabel kiest zijn vorm op de ECHTE breedte van het
+ * blok, net als het pilletje.
+ *
+ * `tijdLabelVoorBlok()` hierboven beslist op uren, en die drempel is gemeten
+ * op de weekweergave van een scherm van 1440px. Op een telefoon en in de
+ * dagweergave is een blok van zeven uur twee keer zo breed, en toch stond er
+ * alleen "09:00" terwijl "09:00-16:00" ruim paste. Het uur-oordeel blijft de
+ * eerste tekening (zo staat er nooit iets afgeknipt voor deze functie draait);
+ * hier wordt het rechtgezet: het volle bereik waar het past, anders het
+ * beginuur. Nooit een half bereik (#208, #404).
+ */
+function kiesTijdLabel(vormen, beschikbaarPx, meet) {
+    if (vormen.bereik && meet(vormen.bereik) <= beschikbaarPx) return vormen.bereik;
+    return vormen.start || vormen.bereik || '';
+}
+
+let _tijdMeetCanvas = null;
+const _tijdMeetCache = new Map();
+function pasTijdlabelsAan(wortel) {
+    const el = wortel || (typeof DOM !== 'undefined' ? DOM.rosterCalendar : null);
+    if (!el || typeof el.querySelectorAll !== 'function') return;
+    const labels = el.querySelectorAll('.timeline-block .block-time[data-bereik]');
+    if (!labels.length) return;
+
+    const stijl = getComputedStyle(labels[0]);
+    const font = `${stijl.fontWeight} ${stijl.fontSize} ${stijl.fontFamily}`;
+    if (!_tijdMeetCanvas) _tijdMeetCanvas = document.createElement('canvas');
+    const ctx = _tijdMeetCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.font = font;
+    const meet = (tekst) => {
+        const sleutel = font + '|' + tekst;
+        if (!_tijdMeetCache.has(sleutel)) _tijdMeetCache.set(sleutel, Math.ceil(ctx.measureText(tekst).width) + 1);
+        return _tijdMeetCache.get(sleutel);
+    };
+
+    // Eerst alles lezen, dan pas schrijven (zie pasPilletjesAan).
+    const werk = [];
+    labels.forEach(label => {
+        const blok = label.parentElement;
+        if (!blok || !blok.clientWidth) return;           // verborgen dagkolom
+        const bs = getComputedStyle(blok);
+        const ls = getComputedStyle(label);
+        if (ls.display === 'none') return;                // te kort blok (#147)
+        const beschikbaar = blok.clientWidth
+            - (parseFloat(bs.paddingLeft) || 0) - (parseFloat(bs.paddingRight) || 0)
+            - (parseFloat(ls.paddingLeft) || 0) - (parseFloat(ls.paddingRight) || 0);
+        werk.push({ label, tekst: kiesTijdLabel(label.dataset, beschikbaar, meet) });
+    });
+    werk.forEach(({ label, tekst }) => {
+        if (label.textContent !== tekst) label.textContent = tekst;
+    });
+}
+
+/**
  * Activiteiten in een dienstblok: een wit pilletje met een pictogram en de
  * uren (#416).
  *
@@ -491,6 +546,9 @@ const _pilMeetCache = new Map();
 function pasPilletjesAan(wortel) {
     const el = wortel || (typeof DOM !== 'undefined' ? DOM.rosterCalendar : null);
     if (!el || typeof el.querySelectorAll !== 'function') return;
+    // Het tijdlabel hangt aan dezelfde momenten (tekenen, venstermaat,
+    // lettertype, dagwissel op de telefoon), dus het gaat hier mee.
+    pasTijdlabelsAan(el);
     const pillen = el.querySelectorAll('.activity-pil');
     if (!pillen.length) return;
 
@@ -546,7 +604,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
         _pilResizeTimer = setTimeout(() => pasPilletjesAan(), 120);
     });
     if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
-        document.fonts.ready.then(() => { _pilMeetCache.clear(); pasPilletjesAan(); }).catch(() => {});
+        document.fonts.ready.then(() => { _pilMeetCache.clear(); _tijdMeetCache.clear(); pasPilletjesAan(); }).catch(() => {});
     }
 }
 
@@ -1551,7 +1609,7 @@ function renderTimelineView() {
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 ${isAbsent ? afwezigheidsLint(availability.type) : ''}
-                                <span class="block-time">${timeLabel}</span>
+                                <span class="block-time" data-bereik="${shift.startTime}-${shift.endTime}" data-start="${shift.startTime}">${timeLabel}</span>
                                 ${actPilletjes}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
@@ -1823,7 +1881,7 @@ function renderTimelineView() {
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-start"></div>' : ''}
                                 ${shift.isReserve ? '<span class="reserve-badge">R</span>' : ''}
                                 ${isAbsent ? afwezigheidsLint(availability.type) : ''}
-                                <span class="block-time">${timeLabel}</span>
+                                <span class="block-time" data-bereik="${shift.startTime}-${shift.endTime}" data-start="${shift.startTime}">${timeLabel}</span>
                                 ${actPilletjes}
                                 ${canEdit && !isNachtdienst ? '<div class="resize-handle resize-handle-end"></div>' : ''}
                             </div>`;
@@ -1945,6 +2003,6 @@ if (typeof module !== 'undefined' && module.exports) {
     afwezigheidsLabel, afwezigheidsLint, afwezigheidsCelMarkering,
     activiteitenPilletjes, kiesPilVorm, kiesPilVormUren, activiteitUrenKort, activiteitStartKort,
     dagActiviteitenChips, dagActiviteitTekst, DAGACT_ZICHTBAAR,
-    tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN,
+    tijdLabelVoorBlok, VOLLEDIG_BEREIK_VANAF_UREN, kiesTijdLabel,
   };
 }
