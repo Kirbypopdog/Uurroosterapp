@@ -30,7 +30,7 @@ async function voerGeplandeOvernamesUit() {
   let uitgevoerd = 0;
   try {
     const rijp = await client.query(
-      `SELECT id, oude_gebruiker, nieuwe_gebruiker, ingangsdatum
+      `SELECT id, oude_gebruiker, nieuwe_gebruiker, ingangsdatum, vertrekker_blijft_actief
          FROM geplande_overnames
         WHERE status = 'gepland' AND ingangsdatum <= CURRENT_DATE
         ORDER BY ingangsdatum`
@@ -79,14 +79,30 @@ async function voerGeplandeOvernamesUit() {
           ]
         );
 
-        await client.query(
-          `UPDATE shift_swap_requests
-              SET status = 'cancelled', responded_at = NOW(), response_notes = $2
-            WHERE status = 'pending' AND (requester_user_id = $1 OR target_user_id = $1)`,
-          [overname.oude_gebruiker, `Ingetrokken: ${o.name} is vervangen`]
-        );
+        if (overname.vertrekker_blijft_actief) {
+          // Hij wisselt alleen van team. Zijn verzoeken over diensten van vóór
+          // de ingangsdatum blijven geldig; alleen die over diensten die
+          // verhuisd zijn, vervallen. En zijn account blijft actief: anders
+          // verviel een overname waarin hij zelf de vervanger is.
+          await client.query(
+            `UPDATE shift_swap_requests r
+                SET status = 'cancelled', responded_at = NOW(), response_notes = $2
+              WHERE r.status = 'pending' AND (r.requester_user_id = $1 OR r.target_user_id = $1)
+                AND EXISTS (SELECT 1 FROM shifts s
+                             WHERE s.id IN (r.requester_shift_id, r.target_shift_id) AND s.date >= $3)`,
+            [overname.oude_gebruiker, `Ingetrokken: de dienst is overgegaan naar ${nieuw.rows[0].name}`,
+             datumTekst(overname.ingangsdatum)]
+          );
+        } else {
+          await client.query(
+            `UPDATE shift_swap_requests
+                SET status = 'cancelled', responded_at = NOW(), response_notes = $2
+              WHERE status = 'pending' AND (requester_user_id = $1 OR target_user_id = $1)`,
+            [overname.oude_gebruiker, `Ingetrokken: ${o.name} is vervangen`]
+          );
 
-        await client.query(`UPDATE users SET active = false WHERE id = $1`, [overname.oude_gebruiker]);
+          await client.query(`UPDATE users SET active = false WHERE id = $1`, [overname.oude_gebruiker]);
+        }
 
         await client.query(
           `UPDATE geplande_overnames SET status = 'uitgevoerd', uitgevoerd_op = NOW() WHERE id = $1`,
@@ -98,6 +114,7 @@ async function voerGeplandeOvernamesUit() {
           [String(overname.oude_gebruiker), JSON.stringify({
             geplandeOvername: overname.id,
             ingangsdatum: datumTekst(overname.ingangsdatum),
+            vertrekkerBlijftActief: !!overname.vertrekker_blijft_actief,
             oud: { id: o.id, name: o.name },
             nieuw: { id: nieuw.rows[0].id, name: nieuw.rows[0].name },
           })]

@@ -603,9 +603,10 @@ async function deleteEmployee(id) {
 // 409 en een lijst botsingen als ze in de weg zitten), 'verwijderen' ruimt ze
 // op. De keuze staat hier expliciet en heeft geen standaard in de backend die
 // stilzwijgend wist.
-async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom = null, eigenDienstenVervanger = 'behouden') {
+async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom = null, eigenDienstenVervanger = 'behouden', vertrekkerBlijftActief = false) {
     try {
         const body = { replacementUserId };
+        if (vertrekkerBlijftActief) body.vertrekkerBlijftActief = true;
         if (transferShiftsFrom) {
             body.transferShiftsFrom = transferShiftsFrom;
             body.eigenDienstenVervanger = eigenDienstenVervanger;

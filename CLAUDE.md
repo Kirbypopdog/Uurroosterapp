@@ -99,6 +99,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `verantwoordelijke.test.js` | Wie er weekend- of vakantieverantwoordelijke is: de rotatie, de vakantie per week en de id-vergelijking |
 | `cdn-scripts.test.js` | Dat elke verwijzing naar een pakket-CDN in `index.html` een bestandspad én een vaste versie draagt (#396) |
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
+| `overnames-blijft-actief.test.js` | Dat een geplande overname met "blijft in dienst" de vertrekker op de ingangsdatum niet deactiveert |
 | `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
 | `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
 | `vrij-telt-mee.test.js` | Dat 'vrij' overal als afwezigheid telt, en dat één bron dat bepaalt (#400) |
@@ -312,6 +313,21 @@ Het hoort in de BACKEND en nergens anders: liet je dat frontendblok staan, dan
 schreef het zijn eigen verouderde `DataStore`-kopie meteen weer terug over de
 waarde die de route net gezet had. Om dezelfde reden ververst `replaceEmployee()`
 in `data.js` nu ook de instellingen.
+
+**Wisselt de vertrekker alleen van team of functie**, vink dan "blijft in dienst"
+aan (`vertrekkerBlijftActief`, bewaard als
+`geplande_overnames.vertrekker_blijft_actief`, migratie 052). Hij wordt dan
+NIET gedeactiveerd, en alleen de verzoeken over diensten vanaf de ingangsdatum
+vervallen. Zonder dat vinkje liep een ketting als "Justine neemt Bryans rooster
+over vanaf 26 november, Bryan dat van Marie vanaf 30 november" stuk: Bryan werd
+op 26 november gedeactiveerd, de tweede overname verviel dan op "niet actief",
+en Marie's diensten stonden al op naam van iemand zonder rij in de planning.
+
+**De volgorde in zo'n ketting doet ertoe**: eerst de vervanging van wie
+doorschuift (Bryan → Justine), dan die waarin hij zelf de vervanger is
+(Marie → Bryan). Omgekeerd zou de tweede Marie's diensten, die dan al bij Bryan
+staan, mee naar Justine schuiven, net als zijn plek in de concepten. De route
+weigert dat met een **409** en `volgorde: true`.
 
 Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
 ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.

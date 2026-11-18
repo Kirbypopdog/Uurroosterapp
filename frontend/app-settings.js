@@ -698,12 +698,19 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                     <div class="form-group hidden" id="replace-date-group">
                         <label for="replace-from-date">Overnemen vanaf *</label>
                         <input type="date" id="replace-from-date" class="form-input" value="${today}" min="${today}" />
-                        <small class="text-muted">Ligt deze datum in de toekomst, dan blijft ${escapeHtml(departingUser.name)} tot dan gewoon werken. De diensten verhuizen meteen; team, uren en de deactivatie volgen op die dag.</small>
+                        <small class="text-muted">Ligt deze datum in de toekomst, dan blijft ${escapeHtml(departingUser.name)} tot dan gewoon werken. De diensten verhuizen meteen; team en uren volgen op die dag, en zonder het vinkje hieronder ook de deactivatie.</small>
                     </div>
                     <div class="form-group hidden" id="replace-eigen-group">
                         <label>Eigen diensten van de vervanger vanaf die datum</label>
                         <label class="radio-label"><input type="radio" name="replace-eigen" value="behouden" checked> Behouden — waarschuw me als ze botsen</label>
                         <label class="radio-label"><input type="radio" name="replace-eigen" value="verwijderen"> Verwijderen — het contract wordt volledig overgenomen</label>
+                    </div>
+                    <div class="form-group form-row-inline">
+                        <label class="toggle-switch flex-shrink-0">
+                            <input type="checkbox" id="replace-blijft-actief" />
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <label for="replace-blijft-actief" class="cursor-pointer">${escapeHtml(departingUser.name)} blijft in dienst (wisselt van team of functie)</label>
                     </div>
                     <div id="replace-botsingen" class="hidden mt-sm"></div>
                     <div id="replace-summary" class="hidden mt-sm"></div>
@@ -733,6 +740,8 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
     // Update summary on changes
     modal.querySelector('#replace-new-user').addEventListener('change', updateReplaceSummary);
     modal.querySelector('#replace-from-date').addEventListener('change', updateReplaceSummary);
+    const blijftActiefCb = modal.querySelector('#replace-blijft-actief');
+    blijftActiefCb.addEventListener('change', updateReplaceSummary);
     modal.querySelectorAll('input[name="replace-eigen"]').forEach(r =>
         r.addEventListener('change', updateReplaceSummary));
 
@@ -754,9 +763,13 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         // spreekt ze de samenvatting eronder tegen en gelooft de beheerder de
         // bovenste.
         const gaatLaterIn = !!(transfer && fromDate && fromDate > today);
-        modal.querySelector('#replace-intro').innerHTML = gaatLaterIn
-            ? `<p><strong>${escapeHtml(departingUser.name)}</strong> wordt vanaf <strong>${formatDateShortMetJaar(fromDate)}</strong> vervangen. Tot dan blijft zij gewoon werken.</p>`
-            : `<p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster, het team en de contracturen gaan naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>`;
+        const blijftActief = blijftActiefCb.checked;
+        const naam = escapeHtml(departingUser.name);
+        modal.querySelector('#replace-intro').innerHTML = blijftActief
+            ? `<p>Het rooster van <strong>${naam}</strong> gaat${gaatLaterIn ? ` vanaf <strong>${formatDateShortMetJaar(fromDate)}</strong>` : ''} naar de nieuwe medewerker. ${naam} blijft zelf in dienst.</p>`
+            : gaatLaterIn
+            ? `<p><strong>${naam}</strong> wordt vanaf <strong>${formatDateShortMetJaar(fromDate)}</strong> vervangen. Tot dan blijft zij gewoon werken.</p>`
+            : `<p><strong>${naam}</strong> wordt vervangen. Het basisrooster, het team en de contracturen gaan naar de nieuwe medewerker en ${naam} wordt gedeactiveerd.</p>`;
 
         if (!newUser) {
             summaryEl.classList.add('hidden');
@@ -792,7 +805,9 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             summaryHtml += `<li>Geen diensten overgedragen. Pas het actieve concept opnieuw toe via Rooster bouwen</li>`;
         }
 
-        if (gaatLaterIn) {
+        if (blijftActief) {
+            summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> blijft actief en kan gewoon inloggen. Neemt ${escapeHtml(departingUser.name)} zelf het rooster van iemand anders over, stel dat dan <strong>hierna</strong> in</li>`;
+        } else if (gaatLaterIn) {
             summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> blijft werken tot ${formatDateShortMetJaar(fromDate)} en wordt dan pas gedeactiveerd</li>`;
         } else {
             summaryHtml += `<li><strong>${escapeHtml(departingUser.name)}</strong> wordt gedeactiveerd</li>`;
@@ -824,8 +839,11 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         const newUser = activeUsers.find(u => String(u.id) === String(newUserId));
         const eigenDienstenVervanger = gekozenEigenDiensten();
         const gaatLaterIn = !!(fromDate && fromDate > today);
+        const blijftActief = blijftActiefCb.checked;
 
-        let confirmMsg = gaatLaterIn
+        let confirmMsg = blijftActief
+            ? `Het rooster van ${departingUser.name} gaat${fromDate ? ` vanaf ${formatDateShortMetJaar(fromDate)}` : ''} naar ${newUser.name}.\n\n${departingUser.name} blijft in dienst en wordt niet gedeactiveerd.`
+            : gaatLaterIn
             ? `Weet je zeker dat je ${departingUser.name} vanaf ${formatDateShortMetJaar(fromDate)} wilt vervangen door ${newUser.name}?\n\nDe diensten verhuizen meteen. ${departingUser.name} blijft werken tot ${formatDateShortMetJaar(fromDate)}.`
             : `Weet je zeker dat je ${departingUser.name} wilt vervangen door ${newUser.name}?\n\nDeze actie kan niet ongedaan worden gemaakt.`;
         if (fromDate && eigenDienstenVervanger === 'verwijderen') {
@@ -838,7 +856,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
         botsingenEl.innerHTML = '';
 
         try {
-            const result = await replaceEmployee(Number(departingUser.id), Number(newUserId), fromDate, eigenDienstenVervanger);
+            const result = await replaceEmployee(Number(departingUser.id), Number(newUserId), fromDate, eigenDienstenVervanger, blijftActief);
             modal.remove();
 
             // #398: de verantwoordelijkheden werden hier overgezet — alleen
@@ -865,7 +883,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             }
             showToast(msg, 'success');
 
-            if (result.gaatLaterIn) {
+            if (result.gaatLaterIn && !result.vertrekkerBlijftActief) {
                 showToast(`${departingUser.name} blijft actief tot ${formatDateShortMetJaar(result.ingangsdatum)}. Team en contracturen gaan op die dag naar ${newUser.name}.`, 'info', 8000);
             }
             if (result.eigenDienstenVerwijderd > 0) {
@@ -900,6 +918,18 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 botsingenEl.classList.remove('hidden');
                 IconHelper.init(botsingenEl);
                 botsingenEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                return;
+            }
+            // De vertrekker neemt zelf later het rooster van een ander over:
+            // dan klopt de volgorde niet. Een uitleg van drie zinnen hoort in
+            // het venster, niet in een toast die na zes seconden weg is.
+            if (error.status === 409 && error.data && error.data.volgorde) {
+                botsingenEl.innerHTML = `<div class="alert alert-error">
+                    ${IconHelper.html(ICONS.error, 'sm')}
+                    <div>${escapeHtml(error.message)}</div>
+                </div>`;
+                botsingenEl.classList.remove('hidden');
+                IconHelper.init(botsingenEl);
                 return;
             }
             showToast(`Vervanging mislukt: ${error.message}`, 'error');

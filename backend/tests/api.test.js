@@ -3434,6 +3434,74 @@ describe('POST /admin/users/:id/replace', () => {
 
   // Regressie #141: bij een lage medewerker-ID (bv. 3) mag de grid-remap enkel
   // de medewerker-sleutel hernoemen, niet de dag-van-de-week-index "3".
+  // Bryan wisselt van Vlot 1 naar Cargo: Justine neemt vanaf 26 november zijn
+  // rooster over, en Bryan vanaf 30 november dat van Marie. Werd Bryan bij de
+  // eerste overname gedeactiveerd, dan verviel de tweede ("niet actief").
+  describe('de vertrekker blijft in dienst', () => {
+    function stel(opties = {}) {
+      const mockClient = { query: jest.fn(), release: jest.fn() };
+      pool.connect.mockResolvedValueOnce(mockClient);
+      pool.query.mockResolvedValueOnce({ rows: [{ active: true }] }); // requireAuth
+      pool.query.mockResolvedValue({ rows: [], rowCount: 0 });
+      mockClient.query.mockImplementation((sql) => {
+        if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+        if (sql.includes('FROM users WHERE id = $1 FOR UPDATE') && sql.includes('week_schedules')) {
+          return Promise.resolve({ rows: [{ id: 117, name: 'Bryan', main_team: 'vlot1', week_schedules: [], week_schedule_week1: [], week_schedule_week2: [] }] });
+        }
+        if (sql.includes('SELECT id, name, active FROM users')) {
+          return Promise.resolve({ rows: [{ id: 181, name: 'Justine', active: true }] });
+        }
+        if (sql.includes('FROM geplande_overnames g JOIN users')) {
+          return Promise.resolve({ rows: opties.inkomend ? [opties.inkomend] : [] });
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      });
+      return mockClient;
+    }
+    const verstuur = (body) => request(app)
+      .post('/api/v1/admin/users/117/replace')
+      .set('Authorization', `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`)
+      .send({ replacementUserId: 181, ...body });
+    const sqls = (c) => c.query.mock.calls.map(([q]) => (typeof q === 'string' ? q : ''));
+
+    test('meteen: geen deactivatie, en alleen verzoeken over verhuisde diensten vervallen', async () => {
+      const c = stel();
+      const res = await verstuur({ transferShiftsFrom: '2000-01-01', vertrekkerBlijftActief: true });
+      expect(res.status).toBe(200);
+      expect(res.body.vertrekkerBlijftActief).toBe(true);
+      expect(sqls(c).some(q => q.includes('SET active = false'))).toBe(false);
+      const intrekken = sqls(c).find(q => q.includes('UPDATE shift_swap_requests'));
+      expect(intrekken).toMatch(/s\.date >= \$3/);
+    });
+
+    test('later: de overname onthoudt dat hij blijft', async () => {
+      const c = stel();
+      const res = await verstuur({ transferShiftsFrom: '2999-11-26', vertrekkerBlijftActief: true });
+      expect(res.status).toBe(200);
+      const insert = c.query.mock.calls.find(([q]) => typeof q === 'string' && q.includes('INSERT INTO geplande_overnames'));
+      expect(insert[0]).toContain('vertrekker_blijft_actief');
+      expect(insert[1][5]).toBe(true);
+    });
+
+    test('zonder vinkje wordt de vertrekker zoals vroeger gedeactiveerd', async () => {
+      const c = stel();
+      const res = await verstuur({ transferShiftsFrom: '2000-01-01' });
+      expect(res.status).toBe(200);
+      expect(sqls(c).some(q => q.includes('SET active = false'))).toBe(true);
+    });
+
+    test('verkeerde volgorde: hij neemt later zelf een rooster over, dus weigeren', async () => {
+      // Eerst "Marie -> Bryan vanaf 30 nov" en dan pas "Bryan -> Justine vanaf
+      // 26 nov" zou Marie's diensten mee naar Justine schuiven.
+      const c = stel({ inkomend: { ingangsdatum: '2999-11-30', van: 'Marie' } });
+      const res = await verstuur({ transferShiftsFrom: '2999-11-26', vertrekkerBlijftActief: true });
+      expect(res.status).toBe(409);
+      expect(res.body.volgorde).toBe(true);
+      expect(res.body.error).toMatch(/Marie/);
+      expect(sqls(c).some(q => q.includes('UPDATE shifts SET user_id'))).toBe(false);
+    });
+  });
+
   test('remaps employee key without corrupting day-of-week indices (#141)', async () => {
     const oldId = 3;   // botst met dagindex donderdag ("3")
     const newId = 42;
@@ -3453,6 +3521,7 @@ describe('POST /admin/users/:id/replace', () => {
       .mockResolvedValueOnce({ rows: [] })                                                 // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: oldId, name: 'Oud', week_schedules: [], week_schedule_week1: [], week_schedule_week2: [] }] }) // old user FOR UPDATE
       .mockResolvedValueOnce({ rows: [{ id: newId, name: 'Nieuw', active: true }] })      // new user FOR UPDATE
+      .mockResolvedValueOnce({ rows: [] })                                                 // neemt de vertrekker zelf later iets over?
       .mockResolvedValueOnce({ rows: [] })                                                 // rooster, team en uren overnemen
       .mockResolvedValueOnce({ rows: [], rowCount: 0 })                                    // openstaande verzoeken annuleren
       .mockResolvedValueOnce({ rows: [] })                                                 // deactivate old
@@ -3498,6 +3567,7 @@ describe('POST /admin/users/:id/replace', () => {
       .mockResolvedValueOnce({ rows: [] })                                                 // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: oldId, name: 'Oud', week_schedules: [], week_schedule_week1: [], week_schedule_week2: [] }] })
       .mockResolvedValueOnce({ rows: [{ id: newId, name: 'Nieuw', active: true }] })
+      .mockResolvedValueOnce({ rows: [] })                                                 // neemt de vertrekker zelf later iets over?
       .mockResolvedValueOnce({ rows: [] })                                                 // rooster, team en uren overnemen
       .mockResolvedValueOnce({ rows: [], rowCount: 0 })                                    // openstaande verzoeken annuleren
       .mockResolvedValueOnce({ rows: [] })                                                 // deactivate old
