@@ -519,15 +519,9 @@ function pasPilletjesAan(wortel) {
             werk.push({ pil, tekst: vorm.tekst, extra: vorm.oms, extraKlasse: '.activity-pil-oms' });
         } else {
             const blok = pil.parentElement;
-            let breedte = blok ? blok.clientWidth : 0;
+            const breedte = blok ? blok.clientWidth : 0;
             if (!breedte) return;
-            // Op een telefoon staat het pilletje NAAST de tijd in plaats van
-            // eronder (zie styles.css); dan is de tijd geen buur maar een
-            // concurrent, en gaat haar breedte van de ruimte af.
-            if (getComputedStyle(pil).position === 'static') {
-                const tijd = blok.querySelector('.block-time');
-                if (tijd && tijd.offsetWidth) breedte -= tijd.offsetWidth + 4;
-            }
+
             const vorm = kiesPilVorm({ bereik: d.bereik, start: d.start, meer: d.meer }, breedte, meet);
             werk.push({ pil, tekst: vorm.tekst, extra: vorm.meer, extraKlasse: '.activity-pil-meer' });
         }
@@ -1518,6 +1512,9 @@ function renderTimelineView() {
                                 blokUren: breedteUren,
                                 isDagweergave: isDayView,
                             });
+                            // Op een telefoon houdt het blok links plaats vrij voor het
+                            // pilletje (styles.css, zoek op `met-pil`).
+                            if (actPilletjes) blockClass += ' met-pil';
 
                             // Welk label past er? Zie tijdLabelVoorBlok() (#147, #404).
                             const timeLabel = tijdLabelVoorBlok(shift.startTime, shift.endTime, zichtbaarUren);
@@ -1787,6 +1784,9 @@ function renderTimelineView() {
                                 blokUren: breedteUren,
                                 isDagweergave: isDayView,
                             });
+                            // Op een telefoon houdt het blok links plaats vrij voor het
+                            // pilletje (styles.css, zoek op `met-pil`).
+                            if (actPilletjes) blockClass += ' met-pil';
 
                             // Welk label past er? Zie tijdLabelVoorBlok() (#147, #404).
                             const timeLabel = tijdLabelVoorBlok(shift.startTime, shift.endTime, zichtbaarUren);

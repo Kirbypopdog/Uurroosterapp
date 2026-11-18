@@ -381,3 +381,29 @@ describe('na de review', () => {
     expect(F('app-globals.js')).not.toContain('ACTIVITY_TYPE_LABELS_SHORT');
   });
 });
+
+describe('op een telefoon (iPhone)', () => {
+  const F = (f) => fs.readFileSync(path.join(__dirname, '../../frontend', f), 'utf8');
+  const css = F('styles.css');
+
+  test('geen :has() en geen flexrij meer: Safari liet die omslaan over de tijd', () => {
+    // In Chromium stond het pilletje netjes naast de tijd; op de iPhone zakte
+    // het eronder en lag het over de tijd van Sam, Victor en Thomas.
+    expect(css).not.toMatch(/\.timeline-block:has\(> \.activity-pil--week\)/);
+  });
+
+  test('een rondje links in het blok, met plaats vrij voor de tijd', () => {
+    const i = css.indexOf('@media (max-width: 768px) {\n    .timeline-block.met-pil {');
+    expect(i).toBeGreaterThan(-1);
+    const blok = css.slice(i, css.indexOf('\n}\n', i));
+    expect(blok).toMatch(/\.timeline-block\.met-pil \{\s*padding-left: 23px;/);
+    expect(blok).toMatch(/position: absolute;/);
+    expect(blok).toMatch(/left: 4px !important;/);
+    expect(blok).toMatch(/\.activity-pil-tekst,[\s\S]*display: none;/);
+    expect(blok).toMatch(/\.resize-handle \{\s*display: none;/);
+  });
+
+  test('het blok krijgt de klasse in beide tekenpaden', () => {
+    expect((F('app-planner.js').match(/if \(actPilletjes\) blockClass \+= ' met-pil';/g) || []).length).toBe(2);
+  });
+});
