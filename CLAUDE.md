@@ -100,7 +100,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `cdn-scripts.test.js` | Dat elke verwijzing naar een pakket-CDN in `index.html` een bestandspad én een vaste versie draagt (#396) |
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
 | `overnames-blijft-actief.test.js` | Dat een geplande overname met "blijft in dienst" de vertrekker op de ingangsdatum niet deactiveert |
-| `geplande-wijziging.test.js` | `geplandeWijzigingVoor()`: een geplande overname is al zichtbaar in de planning, met de uren tegen het nieuwe contract vanaf de ingangsdatum |
+| `geplande-wijziging.test.js` | `geplandeWijzigingVoor()`: vanaf de ingangsdatum staat iemand al in zijn nieuwe team, met de uren tegen het nieuwe contract |
 | `vervang-venster.test.js` | Het vervangvenster: geplande overnames annuleren, en dat de botsingsmelding "Verwijderen" niet meer blind aanraadt |
 | `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
 | `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
@@ -368,9 +368,10 @@ beheerders); annuleren en terugdraaien blijven bij de admin.
 er verandert. De planning gebruikt dat per WEEK (op de maandag): vanaf de
 ingangsdatum staat de vervanger in zijn nieuwe team (`teamVan()` in
 `renderTimelineView`) en valt wie uit dienst gaat weg — tenzij hij die week nog
-een dienst heeft, want een dienst zonder rij is onzichtbaar. Ervoor staat een
-label onder de naam ("Vanaf 30 nov: Cargo · 35u"), en de uren tellen vanaf de
-ingangsdatum tegen het NIEUWE contract. De database zelf volgt pas op de
+een dienst heeft, want een dienst zonder rij is onzichtbaar. De uren tellen
+vanaf de ingangsdatum tegen het NIEUWE contract. Er stond ook een label onder
+de naam ("Vanaf 30 nov: Cargo · 35u"); Victor vond dat overbodig naast de
+teamindeling en het is weggehaald. De database zelf volgt pas op de
 ingangsdatum. Instellingen > Accounts toont alle geplande wijzigingen met
 Terugdraaien of Annuleren.
 
