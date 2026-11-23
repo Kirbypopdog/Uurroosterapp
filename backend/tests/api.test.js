@@ -3467,6 +3467,72 @@ describe('POST /admin/users/:id/replace', () => {
       expect(sqls.some(q => /UPDATE shifts|DELETE FROM shifts/.test(q))).toBe(false);
     });
 
+    describe('terugdraaien', () => {
+      function client(rij, extra = {}) {
+        const c = {
+          release: jest.fn(),
+          query: jest.fn((sql) => {
+            if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+            if (sql.includes('FROM geplande_overnames WHERE id = $1 FOR UPDATE')) return Promise.resolve({ rows: rij ? [rij] : [] });
+            if (sql.includes('UPDATE shifts s SET user_id')) return Promise.resolve({ rows: extra.terug || [], rowCount: (extra.terug || []).length });
+            if (sql.includes('INSERT INTO shifts')) return Promise.resolve({ rows: [], rowCount: extra.teruggezet || 0 });
+            if (sql.includes('UPDATE schedule_drafts')) return Promise.resolve({ rows: [], rowCount: extra.conceptGewijzigd ? 0 : 1 });
+            if (sql.includes('SELECT name FROM schedule_drafts')) return Promise.resolve({ rows: [{ name: 'Kerst' }] });
+            if (sql.includes('UPDATE settings')) return Promise.resolve({ rows: [], rowCount: 1 });
+            return Promise.resolve({ rows: [], rowCount: 0 });
+          }),
+        };
+        pool.connect.mockResolvedValueOnce(c);
+        return c;
+      }
+      const T = { diensten: [1, 2], blokken: [], activiteiten: [7], verwijderd: [{ id: 9, user_id: 117, date: '2026-12-01', start_time: '08:30', end_time: '16:30' }],
+        concepten: [{ id: 'k', voor: { a: 1 }, na: '2026-11-23 13:53:30.9' }], instellingen: {} };
+      const rij = (over = {}) => ({ id: 4, oude_gebruiker: 119, nieuwe_gebruiker: 117, ingangsdatum: '2999-11-30', status: 'gepland', terugdraai: T, ...over });
+
+      test('zet diensten terug, de gewiste diensten ook, en markeert de overname', async () => {
+        mockActiveUser();
+        const c = client(rij(), { terug: [{ id: 1 }, { id: 2 }], teruggezet: 1 });
+        pool.query.mockResolvedValue({ rows: [] });
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', admin());
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ dienstenTerug: 2, dienstenNietTerug: 0, verwijderdTeruggezet: 1, conceptenNietHersteld: [] });
+        const sqls = c.query.mock.calls.map(([q]) => q);
+        expect(sqls.some(q => typeof q === 'string' && q.includes("status = 'teruggedraaid'"))).toBe(true);
+        expect(sqls).toContain('COMMIT');
+      });
+
+      test('een intussen gewijzigd concept wordt niet overschreven, maar wel gemeld', async () => {
+        mockActiveUser();
+        client(rij(), { terug: [], conceptGewijzigd: true });
+        pool.query.mockResolvedValue({ rows: [] });
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', admin());
+        expect(res.body.conceptenNietHersteld).toEqual(['Kerst']);
+        expect(res.body.dienstenNietTerug).toBe(2);
+      });
+
+      test('na de ingangsdatum kan het niet meer', async () => {
+        mockActiveUser();
+        client(rij({ ingangsdatum: '2000-01-01' }));
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', admin());
+        expect(res.status).toBe(409);
+      });
+
+      test('een oudere overname zonder vastlegging: alleen annuleren', async () => {
+        mockActiveUser();
+        client(rij({ terugdraai: null }));
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', admin());
+        expect(res.status).toBe(409);
+        expect(res.body.geenTerugdraai).toBe(true);
+      });
+
+      test('een roosterverantwoordelijke mag de lijst zien maar niet terugdraaien', async () => {
+        mockActiveUser();
+        const rv = `Bearer ${makeToken({ id: 5, role: 'roosterverantwoordelijke', name: 'RV', team_id: 'vlot1' })}`;
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', rv);
+        expect(res.status).toBe(403);
+      });
+    });
+
     test('een overname die al uitgevoerd is, is niet meer te annuleren', async () => {
       mockActiveUser();
       pool.query.mockResolvedValueOnce({ rows: [] });

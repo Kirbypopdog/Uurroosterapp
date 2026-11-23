@@ -264,6 +264,12 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       ]
     );
 
+    // Wat deze vervanging verplaatst of wist, zodat een GEPLANDE overname tot
+    // de ingangsdatum volledig terug te draaien is (zie /terugdraaien hieronder).
+    const terugdraai = gaatLaterIn
+      ? { diensten: [], blokken: [], activiteiten: [], verwijderd: [], concepten: [], instellingen: {} }
+      : null;
+
     // 2. Optionally transfer future shifts
     let shiftsTransferred = 0;
     let eigenDienstenVerwijderd = 0;
@@ -272,10 +278,13 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       // kan er niets meer botsen.
       if (eigenDienstenVervanger === 'verwijderen') {
         const weg = await client.query(
-          `DELETE FROM shifts WHERE user_id = $1 AND date >= $2`,
+          `DELETE FROM shifts WHERE user_id = $1 AND date >= $2
+           RETURNING id, user_id, team, date::text AS date, start_time, end_time, notes,
+                     source, archived, is_reserve, draft_id, created_at`,
           [newUserId, transferShiftsFrom]
         );
         eigenDienstenVerwijderd = weg.rowCount;
+        if (terugdraai) terugdraai.verwijderd = weg.rows || [];
       } else {
         // Botsingen vooraf opzoeken in plaats van de databank erover te laten
         // struikelen. Er staat een unieke index op (gebruiker, datum,
@@ -313,24 +322,28 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
         }
       }
       const transferResult = await client.query(
-        `UPDATE shifts SET user_id = $1 WHERE user_id = $2 AND date >= $3`,
+        `UPDATE shifts SET user_id = $1 WHERE user_id = $2 AND date >= $3 RETURNING id`,
         [newUserId, oldUserId, transferShiftsFrom]
       );
       shiftsTransferred = transferResult.rowCount;
+      if (terugdraai) terugdraai.diensten = (transferResult.rows || []).map(r => r.id);
 
       // Also transfer shift_blocks for transferred dates
-      await client.query(
+      const blokken = await client.query(
         `UPDATE shift_blocks sb SET user_id = $1
          WHERE sb.user_id = $2 AND sb.date >= $3
-         AND NOT EXISTS (SELECT 1 FROM shift_blocks sb2 WHERE sb2.user_id = $1 AND sb2.date = sb.date)`,
+         AND NOT EXISTS (SELECT 1 FROM shift_blocks sb2 WHERE sb2.user_id = $1 AND sb2.date = sb.date)
+         RETURNING sb.id`,
         [newUserId, oldUserId, transferShiftsFrom]
       );
+      if (terugdraai) terugdraai.blokken = ((blokken && blokken.rows) || []).map(r => r.id);
 
       // Transfer activities for transferred dates
-      await client.query(
-        `UPDATE shift_activities SET user_id = $1 WHERE user_id = $2 AND date >= $3`,
+      const activiteiten = await client.query(
+        `UPDATE shift_activities SET user_id = $1 WHERE user_id = $2 AND date >= $3 RETURNING id`,
         [newUserId, oldUserId, transferShiftsFrom]
       );
+      if (terugdraai) terugdraai.activiteiten = ((activiteiten && activiteiten.rows) || []).map(r => r.id);
     }
 
     // 2b. Openstaande ruil- en overnameverzoeken van of naar de vertrekker
@@ -364,6 +377,7 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     const verzoekenGeannuleerd = verzoekenResult.rowCount;
 
     // 3. De vertrekker deactiveren, of de overname vastleggen voor later.
+    let overnameId = null;
     if (gaatLaterIn) {
       // Eén openstaande overname per vertrekker; een tweede vervangt de eerste,
       // zodat een verkeerd ingevoerde datum gewoon te corrigeren is.
@@ -372,13 +386,15 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
           WHERE oude_gebruiker = $1 AND status = 'gepland'`,
         [oldUserId]
       );
-      await client.query(
+      const ingepland = await client.query(
         `INSERT INTO geplande_overnames
            (oude_gebruiker, nieuwe_gebruiker, ingangsdatum, aangemaakt_door, aangemaakt_door_naam,
             vertrekker_blijft_actief)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id`,
         [oldUserId, newUserId, transferShiftsFrom, req.user.id, req.user.name, blijftActief]
       );
+      overnameId = (ingepland && ingepland.rows && ingepland.rows[0]) ? ingepland.rows[0].id : null;
     } else if (!blijftActief) {
       await client.query(
         `UPDATE users SET active = false WHERE id = $1`,
@@ -397,11 +413,17 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     for (const row of draftsResult.rows) {
       const { grid: newGrid, changed } = remapDraftGridUser(row.grid, oldUserId, newUserId);
       if (changed) {
-        await client.query(
-          `UPDATE schedule_drafts SET grid = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+        const na = await client.query(
+          `UPDATE schedule_drafts SET grid = $1::jsonb, updated_at = NOW() WHERE id = $2
+           RETURNING updated_at::text AS na`,
           [JSON.stringify(newGrid), row.id]
         );
         draftsUpdated++;
+        if (terugdraai) {
+          terugdraai.concepten.push({
+            id: row.id, voor: row.grid, na: (na && na.rows && na.rows[0]) ? na.rows[0].na : null,
+          });
+        }
       }
     }
 
@@ -417,6 +439,12 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     const { nieuweRotatie, nieuweVakanties, verplaatst } = verhuisVerantwoordelijkheden(
       huidig.responsibleRotation, huidig.holidayPeriods, oldUserId, newUserId, vanafVerantwoordelijk
     );
+    if (terugdraai && nieuweRotatie) {
+      terugdraai.instellingen.responsibleRotation = { voor: huidig.responsibleRotation, na: nieuweRotatie };
+    }
+    if (terugdraai && nieuweVakanties) {
+      terugdraai.instellingen.holidayPeriods = { voor: huidig.holidayPeriods, na: nieuweVakanties };
+    }
     if (nieuweRotatie) {
       await client.query(
         `UPDATE settings SET value = $1::jsonb WHERE key = 'responsibleRotation'`,
@@ -430,6 +458,13 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     const verantwoordelijkhedenVerplaatst = verplaatst;
 
     // 5. No auto-regeneration — user should re-apply active concept via Rooster Bouwen
+
+    if (overnameId && terugdraai) {
+      await client.query(
+        `UPDATE geplande_overnames SET terugdraai = $1::jsonb WHERE id = $2`,
+        [JSON.stringify(terugdraai), overnameId]
+      );
+    }
 
     await client.query('COMMIT');
 
@@ -449,7 +484,6 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       verzoekenGeannuleerd,
       eigenDienstenVerwijderd,
       gaatLaterIn,
-      vertrekkerBlijftActief: blijftActief,
       vertrekkerBlijftActief: blijftActief,
       transferFrom: transferShiftsFrom || null,
       scheduleCopied: true,
@@ -492,12 +526,17 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
 // verhuisd zijn, blijven waar ze nu staan, en eventueel verwijderde eigen
 // diensten van de vervanger komen niet terug. Het antwoord zegt dat, zodat
 // het scherm het kan herhalen.
-router.get('/admin/geplande-overnames', requireAuth, requireAdmin, async (req, res) => {
+router.get('/admin/geplande-overnames', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  // Ook voor de roosterverantwoordelijke: die ziet de wijziging aankomen in de
+  // planning (de uren tegen het nieuwe contract). Annuleren en terugdraaien
+  // blijven bij de admin, net als het vervangen zelf.
   const { rows } = await pool.query(
     `SELECT g.id, g.oude_gebruiker AS "oudeGebruiker", o.name AS "oudeNaam",
             g.nieuwe_gebruiker AS "nieuweGebruiker", n.name AS "nieuweNaam",
             g.ingangsdatum::text AS ingangsdatum,
             g.vertrekker_blijft_actief AS "vertrekkerBlijftActief",
+            o.contract_hours AS "oudeContracturen", o.main_team AS "oudeTeam",
+            (g.terugdraai IS NOT NULL) AS "heeftTerugdraai",
             g.aangemaakt_door_naam AS "aangemaaktDoor", g.aangemaakt_op AS "aangemaaktOp"
        FROM geplande_overnames g
        JOIN users o ON o.id = g.oude_gebruiker
@@ -505,7 +544,15 @@ router.get('/admin/geplande-overnames', requireAuth, requireAdmin, async (req, r
       WHERE g.status = 'gepland'
       ORDER BY g.ingangsdatum, g.id`
   );
-  res.json({ overnames: rows });
+  const vandaag = vandaagInBelgie();
+  res.json({
+    overnames: rows.map(r => ({
+      ...r,
+      // numeric komt als tekst uit pg
+      oudeContracturen: r.oudeContracturen == null ? null : Number(r.oudeContracturen),
+      kanTerugdraaien: !!r.heeftTerugdraai && r.ingangsdatum > vandaag,
+    })),
+  });
 });
 
 router.delete('/admin/geplande-overnames/:id', requireAuth, requireAdmin, async (req, res) => {
@@ -530,6 +577,153 @@ router.delete('/admin/geplande-overnames/:id', requireAuth, requireAdmin, async 
     uitleg: 'De geplande stap is gestopt: team, uren, weekrooster en deactivatie gebeuren niet. ' +
       'De diensten die al verhuisd zijn blijven staan waar ze nu staan.',
   });
+});
+
+// Een geplande overname VOLLEDIG terugdraaien, zolang de ingangsdatum nog niet
+// bereikt is: verhuisde diensten, blokkades en activiteiten terug naar de
+// vertrekker, gewiste eigen diensten van de vervanger terug, concepten en
+// verantwoordelijkheden terug zoals ze waren, en de geplande stap gestopt.
+//
+// Wat intussen door iemand anders gewijzigd is, wordt NIET overschreven:
+// - een dienst die al bij een ander staat, of waar de vertrekker op die dag en
+//   dat uur intussen zelf iets heeft, blijft staan;
+// - een concept of instelling die sinds de vervanging gewijzigd is, blijft
+//   zoals hij is.
+// Het antwoord noemt die, zodat de beheerder weet wat hij zelf moet nakijken.
+router.post('/admin/geplande-overnames/:id/terugdraaien', requireAuth, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Ongeldig id' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const g = await client.query(
+      `SELECT id, oude_gebruiker, nieuwe_gebruiker, ingangsdatum::text AS ingangsdatum, status, terugdraai
+         FROM geplande_overnames WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    const rij = g.rows[0];
+    if (!rij || rij.status !== 'gepland') {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(404).json({ error: 'Geen geplande overname gevonden (al uitgevoerd, geannuleerd of teruggedraaid?)' });
+    }
+    if (!rij.terugdraai) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(409).json({
+        error: 'Deze overname is ingesteld voor terugdraaien mogelijk was. Annuleren kan wel; de diensten moet je dan zelf terugzetten.',
+        geenTerugdraai: true,
+      });
+    }
+    if (rij.ingangsdatum <= vandaagInBelgie()) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(409).json({ error: 'De ingangsdatum is bereikt; terugdraaien kan alleen daarvoor.' });
+    }
+
+    const oud = rij.oude_gebruiker;
+    const nieuw = rij.nieuwe_gebruiker;
+    const t = rij.terugdraai || {};
+    const ids = (lijst) => (Array.isArray(lijst) ? lijst.map(Number).filter(Number.isInteger) : []);
+
+    // 1. Diensten terug naar de vertrekker. Alleen wat nog bij de vervanger
+    //    staat, en niet waar de vertrekker intussen zelf iets op dat uur heeft
+    //    (de unieke index op gebruiker, datum en starttijd).
+    const dienstIds = ids(t.diensten);
+    const diensten = dienstIds.length ? await client.query(
+      `UPDATE shifts s SET user_id = $1
+        WHERE s.id = ANY($2::int[]) AND s.user_id = $3
+          AND NOT EXISTS (SELECT 1 FROM shifts x WHERE x.user_id = $1 AND x.date = s.date AND x.start_time = s.start_time)
+        RETURNING s.id`,
+      [oud, dienstIds, nieuw]
+    ) : { rows: [] };
+
+    // 2. Blokkades en activiteiten.
+    const blokIds = ids(t.blokken);
+    if (blokIds.length) {
+      await client.query(
+        `UPDATE shift_blocks b SET user_id = $1
+          WHERE b.id = ANY($2::int[]) AND b.user_id = $3
+            AND NOT EXISTS (SELECT 1 FROM shift_blocks x WHERE x.user_id = $1 AND x.date = b.date)`,
+        [oud, blokIds, nieuw]
+      );
+    }
+    const activiteitIds = ids(t.activiteiten);
+    if (activiteitIds.length) {
+      await client.query(
+        `UPDATE shift_activities SET user_id = $1 WHERE id = ANY($2::int[]) AND user_id = $3`,
+        [oud, activiteitIds, nieuw]
+      );
+    }
+
+    // 3. Gewiste eigen diensten van de vervanger terugzetten. Bestaat er op dat
+    //    moment al iets (zelfde id, of zelfde persoon, dag en starttijd), dan
+    //    slaat ON CONFLICT hem over.
+    const verwijderd = Array.isArray(t.verwijderd) ? t.verwijderd : [];
+    let teruggezet = 0;
+    if (verwijderd.length) {
+      const r = await client.query(
+        `INSERT INTO shifts (id, user_id, team, date, start_time, end_time, notes, source, archived, is_reserve, draft_id, created_at)
+         SELECT id, user_id, team, date, start_time, end_time, COALESCE(notes, ''), COALESCE(source, 'manual'),
+                COALESCE(archived, false), COALESCE(is_reserve, false), draft_id, COALESCE(created_at, NOW())
+           FROM jsonb_to_recordset($1::jsonb) AS x(id int, user_id int, team text, date date, start_time text,
+                end_time text, notes text, source text, archived boolean, is_reserve boolean, draft_id text,
+                created_at timestamp)
+         ON CONFLICT DO NOTHING
+         RETURNING id`,
+        [JSON.stringify(verwijderd)]
+      );
+      teruggezet = r.rowCount;
+    }
+
+    // 4. Concepten en verantwoordelijkheden, alleen als ze sindsdien niet
+    //    gewijzigd zijn.
+    const conceptenNietHersteld = [];
+    for (const c of (Array.isArray(t.concepten) ? t.concepten : [])) {
+      const r = await client.query(
+        `UPDATE schedule_drafts SET grid = $1::jsonb, updated_at = NOW()
+          WHERE id = $2 AND updated_at::text = $3
+          RETURNING id`,
+        [JSON.stringify(c.voor), c.id, c.na]
+      );
+      if (r.rowCount === 0) {
+        const naam = await client.query(`SELECT name FROM schedule_drafts WHERE id = $1`, [c.id]);
+        conceptenNietHersteld.push(naam.rows[0] ? naam.rows[0].name : c.id);
+      }
+    }
+    const instellingenNietHersteld = [];
+    for (const [sleutel, w] of Object.entries(t.instellingen || {})) {
+      if (!['responsibleRotation', 'holidayPeriods'].includes(sleutel) || !w) continue;
+      const r = await client.query(
+        `UPDATE settings SET value = $1::jsonb WHERE key = $2 AND value = $3::jsonb RETURNING key`,
+        [JSON.stringify(w.voor), sleutel, JSON.stringify(w.na)]
+      );
+      if (r.rowCount === 0) instellingenNietHersteld.push(sleutel);
+    }
+
+    await client.query(
+      `UPDATE geplande_overnames SET status = 'teruggedraaid', uitgevoerd_op = NOW() WHERE id = $1`,
+      [id]
+    );
+    await client.query('COMMIT');
+
+    const resultaat = {
+      ok: true,
+      dienstenTerug: diensten.rows.length,
+      dienstenNietTerug: dienstIds.length - diensten.rows.length,
+      verwijderdTeruggezet: teruggezet,
+      verwijderdNietTeruggezet: verwijderd.length - teruggezet,
+      conceptenNietHersteld,
+      instellingenNietHersteld,
+    };
+    await logAudit(req, 'UPDATE', 'user', String(oud), {
+      type: 'geplande_overname_teruggedraaid', geplandeOvername: id, nieuweGebruiker: nieuw, ...resultaat,
+    });
+    res.json(resultaat);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 module.exports = router;

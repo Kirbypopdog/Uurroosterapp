@@ -10,16 +10,31 @@ const S = fs.readFileSync(path.join(__dirname, '../../frontend/app-settings.js')
 const D = fs.readFileSync(path.join(__dirname, '../../frontend/data.js'), 'utf8');
 const venster = S.slice(S.indexOf('function showReplaceEmployeeModal'), S.indexOf('// ===== SETTINGS TAB: PLANNING'));
 
-test('het venster toont geplande overnames met een knop om te annuleren', () => {
+const lijst = S.slice(S.indexOf('function geplandeOvernamesHtml'), S.indexOf('function showReplaceEmployeeModal'));
+
+test('het venster toont geplande overnames met Terugdraaien of Annuleren', () => {
   expect(venster).toContain('id="replace-gepland"');
-  expect(venster).toContain('replace-gepland-annuleer');
-  expect(venster).toContain('annuleerGeplandeOvername(knop.dataset.id)');
+  expect(venster).toContain('geplandeOvernamesHtml(relevant');
+  expect(venster).toContain('bindGeplandeOvernameKnoppen(geplandEl');
+  expect(lijst).toContain('o.kanTerugdraaien');
+  expect(lijst).toContain('terugdraaiGeplandeOvername(knop.dataset.id)');
+  expect(lijst).toContain('annuleerGeplandeOvername(knop.dataset.id)');
   expect(D).toMatch(/async function annuleerGeplandeOvername\(id\)/);
-  expect(D).toContain("method: 'DELETE'");
+  expect(D).toMatch(/async function terugdraaiGeplandeOvername\(id\)/);
 });
 
-test('het venster zegt dat verhuisde diensten blijven staan', () => {
-  expect(venster).toMatch(/De diensten die al verhuisd zijn, blijven staan waar ze nu staan/);
+test('Annuleren zegt dat verhuisde diensten blijven staan', () => {
+  expect(lijst).toMatch(/De diensten die al verhuisd zijn, blijven staan waar ze nu staan/);
+});
+
+test('Instellingen > Accounts toont alle geplande wijzigingen', () => {
+  expect(S).toContain('id="settings-gepland"');
+  expect(S).toMatch(/toonGeplandeWijzigingenInInstellingen\(container\);/);
+});
+
+test('terugdraaien meldt wat het NIET kon terugzetten', () => {
+  expect(lijst).toContain('r.conceptenNietHersteld');
+  expect(lijst).toContain('r.dienstenNietTerug');
 });
 
 test('de botsingsmelding raadt Verwijderen niet meer blind aan', () => {

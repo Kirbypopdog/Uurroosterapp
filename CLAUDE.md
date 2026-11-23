@@ -100,6 +100,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `cdn-scripts.test.js` | Dat elke verwijzing naar een pakket-CDN in `index.html` een bestandspad én een vaste versie draagt (#396) |
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
 | `overnames-blijft-actief.test.js` | Dat een geplande overname met "blijft in dienst" de vertrekker op de ingangsdatum niet deactiveert |
+| `geplande-wijziging.test.js` | `geplandeWijzigingVoor()`: een geplande overname is al zichtbaar in de planning, met de uren tegen het nieuwe contract vanaf de ingangsdatum |
 | `vervang-venster.test.js` | Het vervangvenster: geplande overnames annuleren, en dat de botsingsmelding "Verwijderen" niet meer blind aanraadt |
 | `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
 | `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
@@ -243,6 +244,7 @@ dagelijkse samenvatting naast de directe mail aan het eigen team.
 - `GET /api/v1/audit-log` - Audit log met filters en paginatie
 - `POST /api/v1/admin/users/:id/replace` - Medewerker vervangen
 - `GET|DELETE /api/v1/admin/geplande-overnames[/:id]` - Geplande overnames bekijken en annuleren (stopt alleen de stap op de ingangsdatum)
+- `POST /api/v1/admin/geplande-overnames/:id/terugdraaien` - Alles terugzetten zoals vóór de vervanging, tot de ingangsdatum
 - `PUT /api/v1/me/email-preferences` - Email notificatie voorkeur
 
 **Een medewerker vervangen.** Eén verzoek, maar twee momenten. Wat de planning
@@ -345,6 +347,27 @@ melding raadde "Verwijderen" aan, en 121 diensten die naar Justine hadden
 moeten gaan verdwenen. Ze zijn uit het basisconcept opnieuw opgebouwd. De
 botsingsmelding raadt dat nu niet meer blind aan maar wijst op de volgorde, en
 de bevestiging zegt hoeveel diensten er verdwijnen.
+
+**Terugdraaien tot de ingangsdatum.** Een geplande overname legt bij het
+instellen in `geplande_overnames.terugdraai` (JSONB, migratie 053) vast wat ze
+deed: de id's van de verhuisde diensten, blokkades en activiteiten, de GEWISTE
+diensten zelf (volledige rijen), de concepten van vóór de wijziging met hun
+`updated_at` erna, en de verantwoordelijkheden voor en na.
+`POST /admin/geplande-overnames/:id/terugdraaien` zet dat terug en zet de
+status op `teruggedraaid`, alleen vóór de ingangsdatum. Wat intussen door
+iemand anders gewijzigd is, wordt NIET overschreven — een dienst waar de
+vertrekker op dat uur intussen zelf iets heeft, een concept met een andere
+`updated_at`, een instelling met een andere waarde — en het antwoord noemt
+dat. Een overname van vóór migratie 053 heeft geen vastlegging en kent alleen
+Annuleren.
+
+**Al zichtbaar vóór ze ingaat.** `GET /admin/geplande-overnames` mag ook de
+roosterverantwoordelijke lezen. `geplandeWijzigingVoor()` in `data.js` (puur)
+zegt per medewerker en datum wat er verandert; de planning zet een label onder
+de naam ("Vanaf 30 nov: Cargo · 35u") en telt vanaf de ingangsdatum de uren
+tegen het NIEUWE contract. Instellingen > Accounts toont alle geplande
+wijzigingen met Terugdraaien of Annuleren. Wat de planning NIET doet: iemand al
+vóór de ingangsdatum in zijn nieuwe team zetten — de rij volgt `main_team`.
 
 Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
 ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.
