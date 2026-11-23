@@ -169,6 +169,7 @@ const DataStore = {
     shifts: [],
     activities: [],
     dagActiviteiten: [], // #418: algemene activiteiten, aan een dag en niet aan een persoon
+    geplandeOvernames: [], // vervangingen met een ingangsdatum in de toekomst; de planning toont ze al
     availability: [],
     shiftBlocks: [],
     swapRequests: [],
@@ -467,6 +468,10 @@ async function loadDataFromAPI() {
         AppState.leaveRounds = leaveRoundsData.rounds || [];
         DataStore.swapRequests = swapRequestsData.swapRequests || [];
         DataStore.dagActiviteiten = dagActiviteitenData.dagActiviteiten || [];
+        // Geplande overnames: de planning toont ze al vóór de ingangsdatum, met
+        // de uren tegen het nieuwe contract. Een mislukte lading is geen reden
+        // om de app te laten haperen: dan staat er gewoon geen label.
+        DataStore.geplandeOvernames = await fetchGeplandeOvernames().catch(() => []);
 
         // Merge API settings with defaults
         const apiSettings = settingsData.settings || {};
@@ -629,6 +634,66 @@ async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom 
         console.error('Fout bij vervangen medewerker:', error);
         throw error;
     }
+}
+
+// Geplande overnames (vervangingen met een ingangsdatum in de toekomst).
+async function fetchGeplandeOvernames() {
+    const res = await dataApiFetch('/admin/geplande-overnames');
+    return (res && res.overnames) || [];
+}
+
+// Stopt alleen de geplande stap (team, uren, weekrooster, deactivatie). De
+// diensten die al verhuisd zijn blijven staan waar ze nu staan.
+async function annuleerGeplandeOvername(id) {
+    const res = await dataApiFetch(`/admin/geplande-overnames/${id}`, { method: 'DELETE' });
+    await Promise.all([refreshUsers(), refreshShifts(), refreshGeplandeOvernames()]);
+    return res;
+}
+
+// Zet ALLES terug zoals vóór de vervanging: diensten, blokkades,
+// activiteiten, gewiste diensten, concepten en verantwoordelijkheden. Alleen
+// vóór de ingangsdatum. Wat intussen door iemand anders gewijzigd is, blijft
+// staan; het antwoord noemt dat.
+async function terugdraaiGeplandeOvername(id) {
+    const res = await dataApiFetch(`/admin/geplande-overnames/${id}/terugdraaien`, { method: 'POST' });
+    await Promise.all([refreshUsers(), refreshShifts(), refreshActivities(), refreshDrafts(),
+        refreshSettings(), refreshGeplandeOvernames()]);
+    return res;
+}
+
+async function refreshGeplandeOvernames() {
+    try { DataStore.geplandeOvernames = await fetchGeplandeOvernames(); } catch (e) { /* label valt weg */ }
+}
+
+/**
+ * Wat een geplande overname op een bepaalde DATUM betekent voor één
+ * medewerker. Puur, zodat het te toetsen is.
+ *
+ *  - de VERVANGER krijgt vanaf de ingangsdatum de contracturen en het team van
+ *    de vertrekker;
+ *  - de VERTREKKER gaat uit dienst, tenzij hij "blijft in dienst";
+ *  - `labels` beschrijft de komende wijziging, zodat ze in de planning te
+ *    zien is vóór ze ingaat.
+ */
+function geplandeWijzigingVoor(overnames, medewerkerId, datum) {
+    const id = String(medewerkerId);
+    const uit = { contractUren: null, team: null, uitDienst: false, labels: [] };
+    for (const o of (overnames || [])) {
+        const vanaf = o.ingangsdatum;
+        const ingegaan = datum >= vanaf;
+        if (String(o.nieuweGebruiker) === id) {
+            if (ingegaan) {
+                if (o.oudeContracturen != null) uit.contractUren = Number(o.oudeContracturen);
+                if (o.oudeTeam) uit.team = o.oudeTeam;
+            }
+            uit.labels.push({ vanaf, soort: 'neemt-over', van: o.oudeNaam, team: o.oudeTeam, uren: o.oudeContracturen });
+        }
+        if (String(o.oudeGebruiker) === id) {
+            if (!o.vertrekkerBlijftActief && ingegaan) uit.uitDienst = true;
+            uit.labels.push({ vanaf, soort: o.vertrekkerBlijftActief ? 'geeft-door' : 'uit-dienst', naar: o.nieuweNaam });
+        }
+    }
+    return uit;
 }
 
 function getEmployee(id) {
@@ -2414,6 +2479,7 @@ if (typeof module !== 'undefined' && module.exports) {
     // de standaardwaarden. Door de referentie mee te geven kan een test de
     // velden vullen die de functies eronder lezen.
     DataStore,
+    geplandeWijzigingVoor,
     parseDateOnly,
     formatDateYYYYMMDD,
     getMonday,

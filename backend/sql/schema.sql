@@ -262,13 +262,16 @@ CREATE TABLE IF NOT EXISTS geplande_overnames (
   oude_gebruiker  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   nieuwe_gebruiker INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   ingangsdatum    DATE NOT NULL,
-  status          TEXT NOT NULL DEFAULT 'gepland' CHECK (status IN ('gepland', 'uitgevoerd', 'geannuleerd')),
+  status          TEXT NOT NULL DEFAULT 'gepland' CHECK (status IN ('gepland', 'uitgevoerd', 'geannuleerd', 'teruggedraaid')),
   aangemaakt_door INTEGER REFERENCES users(id) ON DELETE SET NULL,
   aangemaakt_door_naam TEXT,
   aangemaakt_op   TIMESTAMP DEFAULT NOW(),
   uitgevoerd_op   TIMESTAMP,
   -- Wisselt de vertrekker alleen van team, dan blijft zijn account actief.
-  vertrekker_blijft_actief BOOLEAN NOT NULL DEFAULT FALSE
+  vertrekker_blijft_actief BOOLEAN NOT NULL DEFAULT FALSE,
+  -- Wat de vervanging verplaatste of wiste, om tot de ingangsdatum terug te
+  -- kunnen draaien (migratie 053).
+  terugdraai      JSONB
 );
 
 CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON shift_swap_requests(status);

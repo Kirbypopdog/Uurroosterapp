@@ -1120,6 +1120,18 @@ const MIGRATIONS = [
       await client.query(
         `ALTER TABLE geplande_overnames ADD COLUMN IF NOT EXISTS vertrekker_blijft_actief BOOLEAN NOT NULL DEFAULT FALSE`);
     }
+  },
+  {
+    name: '053_overname_terugdraaien',
+    up: async (client) => {
+      // Een geplande overname moest tot de ingangsdatum volledig terug te
+      // draaien zijn. Daarvoor legt de vervanging vast wat ze verplaatste of
+      // wiste: dienst-, blokkade- en activiteit-id's, de gewiste diensten zelf,
+      // en de concepten en verantwoordelijkheden van vóór de wijziging.
+      await client.query(`ALTER TABLE geplande_overnames ADD COLUMN IF NOT EXISTS terugdraai JSONB`);
+      await client.query(`ALTER TABLE geplande_overnames DROP CONSTRAINT IF EXISTS geplande_overnames_status_check`);
+      await client.query(`ALTER TABLE geplande_overnames ADD CONSTRAINT geplande_overnames_status_check CHECK (status IN ('gepland', 'uitgevoerd', 'geannuleerd', 'teruggedraaid'))`);
+    }
   }
 ];
 

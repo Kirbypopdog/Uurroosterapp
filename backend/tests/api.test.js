@@ -3434,6 +3434,124 @@ describe('POST /admin/users/:id/replace', () => {
 
   // Regressie #141: bij een lage medewerker-ID (bv. 3) mag de grid-remap enkel
   // de medewerker-sleutel hernoemen, niet de dag-van-de-week-index "3".
+  describe('geplande overnames bekijken en annuleren', () => {
+    const admin = () => `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`;
+
+    test('een medewerker ziet de lijst ook (de planning toont de nieuwe situatie aan iedereen), maar niet wie hem instelde', async () => {
+      mockActiveUser();
+      pool.query.mockResolvedValueOnce({ rows: [{ id: 1, oudeNaam: 'Marie', nieuweNaam: 'Bryan', ingangsdatum: '2026-11-30', aangemaaktDoor: 'Victor', oudeContracturen: '35' }] });
+      const res = await request(app).get('/api/v1/admin/geplande-overnames')
+        .set('Authorization', `Bearer ${makeToken({ id: 3, role: 'medewerker', name: 'Eva', team_id: 'vlot2' })}`);
+      expect(res.status).toBe(200);
+      expect(res.body.overnames[0].nieuweNaam).toBe('Bryan');
+      expect(res.body.overnames[0].oudeContracturen).toBe(35);
+      expect(res.body.overnames[0].aangemaaktDoor).toBeUndefined();
+    });
+
+    test('een medewerker kan niet annuleren of terugdraaien', async () => {
+      mockActiveUser();
+      const res = await request(app).delete('/api/v1/admin/geplande-overnames/1')
+        .set('Authorization', `Bearer ${makeToken({ id: 3, role: 'medewerker', name: 'Eva', team_id: 'vlot2' })}`);
+      expect(res.status).toBe(403);
+    });
+
+    test('de lijst toont alleen wat nog gepland is', async () => {
+      mockActiveUser();
+      pool.query.mockResolvedValueOnce({ rows: [{ id: 1, oudeNaam: 'Marie', nieuweNaam: 'Bryan', ingangsdatum: '2026-11-30' }] });
+      const res = await request(app).get('/api/v1/admin/geplande-overnames').set('Authorization', admin());
+      expect(res.status).toBe(200);
+      expect(res.body.overnames[0].nieuweNaam).toBe('Bryan');
+      const sql = pool.query.mock.calls.find(([q]) => typeof q === 'string' && q.includes('FROM geplande_overnames'))[0];
+      expect(sql).toMatch(/status = 'gepland'/);
+    });
+
+    test('annuleren zet de status op geannuleerd en raakt geen diensten', async () => {
+      mockActiveUser();
+      pool.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, oude_gebruiker: 119, nieuwe_gebruiker: 117, ingangsdatum: '2026-11-30' }] })
+        .mockResolvedValue({ rows: [] });
+      const res = await request(app).delete('/api/v1/admin/geplande-overnames/1').set('Authorization', admin());
+      expect(res.status).toBe(200);
+      expect(res.body.dienstenBlijvenStaan).toBe(true);
+      const sqls = pool.query.mock.calls.map(([q]) => (typeof q === 'string' ? q : ''));
+      expect(sqls.some(q => q.includes("SET status = 'geannuleerd'") && q.includes("status = 'gepland'"))).toBe(true);
+      expect(sqls.some(q => /UPDATE shifts|DELETE FROM shifts/.test(q))).toBe(false);
+    });
+
+    describe('terugdraaien', () => {
+      function client(rij, extra = {}) {
+        const c = {
+          release: jest.fn(),
+          query: jest.fn((sql) => {
+            if (typeof sql !== 'string') return Promise.resolve({ rows: [] });
+            if (sql.includes('FROM geplande_overnames WHERE id = $1 FOR UPDATE')) return Promise.resolve({ rows: rij ? [rij] : [] });
+            if (sql.includes('UPDATE shifts s SET user_id')) return Promise.resolve({ rows: extra.terug || [], rowCount: (extra.terug || []).length });
+            if (sql.includes('INSERT INTO shifts')) return Promise.resolve({ rows: [], rowCount: extra.teruggezet || 0 });
+            if (sql.includes('UPDATE schedule_drafts')) return Promise.resolve({ rows: [], rowCount: extra.conceptGewijzigd ? 0 : 1 });
+            if (sql.includes('SELECT name FROM schedule_drafts')) return Promise.resolve({ rows: [{ name: 'Kerst' }] });
+            if (sql.includes('UPDATE settings')) return Promise.resolve({ rows: [], rowCount: 1 });
+            return Promise.resolve({ rows: [], rowCount: 0 });
+          }),
+        };
+        pool.connect.mockResolvedValueOnce(c);
+        return c;
+      }
+      const T = { diensten: [1, 2], blokken: [], activiteiten: [7], verwijderd: [{ id: 9, user_id: 117, date: '2026-12-01', start_time: '08:30', end_time: '16:30' }],
+        concepten: [{ id: 'k', voor: { a: 1 }, na: '2026-11-23 13:53:30.9' }], instellingen: {} };
+      const rij = (over = {}) => ({ id: 4, oude_gebruiker: 119, nieuwe_gebruiker: 117, ingangsdatum: '2999-11-30', status: 'gepland', terugdraai: T, ...over });
+
+      test('zet diensten terug, de gewiste diensten ook, en markeert de overname', async () => {
+        mockActiveUser();
+        const c = client(rij(), { terug: [{ id: 1 }, { id: 2 }], teruggezet: 1 });
+        pool.query.mockResolvedValue({ rows: [] });
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', admin());
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ dienstenTerug: 2, dienstenNietTerug: 0, verwijderdTeruggezet: 1, conceptenNietHersteld: [] });
+        const sqls = c.query.mock.calls.map(([q]) => q);
+        expect(sqls.some(q => typeof q === 'string' && q.includes("status = 'teruggedraaid'"))).toBe(true);
+        expect(sqls).toContain('COMMIT');
+      });
+
+      test('een intussen gewijzigd concept wordt niet overschreven, maar wel gemeld', async () => {
+        mockActiveUser();
+        client(rij(), { terug: [], conceptGewijzigd: true });
+        pool.query.mockResolvedValue({ rows: [] });
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', admin());
+        expect(res.body.conceptenNietHersteld).toEqual(['Kerst']);
+        expect(res.body.dienstenNietTerug).toBe(2);
+      });
+
+      test('na de ingangsdatum kan het niet meer', async () => {
+        mockActiveUser();
+        client(rij({ ingangsdatum: '2000-01-01' }));
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', admin());
+        expect(res.status).toBe(409);
+      });
+
+      test('een oudere overname zonder vastlegging: alleen annuleren', async () => {
+        mockActiveUser();
+        client(rij({ terugdraai: null }));
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', admin());
+        expect(res.status).toBe(409);
+        expect(res.body.geenTerugdraai).toBe(true);
+      });
+
+      test('een roosterverantwoordelijke mag de lijst zien maar niet terugdraaien', async () => {
+        mockActiveUser();
+        const rv = `Bearer ${makeToken({ id: 5, role: 'roosterverantwoordelijke', name: 'RV', team_id: 'vlot1' })}`;
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', rv);
+        expect(res.status).toBe(403);
+      });
+    });
+
+    test('een overname die al uitgevoerd is, is niet meer te annuleren', async () => {
+      mockActiveUser();
+      pool.query.mockResolvedValueOnce({ rows: [] });
+      const res = await request(app).delete('/api/v1/admin/geplande-overnames/1').set('Authorization', admin());
+      expect(res.status).toBe(404);
+    });
+  });
+
   // Bryan wisselt van Vlot 1 naar Cargo: Justine neemt vanaf 26 november zijn
   // rooster over, en Bryan vanaf 30 november dat van Marie. Werd Bryan bij de
   // eerste overname gedeactiveerd, dan verviel de tweede ("niet actief").

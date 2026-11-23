@@ -162,6 +162,7 @@ function renderSettingsAccounts(container) {
     }
 
     container.innerHTML = `
+        <div id="settings-gepland" class="hidden mb-md"></div>
         <div class="settings-card" id="settings-accounts">
             <div class="settings-card-header">
                 <div class="settings-card-title">
@@ -195,6 +196,25 @@ function renderSettingsAccounts(container) {
 
     // Load and render admin users
     loadAdminUsers(container);
+    toonGeplandeWijzigingenInInstellingen(container);
+}
+
+// Alle geplande overnames bovenaan Accountbeheer, met Terugdraaien of
+// Annuleren. Zo is een vervanging met een ingangsdatum in de toekomst niet
+// alleen terug te vinden via het venster van één medewerker.
+async function toonGeplandeWijzigingenInInstellingen(container) {
+    const el = container.querySelector('#settings-gepland');
+    if (!el || typeof fetchGeplandeOvernames !== 'function') return;
+    let lijst = [];
+    try { lijst = await fetchGeplandeOvernames(); } catch (e) { return; }
+    if (!lijst.length) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+    el.innerHTML = geplandeOvernamesHtml(lijst, 'Geplande wijzigingen');
+    el.classList.remove('hidden');
+    IconHelper.init(el);
+    bindGeplandeOvernameKnoppen(el, async () => {
+        await toonGeplandeWijzigingenInInstellingen(container);
+        loadAdminUsers(container);
+    });
 }
 
 async function loadAdminUsers(container) {
@@ -643,6 +663,76 @@ function showEditAccountModal(user, teams, onSave) {
     });
 }
 
+// ===== GEPLANDE OVERNAMES: lijst met Terugdraaien / Annuleren =====
+//
+// Gedeeld door het vervangvenster en Instellingen > Accounts.
+//
+// TERUGDRAAIEN zet alles terug zoals vóór de vervanging (diensten, gewiste
+// diensten, activiteiten, concepten, verantwoordelijkheden). Dat kan alleen
+// vóór de ingangsdatum, en alleen bij een overname die ingesteld is sinds die
+// mogelijkheid bestaat. Voor een oudere overname is er alleen ANNULEREN: dat
+// stopt de stap op de ingangsdatum en laat de diensten staan.
+function geplandeOvernamesHtml(lijst, titel) {
+    const rij = (o) => {
+        const knop = o.kanTerugdraaien
+            ? `<button type="button" class="btn btn-sm btn-secondary gepland-terugdraaien" data-id="${o.id}"
+                   data-label="${escapeHtml(`${o.oudeNaam} → ${o.nieuweNaam}`)}">Terugdraaien</button>`
+            : `<button type="button" class="btn btn-sm btn-secondary gepland-annuleer" data-id="${o.id}"
+                   data-label="${escapeHtml(`${o.oudeNaam} → ${o.nieuweNaam}`)}">Annuleren</button>`;
+        return `<li>${escapeHtml(o.oudeNaam)} → ${escapeHtml(o.nieuweNaam)} vanaf ${formatDateShortMetJaar(o.ingangsdatum)}${o.vertrekkerBlijftActief ? ' (blijft in dienst)' : ''} ${knop}</li>`;
+    };
+    const metAnnuleer = lijst.some(o => !o.kanTerugdraaien);
+    return `<div class="alert alert-info">
+        ${IconHelper.html(ICONS.info || 'info', 'sm')}
+        <div>
+            <strong>${escapeHtml(titel)}</strong>
+            <ul class="summary-list">${lijst.map(rij).join('')}</ul>
+            <small>"Terugdraaien" zet alles terug zoals het was vóór de vervanging: diensten, activiteiten, concepten en verantwoordelijkheden. Dat kan tot de dag vóór de ingangsdatum.${metAnnuleer
+                ? ' "Annuleren" staat bij een overname van vóór die mogelijkheid: het stopt alleen wat er op die dag nog moest gebeuren (team, uren, weekrooster, deactivatie). De diensten die al verhuisd zijn, blijven staan waar ze nu staan.'
+                : ''}</small>
+        </div>
+    </div>`;
+}
+
+function bindGeplandeOvernameKnoppen(container, naAfloop) {
+    container.querySelectorAll('.gepland-annuleer').forEach(knop => {
+        knop.addEventListener('click', async () => {
+            const ok = await showConfirm(
+                `Geplande overname ${knop.dataset.label} annuleren?\n\nTeam, uren, weekrooster en deactivatie gebeuren dan niet. De diensten die al verhuisd zijn, blijven staan waar ze nu staan: zet die zelf terug als dat nodig is.`,
+                'Overname annuleren', { danger: true, confirmText: 'Overname stoppen' });
+            if (!ok) return;
+            try {
+                await annuleerGeplandeOvername(knop.dataset.id);
+                showToast(`Geplande overname ${knop.dataset.label} geannuleerd`, 'success');
+                if (naAfloop) await naAfloop();
+            } catch (e) {
+                showToast(`Annuleren mislukt: ${e.message}`, 'error');
+            }
+        });
+    });
+    container.querySelectorAll('.gepland-terugdraaien').forEach(knop => {
+        knop.addEventListener('click', async () => {
+            const ok = await showConfirm(
+                `Overname ${knop.dataset.label} volledig terugdraaien?\n\nDe diensten, activiteiten, concepten en verantwoordelijkheden gaan terug zoals ze waren vóór de vervanging, en de stap op de ingangsdatum gebeurt niet. Wat iemand intussen zelf gewijzigd heeft, blijft staan.`,
+                'Overname terugdraaien', { danger: true, confirmText: 'Terugdraaien' });
+            if (!ok) return;
+            try {
+                const r = await terugdraaiGeplandeOvername(knop.dataset.id);
+                showToast(`${knop.dataset.label} teruggedraaid: ${r.dienstenTerug} diensten terug${r.verwijderdTeruggezet ? `, ${r.verwijderdTeruggezet} gewiste diensten teruggezet` : ''}`, 'success');
+                const niet = [];
+                if (r.dienstenNietTerug) niet.push(`${r.dienstenNietTerug} diensten bleven staan omdat er intussen iets anders op dat uur staat`);
+                if (r.verwijderdNietTeruggezet) niet.push(`${r.verwijderdNietTeruggezet} gewiste diensten konden niet terug omdat er al een dienst op dat uur staat`);
+                if (r.conceptenNietHersteld && r.conceptenNietHersteld.length) niet.push(`concept ${r.conceptenNietHersteld.join(', ')} is intussen gewijzigd en niet teruggezet`);
+                if (r.instellingenNietHersteld && r.instellingenNietHersteld.length) niet.push('de weekend- of vakantieverantwoordelijken zijn intussen gewijzigd en niet teruggezet');
+                if (niet.length) showToast(`Kijk dit zelf na: ${niet.join('; ')}.`, 'warning', 12000);
+                if (naAfloop) await naAfloop();
+            } catch (e) {
+                showToast(`Terugdraaien mislukt: ${e.message}`, 'error');
+            }
+        });
+    });
+}
+
 function showReplaceEmployeeModal(departingUser, onComplete) {
     const activeUsers = DataStore.users.filter(u =>
         u.active !== false && String(u.id) !== String(departingUser.id)
@@ -680,6 +770,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
                 <div class="info-box neutral mb-md" id="replace-intro">
                     <p><strong>${escapeHtml(departingUser.name)}</strong> wordt vervangen. Het basisrooster, het team en de contracturen gaan naar de nieuwe medewerker en ${escapeHtml(departingUser.name)} wordt gedeactiveerd.</p>
                 </div>
+                <div id="replace-gepland" class="hidden mb-md"></div>
                 <form id="replace-employee-form">
                     <div class="form-group">
                         <label for="replace-new-user">Nieuwe medewerker *</label>
@@ -726,6 +817,31 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
     document.body.appendChild(modal);
     IconHelper.init(modal);
 
+    // Geplande overnames waarin deze medewerker zit, als vertrekker of als
+    // vervanger, met een knop om ze te annuleren. Zonder die knop zei de
+    // weigering bij een verkeerde volgorde "annuleer die overname" terwijl dat
+    // nergens kon.
+    const geplandEl = modal.querySelector('#replace-gepland');
+    async function toonGeplandeOvernames() {
+        if (typeof fetchGeplandeOvernames !== 'function') return;
+        let lijst = [];
+        try { lijst = await fetchGeplandeOvernames(); } catch (e) { return; }
+        const id = String(departingUser.id);
+        const relevant = lijst.filter(o => String(o.oudeGebruiker) === id || String(o.nieuweGebruiker) === id);
+        if (!relevant.length) {
+            geplandEl.classList.add('hidden');
+            geplandEl.innerHTML = '';
+            return;
+        }
+        geplandEl.innerHTML = geplandeOvernamesHtml(relevant, `Al gepland voor ${departingUser.name}`);
+        geplandEl.classList.remove('hidden');
+        IconHelper.init(geplandEl);
+        bindGeplandeOvernameKnoppen(geplandEl, async () => {
+            botsingenEl.classList.add('hidden');
+            await toonGeplandeOvernames();
+        });
+    }
+
     // Toggle date picker
     const transferCheckbox = modal.querySelector('#replace-transfer-shifts');
     const dateGroup = modal.querySelector('#replace-date-group');
@@ -739,6 +855,7 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
 
     // Update summary on changes
     modal.querySelector('#replace-new-user').addEventListener('change', updateReplaceSummary);
+    toonGeplandeOvernames();
     modal.querySelector('#replace-from-date').addEventListener('change', updateReplaceSummary);
     const blijftActiefCb = modal.querySelector('#replace-blijft-actief');
     blijftActiefCb.addEventListener('change', updateReplaceSummary);
@@ -847,7 +964,11 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             ? `Weet je zeker dat je ${departingUser.name} vanaf ${formatDateShortMetJaar(fromDate)} wilt vervangen door ${newUser.name}?\n\nDe diensten verhuizen meteen. ${departingUser.name} blijft werken tot ${formatDateShortMetJaar(fromDate)}.`
             : `Weet je zeker dat je ${departingUser.name} wilt vervangen door ${newUser.name}?\n\nDeze actie kan niet ongedaan worden gemaakt.`;
         if (fromDate && eigenDienstenVervanger === 'verwijderen') {
-            confirmMsg += `\n\nDe eigen diensten van ${newUser.name} vanaf ${formatDateShortMetJaar(fromDate)} worden verwijderd.`;
+            // Dit is de stap die Bryans Vlot 1-diensten liet verdwijnen in plaats
+            // van ze naar Justine te laten gaan: zeg hoeveel, en dat het weg is.
+            const aantalEigen = DataStore.shifts.filter(s =>
+                String(s.employeeId) === String(newUser.id) && s.date >= fromDate).length;
+            confirmMsg += `\n\n${aantalEigen > 0 ? `${aantalEigen} ` : ''}eigen diensten van ${newUser.name} vanaf ${formatDateShortMetJaar(fromDate)} worden VERWIJDERD, niet overgedragen. Neemt iemand anders ze over, stel dan eerst die vervanging in.`;
         }
 
         if (!await showConfirm(confirmMsg, 'Medewerker vervangen', { danger: true, confirmText: 'Vervangen' })) return;
@@ -906,13 +1027,15 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             // op "Verwijderen" kunt overschakelen.
             const botsingen = error.data && error.data.botsingen;
             if (error.status === 409 && Array.isArray(botsingen) && botsingen.length > 0) {
-                const rijen = botsingen.map(b => `<li><strong>${escapeHtml(b.datum)}</strong> — ${escapeHtml(departingUser.name)} ${escapeHtml(b.vertrekker)} tegenover ${escapeHtml(newUser.name)} ${escapeHtml(b.vervanger)}${b.zelfdeStart ? ' (zelfde starttijd)' : ''}</li>`).join('');
+                const rijen = botsingen.map(b => `<li><strong>${formatDateShortMetJaar(b.datum)}</strong> — ${escapeHtml(departingUser.name)} ${escapeHtml(b.vertrekker)} tegenover ${escapeHtml(newUser.name)} ${escapeHtml(b.vervanger)}${b.zelfdeStart ? ' (zelfde starttijd)' : ''}</li>`).join('');
                 botsingenEl.innerHTML = `<div class="alert alert-error">
                     ${IconHelper.html(ICONS.error, 'sm')}
                     <div>
                         <strong>${escapeHtml(error.message)}</strong>
                         <ul class="summary-list">${rijen}</ul>
-                        <small>Kies hierboven "Verwijderen" om de eigen diensten van ${escapeHtml(newUser.name)} te laten vervallen, of pas de ingangsdatum aan. Er is nog niets gewijzigd.</small>
+                        <small>Er is nog niets gewijzigd.
+                        <br><strong>Wisselt ${escapeHtml(newUser.name)} zelf van team, en neemt iemand anders zijn diensten over?</strong> Annuleer hier dan en stel eerst de vervanging van ${escapeHtml(newUser.name)} in, met "blijft in dienst". Zo verhuizen zijn diensten naar die collega in plaats van te verdwijnen.
+                        <br>Kies "Verwijderen" alleen als de eigen diensten van ${escapeHtml(newUser.name)} echt mogen vervallen. Dat is niet terug te draaien.</small>
                     </div>
                 </div>`;
                 botsingenEl.classList.remove('hidden');
@@ -926,10 +1049,12 @@ function showReplaceEmployeeModal(departingUser, onComplete) {
             if (error.status === 409 && error.data && error.data.volgorde) {
                 botsingenEl.innerHTML = `<div class="alert alert-error">
                     ${IconHelper.html(ICONS.error, 'sm')}
-                    <div>${escapeHtml(error.message)}</div>
+                    <div>${escapeHtml(error.message)} De knop "Annuleren" staat bovenaan dit venster.</div>
                 </div>`;
                 botsingenEl.classList.remove('hidden');
                 IconHelper.init(botsingenEl);
+                await toonGeplandeOvernames();
+                geplandEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 return;
             }
             showToast(`Vervanging mislukt: ${error.message}`, 'error');
