@@ -50,7 +50,8 @@ test('de planning gebruikt het, met een typeof-wacht (#412)', () => {
   const P = fs.readFileSync(path.join(__dirname, '../../frontend/app-planner.js'), 'utf8');
   expect(P).toContain("typeof geplandeWijzigingVoor === 'function'");
   expect(P).toContain('wijziging.contractUren');
-  expect(P).toContain('class="emp-gepland"');
+  // Het label onder de naam is op vraag weggehaald; de teamindeling zegt het.
+  expect(P).not.toContain('class="emp-gepland"');
 });
 
 describe('de planning zet iedereen al in zijn nieuwe situatie', () => {

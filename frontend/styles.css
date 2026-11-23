@@ -14884,20 +14884,3 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
         padding-bottom: calc(var(--space-sm, 8px) + env(safe-area-inset-bottom));
     }
 }
-
-/* Een geplande overname, al zichtbaar vóór ze ingaat (bv. "Vanaf 30 nov:
-   Cargo · 35u"). Klein, want de naamcel is smal; de volledige tekst staat in
-   de tooltip. Twee regels en dan pas afkappen: op één regel bleef er van "Uit
-   dienst vanaf 30 nov, rooster naar Bryan" alleen "Uit dienst vanaf 30 nov,
-   r…" over. */
-.timeline-employee-cell .emp-gepland {
-    font-size: 10px;
-    line-height: 1.3;
-    margin-top: 2px;
-    color: var(--alert-info-text);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    max-width: 100%;
-}

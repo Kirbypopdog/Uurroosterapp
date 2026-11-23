@@ -1270,22 +1270,14 @@ function renderTimelineView() {
         const name = escapeHtml(emp.name);
         const initials = escapeHtml(getInitials(emp.name || ''));
         const teamColor = _teamsMap[teamVan(emp)]?.color || '#8d897c';
-        // Een geplande overname is al te zien vóór ze ingaat: een label bij de
-        // naam, en vanaf de ingangsdatum de uren tegen het NIEUWE contract.
+        // Een geplande overname: vanaf de ingangsdatum de uren tegen het NIEUWE
+        // contract. Er stond ook een label onder de naam ("Vanaf 30 nov:
+        // Cargo · 35u"); dat is op vraag weggehaald — de nieuwe teamindeling
+        // vanaf die week zegt het al.
         const wijziging = wijzigingVan(emp);
         const contractH = (wijziging && wijziging.contractUren != null)
             ? wijziging.contractUren
             : (emp.contractHours || emp.contract_hours || 0);
-        const kortDatum = (d) => parseDateOnly(d).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short' });
-        const geplandTekst = (wijziging ? wijziging.labels : []).map(l =>
-            l.soort === 'neemt-over'
-                ? `Vanaf ${kortDatum(l.vanaf)}: ${_teamsMap[l.team]?.name || l.team || ''}${l.uren != null ? ` · ${_fmtHrs(Number(l.uren))}u` : ''} (van ${l.van})`
-                : l.soort === 'uit-dienst'
-                    ? `Uit dienst vanaf ${kortDatum(l.vanaf)}, rooster naar ${l.naar}`
-                    : `Rooster naar ${l.naar} vanaf ${kortDatum(l.vanaf)}`
-        );
-        const geplandHtml = geplandTekst.map(t =>
-            `<div class="emp-gepland" data-tooltip="${escapeHtml(t)}" data-tooltip-pos="right">${escapeHtml(t)}</div>`).join('');
         const weekH = getEmployeeHoursThisWeek(emp.id, startDateStr);
         const periodH = getEmployeeHoursThisPeriod(emp.id, startDateStr);
         const periodContract = contractH > 0 ? contractH * 4 : 0;
@@ -1302,7 +1294,6 @@ function renderTimelineView() {
                 <span class="emp-hours${weekCls}">${weekLabel}</span>
                 <span class="emp-hours-sub${periodCls}">${periodLabel}</span>
             </div>
-            ${geplandHtml}
         </div>`;
     }
 
