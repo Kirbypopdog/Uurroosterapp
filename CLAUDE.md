@@ -361,13 +361,18 @@ vertrekker op dat uur intussen zelf iets heeft, een concept met een andere
 dat. Een overname van vóór migratie 053 heeft geen vastlegging en kent alleen
 Annuleren.
 
-**Al zichtbaar vóór ze ingaat.** `GET /admin/geplande-overnames` mag ook de
-roosterverantwoordelijke lezen. `geplandeWijzigingVoor()` in `data.js` (puur)
-zegt per medewerker en datum wat er verandert; de planning zet een label onder
-de naam ("Vanaf 30 nov: Cargo · 35u") en telt vanaf de ingangsdatum de uren
-tegen het NIEUWE contract. Instellingen > Accounts toont alle geplande
-wijzigingen met Terugdraaien of Annuleren. Wat de planning NIET doet: iemand al
-vóór de ingangsdatum in zijn nieuwe team zetten — de rij volgt `main_team`.
+**Al zichtbaar vóór ze ingaat, voor IEDEREEN.** `GET /admin/geplande-overnames`
+mag elke ingelogde gebruiker lezen (wie de overname instelde alleen de
+beheerders); annuleren en terugdraaien blijven bij de admin.
+`geplandeWijzigingVoor()` in `data.js` (puur) zegt per medewerker en datum wat
+er verandert. De planning gebruikt dat per WEEK (op de maandag): vanaf de
+ingangsdatum staat de vervanger in zijn nieuwe team (`teamVan()` in
+`renderTimelineView`) en valt wie uit dienst gaat weg — tenzij hij die week nog
+een dienst heeft, want een dienst zonder rij is onzichtbaar. Ervoor staat een
+label onder de naam ("Vanaf 30 nov: Cargo · 35u"), en de uren tellen vanaf de
+ingangsdatum tegen het NIEUWE contract. De database zelf volgt pas op de
+ingangsdatum. Instellingen > Accounts toont alle geplande wijzigingen met
+Terugdraaien of Annuleren.
 
 Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
 ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.

@@ -169,7 +169,7 @@ const DataStore = {
     shifts: [],
     activities: [],
     dagActiviteiten: [], // #418: algemene activiteiten, aan een dag en niet aan een persoon
-    geplandeOvernames: [], // vervangingen met een ingangsdatum in de toekomst (alleen voor beheerders)
+    geplandeOvernames: [], // vervangingen met een ingangsdatum in de toekomst; de planning toont ze al
     availability: [],
     shiftBlocks: [],
     swapRequests: [],
@@ -471,9 +471,7 @@ async function loadDataFromAPI() {
         // Geplande overnames: de planning toont ze al vóór de ingangsdatum, met
         // de uren tegen het nieuwe contract. Een mislukte lading is geen reden
         // om de app te laten haperen: dan staat er gewoon geen label.
-        DataStore.geplandeOvernames = magConcepten
-            ? await fetchGeplandeOvernames().catch(() => [])
-            : [];
+        DataStore.geplandeOvernames = await fetchGeplandeOvernames().catch(() => []);
 
         // Merge API settings with defaults
         const apiSettings = settingsData.settings || {};

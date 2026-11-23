@@ -526,10 +526,12 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
 // verhuisd zijn, blijven waar ze nu staan, en eventueel verwijderde eigen
 // diensten van de vervanger komen niet terug. Het antwoord zegt dat, zodat
 // het scherm het kan herhalen.
-router.get('/admin/geplande-overnames', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
-  // Ook voor de roosterverantwoordelijke: die ziet de wijziging aankomen in de
-  // planning (de uren tegen het nieuwe contract). Annuleren en terugdraaien
-  // blijven bij de admin, net als het vervangen zelf.
+router.get('/admin/geplande-overnames', requireAuth, async (req, res) => {
+  // Voor IEDEREEN: de planning toont de nieuwe situatie al vanaf de
+  // ingangsdatum (wie in welk team staat, wie uit dienst is), en dat moet elke
+  // collega zien. Het zijn dezelfde gegevens die de planning toch al toont:
+  // namen, team en contracturen. Wie de overname instelde gaat alleen naar de
+  // beheerders. Annuleren en terugdraaien blijven bij de admin.
   const { rows } = await pool.query(
     `SELECT g.id, g.oude_gebruiker AS "oudeGebruiker", o.name AS "oudeNaam",
             g.nieuwe_gebruiker AS "nieuweGebruiker", n.name AS "nieuweNaam",
@@ -545,9 +547,11 @@ router.get('/admin/geplande-overnames', requireAuth, requireRole('admin', 'roost
       ORDER BY g.ingangsdatum, g.id`
   );
   const vandaag = vandaagInBelgie();
+  const beheerder = ['admin', 'roosterverantwoordelijke'].includes(req.user.role);
   res.json({
-    overnames: rows.map(r => ({
+    overnames: rows.map(({ aangemaaktDoor, aangemaaktOp, ...r }) => ({
       ...r,
+      ...(beheerder ? { aangemaaktDoor, aangemaaktOp } : {}),
       // numeric komt als tekst uit pg
       oudeContracturen: r.oudeContracturen == null ? null : Number(r.oudeContracturen),
       kanTerugdraaien: !!r.heeftTerugdraai && r.ingangsdatum > vandaag,

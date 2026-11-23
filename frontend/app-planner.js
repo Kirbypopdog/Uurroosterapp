@@ -1193,8 +1193,25 @@ function renderTimelineView() {
 
     // Get employees: those with shifts + all active employees in visible teams
     const employeeIdsWithShifts = new Set(allShifts.map(s => s.employeeId));
+
+    // Een geplande overname is voor IEDEREEN al zichtbaar in de weken vanaf de
+    // ingangsdatum: de vervanger staat dan in zijn nieuwe team, en wie uit
+    // dienst gaat staat er niet meer — tenzij hij die week nog een dienst
+    // heeft, want een dienst zonder rij is onzichtbaar. De database volgt pas
+    // op de ingangsdatum zelf (voerGeplandeOvernamesUit).
+    const _wijzigingen = new Map();
+    const wijzigingVan = (emp) => {
+        if (!_wijzigingen.has(emp.id)) {
+            _wijzigingen.set(emp.id, typeof geplandeWijzigingVoor === 'function'
+                ? geplandeWijzigingVoor(DataStore.geplandeOvernames, emp.id, startDateStr)
+                : { team: null, uitDienst: false, contractUren: null, labels: [] });
+        }
+        return _wijzigingen.get(emp.id);
+    };
+    const teamVan = (emp) => wijzigingVan(emp).team || emp.mainTeam;
     const activeEmployees = getAllEmployees(true).filter(emp =>
-        emp.mainTeam && AppState.visibleTeams.includes(emp.mainTeam)
+        teamVan(emp) && AppState.visibleTeams.includes(teamVan(emp)) &&
+        !(wijzigingVan(emp).uitDienst && !employeeIdsWithShifts.has(emp.id))
     );
     // Merge: start with active employees, add any with shifts not yet included
     const employeeMap = new Map();
@@ -1220,13 +1237,13 @@ function renderTimelineView() {
 
     teamOrder.forEach(teamKey => {
         employeesByTeam[teamKey] = employees
-            .filter(emp => emp.mainTeam === teamKey)
+            .filter(emp => teamVan(emp) === teamKey)
             .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
     });
 
     // Add employees without a team to a special "no-team" category
     const employeesWithoutTeam = employees
-        .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
+        .filter(emp => !teamVan(emp) || !teamOrder.includes(teamVan(emp)))
         .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
     if (employeesWithoutTeam.length > 0) {
         employeesByTeam['_no_team'] = employeesWithoutTeam;
@@ -1252,12 +1269,10 @@ function renderTimelineView() {
         const respTip = isResp ? 'data-tooltip="Weekendverantwoordelijke" data-tooltip-pos="right"' : '';
         const name = escapeHtml(emp.name);
         const initials = escapeHtml(getInitials(emp.name || ''));
-        const teamColor = _teamsMap[emp.mainTeam]?.color || '#8d897c';
+        const teamColor = _teamsMap[teamVan(emp)]?.color || '#8d897c';
         // Een geplande overname is al te zien vóór ze ingaat: een label bij de
         // naam, en vanaf de ingangsdatum de uren tegen het NIEUWE contract.
-        const wijziging = typeof geplandeWijzigingVoor === 'function'
-            ? geplandeWijzigingVoor(DataStore.geplandeOvernames, emp.id, startDateStr)
-            : null;
+        const wijziging = wijzigingVan(emp);
         const contractH = (wijziging && wijziging.contractUren != null)
             ? wijziging.contractUren
             : (emp.contractHours || emp.contract_hours || 0);

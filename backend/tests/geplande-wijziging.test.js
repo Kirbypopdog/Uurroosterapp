@@ -52,3 +52,23 @@ test('de planning gebruikt het, met een typeof-wacht (#412)', () => {
   expect(P).toContain('wijziging.contractUren');
   expect(P).toContain('class="emp-gepland"');
 });
+
+describe('de planning zet iedereen al in zijn nieuwe situatie', () => {
+  const P = fs.readFileSync(path.join(__dirname, '../../frontend/app-planner.js'), 'utf8');
+  const tijdlijn = P.slice(P.indexOf('function renderTimelineView'));
+
+  test('de teamindeling volgt het team uit de geplande overname', () => {
+    expect(tijdlijn).toContain('const teamVan = (emp) => wijzigingVan(emp).team || emp.mainTeam;');
+    expect(tijdlijn).toContain('.filter(emp => teamVan(emp) === teamKey)');
+    expect(tijdlijn).not.toContain('.filter(emp => emp.mainTeam === teamKey)');
+  });
+
+  test('wie uit dienst gaat valt weg, tenzij hij die week nog een dienst heeft', () => {
+    expect(tijdlijn).toContain('!(wijzigingVan(emp).uitDienst && !employeeIdsWithShifts.has(emp.id))');
+  });
+
+  test('iedereen laadt de geplande overnames, niet alleen beheerders', () => {
+    const D = fs.readFileSync(path.join(__dirname, '../../frontend/data.js'), 'utf8');
+    expect(D).toContain('DataStore.geplandeOvernames = await fetchGeplandeOvernames().catch(() => []);');
+  });
+});

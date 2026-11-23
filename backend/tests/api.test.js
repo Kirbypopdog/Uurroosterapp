@@ -3437,9 +3437,20 @@ describe('POST /admin/users/:id/replace', () => {
   describe('geplande overnames bekijken en annuleren', () => {
     const admin = () => `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`;
 
-    test('een medewerker mag de lijst niet zien', async () => {
+    test('een medewerker ziet de lijst ook (de planning toont de nieuwe situatie aan iedereen), maar niet wie hem instelde', async () => {
       mockActiveUser();
+      pool.query.mockResolvedValueOnce({ rows: [{ id: 1, oudeNaam: 'Marie', nieuweNaam: 'Bryan', ingangsdatum: '2026-11-30', aangemaaktDoor: 'Victor', oudeContracturen: '35' }] });
       const res = await request(app).get('/api/v1/admin/geplande-overnames')
+        .set('Authorization', `Bearer ${makeToken({ id: 3, role: 'medewerker', name: 'Eva', team_id: 'vlot2' })}`);
+      expect(res.status).toBe(200);
+      expect(res.body.overnames[0].nieuweNaam).toBe('Bryan');
+      expect(res.body.overnames[0].oudeContracturen).toBe(35);
+      expect(res.body.overnames[0].aangemaaktDoor).toBeUndefined();
+    });
+
+    test('een medewerker kan niet annuleren of terugdraaien', async () => {
+      mockActiveUser();
+      const res = await request(app).delete('/api/v1/admin/geplande-overnames/1')
         .set('Authorization', `Bearer ${makeToken({ id: 3, role: 'medewerker', name: 'Eva', team_id: 'vlot2' })}`);
       expect(res.status).toBe(403);
     });
