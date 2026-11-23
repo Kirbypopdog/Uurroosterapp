@@ -239,7 +239,7 @@ function renderWisselBewerken(container) {
                 <div class="form-group">
                     <label for="wissel-omschrijving">Omschrijving (optioneel)</label>
                     <input type="text" id="wissel-omschrijving" class="form-input" maxlength="200"
-                        placeholder="bv. Bryan naar Cargo, Marie uit dienst" value="${escapeHtml(WisselState.omschrijving)}">
+                        placeholder="bv. Teamwissel januari" value="${escapeHtml(WisselState.omschrijving)}">
                 </div>
                 <div class="wissel-stappen-invoer">
                     ${WisselState.stappen.map((s, i) => `

@@ -125,3 +125,11 @@ describe('uren per week in het voorbeeld', () => {
     expect(wisselWeekUren([{ date: '2026-11-29' }, { date: '2026-12-21' }], M, acht)).toEqual([0, 0, 0]);
   });
 });
+
+test('geen namen van echte collega\'s in wat de gebruiker te zien krijgt', () => {
+  // Alleen de tekst buiten de opmerkingen telt: daar staat de aanleiding wel
+  // met namen, maar die ziet niemand in de app.
+  const W = fs.readFileSync(path.join(__dirname, '../../frontend/app-wissels.js'), 'utf8')
+    .split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  expect(W).not.toMatch(/Bryan|Marie|Justine/);
+});
