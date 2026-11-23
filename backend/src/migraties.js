@@ -1161,6 +1161,39 @@ const MIGRATIONS = [
         `ALTER TABLE geplande_overnames ADD COLUMN IF NOT EXISTS wissel_id INTEGER REFERENCES personeelswissels(id) ON DELETE SET NULL`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_geplande_overnames_wissel ON geplande_overnames(wissel_id)`);
     }
+  },
+  {
+    // EENMALIGE gegevensherstelling, geen schemawijziging (23 november 2026).
+    // Justine (181) nam Bryans (117) Vlot 1-rooster over, maar dat liep niet
+    // via een overname: haar diensten zijn met de hand opnieuw aangemaakt
+    // nadat de ketting misliep. De roosterconcepten zijn daardoor niet mee
+    // herschreven en droegen zijn Vlot 1-rij nog op zijn naam. Op vraag van
+    // Victor zetten we die rij hier één keer over.
+    //
+    // Alleen zijn VLOT 1-weken: in het basisrooster week 1 en 2, in de
+    // kerstvakantie week 1. Kerstweek 2 is Cargo en blijft van Bryan.
+    // Elke stap draait alleen als de rij er nog staat, volledig Vlot 1 is, en
+    // Justine in die week nog geen rij heeft. Op staging (andere concepten)
+    // doet dit dus niets.
+    name: '055_concept_bryan_naar_justine',
+    up: async (client) => {
+      const stappen = [
+        ['mo8hbdivcwuz', '1'], ['mo8hbdivcwuz', '2'], ['mtuhj5nadx6w', '1'],
+      ];
+      for (const [draftId, week] of stappen) {
+        await client.query(
+          `UPDATE schedule_drafts
+              SET grid = jsonb_set(grid, ARRAY[$2::text],
+                    ((grid -> $2) - '117') || jsonb_build_object('181', grid -> $2 -> '117')),
+                  updated_at = NOW()
+            WHERE id = $1
+              AND (grid -> $2) ? '117'
+              AND NOT (grid -> $2) ? '181'
+              AND NOT EXISTS (
+                SELECT 1 FROM jsonb_each(grid -> $2 -> '117') e WHERE e.value ->> 'team' IS DISTINCT FROM 'vlot1')`,
+          [draftId, week]);
+      }
+    }
   }
 ];
 
