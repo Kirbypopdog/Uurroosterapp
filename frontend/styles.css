@@ -14913,6 +14913,15 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
 .wissel-stappen { list-style: none; margin: 10px 0 0; padding: 0; }
 .wissel-stappen li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
 .wissel-persoon { font-weight: 600; }
+.wissel-stap-wie { display: inline-flex; align-items: center; gap: 6px; }
+/* Hoe een stap van een bevestigde wissel ervoor staat: rechts uitgelijnd. */
+.wissel-stand {
+    margin-left: auto; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; white-space: nowrap;
+    border: 1px solid var(--line-strong); color: var(--text-secondary);
+}
+.wissel-stand--bijna { border-color: var(--alert-warning-border); background: var(--alert-warning-bg); color: var(--alert-warning-text); }
+.wissel-stand--klaar { border-color: var(--alert-ok-border); background: var(--alert-ok-bg); color: var(--alert-ok-text); }
+.wissel-stand--later { border-color: var(--alert-info-border); background: var(--alert-info-bg); color: var(--alert-info-text); }
 .wissel-item-voet {
     display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
     margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-strong);
@@ -14962,6 +14971,13 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
 .wissel-pijl { padding-bottom: 10px; color: var(--text-secondary); }
 .wissel-blijft { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; }
 .wissel-blijft-uitleg { display: block; font-size: 12px; margin-top: 2px; }
+/* Een fout in de invoer staat BIJ de stap, niet alleen onderaan. */
+.wissel-stap--fout { border-color: var(--alert-error-border); }
+.wissel-stap-fout {
+    display: flex; gap: 6px; align-items: flex-start; margin: 10px 0 0; padding: 8px 10px; border-radius: 8px;
+    font-size: 13px; background: var(--alert-error-bg); color: var(--alert-error-text);
+}
+.wissel-stap-fout[hidden] { display: none; }
 
 /* Voorbeeld */
 .wissel-voorbeeld-zone { margin-top: 18px; transition: opacity .15s; }

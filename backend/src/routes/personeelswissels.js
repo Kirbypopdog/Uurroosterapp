@@ -99,6 +99,53 @@ function botsen(a, b) {
   const as = tijd(a.start_time), ae = tijd(a.end_time), bs = tijd(b.start_time), be = tijd(b.end_time);
   return as === bs || (as < be && bs < ae);
 }
+const MAANDEN = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+function datumTekst(iso) {
+  const [j, m, d] = iso.split('-').map(Number);
+  return `${d} ${MAANDEN[m - 1]} ${j}`;
+}
+
+/**
+ * Staat iemand die in deze wissel zijn rooster doorgeeft al in een ANDERE
+ * geplande overname? Dan liep het voorbeeld vroeger stuk op een melding uit
+ * de oude vervangknop ("Annuleer die overname bij Medewerker vervangen"), die
+ * op deze pagina nergens naar verwees. Nu noemt de melding de wissel bij
+ * naam en zegt ze wat je eraan doet.
+ *
+ * Twee gevallen blokkeren:
+ *  - hij geeft al door in een andere overname (er mag er maar één `gepland`
+ *    zijn per vertrekker: de partiële unieke index);
+ *  - hij neemt LATER zelf een rooster over: dan schuiven die diensten mee
+ *    (zie de volgordecontrole in replace-employee.js).
+ * Iemand die alleen vervanger is in een andere overname blokkeert niets.
+ */
+async function controleerAndereOvernames(client, volgorde, naam) {
+  const vans = volgorde.map(s => s.van);
+  const r = await client.query(
+    `SELECT g.oude_gebruiker AS van, g.nieuwe_gebruiker AS naar, g.ingangsdatum::text AS vanaf,
+            o.name AS "vanNaam", n.name AS "naarNaam", w.omschrijving, g.wissel_id AS "wisselId"
+       FROM geplande_overnames g
+       JOIN users o ON o.id = g.oude_gebruiker JOIN users n ON n.id = g.nieuwe_gebruiker
+       LEFT JOIN personeelswissels w ON w.id = g.wissel_id
+      WHERE g.status = 'gepland' AND (g.oude_gebruiker = ANY($1::int[]) OR g.nieuwe_gebruiker = ANY($1::int[]))
+      ORDER BY g.ingangsdatum`, [vans]);
+  for (const stap of volgorde) {
+    const botst = r.rows.find(g => g.van === stap.van) ||
+      r.rows.find(g => g.naar === stap.van && g.vanaf > stap.vanaf);
+    if (!botst) continue;
+    const waar = botst.wisselId
+      ? `de personeelswissel „${botst.omschrijving || 'zonder naam'}"`
+      : 'een losse geplande overname (onderaan deze lijst)';
+    const wat = botst.van === stap.van
+      ? `${naam(stap.van)} geeft het rooster al door aan ${botst.naarNaam} vanaf ${datumTekst(botst.vanaf)}, in ${waar}.`
+      : `${naam(stap.van)} neemt vanaf ${datumTekst(botst.vanaf)} het rooster van ${botst.vanNaam} over, in ${waar}. Die diensten zouden mee naar ${naam(stap.naar)} schuiven.`;
+    throw fout(409, {
+      error: `${wat} Draai die eerst terug en zet alle stappen samen in één wissel; de app kiest dan zelf de goede volgorde.`,
+      andereOvername: true,
+    });
+  }
+}
+
 function sleutelVan(stap, eigen) { return `${stap.van}-${stap.naar}-${eigen.id}`; }
 
 /**
@@ -138,6 +185,7 @@ async function voerWisselUit(client, { stappen, keuzes = {}, actor, wisselId = n
     });
     return per;
   };
+  await controleerAndereOvernames(client, volgorde, naam);
   const voor = await dienstenIn();
 
   const stapResultaten = [];
@@ -394,4 +442,5 @@ router.post('/personeelswissels/:id/terugdraaien', requireAuth, BEHEER, async (r
 
 router.normaliseerStappen = normaliseerStappen;
 router.ordenStappen = ordenStappen;
+router.controleerAndereOvernames = controleerAndereOvernames;
 module.exports = router;

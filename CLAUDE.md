@@ -265,6 +265,8 @@ liep die ketting als twee losse vervangingen mis (zie verderop).
 | volgorde | zoekt de app zelf (`ordenStappen`): wie doorgeeft vóór wie zijn plaats inneemt. Een kring of iemand die twee keer doorgeeft wordt geweigerd |
 | voorbeeld | `POST /personeelswissels/voorbeeld` voert de wissel ECHT uit in een transactie en rolt ALTIJD terug. Zo kan het voorbeeld niet afwijken van wat Bevestigen doet: het is dezelfde code |
 | botsingen | per DAG een keuze: rooster overnemen (eigen dienst vervalt) of eigen dienst houden (dienst van de vertrekker vervalt). Wat vervalt gaat mee in `terugdraai.verwijderd` van die stap |
+| andere overnames | geeft iemand al door in een ANDERE geplande overname, of neemt hij later zelf een rooster over, dan weigert het voorbeeld met een 409 die de wissel bij naam noemt (`controleerAndereOvernames`). Alleen vervanger zijn elders blokkeert niets |
+| invoerfouten | `wisselInvoerProblemen()` in de frontend: dezelfde persoon links en rechts, iemand die twee keer doorgeeft, een datum in het verleden. De fout staat BIJ de stap |
 | waarschuwingen | met de hand leeggemaakte dagen (`shift_blocks`) van de vertrekker, en een stap die meteen ingaat (niet terug te draaien) |
 | statussen | `concept` (niets gewijzigd) → `bevestigd` (elke stap een `geplande_overnames`-rij met `wissel_id`) → `uitgevoerd` (afgeleid: alle stappen uitgevoerd); `teruggedraaid` |
 | terugdraaien | alle stappen in OMGEKEERDE volgorde via `draaiOvernameTerug`, tot de eerste ingangsdatum |

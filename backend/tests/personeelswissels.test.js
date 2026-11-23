@@ -193,3 +193,61 @@ describe('na het bevestigen: afwezigheid, bouwer en vergaderingen', () => {
     expect(F('app-wissels.js')).toContain('is afwezig op');
   });
 });
+
+describe('UX-ronde: fouten bij de stap, stand per stap, andere overnames', () => {
+  const { wisselInvoerProblemen, wisselStapStand } = require('../../frontend/app-wissels.js');
+  const naam = (id) => ({ 1: 'Anna', 2: 'Bram' })[id] || String(id);
+
+  test('dezelfde persoon links en rechts: een fout BIJ die stap, niet "vul alles in"', () => {
+    const p = wisselInvoerProblemen([{ van: '1', naar: '1', vanaf: '2026-12-01' }], '2026-11-23', naam);
+    expect(p[0]).toMatch(/Anna staat twee keer/);
+  });
+
+  test('iemand die in twee stappen doorgeeft, en een datum in het verleden', () => {
+    const p = wisselInvoerProblemen([
+      { van: '1', naar: '2', vanaf: '2026-12-01' },
+      { van: '1', naar: '3', vanaf: '2026-12-01' },
+      { van: '2', naar: '3', vanaf: '2026-11-01' },
+    ], '2026-11-23', naam);
+    expect(p[0]).toBeNull();
+    expect(p[1]).toMatch(/al door in stap 1/);
+    expect(p[2]).toMatch(/verleden/);
+  });
+
+  test('een half ingevulde stap is geen fout', () => {
+    expect(wisselInvoerProblemen([{ van: '1', naar: '', vanaf: '' }], '2026-11-23', naam)).toEqual([null]);
+  });
+
+  test('de stand van een stap: aftellen, ingegaan, geannuleerd', () => {
+    const stap = { van: 1, naar: 2 };
+    const r = (status, vanaf) => wisselStapStand(stap, [{ van: 1, naar: 2, status, vanaf }], '2026-11-23');
+    expect(r('gepland', '2026-11-30').tekst).toBe('Over 7 dagen');
+    expect(r('gepland', '2026-11-24').tekst).toBe('Gaat morgen in');
+    expect(r('gepland', '2027-01-11').soort).toBe('later');
+    expect(r('uitgevoerd', '2026-11-01').tekst).toBe('Ingegaan');
+    expect(r('geannuleerd', '2026-11-30').tekst).toBe('Geannuleerd');
+    expect(wisselStapStand(stap, [], '2026-11-23')).toBeNull();
+  });
+
+  test('een andere geplande overname: de melding noemt de wissel en verwijst niet meer naar de oude knop', async () => {
+    const client = { query: jest.fn().mockResolvedValue({ rows: [
+      { van: 2, naar: 3, vanaf: '2026-11-26', vanNaam: 'Bram', naarNaam: 'Cleo', omschrijving: 'Teamwissel december', wisselId: 4 },
+    ] }) };
+    const volgorde = [{ van: 2, naar: 1, vanaf: '2026-12-01' }];
+    await expect(router.controleerAndereOvernames(client, volgorde, naam)).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringMatching(/Teamwissel december[\s\S]*Draai die eerst terug/),
+    });
+    await expect(router.controleerAndereOvernames(client, volgorde, naam)).rejects.toMatchObject({
+      message: expect.not.stringMatching(/Medewerker vervangen/),
+    });
+  });
+
+  test('alleen vervanger zijn in een andere overname blokkeert niets', async () => {
+    const client = { query: jest.fn().mockResolvedValue({ rows: [
+      { van: 1, naar: 2, vanaf: '2026-11-30', vanNaam: 'Anna', naarNaam: 'Bram', omschrijving: 'x', wisselId: 4 },
+    ] }) };
+    // Bram geeft door vanaf januari: zijn inkomende overname (30 nov) ligt ervóór.
+    await expect(router.controleerAndereOvernames(client, [{ van: 2, naar: 3, vanaf: '2027-01-11' }], naam)).resolves.toBeUndefined();
+  });
+});

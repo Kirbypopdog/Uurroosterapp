@@ -62,6 +62,29 @@ function wisselStapKlaar(s) {
     return !!(s && s.van && s.naar && s.vanaf && String(s.van) !== String(s.naar));
 }
 
+/**
+ * Wat er per stap aan de INVOER schort, nog vóór er iets naar de server gaat.
+ * Puur: geeft per stap een tekst of null. `naamVan` zet een id om in een naam.
+ *
+ * Zonder dit las je bij "Anna → Anna" onderaan alleen "Vul elke stap volledig
+ * in", terwijl alles ingevuld wás.
+ */
+function wisselInvoerProblemen(stappen, vandaag, naamVan = (id) => id) {
+    const vansGezien = new Map();
+    return (stappen || []).map((s, i) => {
+        if (s.van && s.naar && String(s.van) === String(s.naar)) {
+            return `${naamVan(s.van)} staat twee keer in deze stap. Kies bij "Neemt het over" iemand anders.`;
+        }
+        if (s.van) {
+            const eerder = vansGezien.get(String(s.van));
+            if (eerder !== undefined) return `${naamVan(s.van)} geeft het rooster al door in stap ${eerder + 1}. Eén vervanger per persoon.`;
+            vansGezien.set(String(s.van), i);
+        }
+        if (s.vanaf && vandaag && s.vanaf < vandaag) return 'Deze datum ligt in het verleden. Kies vandaag of later.';
+        return null;
+    });
+}
+
 function wisselMaandagen(van, weken) {
     const start = getMonday(parseDateOnly(van));
     const uit = [];
@@ -92,6 +115,30 @@ function wisselKortDatum(iso) {
 const W_ICOON = (naam, maat = 'sm') => (typeof IconHelper !== 'undefined' ? IconHelper.html(naam, maat) : '');
 
 // ===== LIJST =====
+
+/**
+ * Hoe staat één stap van een bevestigde wissel ervoor? Puur.
+ * `uitvoering` is de rij uit geplande_overnames ({van, naar, vanaf, status}).
+ * Geeft {tekst, soort} of null (concept: er is nog niets gepland).
+ */
+function wisselStapStand(stap, uitvoering, vandaag) {
+    const u = (uitvoering || []).find(x => String(x.van) === String(stap.van) && String(x.naar) === String(stap.naar));
+    if (!u) return null;
+    if (u.status === 'uitgevoerd') return { tekst: 'Ingegaan', soort: 'klaar' };
+    if (u.status === 'geannuleerd') return { tekst: 'Geannuleerd', soort: 'stil' };
+    if (u.status === 'teruggedraaid') return { tekst: 'Teruggedraaid', soort: 'stil' };
+    const dagen = Math.round((new Date(`${u.vanaf}T12:00:00Z`) - new Date(`${vandaag}T12:00:00Z`)) / 86400000);
+    if (dagen <= 0) return { tekst: 'Gaat vandaag in', soort: 'bijna' };
+    if (dagen === 1) return { tekst: 'Gaat morgen in', soort: 'bijna' };
+    return { tekst: `Over ${dagen} dagen`, soort: dagen <= 7 ? 'bijna' : 'later' };
+}
+
+/** De dag vóór een ISO-datum, als ISO. */
+function wisselDagErvoor(iso) {
+    const d = new Date(`${iso}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+}
 
 const WISSEL_STATUS = {
     concept: ['Concept', 'wissel-status--concept'],
@@ -147,13 +194,20 @@ async function renderSettingsWissels(container) {
         return;
     }
 
-    const stapRegel = (s) => `
+    const vandaag = formatDateYYYYMMDD(new Date());
+    const stapRegel = (s, w) => {
+        const stand = w.status === 'concept' ? null : wisselStapStand(s, w.uitvoering, vandaag);
+        return `
         <li>
-            <span class="wissel-persoon">${escapeHtml(s.vanNaam || wisselNaam(s.van))}</span>
-            ${W_ICOON('arrow-right', 'xs')}
-            <span class="wissel-persoon">${escapeHtml(s.naarNaam || wisselNaam(s.naar))}</span>
+            <span class="wissel-stap-wie">
+                <span class="wissel-persoon">${escapeHtml(s.vanNaam || wisselNaam(s.van))}</span>
+                ${W_ICOON('arrow-right', 'xs')}
+                <span class="wissel-persoon">${escapeHtml(s.naarNaam || wisselNaam(s.naar))}</span>
+            </span>
             <span class="text-muted">vanaf ${formatDateShortMetJaar(s.vanaf)}${s.blijftInDienst ? ` · ${escapeHtml(s.vanNaam || wisselNaam(s.van))} blijft in dienst` : ''}</span>
+            ${stand ? `<span class="wissel-stand wissel-stand--${stand.soort}">${stand.tekst}</span>` : ''}
         </li>`;
+    };
 
     lijstEl.innerHTML = `
         ${wissels.map(w => {
@@ -171,13 +225,17 @@ async function renderSettingsWissels(container) {
                     ? 'Uitgevoerd.'
                     : w.status === 'teruggedraaid'
                         ? 'Teruggedraaid.'
-                        : `Bevestigd door ${escapeHtml(w.bevestigdDoor || '')}.${w.kanTerugdraaien ? ' Terug te draaien tot de eerste ingangsdatum.' : ''}`;
+                        : (() => {
+                            const eerste = (w.stappen || []).map(x => x.vanaf).sort()[0];
+                            const tot = w.kanTerugdraaien && eerste ? ` Terug te draaien t/m ${formatDateShortMetJaar(wisselDagErvoor(eerste))}.` : '';
+                            return `Bevestigd door ${escapeHtml(w.bevestigdDoor || '')}.${tot}`;
+                        })();
             return `<article class="wissel-item wissel-item--${w.status}">
                 <div class="wissel-item-kop">
                     <h4>${escapeHtml(titel)}</h4>
                     <span class="wissel-status ${klasse}">${label}</span>
                 </div>
-                <ul class="wissel-stappen">${(w.stappen || []).map(stapRegel).join('')}</ul>
+                <ul class="wissel-stappen">${(w.stappen || []).map(x => stapRegel(x, w)).join('')}</ul>
                 <div class="wissel-item-voet">
                     <span class="text-muted text-xs">${meta}</span>
                     <span class="wissel-knoppen">${knoppen}</span>
@@ -272,9 +330,20 @@ function wisselStapUitleg(s) {
 
 function renderWisselBewerken(container) {
     const mensen = getAllEmployees(true).slice().sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
-    const opties = (gekozen, leeg) => `<option value="">${leeg}</option>` + mensen.map(m =>
-        `<option value="${m.id}" ${String(m.id) === String(gekozen) ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join('');
+    // Gegroepeerd per team: bij veertig namen zoek je iemand op zijn team, en
+    // zo zie je meteen uit welk team de vervanger komt.
+    const perTeam = new Map();
+    for (const m of mensen) {
+        const t = wisselTeam(m.mainTeam) || 'Zonder team';
+        if (!perTeam.has(t)) perTeam.set(t, []);
+        perTeam.get(t).push(m);
+    }
+    const teams = [...perTeam.keys()].sort((a, b) => a.localeCompare(b, 'nl-BE'));
+    const opties = (gekozen, leeg) => `<option value="">${leeg}</option>` + teams.map(t =>
+        `<optgroup label="${escapeHtml(t)}">${perTeam.get(t).map(m =>
+            `<option value="${m.id}" ${String(m.id) === String(gekozen) ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join('')}</optgroup>`).join('');
     const vandaag = formatDateYYYYMMDD(new Date());
+    const problemen = wisselInvoerProblemen(WisselState.stappen, vandaag, wisselNaam);
 
     container.innerHTML = `
         <div class="settings-card wissel-kaart">
@@ -299,7 +368,7 @@ function renderWisselBewerken(container) {
 
                 <div class="wissel-stappen-invoer">
                     ${WisselState.stappen.map((s, i) => `
-                        <section class="wissel-stap" data-i="${i}" aria-label="Stap ${i + 1}">
+                        <section class="wissel-stap${problemen[i] ? ' wissel-stap--fout' : ''}" data-i="${i}" aria-label="Stap ${i + 1}">
                             <div class="wissel-stap-kop">
                                 <span class="wissel-stap-nr">Stap ${i + 1}</span>
                                 ${WisselState.stappen.length > 1 ? `<button type="button" class="btn-icon-only wissel-stap-weg" data-i="${i}" aria-label="Stap ${i + 1} verwijderen" data-tooltip="Stap verwijderen">${W_ICOON('trash-2', 'sm')}</button>` : ''}
@@ -329,6 +398,7 @@ function renderWisselBewerken(container) {
                                     <span class="wissel-blijft-uitleg text-muted" data-uitleg="${i}">${escapeHtml(wisselStapUitleg(s))}</span>
                                 </label>
                             </div>
+                            <p class="wissel-stap-fout" data-fout="${i}" role="alert" ${problemen[i] ? '' : 'hidden'}>${W_ICOON(ICONS.error, 'xs')}<span>${escapeHtml(problemen[i] || '')}</span></p>
                         </section>`).join('')}
                 </div>
                 <button type="button" class="btn btn-secondary btn-sm" id="wissel-stap-erbij">${W_ICOON('plus', 'xs')} Nog iemand</button>
@@ -356,6 +426,7 @@ function renderWisselBewerken(container) {
             WisselState.stappen[i][veld.dataset.veld] = veld.type === 'checkbox' ? veld.checked : veld.value;
             const uitleg = container.querySelector(`[data-uitleg="${i}"]`);
             if (uitleg) uitleg.textContent = wisselStapUitleg(WisselState.stappen[i]);
+            wisselToonInvoerProblemen(container);
             wisselPlanVoorbeeld(container);
         }));
     });
@@ -378,9 +449,23 @@ function renderWisselBewerken(container) {
     if (!WisselState.voorbeeld && WisselState.stappen.every(wisselStapKlaar)) wisselPlanVoorbeeld(container, 0);
 }
 
+function wisselToonInvoerProblemen(container) {
+    const p = wisselInvoerProblemen(WisselState.stappen, formatDateYYYYMMDD(new Date()), wisselNaam);
+    p.forEach((tekst, i) => {
+        const el = container.querySelector(`[data-fout="${i}"]`);
+        if (!el) return;
+        el.hidden = !tekst;
+        const span = el.querySelector('span');
+        if (span) span.textContent = tekst || '';
+        el.closest('.wissel-stap')?.classList.toggle('wissel-stap--fout', !!tekst);
+    });
+    return p;
+}
+
 /** Stapbalk en knoppen volgen de toestand: bevestigen kan pas met een actueel voorbeeld. */
 function wisselZetFase(container) {
-    const klaar = WisselState.stappen.length > 0 && WisselState.stappen.every(wisselStapKlaar);
+    const probleem = wisselInvoerProblemen(WisselState.stappen, formatDateYYYYMMDD(new Date()), wisselNaam).find(Boolean);
+    const klaar = !probleem && WisselState.stappen.length > 0 && WisselState.stappen.every(wisselStapKlaar);
     const actueel = !!WisselState.voorbeeld && !WisselState.gewijzigdNaVoorbeeld && !WisselState.bezig;
     const fase = actueel ? 3 : (klaar ? 2 : 1);
     container.querySelectorAll('.wissel-stappenbalk li').forEach(li => {
@@ -394,7 +479,9 @@ function wisselZetFase(container) {
     if (opslaan) opslaan.disabled = !klaar || WisselState.bezig;
     const tekst = container.querySelector('.wissel-actiebalk-tekst');
     if (tekst) {
-        tekst.textContent = !klaar
+        tekst.textContent = probleem
+            ? 'Los eerst de fout bij de stap hierboven op.'
+            : !klaar
             ? 'Vul elke stap volledig in: wie, aan wie en vanaf wanneer.'
             : (WisselState.bezig ? 'Voorbeeld wordt berekend…'
                 : (WisselState.voorbeeldFout ? 'Los eerst het probleem hierboven op.'
@@ -407,7 +494,8 @@ function wisselPlanVoorbeeld(container, wacht = 450) {
     WisselState.gewijzigdNaVoorbeeld = true;
     clearTimeout(_wisselTimer);
     const uit = container.querySelector('#wissel-voorbeeld-uit');
-    if (!WisselState.stappen.length || !WisselState.stappen.every(wisselStapKlaar)) {
+    const probleem = wisselInvoerProblemen(WisselState.stappen, formatDateYYYYMMDD(new Date()), wisselNaam).some(Boolean);
+    if (probleem || !WisselState.stappen.length || !WisselState.stappen.every(wisselStapKlaar)) {
         WisselState.voorbeeld = null;
         WisselState.voorbeeldFout = null;
         if (uit) uit.innerHTML = wisselVoorbeeldHtml();
@@ -457,7 +545,7 @@ function wisselVoorbeeldHtml() {
     if (!v) {
         return WisselState.bezig
             ? '<p class="text-muted wissel-wacht">Voorbeeld wordt berekend…</p>'
-            : '<p class="text-muted wissel-wacht">Het voorbeeld verschijnt hier zodra elke stap ingevuld is.</p>';
+            : '<p class="text-muted wissel-wacht">Het voorbeeld verschijnt hier zodra elke stap juist ingevuld is.</p>';
     }
 
     const totaal = v.volgorde.reduce((n, s) => n + s.verhuisd, 0);
@@ -479,6 +567,11 @@ function wisselVoorbeeldHtml() {
             const n = s.afwezigOp.length;
             const datums = s.afwezigOp.slice(0, 6).map(d => wisselKortDatum(d)).join(', ') + (n > 6 ? ` en nog ${n - 6}` : '');
             meldingen.push(`<div class="alert alert-warning">${W_ICOON(ICONS.warning)}<div><strong>${escapeHtml(s.naar.naam)} is afwezig op ${n} ${n === 1 ? 'dag' : 'dagen'}</strong> waarop ${n === 1 ? 'een dienst' : 'diensten'} van ${escapeHtml(s.van.naam)} naar ${escapeHtml(s.naar.naam)} ${n === 1 ? 'gaat' : 'gaan'}: ${datums}. Iedereen houdt zijn eigen verlof, dus ${n === 1 ? 'die dienst staat' : 'die diensten staan'} straks met het verloflint in de planning: zoek er iemand voor.</div></div>`);
+        }
+        if (s.verhuisd === 0) {
+            // Zonder deze regel stond er alleen "0 diensten", en vroeg je je af
+            // of het voorbeeld wel gewerkt had.
+            meldingen.push(`<div class="alert alert-info">${W_ICOON(ICONS.info || 'info')}<div>${escapeHtml(s.van.naam)} heeft vanaf ${formatDateShortMetJaar(s.vanaf)} nog geen diensten in de planning, dus er verhuist nu niets. Team, contracturen en weekrooster gaan wel over op de ingangsdatum.</div></div>`);
         }
         if (s.onmiddellijk) {
             meldingen.push(`<div class="alert alert-warning">${W_ICOON(ICONS.warning)}<div>Deze stap gaat <strong>meteen</strong> in en kan na bevestigen niet meer teruggedraaid worden.</div></div>`);
@@ -603,5 +696,5 @@ async function wisselBewaar() {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { wisselWeekUren, wisselStapKlaar };
+    module.exports = { wisselWeekUren, wisselStapKlaar, wisselInvoerProblemen, wisselStapStand };
 }
