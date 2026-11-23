@@ -2033,6 +2033,9 @@ function switchBuilderWeek(weekNumber) {
 // Settings tab configuration: role-based visibility
 const SETTINGS_TAB_CONFIG = [
     { id: 'accounts', label: 'Accounts', roles: ['admin'] },
+    // Personeelswissels: wie vertrekt, wie neemt wiens rooster over. Eigen tab,
+    // los van de accounts, ook voor de roosterverantwoordelijke.
+    { id: 'wissels', label: 'Personeelswissels', roles: ['admin', 'roosterverantwoordelijke'] },
     { id: 'teams', label: 'Teams & Diensten', roles: ['admin', 'roosterverantwoordelijke'] },
     { id: 'planning', label: 'Planning', roles: ['admin', 'roosterverantwoordelijke'] },
     { id: 'communicatie', label: 'Communicatie', roles: ['admin', 'roosterverantwoordelijke'] },

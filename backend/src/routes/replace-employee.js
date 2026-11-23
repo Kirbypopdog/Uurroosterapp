@@ -129,33 +129,28 @@ function remapDraftGridUser(grid, oldId, newId) {
   return { grid: remapEmployeeLayer(grid), changed };
 }
 
-router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) => {
-  const oldUserId = Number(req.params.id);
-  const {
-    replacementUserId,
-    transferShiftsFrom,
-    // Wat er moet gebeuren met de diensten die de VERVANGER zelf al had staan
-    // vanaf de overnamedatum. 'behouden' is de veilige standaard: dat is echt
-    // werk waar al op gerekend is.
-    eigenDienstenVervanger = 'behouden',
-    // Wisselt de vertrekker alleen van functie of team, dan blijft hij in
-    // dienst: geen deactivatie, en alleen de verzoeken over diensten die
-    // verhuizen worden ingetrokken. Zie geplande_overnames.vertrekker_blijft_actief.
-    vertrekkerBlijftActief = false,
-  } = req.body;
-  const blijftActief = vertrekkerBlijftActief === true;
-  const newUserId = Number(replacementUserId);
+// Een zakelijke weigering (404/409) uit de functies hieronder. De route vertaalt
+// ze naar een antwoord; een personeelswissel draait er de hele transactie op
+// terug.
+function fout(status, body) {
+  const e = new Error(body && body.error ? body.error : 'Vervanging geweigerd');
+  e.status = status;
+  e.body = body;
+  return e;
+}
 
-  if (!oldUserId || !newUserId) {
-    return res.status(400).json({ error: 'Oud en nieuw gebruiker ID zijn verplicht' });
-  }
-  if (oldUserId === newUserId) {
-    return res.status(400).json({ error: 'Oud en nieuw gebruiker mogen niet dezelfde zijn' });
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+/**
+ * Eén vervanging: de vertrekker geeft zijn rooster door aan de vervanger.
+ *
+ * Draait BINNEN een transactie die de aanroeper opent en afsluit: de route
+ * hieronder voor één vervanging, `routes/personeelswissels.js` voor een hele
+ * ketting in één keer. Een weigering gooit `fout(status, body)`.
+ */
+async function voerVervangingUit(client, {
+  oldUserId, newUserId, transferShiftsFrom,
+  eigenDienstenVervanger = 'behouden', blijftActief = false,
+  actor, wisselId = null, extraVerwijderd = [],
+}) {
 
     // Lock both users to prevent race conditions
     const oldUserResult = await client.query(
@@ -170,12 +165,10 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     );
 
     if (oldUserResult.rows.length === 0) {
-      await client.query('ROLLBACK').catch(() => {});
-      return res.status(404).json({ error: 'Vertrekkende medewerker niet gevonden' });
+            throw fout(404, { error: 'Vertrekkende medewerker niet gevonden' });
     }
     if (newUserResult.rows.length === 0) {
-      await client.query('ROLLBACK').catch(() => {});
-      return res.status(404).json({ error: 'Nieuwe medewerker niet gevonden' });
+            throw fout(404, { error: 'Nieuwe medewerker niet gevonden' });
     }
 
     const oldUser = oldUserResult.rows[0];
@@ -198,8 +191,7 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     const gaatLaterIn = !!transferShiftsFrom && transferShiftsFrom > vandaag;
 
     if (newUser.active === false) {
-      await client.query('ROLLBACK').catch(() => {});
-      return res.status(409).json({ error: `${newUser.name} is niet actief en kan geen diensten overnemen` });
+            throw fout(409, { error: `${newUser.name} is niet actief en kan geen diensten overnemen` });
     }
 
     // De vertrekker neemt zelf al het rooster van iemand anders over, op een
@@ -221,8 +213,7 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       const MAANDEN = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
       const [jj, mm, dd] = r.ingangsdatum.split('-').map(Number);
       const datumTekst = `${dd} ${MAANDEN[mm - 1]} ${jj}`;
-      await client.query('ROLLBACK').catch(() => {});
-      return res.status(409).json({
+            throw fout(409, {
         error: `${oldUser.name} neemt vanaf ${datumTekst} zelf het rooster van ${r.van} over. ` +
           `Die diensten zouden nu mee naar ${newUser.name} verhuizen. Annuleer die overname ` +
           `(bij "Medewerker vervangen" van ${oldUser.name} of ${r.van}), stel eerst deze vervanging in ` +
@@ -309,8 +300,7 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
           [oldUserId, newUserId, transferShiftsFrom]
         );
         if (botsingen.rows.length > 0) {
-          await client.query('ROLLBACK').catch(() => {});
-          return res.status(409).json({
+                    throw fout(409, {
             error: `${newUser.name} heeft zelf al diensten die botsen met die van ${oldUser.name}`,
             botsingen: botsingen.rows.map(r => ({
               datum: r.datum,
@@ -389,10 +379,10 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       const ingepland = await client.query(
         `INSERT INTO geplande_overnames
            (oude_gebruiker, nieuwe_gebruiker, ingangsdatum, aangemaakt_door, aangemaakt_door_naam,
-            vertrekker_blijft_actief)
-         VALUES ($1, $2, $3, $4, $5, $6)
+            vertrekker_blijft_actief, wissel_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
-        [oldUserId, newUserId, transferShiftsFrom, req.user.id, req.user.name, blijftActief]
+        [oldUserId, newUserId, transferShiftsFrom, actor.id, actor.name, blijftActief, wisselId]
       );
       overnameId = (ingepland && ingepland.rows && ingepland.rows[0]) ? ingepland.rows[0].id : null;
     } else if (!blijftActief) {
@@ -459,6 +449,11 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
 
     // 5. No auto-regeneration — user should re-apply active concept via Rooster Bouwen
 
+    // Diensten die een personeelswissel vóór deze stap wiste (botsingen die de
+    // gebruiker per dag besliste), horen bij het terugdraaien van DEZE stap.
+    if (terugdraai && Array.isArray(extraVerwijderd) && extraVerwijderd.length) {
+      terugdraai.verwijderd = [...extraVerwijderd, ...terugdraai.verwijderd];
+    }
     if (overnameId && terugdraai) {
       await client.query(
         `UPDATE geplande_overnames SET terugdraai = $1::jsonb WHERE id = $2`,
@@ -466,6 +461,45 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
       );
     }
 
+    return {
+      oldUser, newUser, shiftsTransferred, draftsUpdated, verantwoordelijkhedenVerplaatst,
+      verzoekenGeannuleerd, eigenDienstenVerwijderd, gaatLaterIn, overnameId,
+    };
+}
+
+router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, res) => {
+  const oldUserId = Number(req.params.id);
+  const {
+    replacementUserId,
+    transferShiftsFrom,
+    // Wat er moet gebeuren met de diensten die de VERVANGER zelf al had staan
+    // vanaf de overnamedatum. 'behouden' is de veilige standaard: dat is echt
+    // werk waar al op gerekend is.
+    eigenDienstenVervanger = 'behouden',
+    // Wisselt de vertrekker alleen van functie of team, dan blijft hij in
+    // dienst: geen deactivatie, en alleen de verzoeken over diensten die
+    // verhuizen worden ingetrokken. Zie geplande_overnames.vertrekker_blijft_actief.
+    vertrekkerBlijftActief = false,
+  } = req.body;
+  const blijftActief = vertrekkerBlijftActief === true;
+  const newUserId = Number(replacementUserId);
+
+  if (!oldUserId || !newUserId) {
+    return res.status(400).json({ error: 'Oud en nieuw gebruiker ID zijn verplicht' });
+  }
+  if (oldUserId === newUserId) {
+    return res.status(400).json({ error: 'Oud en nieuw gebruiker mogen niet dezelfde zijn' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const {
+      oldUser, newUser, shiftsTransferred, draftsUpdated, verantwoordelijkhedenVerplaatst,
+      verzoekenGeannuleerd, eigenDienstenVerwijderd, gaatLaterIn,
+    } = await voerVervangingUit(client, {
+      oldUserId, newUserId, transferShiftsFrom, eigenDienstenVervanger, blijftActief, actor: req.user,
+    });
     await client.query('COMMIT');
 
     // contract_hours is een numeric, en die komt als STRING uit pg. Ongemoeid
@@ -510,12 +544,14 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    if (err.status) return res.status(err.status).json(err.body);
     console.error('Replace user error:', err);
     res.status(500).json({ error: 'Server error bij vervanging' });
   } finally {
     client.release();
   }
 });
+
 
 // Geplande overnames bekijken en annuleren. Zonder dit stond er in de
 // weigering bij een verkeerde volgorde "annuleer die overname", terwijl daar
@@ -559,7 +595,7 @@ router.get('/admin/geplande-overnames', requireAuth, async (req, res) => {
   });
 });
 
-router.delete('/admin/geplande-overnames/:id', requireAuth, requireAdmin, async (req, res) => {
+router.delete('/admin/geplande-overnames/:id', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Ongeldig id' });
   const { rows } = await pool.query(
@@ -594,13 +630,8 @@ router.delete('/admin/geplande-overnames/:id', requireAuth, requireAdmin, async 
 // - een concept of instelling die sinds de vervanging gewijzigd is, blijft
 //   zoals hij is.
 // Het antwoord noemt die, zodat de beheerder weet wat hij zelf moet nakijken.
-router.post('/admin/geplande-overnames/:id/terugdraaien', requireAuth, requireAdmin, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Ongeldig id' });
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+/** Eén geplande overname terugdraaien, binnen een transactie van de aanroeper. */
+async function draaiOvernameTerug(client, id) {
     const g = await client.query(
       `SELECT id, oude_gebruiker, nieuwe_gebruiker, ingangsdatum::text AS ingangsdatum, status, terugdraai
          FROM geplande_overnames WHERE id = $1 FOR UPDATE`,
@@ -608,19 +639,16 @@ router.post('/admin/geplande-overnames/:id/terugdraaien', requireAuth, requireAd
     );
     const rij = g.rows[0];
     if (!rij || rij.status !== 'gepland') {
-      await client.query('ROLLBACK').catch(() => {});
-      return res.status(404).json({ error: 'Geen geplande overname gevonden (al uitgevoerd, geannuleerd of teruggedraaid?)' });
+            throw fout(404, { error: 'Geen geplande overname gevonden (al uitgevoerd, geannuleerd of teruggedraaid?)' });
     }
     if (!rij.terugdraai) {
-      await client.query('ROLLBACK').catch(() => {});
-      return res.status(409).json({
+            throw fout(409, {
         error: 'Deze overname is ingesteld voor terugdraaien mogelijk was. Annuleren kan wel; de diensten moet je dan zelf terugzetten.',
         geenTerugdraai: true,
       });
     }
     if (rij.ingangsdatum <= vandaagInBelgie()) {
-      await client.query('ROLLBACK').catch(() => {});
-      return res.status(409).json({ error: 'De ingangsdatum is bereikt; terugdraaien kan alleen daarvoor.' });
+            throw fout(409, { error: 'De ingangsdatum is bereikt; terugdraaien kan alleen daarvoor.' });
     }
 
     const oud = rij.oude_gebruiker;
@@ -707,27 +735,42 @@ router.post('/admin/geplande-overnames/:id/terugdraaien', requireAuth, requireAd
       `UPDATE geplande_overnames SET status = 'teruggedraaid', uitgevoerd_op = NOW() WHERE id = $1`,
       [id]
     );
-    await client.query('COMMIT');
-
-    const resultaat = {
-      ok: true,
-      dienstenTerug: diensten.rows.length,
-      dienstenNietTerug: dienstIds.length - diensten.rows.length,
-      verwijderdTeruggezet: teruggezet,
-      verwijderdNietTeruggezet: verwijderd.length - teruggezet,
-      conceptenNietHersteld,
-      instellingenNietHersteld,
+    return {
+      oud, nieuw,
+      resultaat: {
+        ok: true,
+        dienstenTerug: diensten.rows.length,
+        dienstenNietTerug: dienstIds.length - diensten.rows.length,
+        verwijderdTeruggezet: teruggezet,
+        verwijderdNietTeruggezet: verwijderd.length - teruggezet,
+        conceptenNietHersteld,
+        instellingenNietHersteld,
+      },
     };
+}
+
+router.post('/admin/geplande-overnames/:id/terugdraaien', requireAuth, requireRole('admin', 'roosterverantwoordelijke'), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Ongeldig id' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { oud, nieuw, resultaat } = await draaiOvernameTerug(client, id);
+    await client.query('COMMIT');
     await logAudit(req, 'UPDATE', 'user', String(oud), {
       type: 'geplande_overname_teruggedraaid', geplandeOvername: id, nieuweGebruiker: nieuw, ...resultaat,
     });
     res.json(resultaat);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    if (err.status) return res.status(err.status).json(err.body);
     throw err;
   } finally {
     client.release();
   }
 });
 
+router.voerVervangingUit = voerVervangingUit;
+router.draaiOvernameTerug = draaiOvernameTerug;
 module.exports = router;

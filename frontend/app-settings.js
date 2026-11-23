@@ -98,6 +98,11 @@ function renderSettingsTabContent(tabName) {
         case 'beheer':
             renderSettingsBeheer(content);
             break;
+        case 'wissels':
+            // In app-wissels.js; typeof-wacht voor een oude cache (#412).
+            if (typeof renderSettingsWissels === 'function') renderSettingsWissels(content);
+            else content.innerHTML = '<p>Herlaad de pagina om de personeelswissels te openen.</p>';
+            break;
         default:
             content.innerHTML = '<p>Ongeldige tab</p>';
     }
@@ -162,7 +167,6 @@ function renderSettingsAccounts(container) {
     }
 
     container.innerHTML = `
-        <div id="settings-gepland" class="hidden mb-md"></div>
         <div class="settings-card" id="settings-accounts">
             <div class="settings-card-header">
                 <div class="settings-card-title">
@@ -196,25 +200,6 @@ function renderSettingsAccounts(container) {
 
     // Load and render admin users
     loadAdminUsers(container);
-    toonGeplandeWijzigingenInInstellingen(container);
-}
-
-// Alle geplande overnames bovenaan Accountbeheer, met Terugdraaien of
-// Annuleren. Zo is een vervanging met een ingangsdatum in de toekomst niet
-// alleen terug te vinden via het venster van één medewerker.
-async function toonGeplandeWijzigingenInInstellingen(container) {
-    const el = container.querySelector('#settings-gepland');
-    if (!el || typeof fetchGeplandeOvernames !== 'function') return;
-    let lijst = [];
-    try { lijst = await fetchGeplandeOvernames(); } catch (e) { return; }
-    if (!lijst.length) { el.classList.add('hidden'); el.innerHTML = ''; return; }
-    el.innerHTML = geplandeOvernamesHtml(lijst, 'Geplande wijzigingen');
-    el.classList.remove('hidden');
-    IconHelper.init(el);
-    bindGeplandeOvernameKnoppen(el, async () => {
-        await toonGeplandeWijzigingenInInstellingen(container);
-        loadAdminUsers(container);
-    });
 }
 
 async function loadAdminUsers(container) {
@@ -515,7 +500,7 @@ function showEditAccountModal(user, teams, onSave) {
                     <div class="modal-actions modal-actions-split">
                         <div class="modal-actions-left">
                             <button type="button" class="btn btn-danger btn-sm" id="edit-account-delete-btn">${IconHelper.html('trash-2', 'xs')}</button>
-                            <button type="button" class="btn btn-secondary btn-sm" id="edit-account-replace-btn">${IconHelper.html('user-round-plus', 'xs')} Vervang</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="edit-account-replace-btn">${IconHelper.html('user-round-plus', 'xs')} Personeelswissel</button>
                             <button type="button" class="btn btn-secondary btn-sm" id="edit-account-reset-btn">${IconHelper.html('key-round', 'xs')} Reset ww</button>
                         </div>
                         <button type="submit" class="btn btn-primary btn-sm">Opslaan</button>
@@ -656,10 +641,14 @@ function showEditAccountModal(user, teams, onSave) {
         }
     });
 
-    // Replace button
+    // Vervangen gebeurt sinds de personeelswissels in een eigen tab, met deze
+    // persoon al ingevuld als wie zijn rooster doorgeeft. Het oude venster
+    // (showReplaceEmployeeModal) blijft bestaan maar wordt hier niet meer
+    // geopend: één stap per keer was precies wat op 23 november misliep.
     modal.querySelector('#edit-account-replace-btn').addEventListener('click', () => {
         modal.remove();
-        showReplaceEmployeeModal(user, onSave);
+        if (typeof startPersoneelswisselVoor === 'function') startPersoneelswisselVoor(user.id);
+        else showReplaceEmployeeModal(user, onSave);
     });
 }
 
