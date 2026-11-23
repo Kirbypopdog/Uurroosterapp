@@ -105,13 +105,28 @@ describe('in de app', () => {
 
   test('bevestigen kan pas na een actueel voorbeeld', () => {
     const W = F('app-wissels.js');
-    expect(W).toContain("el.querySelectorAll('.wissel-bevestig, .wissel-opslaan').forEach(k => { k.disabled = true; });");
+    expect(W).toContain("const actueel = !!WisselState.voorbeeld && !WisselState.gewijzigdNaVoorbeeld && !WisselState.bezig;");
+    expect(W).toContain('if (bevestig) bevestig.disabled = !actueel;');
+    expect(W).toContain('if (!v || WisselState.gewijzigdNaVoorbeeld) return;');
+  });
+
+  test('het voorbeeld verschijnt vanzelf, en een trager antwoord overschrijft geen nieuwer', () => {
+    const W = F('app-wissels.js');
+    expect(W).toContain('wisselPlanVoorbeeld(container)');
+    expect(W).toContain('if (nummer !== _wisselVolgnummer) return;');
   });
 });
 
 describe('uren per week in het voorbeeld', () => {
   global.window = global.window || {};
-  const { wisselWeekUren } = require('../../frontend/app-wissels.js');
+  const { wisselWeekUren, wisselStapKlaar } = require('../../frontend/app-wissels.js');
+
+  test('een stap is pas klaar met twee verschillende mensen en een datum', () => {
+    expect(wisselStapKlaar({ van: '1', naar: '2', vanaf: '2027-01-01' })).toBe(true);
+    expect(wisselStapKlaar({ van: '1', naar: '1', vanaf: '2027-01-01' })).toBe(false);
+    expect(wisselStapKlaar({ van: '1', naar: '', vanaf: '2027-01-01' })).toBe(false);
+    expect(wisselStapKlaar({ van: '1', naar: '2', vanaf: '' })).toBe(false);
+  });
   const M = ['2026-11-30', '2026-12-07', '2026-12-14'];
   const acht = () => 8;
 
