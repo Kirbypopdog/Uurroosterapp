@@ -1,0 +1,253 @@
+'use strict';
+
+// Personeelswissels: een hele situatie in één keer, met de volgorde door de
+// app bepaald. Aanleiding: op 23 november 2026 werd "Marie → Bryan" vóór
+// "Bryan → Justine" ingesteld, en verdwenen 121 diensten van Bryan.
+const fs = require('fs');
+const path = require('path');
+jest.mock('../src/db', () => ({ pool: { query: jest.fn(), connect: jest.fn() } }));
+const router = require('../src/routes/personeelswissels');
+const { ordenStappen, normaliseerStappen } = router;
+
+const MARIE = 119, BRYAN = 117, JUSTINE = 181;
+
+describe('de volgorde zoekt de app zelf', () => {
+  test('eerst wie doorschuift, dan wie diens plaats inneemt — ook als je het omgekeerd ingeeft', () => {
+    const omgekeerd = [
+      { van: MARIE, naar: BRYAN, vanaf: '2026-11-30' },
+      { van: BRYAN, naar: JUSTINE, vanaf: '2026-11-26', blijftInDienst: true },
+    ];
+    const v = ordenStappen(normaliseerStappen(omgekeerd));
+    expect(v.map(s => `${s.van}->${s.naar}`)).toEqual([`${BRYAN}->${JUSTINE}`, `${MARIE}->${BRYAN}`]);
+  });
+
+  test('een langere ketting: A → B → C → D', () => {
+    const v = ordenStappen(normaliseerStappen([
+      { van: 1, naar: 2, vanaf: '2027-01-01' },
+      { van: 2, naar: 3, vanaf: '2027-01-01' },
+      { van: 3, naar: 4, vanaf: '2027-01-01' },
+    ]));
+    expect(v.map(s => s.van)).toEqual([3, 2, 1]);
+  });
+
+  test('een kring kan niet', () => {
+    expect(() => ordenStappen(normaliseerStappen([
+      { van: 1, naar: 2, vanaf: '2027-01-01' },
+      { van: 2, naar: 1, vanaf: '2027-01-01' },
+    ]))).toThrow(/kring/);
+  });
+
+  test('iemand kan maar één keer zijn rooster doorgeven', () => {
+    expect(() => ordenStappen(normaliseerStappen([
+      { van: 1, naar: 2, vanaf: '2027-01-01' },
+      { van: 1, naar: 3, vanaf: '2027-01-01' },
+    ]))).toThrow(/twee stappen/);
+  });
+});
+
+describe('invoer', () => {
+  test.each([
+    [[], /minstens één stap/],
+    [[{ van: 1, naar: 1, vanaf: '2027-01-01' }], /eigen rooster/],
+    [[{ van: 1, naar: 2, vanaf: '1 jan' }], /ingangsdatum/],
+    [[{ van: 0, naar: 2, vanaf: '2027-01-01' }], /kies wie/],
+  ])('%j wordt geweigerd', (stappen, melding) => {
+    expect(() => normaliseerStappen(stappen)).toThrow(melding);
+  });
+
+  test('"blijft in dienst" staat standaard uit', () => {
+    expect(normaliseerStappen([{ van: 1, naar: 2, vanaf: '2027-01-01' }])[0].blijftInDienst).toBe(false);
+  });
+});
+
+describe('veiligheid van het voorbeeld en de botsingen', () => {
+  const BRON = fs.readFileSync(path.join(__dirname, '../src/routes/personeelswissels.js'), 'utf8');
+
+  test('het voorbeeld draait ALTIJD terug', () => {
+    const blok = BRON.slice(BRON.indexOf("router.post('/personeelswissels/voorbeeld'"), BRON.indexOf("router.get('/personeelswissels'"));
+    expect(blok).toMatch(/finally \{[\s\S]*ROLLBACK/);
+    expect(blok).not.toContain('COMMIT');
+  });
+
+  test('botsingen worden per dag beslist, en wat vervalt gaat mee in het terugdraaien', () => {
+    expect(BRON).toContain("keuzes[sleutel] === 'eigen' ? 'eigen' : 'overnemen'");
+    expect(BRON).toContain('extraVerwijderd: teWissen');
+    expect(BRON).toContain("eigenDienstenVervanger: 'behouden'");
+  });
+
+  test('rollen gaan niet mee', () => {
+    expect(BRON).not.toMatch(/SET role\b/);
+  });
+
+  test('terugdraaien gaat in omgekeerde volgorde', () => {
+    expect(BRON).toMatch(/FROM geplande_overnames WHERE wissel_id = \$1 ORDER BY id DESC/);
+  });
+});
+
+describe('in de app', () => {
+  const F = (f) => fs.readFileSync(path.join(__dirname, '../../frontend', f), 'utf8');
+
+  test('een eigen tab in Instellingen, voor admin en roosterverantwoordelijke', () => {
+    expect(F('app-builder.js')).toContain("{ id: 'wissels', label: 'Personeelswissels', roles: ['admin', 'roosterverantwoordelijke'] }");
+    expect(F('app-settings.js')).toContain("if (typeof renderSettingsWissels === 'function') renderSettingsWissels(content);");
+    expect(F('index.html')).toMatch(/<script src="app-wissels\.js\?v=\w+"><\/script>/);
+  });
+
+  test('de knop in het accountvenster start een personeelswissel in plaats van één losse vervanging', () => {
+    const S = F('app-settings.js');
+    expect(S).toContain('startPersoneelswisselVoor(user.id)');
+    expect(S).toContain(' Personeelswissel</button>');
+  });
+
+  test('het voorbeeld waarschuwt voor met de hand leeggemaakte dagen (wat bij Marie misliep)', () => {
+    expect(F('app-wissels.js')).toContain('met de hand leeggemaakt');
+  });
+
+  test('bevestigen kan pas na een actueel voorbeeld', () => {
+    const W = F('app-wissels.js');
+    expect(W).toContain("const actueel = !!WisselState.voorbeeld && !WisselState.gewijzigdNaVoorbeeld && !WisselState.bezig;");
+    expect(W).toContain('if (bevestig) bevestig.disabled = !actueel;');
+    expect(W).toContain('if (!v || WisselState.gewijzigdNaVoorbeeld) return;');
+  });
+
+  test('het voorbeeld verschijnt vanzelf, en een trager antwoord overschrijft geen nieuwer', () => {
+    const W = F('app-wissels.js');
+    expect(W).toContain('wisselPlanVoorbeeld(container)');
+    expect(W).toContain('if (nummer !== _wisselVolgnummer) return;');
+  });
+});
+
+describe('uren per week in het voorbeeld', () => {
+  global.window = global.window || {};
+  const { wisselWeekUren, wisselStapKlaar } = require('../../frontend/app-wissels.js');
+
+  test('een stap is pas klaar met twee verschillende mensen en een datum', () => {
+    expect(wisselStapKlaar({ van: '1', naar: '2', vanaf: '2027-01-01' })).toBe(true);
+    expect(wisselStapKlaar({ van: '1', naar: '1', vanaf: '2027-01-01' })).toBe(false);
+    expect(wisselStapKlaar({ van: '1', naar: '', vanaf: '2027-01-01' })).toBe(false);
+    expect(wisselStapKlaar({ van: '1', naar: '2', vanaf: '' })).toBe(false);
+  });
+  const M = ['2026-11-30', '2026-12-07', '2026-12-14'];
+  const acht = () => 8;
+
+  test('elke dienst telt in zijn eigen week', () => {
+    expect(wisselWeekUren([
+      { date: '2026-11-30' }, { date: '2026-12-06' }, { date: '2026-12-07' }, { date: '2026-12-20' },
+    ], M, acht)).toEqual([16, 8, 8]);
+  });
+
+  test('vóór de eerste week en na de laatste telt niets', () => {
+    expect(wisselWeekUren([{ date: '2026-11-29' }, { date: '2026-12-21' }], M, acht)).toEqual([0, 0, 0]);
+  });
+});
+
+test('geen namen van echte collega\'s in wat de gebruiker te zien krijgt', () => {
+  // Alleen de tekst buiten de opmerkingen telt: daar staat de aanleiding wel
+  // met namen, maar die ziet niemand in de app.
+  const W = fs.readFileSync(path.join(__dirname, '../../frontend/app-wissels.js'), 'utf8')
+    .split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  expect(W).not.toMatch(/Bryan|Marie|Justine/);
+});
+
+describe('na het bevestigen: afwezigheid, bouwer en vergaderingen', () => {
+  const F = (f) => fs.readFileSync(path.join(__dirname, '../../frontend', f), 'utf8');
+  global.window = global.window || { DEFAULT_SETTINGS: {} };
+  const { conceptWijzigingVoor } = require('../../frontend/data.js');
+  const PLAN = [
+    { oudeGebruiker: 2, nieuweGebruiker: 3, vertrekkerBlijftActief: true, oudeTeam: 'vlot1' },
+    { oudeGebruiker: 4, nieuweGebruiker: 2, vertrekkerBlijftActief: false, oudeTeam: 'cargo' },
+  ];
+
+  test('in de bouwer staat wie overneemt meteen in zijn nieuwe team', () => {
+    expect(conceptWijzigingVoor(PLAN, 2)).toEqual({ team: 'cargo', verborgen: false });
+    expect(conceptWijzigingVoor(PLAN, 3)).toEqual({ team: 'vlot1', verborgen: false });
+  });
+
+  test('wie vertrekt heeft in de bouwer geen (lege) rij meer; wie in dienst blijft wel', () => {
+    expect(conceptWijzigingVoor(PLAN, 4).verborgen).toBe(true);
+    expect(conceptWijzigingVoor(PLAN, 2).verborgen).toBe(false);
+    expect(conceptWijzigingVoor([], 4)).toEqual({ team: null, verborgen: false });
+  });
+
+  test('de bouwer, de vergaderingen en de bezetting in de bouwer gebruiken dat team', () => {
+    const B = F('app-builder.js');
+    expect(B).toContain("employees = builderMedewerkers(AppState.builderTeamFilter || null);");
+    expect(B).toContain("const mainTeam = typeof builderTeamVan === 'function' ? builderTeamVan(employee) : employee.mainTeam;");
+    expect(B).toMatch(/const team = user \? \(typeof builderTeamVan === 'function' \? builderTeamVan\(user\)/);
+    expect(B).toContain('if (emp && !coverageTeams.includes(empTeam)) continue;');
+  });
+
+  test('de afwezigheidstab volgt de wissel per week, zoals de planning', () => {
+    const A = F('app-availability.js');
+    expect(A).toContain('geplandeWijzigingVoor(DataStore.geplandeOvernames, emp.id, startDateStr)');
+    expect(A).toContain('employeesByTeam[team] = employees.filter(emp => teamVan(emp) === team);');
+    expect(A).toContain('employees = employees.filter(emp => !_wijz(emp).uitDienst || heeftIetsDezeWeek(emp));');
+  });
+
+  test('het voorbeeld meldt diensten op afwezigheidsdagen van de vervanger; afwezigheid verhuist niet', () => {
+    const R = fs.readFileSync(path.join(__dirname, '../src/routes/personeelswissels.js'), 'utf8');
+    expect(R).toContain('afwezigOp: afwezig.rows.map(r => r.datum)');
+    expect(R).toMatch(/FROM availability[\s\S]*type = ANY\(\$3::text\[\]\)/);
+    const V = fs.readFileSync(path.join(__dirname, '../src/routes/replace-employee.js'), 'utf8');
+    expect(V).not.toMatch(/UPDATE availability/);
+    expect(F('app-wissels.js')).toContain('is afwezig op');
+  });
+});
+
+describe('UX-ronde: fouten bij de stap, stand per stap, andere overnames', () => {
+  const { wisselInvoerProblemen, wisselStapStand } = require('../../frontend/app-wissels.js');
+  const naam = (id) => ({ 1: 'Anna', 2: 'Bram' })[id] || String(id);
+
+  test('dezelfde persoon links en rechts: een fout BIJ die stap, niet "vul alles in"', () => {
+    const p = wisselInvoerProblemen([{ van: '1', naar: '1', vanaf: '2026-12-01' }], '2026-11-23', naam);
+    expect(p[0]).toMatch(/Anna staat twee keer/);
+  });
+
+  test('iemand die in twee stappen doorgeeft, en een datum in het verleden', () => {
+    const p = wisselInvoerProblemen([
+      { van: '1', naar: '2', vanaf: '2026-12-01' },
+      { van: '1', naar: '3', vanaf: '2026-12-01' },
+      { van: '2', naar: '3', vanaf: '2026-11-01' },
+    ], '2026-11-23', naam);
+    expect(p[0]).toBeNull();
+    expect(p[1]).toMatch(/al door in stap 1/);
+    expect(p[2]).toMatch(/verleden/);
+  });
+
+  test('een half ingevulde stap is geen fout', () => {
+    expect(wisselInvoerProblemen([{ van: '1', naar: '', vanaf: '' }], '2026-11-23', naam)).toEqual([null]);
+  });
+
+  test('de stand van een stap: aftellen, ingegaan, geannuleerd', () => {
+    const stap = { van: 1, naar: 2 };
+    const r = (status, vanaf) => wisselStapStand(stap, [{ van: 1, naar: 2, status, vanaf }], '2026-11-23');
+    expect(r('gepland', '2026-11-30').tekst).toBe('Over 7 dagen');
+    expect(r('gepland', '2026-11-24').tekst).toBe('Gaat morgen in');
+    expect(r('gepland', '2027-01-11').soort).toBe('later');
+    expect(r('uitgevoerd', '2026-11-01').tekst).toBe('Ingegaan');
+    expect(r('geannuleerd', '2026-11-30').tekst).toBe('Geannuleerd');
+    expect(wisselStapStand(stap, [], '2026-11-23')).toBeNull();
+  });
+
+  test('een andere geplande overname: de melding noemt de wissel en verwijst niet meer naar de oude knop', async () => {
+    const client = { query: jest.fn().mockResolvedValue({ rows: [
+      { van: 2, naar: 3, vanaf: '2026-11-26', vanNaam: 'Bram', naarNaam: 'Cleo', omschrijving: 'Teamwissel december', wisselId: 4 },
+    ] }) };
+    const volgorde = [{ van: 2, naar: 1, vanaf: '2026-12-01' }];
+    await expect(router.controleerAndereOvernames(client, volgorde, naam)).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringMatching(/Teamwissel december[\s\S]*Draai die eerst terug/),
+    });
+    await expect(router.controleerAndereOvernames(client, volgorde, naam)).rejects.toMatchObject({
+      message: expect.not.stringMatching(/Medewerker vervangen/),
+    });
+  });
+
+  test('alleen vervanger zijn in een andere overname blokkeert niets', async () => {
+    const client = { query: jest.fn().mockResolvedValue({ rows: [
+      { van: 1, naar: 2, vanaf: '2026-11-30', vanNaam: 'Anna', naarNaam: 'Bram', omschrijving: 'x', wisselId: 4 },
+    ] }) };
+    // Bram geeft door vanaf januari: zijn inkomende overname (30 nov) ligt ervóór.
+    await expect(router.controleerAndereOvernames(client, [{ van: 2, naar: 3, vanaf: '2027-01-11' }], naam)).resolves.toBeUndefined();
+  });
+});

@@ -33,7 +33,9 @@ async function voerGeplandeOvernamesUit() {
       `SELECT id, oude_gebruiker, nieuwe_gebruiker, ingangsdatum, vertrekker_blijft_actief
          FROM geplande_overnames
         WHERE status = 'gepland' AND ingangsdatum <= CURRENT_DATE
-        ORDER BY ingangsdatum`
+        -- Op dezelfde dag in de volgorde van invoegen: een personeelswissel
+        -- voegt zijn stappen in de juiste volgorde in (eerst wie doorschuift).
+        ORDER BY ingangsdatum, id`
     );
 
     for (const overname of rijp.rows) {

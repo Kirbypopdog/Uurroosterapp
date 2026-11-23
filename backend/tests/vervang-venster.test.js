@@ -27,9 +27,10 @@ test('Annuleren zegt dat verhuisde diensten blijven staan', () => {
   expect(lijst).toMatch(/De diensten die al verhuisd zijn, blijven staan waar ze nu staan/);
 });
 
-test('Instellingen > Accounts toont alle geplande wijzigingen', () => {
-  expect(S).toContain('id="settings-gepland"');
-  expect(S).toMatch(/toonGeplandeWijzigingenInInstellingen\(container\);/);
+test('de geplande overnames staan niet meer bij Accounts maar in de tab Personeelswissels', () => {
+  expect(S).not.toContain('id="settings-gepland"');
+  const W = fs.readFileSync(path.join(__dirname, '../../frontend/app-wissels.js'), 'utf8');
+  expect(W).toContain('Losse geplande overnames');
 });
 
 test('terugdraaien meldt wat het NIET kon terugzetten', () => {

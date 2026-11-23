@@ -3536,10 +3536,10 @@ describe('POST /admin/users/:id/replace', () => {
         expect(res.body.geenTerugdraai).toBe(true);
       });
 
-      test('een roosterverantwoordelijke mag de lijst zien maar niet terugdraaien', async () => {
+      test('een medewerker mag niet terugdraaien (roosterverantwoordelijke wel, sinds de personeelswissels)', async () => {
         mockActiveUser();
-        const rv = `Bearer ${makeToken({ id: 5, role: 'roosterverantwoordelijke', name: 'RV', team_id: 'vlot1' })}`;
-        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', rv);
+        const mw = `Bearer ${makeToken({ id: 5, role: 'medewerker', name: 'Eva', team_id: 'vlot1' })}`;
+        const res = await request(app).post('/api/v1/admin/geplande-overnames/4/terugdraaien').set('Authorization', mw);
         expect(res.status).toBe(403);
       });
     });

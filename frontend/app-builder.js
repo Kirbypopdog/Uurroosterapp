@@ -501,8 +501,13 @@ function renderBuilderControls(role, userTeam) {
 function renderBuilderGrid(role, userTeam) {
     const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
 
+    // Na een bevestigde personeelswissel staat wie een rooster overneemt al in
+    // zijn nieuwe team, en heeft wie vertrekt geen rij meer: de concepten zijn
+    // bij het bevestigen al herschreven (zie builderMedewerkers in data.js).
     let employees;
-    if (AppState.builderTeamFilter) {
+    if (typeof builderMedewerkers === 'function') {
+        employees = builderMedewerkers(AppState.builderTeamFilter || null);
+    } else if (AppState.builderTeamFilter) {
         employees = getEmployeesByTeam(AppState.builderTeamFilter);
     } else {
         employees = getAllEmployees(true);
@@ -671,7 +676,9 @@ function renderBuilderGrid(role, userTeam) {
 function getEmployeeMeetings(employee, dayIndex) {
     const meetings = AppState.builderMeetings || {};
     const teams = DataStore.settings.teams || {};
-    const mainTeam = employee.mainTeam;
+    // Team na een bevestigde wissel: wie Cargo overneemt, zit in de
+    // Cargo-vergadering, ook vóór de ingangsdatum.
+    const mainTeam = typeof builderTeamVan === 'function' ? builderTeamVan(employee) : employee.mainTeam;
     if (!mainTeam) return [];
     const result = [];
     for (const m of (meetings[mainTeam] || [])) {
@@ -686,8 +693,9 @@ function getEmployeeMeetings(employee, dayIndex) {
 function isInMeeting(userId, hour, dayIndex) {
     const meetings = AppState.builderMeetings || {};
     const user = DataStore.users.find(u => u.id == userId);
-    if (!user || !user.mainTeam) return false;
-    for (const m of (meetings[user.mainTeam] || [])) {
+    const team = user ? (typeof builderTeamVan === 'function' ? builderTeamVan(user) : user.mainTeam) : null;
+    if (!team) return false;
+    for (const m of (meetings[team] || [])) {
         if (m.day === dayIndex && hour >= m.from && hour < m.to) return true;
     }
     return false;
@@ -885,7 +893,8 @@ function calcBuilderHourlyHeadcount(hour, dayIndex) {
     for (const [userId, days] of Object.entries(AppState.builderGrid)) {
         // Only count employees whose main_team is in coverageTeams
         const emp = getEmployee(userId);
-        if (emp && !coverageTeams.includes(emp.mainTeam || emp.main_team)) continue;
+        const empTeam = emp ? (typeof builderTeamVan === 'function' ? builderTeamVan(emp) : (emp.mainTeam || emp.main_team)) : null;
+        if (emp && !coverageTeams.includes(empTeam)) continue;
 
         let isWorking = false;
 
@@ -2033,6 +2042,9 @@ function switchBuilderWeek(weekNumber) {
 // Settings tab configuration: role-based visibility
 const SETTINGS_TAB_CONFIG = [
     { id: 'accounts', label: 'Accounts', roles: ['admin'] },
+    // Personeelswissels: wie vertrekt, wie neemt wiens rooster over. Eigen tab,
+    // los van de accounts, ook voor de roosterverantwoordelijke.
+    { id: 'wissels', label: 'Personeelswissels', roles: ['admin', 'roosterverantwoordelijke'] },
     { id: 'teams', label: 'Teams & Diensten', roles: ['admin', 'roosterverantwoordelijke'] },
     { id: 'planning', label: 'Planning', roles: ['admin', 'roosterverantwoordelijke'] },
     { id: 'communicatie', label: 'Communicatie', roles: ['admin', 'roosterverantwoordelijke'] },

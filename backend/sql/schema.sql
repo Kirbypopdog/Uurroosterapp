@@ -257,6 +257,23 @@ CREATE INDEX IF NOT EXISTS idx_shift_blocks_user_date ON shift_blocks(user_id, d
 -- verhuizen wel meteen, want de planning moet vooruit kloppen.
 -- voerGeplandeOvernamesUit() in server.js werkt dit af bij het opstarten en elk
 -- uur daarna.
+-- Een personeelswissel: een hele situatie (wie gaat weg, wie neemt wiens
+-- rooster over) in één keer, eerst als concept (migratie 054).
+CREATE TABLE IF NOT EXISTS personeelswissels (
+  id              SERIAL PRIMARY KEY,
+  omschrijving    TEXT NOT NULL DEFAULT '',
+  status          TEXT NOT NULL DEFAULT 'concept'
+                  CHECK (status IN ('concept', 'bevestigd', 'teruggedraaid')),
+  stappen         JSONB NOT NULL DEFAULT '[]',
+  keuzes          JSONB NOT NULL DEFAULT '{}',
+  aangemaakt_door INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  aangemaakt_door_naam TEXT,
+  aangemaakt_op   TIMESTAMP NOT NULL DEFAULT NOW(),
+  gewijzigd_op    TIMESTAMP NOT NULL DEFAULT NOW(),
+  bevestigd_op    TIMESTAMP,
+  bevestigd_door_naam TEXT
+);
+
 CREATE TABLE IF NOT EXISTS geplande_overnames (
   id              SERIAL PRIMARY KEY,
   oude_gebruiker  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -271,8 +288,11 @@ CREATE TABLE IF NOT EXISTS geplande_overnames (
   vertrekker_blijft_actief BOOLEAN NOT NULL DEFAULT FALSE,
   -- Wat de vervanging verplaatste of wiste, om tot de ingangsdatum terug te
   -- kunnen draaien (migratie 053).
-  terugdraai      JSONB
+  terugdraai      JSONB,
+  -- De personeelswissel waar deze stap bij hoort (migratie 054).
+  wissel_id       INTEGER REFERENCES personeelswissels(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS idx_geplande_overnames_wissel ON geplande_overnames(wissel_id);
 
 CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON shift_swap_requests(status);
 -- Eén openstaande overname per vertrekker: twee tegelijk zou betekenen dat

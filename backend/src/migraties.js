@@ -1132,6 +1132,35 @@ const MIGRATIONS = [
       await client.query(`ALTER TABLE geplande_overnames DROP CONSTRAINT IF EXISTS geplande_overnames_status_check`);
       await client.query(`ALTER TABLE geplande_overnames ADD CONSTRAINT geplande_overnames_status_check CHECK (status IN ('gepland', 'uitgevoerd', 'geannuleerd', 'teruggedraaid'))`);
     }
+  },
+  {
+    name: '054_personeelswissels',
+    up: async (client) => {
+      // Een personeelswissel beschrijft een hele situatie in één keer — "Marie
+      // gaat uit dienst, Bryan neemt haar rooster over, Justine dat van Bryan"
+      // — in plaats van losse vervangingen per account. Hij staat eerst als
+      // CONCEPT (er is nog niets gewijzigd), wordt BEVESTIGD (de diensten
+      // verhuizen, elke stap wordt een geplande overname) en is UITGEVOERD als
+      // alle stappen hun ingangsdatum gehad hebben.
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS personeelswissels (
+          id              SERIAL PRIMARY KEY,
+          omschrijving    TEXT NOT NULL DEFAULT '',
+          status          TEXT NOT NULL DEFAULT 'concept'
+                          CHECK (status IN ('concept', 'bevestigd', 'teruggedraaid')),
+          stappen         JSONB NOT NULL DEFAULT '[]',
+          keuzes          JSONB NOT NULL DEFAULT '{}',
+          aangemaakt_door INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          aangemaakt_door_naam TEXT,
+          aangemaakt_op   TIMESTAMP NOT NULL DEFAULT NOW(),
+          gewijzigd_op    TIMESTAMP NOT NULL DEFAULT NOW(),
+          bevestigd_op    TIMESTAMP,
+          bevestigd_door_naam TEXT
+        )`);
+      await client.query(
+        `ALTER TABLE geplande_overnames ADD COLUMN IF NOT EXISTS wissel_id INTEGER REFERENCES personeelswissels(id) ON DELETE SET NULL`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_geplande_overnames_wissel ON geplande_overnames(wissel_id)`);
+    }
   }
 ];
 

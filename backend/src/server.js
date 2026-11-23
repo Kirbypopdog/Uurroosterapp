@@ -229,6 +229,8 @@ v1.use(require('./routes/admin-users'));
 
 // ===== REPLACE EMPLOYEE =====  (verhuisd naar routes/replace-employee.js, #157)
 v1.use(require('./routes/replace-employee'));
+// Personeelswissels: een hele situatie in één keer, eerst als concept.
+v1.use(require('./routes/personeelswissels'));
 
 // ===== APPLY SCHEDULE =====
 // NOTE: regenerateShiftsForUser() is VERWIJDERD.

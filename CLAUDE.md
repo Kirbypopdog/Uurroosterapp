@@ -49,6 +49,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `app-builder-drafts.js` | Concepten: aanmaken, laden, vergrendelen, toepassen, diff, import/export |
 | `app-builder-editors.js` | Bouwer-deelschermen: staffing, vergaderingen, waarschuwingen, urenberekening |
 | `app-settings.js` | renderSettings, alle instellingstabs |
+| `app-wissels.js` | De tab Personeelswissels: stappen invoeren, voorbeeld per persoon en week, botsingen per dag, concept → bevestigd → terugdraaien |
 | `app-admin.js` | Export/import, debug, migratie, sanitize |
 | `app-init.js` | initDOM, setupEventListeners, init(), DOMContentLoaded entry |
 | `data.js` | DataStore, API fetch wrappers, data loading |
@@ -64,6 +65,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | Bestand | Doel |
 |---------|------|
 | `src/server.js` | Express opzetten, opstarten, de routers monteren. Was 7213 regels met alle endpoints erin; sinds #157 nog 395 |
+| `src/routes/personeelswissels.js` | Personeelswissels: `ordenStappen` (de volgorde), het voorbeeld (voert de wissel uit en rolt terug), concept, bevestigen, terugdraaien. Gebruikt `voerVervangingUit` en `draaiOvernameTerug` uit `replace-employee.js` |
 | `src/routes/*.js` | De endpoints, één bestand per domein. Elk bestand maakt zijn router met `maakRouter()` en exporteert hem; `server.js` hangt ze met `v1.use()` op in de volgorde waarin ze vroeger stonden |
 | `src/veilige-router.js` | `maakRouter()`: een router die een afwijzende async handler naar `next(err)` stuurt (#380). Gebruik deze, nooit `express.Router()` rechtstreeks, anders krijgt een verzoek bij een fout géén antwoord |
 | `src/middleware/auth.js` | `signToken`, `requireAuth`, `requireAdmin`, `requireRole` |
@@ -101,6 +103,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
 | `overnames-blijft-actief.test.js` | Dat een geplande overname met "blijft in dienst" de vertrekker op de ingangsdatum niet deactiveert |
 | `geplande-wijziging.test.js` | `geplandeWijzigingVoor()`: vanaf de ingangsdatum staat iemand al in zijn nieuwe team, met de uren tegen het nieuwe contract |
+| `personeelswissels.test.js` | De volgorde die de app zelf kiest, de invoercontrole, dat het voorbeeld altijd terugrolt, botsingen per dag en de tab in Instellingen |
 | `vervang-venster.test.js` | Het vervangvenster: geplande overnames annuleren, en dat de botsingsmelding "Verwijderen" niet meer blind aanraadt |
 | `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
 | `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
@@ -242,12 +245,42 @@ dagelijkse samenvatting naast de directe mail aan het eigen team.
 
 ### Admin
 - `GET /api/v1/audit-log` - Audit log met filters en paginatie
-- `POST /api/v1/admin/users/:id/replace` - Medewerker vervangen
+- `GET|POST /api/v1/personeelswissels`, `PUT|DELETE /api/v1/personeelswissels/:id` - Personeelswissels (admin en roosterverantwoordelijke); alleen een concept is te wijzigen of te verwijderen
+- `POST /api/v1/personeelswissels/voorbeeld` - Wat een wissel zou doen; draait hem echt en rolt ALTIJD terug
+- `POST /api/v1/personeelswissels/:id/bevestigen` en `/terugdraaien` - Uitvoeren, en tot de eerste ingangsdatum terugdraaien
+- `POST /api/v1/admin/users/:id/replace` - Eén losse vervanging (oud; het accountvenster opent nu de personeelswissels)
 - `GET|DELETE /api/v1/admin/geplande-overnames[/:id]` - Geplande overnames bekijken en annuleren (stopt alleen de stap op de ingangsdatum)
 - `POST /api/v1/admin/geplande-overnames/:id/terugdraaien` - Alles terugzetten zoals vóór de vervanging, tot de ingangsdatum
 - `PUT /api/v1/me/email-preferences` - Email notificatie voorkeur
 
-**Een medewerker vervangen.** Eén verzoek, maar twee momenten. Wat de planning
+**Personeelswissels — de manier om iemand te vervangen.** Een tab in
+Instellingen (admin en roosterverantwoordelijke), los van de accounts; de knop
+in het accountvenster start er een met die persoon ingevuld. Een wissel
+beschrijft de HELE situatie in één keer: "Marie gaat uit dienst, Bryan neemt
+haar rooster over, Justine dat van Bryan". Aanleiding: op 23 november 2026
+liep die ketting als twee losse vervangingen mis (zie verderop).
+
+| | |
+|---|---|
+| volgorde | zoekt de app zelf (`ordenStappen`): wie doorgeeft vóór wie zijn plaats inneemt. Een kring of iemand die twee keer doorgeeft wordt geweigerd |
+| voorbeeld | `POST /personeelswissels/voorbeeld` voert de wissel ECHT uit in een transactie en rolt ALTIJD terug. Zo kan het voorbeeld niet afwijken van wat Bevestigen doet: het is dezelfde code |
+| botsingen | per DAG een keuze: rooster overnemen (eigen dienst vervalt) of eigen dienst houden (dienst van de vertrekker vervalt). Wat vervalt gaat mee in `terugdraai.verwijderd` van die stap |
+| andere overnames | geeft iemand al door in een ANDERE geplande overname, of neemt hij later zelf een rooster over, dan weigert het voorbeeld met een 409 die de wissel bij naam noemt (`controleerAndereOvernames`). Alleen vervanger zijn elders blokkeert niets |
+| invoerfouten | `wisselInvoerProblemen()` in de frontend: dezelfde persoon links en rechts, iemand die twee keer doorgeeft, een datum in het verleden. De fout staat BIJ de stap |
+| waarschuwingen | met de hand leeggemaakte dagen (`shift_blocks`) van de vertrekker, en een stap die meteen ingaat (niet terug te draaien) |
+| statussen | `concept` (niets gewijzigd) → `bevestigd` (elke stap een `geplande_overnames`-rij met `wissel_id`) → `uitgevoerd` (afgeleid: alle stappen uitgevoerd); `teruggedraaid` |
+| terugdraaien | alle stappen in OMGEKEERDE volgorde via `draaiOvernameTerug`, tot de eerste ingangsdatum |
+| rollen | gaan NIET mee — bewust los van een wissel |
+| afwezigheid | verhuist NIET: iedereen houdt zijn eigen verlof en ziekte. Het voorbeeld meldt wel elke dag waarop een verhuisde dienst op een afwezigheid van de vervanger valt (`afwezigOp`) |
+| afwezigheidstab | volgt de wissel per week zoals de planning (`geplandeWijzigingVoor` in `renderAvailability`): vanaf de ingangsdatum de vervanger in zijn nieuwe team, wie vertrekt weg tenzij hij die week nog iets heeft |
+| roosterbouwer | volgt de wissel METEEN na het bevestigen, want de concepten zijn dan al herschreven: `builderMedewerkers()` / `conceptWijzigingVoor()` in `data.js` zetten de vervanger in zijn nieuwe team en laten wie vertrekt weg. Vergaderingen en de bezetting in de bouwer gebruiken `builderTeamVan()` |
+
+Op dezelfde ingangsdatum voert `voerGeplandeOvernamesUit()` de stappen uit op
+`id`, dus in de volgorde waarin de wissel ze invoegde. De vervanger krijgt team
+en uren van de vertrekker zoals die op dat moment zijn — in een ketting dus nog
+de oude, want wie doorgeeft heeft zijn eigen nieuwe stap pas later of na hem.
+
+**Een medewerker vervangen (één stap).** Eén verzoek, maar twee momenten. Wat de planning
 vooruit laat kloppen gebeurt METEEN: de diensten, de blokkades en de
 activiteiten vanaf `transferShiftsFrom` verhuizen naar de vervanger. Wat aan het
 CONTRACT hangt — weekrooster, team, extra teams, contracturen, en het
