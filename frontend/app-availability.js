@@ -83,6 +83,19 @@ function renderAvailability() {
     let employees = getAllEmployees(true);
     const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
 
+    // Een geplande personeelswissel geldt hier zoals in de planning: vanaf de
+    // week van de ingangsdatum staat de vervanger in zijn nieuwe team, en is
+    // wie uit dienst gaat weg — tenzij hij die week nog een dienst of een
+    // afwezigheid heeft, want die moet je dan nog kunnen zien.
+    const _wijz = (emp) => typeof geplandeWijzigingVoor === 'function'
+        ? geplandeWijzigingVoor(DataStore.geplandeOvernames, emp.id, startDateStr)
+        : { team: null, uitDienst: false };
+    const teamVan = (emp) => _wijz(emp).team || emp.mainTeam;
+    const heeftIetsDezeWeek = (emp) => weekDates.some(d =>
+        (DataStore.shifts || []).some(sh => String(sh.employeeId) === String(emp.id) && sh.date === d) ||
+        (DataStore.availability || []).some(a => String(a.employeeId) === String(emp.id) && a.date === d));
+    employees = employees.filter(emp => !_wijz(emp).uitDienst || heeftIetsDezeWeek(emp));
+
     // Group employees by team (same order as Timeline)
     let teamOrder = getTeamOrder();
     let zonderTeam = false;
@@ -93,7 +106,7 @@ function renderAvailability() {
             || employees.find(emp => emp.email && emp.email.toLowerCase() === String(AppState.currentUser?.email || '').toLowerCase())?.mainTeam;
         if (userTeam) {
             teamOrder = teamOrder.filter(teamId => teamId === userTeam);
-            employees = employees.filter(emp => emp.mainTeam === userTeam);
+            employees = employees.filter(emp => teamVan(emp) === userTeam);
         } else {
             // #349: een medewerker zonder team zag hier een tabel met alleen
             // een koprij en verder niets. Dat is niet zijn fout en hij kan het
@@ -106,14 +119,14 @@ function renderAvailability() {
     }
     const employeesByTeam = {};
     teamOrder.forEach(team => {
-        employeesByTeam[team] = employees.filter(emp => emp.mainTeam === team);
+        employeesByTeam[team] = employees.filter(emp => teamVan(emp) === team);
     });
     // #231: de tabel groepeert per team, dus wie geen team heeft (of een team
     // dat niet meer in de instellingen staat) viel er helemaal uit. Bij
     // Afwezigheid is dat erger dan elders: je kunt voor die persoon dan geen
     // verlof of ziekte registreren.
     const geenTeamLeden = employees
-        .filter(emp => !emp.mainTeam || !teamOrder.includes(emp.mainTeam))
+        .filter(emp => !teamVan(emp) || !teamOrder.includes(teamVan(emp)))
         .sort((a, b) => a.name.localeCompare(b.name, 'nl-BE'));
 
     let html = `

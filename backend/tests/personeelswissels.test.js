@@ -148,3 +148,48 @@ test('geen namen van echte collega\'s in wat de gebruiker te zien krijgt', () =>
     .split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   expect(W).not.toMatch(/Bryan|Marie|Justine/);
 });
+
+describe('na het bevestigen: afwezigheid, bouwer en vergaderingen', () => {
+  const F = (f) => fs.readFileSync(path.join(__dirname, '../../frontend', f), 'utf8');
+  global.window = global.window || { DEFAULT_SETTINGS: {} };
+  const { conceptWijzigingVoor } = require('../../frontend/data.js');
+  const PLAN = [
+    { oudeGebruiker: 2, nieuweGebruiker: 3, vertrekkerBlijftActief: true, oudeTeam: 'vlot1' },
+    { oudeGebruiker: 4, nieuweGebruiker: 2, vertrekkerBlijftActief: false, oudeTeam: 'cargo' },
+  ];
+
+  test('in de bouwer staat wie overneemt meteen in zijn nieuwe team', () => {
+    expect(conceptWijzigingVoor(PLAN, 2)).toEqual({ team: 'cargo', verborgen: false });
+    expect(conceptWijzigingVoor(PLAN, 3)).toEqual({ team: 'vlot1', verborgen: false });
+  });
+
+  test('wie vertrekt heeft in de bouwer geen (lege) rij meer; wie in dienst blijft wel', () => {
+    expect(conceptWijzigingVoor(PLAN, 4).verborgen).toBe(true);
+    expect(conceptWijzigingVoor(PLAN, 2).verborgen).toBe(false);
+    expect(conceptWijzigingVoor([], 4)).toEqual({ team: null, verborgen: false });
+  });
+
+  test('de bouwer, de vergaderingen en de bezetting in de bouwer gebruiken dat team', () => {
+    const B = F('app-builder.js');
+    expect(B).toContain("employees = builderMedewerkers(AppState.builderTeamFilter || null);");
+    expect(B).toContain("const mainTeam = typeof builderTeamVan === 'function' ? builderTeamVan(employee) : employee.mainTeam;");
+    expect(B).toMatch(/const team = user \? \(typeof builderTeamVan === 'function' \? builderTeamVan\(user\)/);
+    expect(B).toContain('if (emp && !coverageTeams.includes(empTeam)) continue;');
+  });
+
+  test('de afwezigheidstab volgt de wissel per week, zoals de planning', () => {
+    const A = F('app-availability.js');
+    expect(A).toContain('geplandeWijzigingVoor(DataStore.geplandeOvernames, emp.id, startDateStr)');
+    expect(A).toContain('employeesByTeam[team] = employees.filter(emp => teamVan(emp) === team);');
+    expect(A).toContain('employees = employees.filter(emp => !_wijz(emp).uitDienst || heeftIetsDezeWeek(emp));');
+  });
+
+  test('het voorbeeld meldt diensten op afwezigheidsdagen van de vervanger; afwezigheid verhuist niet', () => {
+    const R = fs.readFileSync(path.join(__dirname, '../src/routes/personeelswissels.js'), 'utf8');
+    expect(R).toContain('afwezigOp: afwezig.rows.map(r => r.datum)');
+    expect(R).toMatch(/FROM availability[\s\S]*type = ANY\(\$3::text\[\]\)/);
+    const V = fs.readFileSync(path.join(__dirname, '../src/routes/replace-employee.js'), 'utf8');
+    expect(V).not.toMatch(/UPDATE availability/);
+    expect(F('app-wissels.js')).toContain('is afwezig op');
+  });
+});

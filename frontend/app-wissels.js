@@ -462,7 +462,7 @@ function wisselVoorbeeldHtml() {
 
     const totaal = v.volgorde.reduce((n, s) => n + s.verhuisd, 0);
     const botsingen = v.volgorde.reduce((n, s) => n + s.botsingen.length, 0);
-    const waarschuwingen = v.volgorde.reduce((n, s) => n + (s.leeggemaakteDagen > 0 ? 1 : 0) + (s.onmiddellijk ? 1 : 0), 0);
+    const waarschuwingen = v.volgorde.reduce((n, s) => n + (s.leeggemaakteDagen > 0 ? 1 : 0) + (s.onmiddellijk ? 1 : 0) + ((s.afwezigOp || []).length ? 1 : 0), 0);
     const pil = (tekst, soort = '') => `<span class="wissel-pil ${soort}">${tekst}</span>`;
     const samenvatting = [
         pil(`${totaal} ${totaal === 1 ? 'dienst verhuist' : 'diensten verhuizen'}`),
@@ -474,6 +474,11 @@ function wisselVoorbeeldHtml() {
         const meldingen = [];
         if (s.leeggemaakteDagen > 0) {
             meldingen.push(`<div class="alert alert-warning">${W_ICOON(ICONS.warning)}<div><strong>${escapeHtml(s.van.naam)} heeft ${s.leeggemaakteDagen} ${s.leeggemaakteDagen === 1 ? 'dag' : 'dagen'} met de hand leeggemaakt</strong> vanaf ${formatDateShortMetJaar(s.vanaf)}. Die blijven ook bij ${escapeHtml(s.naar.naam)} leeg: plan die zelf in.</div></div>`);
+        }
+        if (s.afwezigOp && s.afwezigOp.length) {
+            const n = s.afwezigOp.length;
+            const datums = s.afwezigOp.slice(0, 6).map(d => wisselKortDatum(d)).join(', ') + (n > 6 ? ` en nog ${n - 6}` : '');
+            meldingen.push(`<div class="alert alert-warning">${W_ICOON(ICONS.warning)}<div><strong>${escapeHtml(s.naar.naam)} is afwezig op ${n} ${n === 1 ? 'dag' : 'dagen'}</strong> waarop ${n === 1 ? 'een dienst' : 'diensten'} van ${escapeHtml(s.van.naam)} naar ${escapeHtml(s.naar.naam)} ${n === 1 ? 'gaat' : 'gaan'}: ${datums}. Iedereen houdt zijn eigen verlof, dus ${n === 1 ? 'die dienst staat' : 'die diensten staan'} straks met het verloflint in de planning: zoek er iemand voor.</div></div>`);
         }
         if (s.onmiddellijk) {
             meldingen.push(`<div class="alert alert-warning">${W_ICOON(ICONS.warning)}<div>Deze stap gaat <strong>meteen</strong> in en kan na bevestigen niet meer teruggedraaid worden.</div></div>`);

@@ -25,6 +25,7 @@ const { pool } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../helpers/audit');
 const { vandaagInBelgie } = require('../utils');
+const { AFWEZIGHEIDSTYPES } = require('../helpers/dienstregels');
 const vervangRouter = require('./replace-employee');
 
 const router = maakRouter();
@@ -171,6 +172,18 @@ async function voerWisselUit(client, { stappen, keuzes = {}, actor, wisselId = n
       else for (const v of tegen) weg.set(v.id, v);
     }
     const teWissen = [...weg.values()];
+
+    // Diensten die naar de vervanger gaan op een dag dat die zelf afwezig is
+    // (verlof, ziekte, ...). Afwezigheden verhuizen NIET mee — iedereen houdt
+    // zijn eigen verlof — dus zo'n dienst staat straks met het verloflint in de
+    // planning. Beter vooraf weten dan achteraf ontdekken.
+    const gaanMee = vanDiensten.filter(v => !weg.has(v.id));
+    const afwezig = gaanMee.length ? await client.query(
+      `SELECT DISTINCT date::text AS datum FROM availability
+        WHERE user_id = $1 AND date = ANY($2::date[]) AND type = ANY($3::text[])
+        ORDER BY 1`,
+      [stap.naar, [...new Set(gaanMee.map(v => v.date))], AFWEZIGHEIDSTYPES]
+    ) : { rows: [] };
     if (teWissen.length) {
       await client.query(`DELETE FROM shifts WHERE id = ANY($1::int[])`, [teWissen.map(x => x.id)]);
     }
@@ -189,6 +202,7 @@ async function voerWisselUit(client, { stappen, keuzes = {}, actor, wisselId = n
       verhuisd: uit.shiftsTransferred,
       botsingen,
       leeggemaakteDagen: blokken.rows[0].n,
+      afwezigOp: afwezig.rows.map(r => r.datum),
     });
   }
   const na = await dienstenIn();

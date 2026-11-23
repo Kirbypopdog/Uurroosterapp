@@ -269,6 +269,9 @@ liep die ketting als twee losse vervangingen mis (zie verderop).
 | statussen | `concept` (niets gewijzigd) → `bevestigd` (elke stap een `geplande_overnames`-rij met `wissel_id`) → `uitgevoerd` (afgeleid: alle stappen uitgevoerd); `teruggedraaid` |
 | terugdraaien | alle stappen in OMGEKEERDE volgorde via `draaiOvernameTerug`, tot de eerste ingangsdatum |
 | rollen | gaan NIET mee — bewust los van een wissel |
+| afwezigheid | verhuist NIET: iedereen houdt zijn eigen verlof en ziekte. Het voorbeeld meldt wel elke dag waarop een verhuisde dienst op een afwezigheid van de vervanger valt (`afwezigOp`) |
+| afwezigheidstab | volgt de wissel per week zoals de planning (`geplandeWijzigingVoor` in `renderAvailability`): vanaf de ingangsdatum de vervanger in zijn nieuwe team, wie vertrekt weg tenzij hij die week nog iets heeft |
+| roosterbouwer | volgt de wissel METEEN na het bevestigen, want de concepten zijn dan al herschreven: `builderMedewerkers()` / `conceptWijzigingVoor()` in `data.js` zetten de vervanger in zijn nieuwe team en laten wie vertrekt weg. Vergaderingen en de bezetting in de bouwer gebruiken `builderTeamVan()` |
 
 Op dezelfde ingangsdatum voert `voerGeplandeOvernamesUit()` de stappen uit op
 `id`, dus in de volgorde waarin de wissel ze invoegde. De vervanger krijgt team

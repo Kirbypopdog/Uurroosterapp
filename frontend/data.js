@@ -696,6 +696,46 @@ function geplandeWijzigingVoor(overnames, medewerkerId, datum) {
     return uit;
 }
 
+/**
+ * Wat een BEVESTIGDE wissel betekent voor de roosterbouwer. Puur.
+ *
+ * De bouwer werkt niet met datums maar met een patroon, en de concepten zijn
+ * bij het bevestigen al herschreven: de rij van de vertrekker is dan al die van
+ * de vervanger. De bouwer moet daarom NU al de nieuwe toestand tonen, niet pas
+ * op de ingangsdatum zoals de planning:
+ *  - wie een rooster overneemt, staat in het team van de vertrekker;
+ *  - wie vertrekt (en niet in dienst blijft) heeft geen rij meer: die is
+ *    doorgegeven, en een lege rij zou suggereren dat er iets te plannen valt.
+ */
+function conceptWijzigingVoor(overnames, medewerkerId) {
+    const id = String(medewerkerId);
+    let team = null;
+    let verborgen = false;
+    for (const o of (overnames || [])) {
+        if (String(o.nieuweGebruiker) === id && o.oudeTeam) team = o.oudeTeam;
+        if (String(o.oudeGebruiker) === id && !o.vertrekkerBlijftActief) verborgen = true;
+    }
+    return { team, verborgen };
+}
+
+/** De medewerkers zoals de roosterbouwer ze toont, met het team na een bevestigde wissel. */
+function builderMedewerkers(teamFilter) {
+    const plan = DataStore.geplandeOvernames || [];
+    return getAllEmployees(true)
+        .filter(e => !conceptWijzigingVoor(plan, e.id).verborgen)
+        .map(e => {
+            const w = conceptWijzigingVoor(plan, e.id);
+            return w.team ? { ...e, mainTeam: w.team } : e;
+        })
+        .filter(e => !teamFilter || e.mainTeam === teamFilter);
+}
+
+/** Het team van een medewerker in de bouwer (zie conceptWijzigingVoor). */
+function builderTeamVan(emp) {
+    if (!emp) return null;
+    return conceptWijzigingVoor(DataStore.geplandeOvernames, emp.id).team || emp.mainTeam || emp.main_team;
+}
+
 function getEmployee(id) {
     // Find in all users (employees are non-admin users)
     //
@@ -2480,6 +2520,7 @@ if (typeof module !== 'undefined' && module.exports) {
     // velden vullen die de functies eronder lezen.
     DataStore,
     geplandeWijzigingVoor,
+    conceptWijzigingVoor,
     parseDateOnly,
     formatDateYYYYMMDD,
     getMonday,
