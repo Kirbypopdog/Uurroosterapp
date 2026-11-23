@@ -631,6 +631,20 @@ async function replaceEmployee(oldUserId, replacementUserId, transferShiftsFrom 
     }
 }
 
+// Geplande overnames (vervangingen met een ingangsdatum in de toekomst).
+async function fetchGeplandeOvernames() {
+    const res = await dataApiFetch('/admin/geplande-overnames');
+    return (res && res.overnames) || [];
+}
+
+// Stopt alleen de geplande stap (team, uren, weekrooster, deactivatie). De
+// diensten die al verhuisd zijn blijven staan waar ze nu staan.
+async function annuleerGeplandeOvername(id) {
+    const res = await dataApiFetch(`/admin/geplande-overnames/${id}`, { method: 'DELETE' });
+    await Promise.all([refreshUsers(), refreshShifts()]);
+    return res;
+}
+
 function getEmployee(id) {
     // Find in all users (employees are non-admin users)
     //

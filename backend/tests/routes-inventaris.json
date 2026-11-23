@@ -1,5 +1,7 @@
 [
+  "DELETE /admin/geplande-overnames/:id",
   "DELETE /admin/users/:id",
+  "DELETE /api/v1/admin/geplande-overnames/:id",
   "DELETE /api/v1/admin/users/:id",
   "DELETE /api/v1/availability",
   "DELETE /api/v1/dag-activiteiten/:id",
@@ -26,8 +28,10 @@
   "DELETE /swap-requests/:id",
   "DELETE /teams/:id",
   "GET /admin/email-status",
+  "GET /admin/geplande-overnames",
   "GET /admin/users",
   "GET /api/v1/admin/email-status",
+  "GET /api/v1/admin/geplande-overnames",
   "GET /api/v1/admin/users",
   "GET /api/v1/audit-log",
   "GET /api/v1/availability",

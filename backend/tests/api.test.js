@@ -3434,6 +3434,47 @@ describe('POST /admin/users/:id/replace', () => {
 
   // Regressie #141: bij een lage medewerker-ID (bv. 3) mag de grid-remap enkel
   // de medewerker-sleutel hernoemen, niet de dag-van-de-week-index "3".
+  describe('geplande overnames bekijken en annuleren', () => {
+    const admin = () => `Bearer ${makeToken({ id: 1, role: 'admin', name: 'Admin', team_id: null })}`;
+
+    test('een medewerker mag de lijst niet zien', async () => {
+      mockActiveUser();
+      const res = await request(app).get('/api/v1/admin/geplande-overnames')
+        .set('Authorization', `Bearer ${makeToken({ id: 3, role: 'medewerker', name: 'Eva', team_id: 'vlot2' })}`);
+      expect(res.status).toBe(403);
+    });
+
+    test('de lijst toont alleen wat nog gepland is', async () => {
+      mockActiveUser();
+      pool.query.mockResolvedValueOnce({ rows: [{ id: 1, oudeNaam: 'Marie', nieuweNaam: 'Bryan', ingangsdatum: '2026-11-30' }] });
+      const res = await request(app).get('/api/v1/admin/geplande-overnames').set('Authorization', admin());
+      expect(res.status).toBe(200);
+      expect(res.body.overnames[0].nieuweNaam).toBe('Bryan');
+      const sql = pool.query.mock.calls.find(([q]) => typeof q === 'string' && q.includes('FROM geplande_overnames'))[0];
+      expect(sql).toMatch(/status = 'gepland'/);
+    });
+
+    test('annuleren zet de status op geannuleerd en raakt geen diensten', async () => {
+      mockActiveUser();
+      pool.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, oude_gebruiker: 119, nieuwe_gebruiker: 117, ingangsdatum: '2026-11-30' }] })
+        .mockResolvedValue({ rows: [] });
+      const res = await request(app).delete('/api/v1/admin/geplande-overnames/1').set('Authorization', admin());
+      expect(res.status).toBe(200);
+      expect(res.body.dienstenBlijvenStaan).toBe(true);
+      const sqls = pool.query.mock.calls.map(([q]) => (typeof q === 'string' ? q : ''));
+      expect(sqls.some(q => q.includes("SET status = 'geannuleerd'") && q.includes("status = 'gepland'"))).toBe(true);
+      expect(sqls.some(q => /UPDATE shifts|DELETE FROM shifts/.test(q))).toBe(false);
+    });
+
+    test('een overname die al uitgevoerd is, is niet meer te annuleren', async () => {
+      mockActiveUser();
+      pool.query.mockResolvedValueOnce({ rows: [] });
+      const res = await request(app).delete('/api/v1/admin/geplande-overnames/1').set('Authorization', admin());
+      expect(res.status).toBe(404);
+    });
+  });
+
   // Bryan wisselt van Vlot 1 naar Cargo: Justine neemt vanaf 26 november zijn
   // rooster over, en Bryan vanaf 30 november dat van Marie. Werd Bryan bij de
   // eerste overname gedeactiveerd, dan verviel de tweede ("niet actief").

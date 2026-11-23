@@ -100,6 +100,7 @@ zeiden niets nuttigs (#291). De kolom "doel" is wat telt.
 | `cdn-scripts.test.js` | Dat elke verwijzing naar een pakket-CDN in `index.html` een bestandspad én een vaste versie draagt (#396) |
 | `vervanging-concepten.test.js` | Dat `replaceEmployee()` na een vervanging ook de conceptencache ververst (#395) |
 | `overnames-blijft-actief.test.js` | Dat een geplande overname met "blijft in dienst" de vertrekker op de ingangsdatum niet deactiveert |
+| `vervang-venster.test.js` | Het vervangvenster: geplande overnames annuleren, en dat de botsingsmelding "Verwijderen" niet meer blind aanraadt |
 | `vervanging-verantwoordelijke.test.js` | Dat een vervanging ook de weekend- en vakantieverantwoordelijke overzet, en alleen vooruit (#398) |
 | `vakantieverantwoordelijke.test.js` | Dat de bouwer de waarheid is: opruimen van vertrokken aanduidingen, en de uitleg waar Instellingen op steunt (#399) |
 | `vrij-telt-mee.test.js` | Dat 'vrij' overal als afwezigheid telt, en dat één bron dat bepaalt (#400) |
@@ -241,6 +242,7 @@ dagelijkse samenvatting naast de directe mail aan het eigen team.
 ### Admin
 - `GET /api/v1/audit-log` - Audit log met filters en paginatie
 - `POST /api/v1/admin/users/:id/replace` - Medewerker vervangen
+- `GET|DELETE /api/v1/admin/geplande-overnames[/:id]` - Geplande overnames bekijken en annuleren (stopt alleen de stap op de ingangsdatum)
 - `PUT /api/v1/me/email-preferences` - Email notificatie voorkeur
 
 **Een medewerker vervangen.** Eén verzoek, maar twee momenten. Wat de planning
@@ -328,6 +330,21 @@ doorschuift (Bryan → Justine), dan die waarin hij zelf de vervanger is
 (Marie → Bryan). Omgekeerd zou de tweede Marie's diensten, die dan al bij Bryan
 staan, mee naar Justine schuiven, net als zijn plek in de concepten. De route
 weigert dat met een **409** en `volgorde: true`.
+
+**Een geplande overname annuleren** kan in het vervangvenster: bovenaan staat
+wat er voor die medewerker al gepland is, met een knop "Annuleren"
+(`GET` en `DELETE /admin/geplande-overnames[/:id]`). Annuleren stopt ALLEEN wat
+er op de ingangsdatum nog moest gebeuren — team, uren, weekrooster,
+deactivatie. De diensten die bij het instellen al verhuisd zijn blijven staan,
+en eigen diensten die met "Verwijderen" gewist zijn komen niet terug. Het
+venster en het antwoord zeggen dat allebei.
+
+Dat "Verwijderen" was precies wat in productie misging (23 november 2026): bij
+Marie → Bryan meldde de app botsingen met Bryans eigen Vlot 1-diensten, de
+melding raadde "Verwijderen" aan, en 121 diensten die naar Justine hadden
+moeten gaan verdwenen. Ze zijn uit het basisconcept opnieuw opgebouwd. De
+botsingsmelding raadt dat nu niet meer blind aan maar wijst op de volgorde, en
+de bevestiging zegt hoeveel diensten er verdwijnen.
 
 Openstaande ruil- en overnameverzoeken van of naar de vertrekker worden
 ingetrokken — maar pas op de ingangsdatum, want zolang zij werkt zijn ze geldig.

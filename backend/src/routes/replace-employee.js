@@ -217,11 +217,16 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
     );
     if (inkomend.rows.length > 0) {
       const r = inkomend.rows[0];
+      // Een datum in een zin die een mens leest, niet de ISO-vorm (CLAUDE.md).
+      const MAANDEN = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+      const [jj, mm, dd] = r.ingangsdatum.split('-').map(Number);
+      const datumTekst = `${dd} ${MAANDEN[mm - 1]} ${jj}`;
       await client.query('ROLLBACK').catch(() => {});
       return res.status(409).json({
-        error: `${oldUser.name} neemt vanaf ${r.ingangsdatum} zelf het rooster van ${r.van} over. ` +
-          `Die diensten zouden nu mee naar ${newUser.name} verhuizen. Annuleer die overname, ` +
-          `stel eerst deze vervanging in en daarna opnieuw die van ${r.van}.`,
+        error: `${oldUser.name} neemt vanaf ${datumTekst} zelf het rooster van ${r.van} over. ` +
+          `Die diensten zouden nu mee naar ${newUser.name} verhuizen. Annuleer die overname ` +
+          `(bij "Medewerker vervangen" van ${oldUser.name} of ${r.van}), stel eerst deze vervanging in ` +
+          `en daarna opnieuw die van ${r.van}.`,
         volgorde: true,
       });
     }
@@ -476,6 +481,55 @@ router.post('/admin/users/:id/replace', requireAuth, requireAdmin, async (req, r
   } finally {
     client.release();
   }
+});
+
+// Geplande overnames bekijken en annuleren. Zonder dit stond er in de
+// weigering bij een verkeerde volgorde "annuleer die overname", terwijl daar
+// nergens een knop voor was.
+//
+// Annuleren zet ALLEEN de geplande stap stop: team, uren, weekrooster en de
+// deactivatie op de ingangsdatum. De diensten die bij het instellen al
+// verhuisd zijn, blijven waar ze nu staan, en eventueel verwijderde eigen
+// diensten van de vervanger komen niet terug. Het antwoord zegt dat, zodat
+// het scherm het kan herhalen.
+router.get('/admin/geplande-overnames', requireAuth, requireAdmin, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT g.id, g.oude_gebruiker AS "oudeGebruiker", o.name AS "oudeNaam",
+            g.nieuwe_gebruiker AS "nieuweGebruiker", n.name AS "nieuweNaam",
+            g.ingangsdatum::text AS ingangsdatum,
+            g.vertrekker_blijft_actief AS "vertrekkerBlijftActief",
+            g.aangemaakt_door_naam AS "aangemaaktDoor", g.aangemaakt_op AS "aangemaaktOp"
+       FROM geplande_overnames g
+       JOIN users o ON o.id = g.oude_gebruiker
+       JOIN users n ON n.id = g.nieuwe_gebruiker
+      WHERE g.status = 'gepland'
+      ORDER BY g.ingangsdatum, g.id`
+  );
+  res.json({ overnames: rows });
+});
+
+router.delete('/admin/geplande-overnames/:id', requireAuth, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Ongeldig id' });
+  const { rows } = await pool.query(
+    `UPDATE geplande_overnames SET status = 'geannuleerd', uitgevoerd_op = NOW()
+      WHERE id = $1 AND status = 'gepland'
+      RETURNING id, oude_gebruiker, nieuwe_gebruiker, ingangsdatum::text AS ingangsdatum`,
+    [id]
+  );
+  if (rows.length === 0) {
+    return res.status(404).json({ error: 'Geen geplande overname gevonden (al uitgevoerd of al geannuleerd?)' });
+  }
+  await logAudit(req, 'UPDATE', 'user', String(rows[0].oude_gebruiker), {
+    type: 'geplande_overname_geannuleerd', geplandeOvername: id,
+    nieuweGebruiker: rows[0].nieuwe_gebruiker, ingangsdatum: rows[0].ingangsdatum,
+  });
+  res.json({
+    ok: true,
+    dienstenBlijvenStaan: true,
+    uitleg: 'De geplande stap is gestopt: team, uren, weekrooster en deactivatie gebeuren niet. ' +
+      'De diensten die al verhuisd zijn blijven staan waar ze nu staan.',
+  });
 });
 
 module.exports = router;
