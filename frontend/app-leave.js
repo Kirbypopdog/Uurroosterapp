@@ -898,8 +898,8 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
                 <div class="leave-banner leave-banner-warn">
                     Nog niet ingediend (${nogNiet.length}): ${nogNiet.map(m => namensKan
                         ? `<button type="button" class="leave-namens-link" data-leave-voor="${m.id}">${escapeHtml(m.name)}</button>`
-                        : escapeHtml(m.name)).join(', ')}
-                    ${namensKan ? '<div class="text-xs leave-namens-uitleg">Klik op een naam, hier of bovenaan een kolom, om voor die persoon in te vullen en in te dienen.</div>' : ''}
+                        : escapeHtml(m.name)).join(namensKan ? ' ' : ', ')}
+                    ${namensKan ? '<div class="text-xs leave-namens-uitleg">Klik op een naam om voor die persoon in te vullen en in te dienen.</div>' : ''}
                 </div>` : '<div class="leave-banner leave-banner-ok">Iedereen heeft ingediend.</div>'}
 
             <div class="leave-legend">
