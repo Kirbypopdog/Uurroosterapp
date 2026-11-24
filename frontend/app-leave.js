@@ -197,6 +197,154 @@ function leaveIkDoeMee() {
     return draaitMeeInVerlof({ ...volledig, ...ik, mainTeam: ik.mainTeam ?? volledig?.mainTeam });
 }
 
+// ===== AFSPRAKEN VAN EEN RONDE =====
+//
+// De afspraken voor de zomer stonden alleen op papier. Nu staan ze in de ronde
+// zelf (`leave_rounds.rules.afspraken`, tekst, één afspraak per regel) en
+// verschijnen ze bovenaan bij het invullen. Bij een voorkeurblok controleert
+// het invulscherm ze ook terwijl je klikt (`rules.controle`). Dat is een
+// HULP, geen slot: indienen blijft mogelijk, want er zijn altijd uitzonderingen
+// en de verdeling gebeurt achteraf toch door een mens.
+
+const LEAVE_ZOMER_AFSPRAKEN = [
+    'Iedereen duidt 2 weken ZEKER NIET (rood) aan en 2 weken LIEVER NIET (oranje).',
+    'Hou rekening met het aantal verlofdagen dat je hebt: minder verlof = meer groen aanduiden.',
+    'Iedereen werkt in de startweek (de laatste week van augustus).',
+    'Je mag maximum 3 weken na elkaar verlof nemen.',
+    'Hoe het verder gaat: de week waarin de meesten verlof vragen, wordt de sluitingsweek. Dan heeft iedereen verlof, en daarna kan er nog een en ander verschuiven.',
+].join('\n');
+
+const LEAVE_ZOMER_CONTROLE = { zekerNiet: 2, lieverNiet: 2, laatsteWeekWerken: true, maxAaneen: 3 };
+
+/** De `rules` die een nieuwe ronde meekrijgt. Puur. */
+function leaveRondeRegels(afspraken, heeftVoorkeurBlok) {
+    const regels = {};
+    const tekst = String(afspraken || '').trim();
+    if (tekst) regels.afspraken = tekst;
+    if (heeftVoorkeurBlok) regels.controle = { ...LEAVE_ZOMER_CONTROLE };
+    return regels;
+}
+
+/**
+ * Toetst de wensen van één voorkeurblok aan de afspraken. Puur.
+ * @param {Array<string|null|undefined>} statussen  per week: 'werken',
+ *        'liever_niet', 'zeker_niet', of leeg (nog niet / gemengd ingevuld)
+ * @returns {Array<{ok: boolean, tekst: string}>}
+ */
+function leaveZomerControle(statussen, controle) {
+    if (!controle || !statussen.length) return [];
+    const tel = s => statussen.filter(x => x === s).length;
+    const uit = [];
+    const aantal = (n, soort, label) => {
+        const heb = tel(soort);
+        uit.push({
+            ok: heb === n,
+            tekst: heb === n
+                ? `${n} ${n === 1 ? 'week' : 'weken'} ${label}`
+                : `${n} ${n === 1 ? 'week' : 'weken'} ${label}: je hebt er ${heb}`,
+        });
+    };
+    if (controle.zekerNiet != null) aantal(controle.zekerNiet, 'zeker_niet', 'Zeker niet');
+    if (controle.lieverNiet != null) aantal(controle.lieverNiet, 'liever_niet', 'Liever niet');
+    if (controle.laatsteWeekWerken) {
+        const laatste = statussen[statussen.length - 1];
+        uit.push({
+            ok: laatste === 'werken',
+            tekst: laatste === 'werken' || !laatste
+                ? 'Werken in de startweek (laatste week)'
+                : 'Werken in de startweek (laatste week): die staat nu op ' + (laatste === 'zeker_niet' ? 'Zeker niet' : 'Liever niet'),
+        });
+    }
+    if (controle.maxAaneen != null) {
+        let langste = 0, nu = 0;
+        statussen.forEach(s => {
+            nu = (s === 'zeker_niet' || s === 'liever_niet') ? nu + 1 : 0;
+            langste = Math.max(langste, nu);
+        });
+        uit.push({
+            ok: langste <= controle.maxAaneen,
+            tekst: langste <= controle.maxAaneen
+                ? `Hoogstens ${controle.maxAaneen} weken na elkaar verlof`
+                : `Hoogstens ${controle.maxAaneen} weken na elkaar verlof: je hebt er ${langste} na elkaar`,
+        });
+    }
+    return uit;
+}
+
+function leaveAfsprakenHtml(round) {
+    const tekst = round?.rules?.afspraken;
+    if (!tekst) return '';
+    const regels = String(tekst).split('\n').map(r => r.trim()).filter(Boolean);
+    return `
+        <div class="alert alert-info leave-afspraken">
+            ${IconHelper.html(ICONS.info || 'info', 'sm')}
+            <div>
+                <strong>Afspraken</strong>
+                <ul>${regels.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>
+            </div>
+        </div>`;
+}
+
+function leaveControleHtml(round, block, entryMap) {
+    if (block.mode !== 'voorkeur' || !round?.rules?.controle) return '';
+    const weken = leaveWeeksOfBlock(block).filter(w => w.openDays.length > 0);
+    const punten = leaveZomerControle(weken.map(w => weekStatus(w.openDays, entryMap)), round.rules.controle);
+    if (!punten.length) return '';
+    const allesOk = punten.every(p => p.ok);
+    return `
+        <div class="leave-controle ${allesOk ? 'is-ok' : ''}" id="leave-controle" aria-live="polite">
+            ${punten.map(p => `
+                <span class="leave-controle-punt ${p.ok ? 'is-ok' : 'is-open'}">
+                    ${IconHelper.html(p.ok ? 'check' : 'circle', 'xs')}${escapeHtml(p.tekst)}
+                </span>`).join('')}
+        </div>`;
+}
+
+/** De afspraken van een lopende ronde aanpassen (beheerder). */
+function bewerkLeaveAfspraken(round, blocks) {
+    const heeftVoorkeur = (blocks || []).some(b => b.mode === 'voorkeur');
+    const huidig = round?.rules?.afspraken ?? (heeftVoorkeur ? LEAVE_ZOMER_AFSPRAKEN : '');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal';
+    overlay.innerHTML = `
+        <div class="modal-content leave-afspraken-venster">
+            <div class="modal-header">
+                <h2>Afspraken voor ${escapeHtml(round.name)}</h2>
+                <button class="modal-close" aria-label="Sluiten">${IconHelper.html(ICONS.close, 'sm')}</button>
+            </div>
+            <div class="modal-body modal-body-padded">
+                <p class="text-muted text-sm">Medewerkers zien dit bovenaan bij het invullen. Eén afspraak per regel; leeg laten haalt ze weg.</p>
+                <textarea id="lr-afspraken-bewerk" class="form-input" rows="8">${escapeHtml(huidig)}</textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="lr-afspraken-annuleer">Annuleren</button>
+                <button class="btn btn-primary" id="lr-afspraken-bewaar">Bewaren</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    IconHelper.init(overlay);
+    const sluit = () => overlay.remove();
+    overlay.querySelector('.modal-close').addEventListener('click', sluit);
+    overlay.querySelector('#lr-afspraken-annuleer').addEventListener('click', sluit);
+    overlay.addEventListener('mousedown', e => { if (e.target === overlay) sluit(); });
+    overlay.querySelector('#lr-afspraken-bewaar').addEventListener('click', async () => {
+        const tekst = overlay.querySelector('#lr-afspraken-bewerk').value.trim();
+        // De rest van `rules` blijft staan; de controle komt erbij voor een
+        // zomerronde die nog van vóór de afspraken dateert.
+        const rules = { ...(round.rules || {}) };
+        if (tekst) rules.afspraken = tekst; else delete rules.afspraken;
+        if (heeftVoorkeur && !rules.controle) rules.controle = { ...LEAVE_ZOMER_CONTROLE };
+        try {
+            await dataApiFetch(`/leave-rounds/${round.id}`, { method: 'PUT', body: JSON.stringify({ rules }) });
+            sluit();
+            showToast('Afspraken bewaard', 'success');
+            renderLeave();
+        } catch (err) {
+            showToast('Bewaren mislukt: ' + getUserFriendlyError(err), 'error');
+        }
+    });
+}
+
 // ===== INVULLEN NAMENS IEMAND =====
 //
 // Een roosterverantwoordelijke of admin kan in het overzicht van iedereen op
@@ -426,6 +574,10 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
                 ${round.deadline ? `<p class="text-muted text-sm">Indienen bij voorkeur vóór ${leaveDatumKort(round.deadline)}</p>` : ''}
             </div>
             <div class="leave-header-actions">
+                ${canManageLeave() && round.status !== 'toegepast' ? `
+                    <button class="btn btn-sm btn-secondary" id="leave-afspraken-bewerk">
+                        ${IconHelper.html('pencil', 'xs')} Afspraken
+                    </button>` : ''}
                 ${canManageLeave() ? `
                     <button class="btn-icon-only leave-round-delete" id="leave-delete" data-tooltip="Ronde verwijderen" data-tooltip-pos="left" aria-label="Ronde verwijderen">
                         ${IconHelper.html(ICONS.delete, 'sm')}
@@ -449,6 +601,7 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
                 Volg de ronde op via <strong>Overzicht iedereen</strong>.
             </div>` : `
             ${renderLeaveStatusBanner(round, mySub, alleKlaar)}
+            ${leaveAfsprakenHtml(round)}
 
             ${groep('Kleine vakanties', klein)}
             ${groep('Zomer', zomer)}
@@ -556,6 +709,7 @@ function renderLeaveBlokScherm(round, block, entries, submissions) {
             </p>
             ${namens ? `<p class="leave-namens-tag">Voor ${escapeHtml(getEmployee(me)?.name || '')}</p>` : ''}
         </div>
+        ${leaveAfsprakenHtml(round)}
         <div class="leave-fill">
             <div class="leave-fill-toolbar">
                 <div class="leave-legend">
@@ -563,6 +717,7 @@ function renderLeaveBlokScherm(round, block, entries, submissions) {
                         `<span class="leave-legend-chip ${LEAVE_STATUS[s].klasse}">${LEAVE_STATUS[s].label}</span>`).join('')}
                 </div>
             </div>
+            ${leaveControleHtml(round, block, AppState.leaveDraft)}
             <div id="leave-fill-body">
                 ${renderLeaveFillWeeks(block, AppState.leaveDraft, bewerkbaar)}
             </div>
@@ -728,6 +883,20 @@ function leaveWeekWens(week, entryMap) {
     return null;
 }
 
+/**
+ * Per week: hoeveel mensen vroegen liever of zeker niet te werken. Puur.
+ * Gaat uit van wat er GEVRAAGD werd, niet van de verdeling: zo blijft de
+ * telling waarop de sluitingsweek gekozen wordt staan, ook nadat je die week
+ * aan iedereen gegeven hebt.
+ */
+function leaveVraagtVrijPerWeek(weken, medewerkers, gevraagdPerUser, perUser) {
+    return weken.map(w => medewerkers.filter(m => {
+        const map = gevraagdPerUser[Number(m.id)] || perUser[Number(m.id)] || {};
+        const wens = leaveWeekWens(w, map);
+        return wens === 'liever_niet' || wens === 'zeker_niet';
+    }).length);
+}
+
 // Het verdeelscherm: rijen zijn medewerkers, kolommen de weken van het blok.
 // Elke cel toont wat het voorstel is (kleur) én waarop dat gebaseerd is (de
 // wens als letter). Klikken wisselt tussen verlof en werken.
@@ -774,6 +943,8 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
 
     const aanHetWerk = weken.map(w =>
         medewerkers.filter(m => verdeling[Number(m.id)]?.[w.maandag] !== 'verlof').length);
+    const vraagtVrij = leaveVraagtVrijPerWeek(weken, medewerkers, gevraagdPerUser, perUser);
+    const meesteVrij = Math.max(0, ...vraagtVrij);
 
     // apply slaat niet-goedgekeurde mensen over, dus dat moet zichtbaar zijn
     // vóór je vastlegt — anders lijkt alles klaar en gebeurt er niets.
@@ -836,6 +1007,25 @@ function renderLeaveVerdeelScherm(round, block, entries, submissions) {
                         <td class="leave-matrix-day">Aan het werk</td>
                         ${aanHetWerk.map((n, i) => `
                             <td class="leave-matrix-count ${n <= 1 ? 'leave-druk' : ''}" data-weekteller="${weken[i].maandag}">${n}</td>`).join('')}
+                    </tr>
+                    ${/* De sluitingsweek: de week waarin de meesten vrij vroegen
+                          wordt een week waarin iedereen verlof heeft. Hier zie je
+                          per week hoeveel mensen liever of zeker niet werken, en
+                          met één klik geef je die week aan iedereen. */''}
+                    <tr class="leave-vraagt-vrij">
+                        <td class="leave-matrix-day">Vraagt vrij</td>
+                        ${vraagtVrij.map((n, i) => `
+                            <td class="leave-matrix-count ${n === meesteVrij && n > 0 ? 'leave-meeste-vrij' : ''}"
+                                data-tooltip="${n} ${n === 1 ? 'persoon vraagt' : 'mensen vragen'} liever of zeker niet te werken" data-tooltip-pos="top">${n}</td>`).join('')}
+                    </tr>
+                    <tr>
+                        <td class="leave-matrix-day">Sluitingsweek</td>
+                        ${weken.map(w => `
+                            <td class="leave-matrix-count">
+                                <button type="button" class="leave-sluitingsweek" data-sluitingsweek="${w.maandag}"
+                                    data-tooltip="Iedereen verlof in ${leaveWeekLabel(w)}" data-tooltip-pos="top"
+                                    aria-label="Iedereen verlof in ${leaveWeekLabel(w)}">${IconHelper.html('lock', 'xs')}</button>
+                            </td>`).join('')}
                     </tr>
                 </tfoot>
             </table>
@@ -1066,6 +1256,7 @@ function bindLeaveEvents(container, data) {
 
     container.querySelector('#leave-new-round')?.addEventListener('click', openLeaveRoundModal);
     container.querySelector('#leave-delete')?.addEventListener('click', () => deleteLeaveRound(round));
+    container.querySelector('#leave-afspraken-bewerk')?.addEventListener('click', () => bewerkLeaveAfspraken(round, blocks));
     container.querySelectorAll('[data-leave-voor]').forEach(k => k.addEventListener('click', () => {
         AppState.leaveVoorWie = Number(k.dataset.leaveVoor);
         AppState.leaveDraft = {};
@@ -1165,6 +1356,17 @@ function bindLeaveEvents(container, data) {
             }
         });
     });
+    container.querySelectorAll('[data-sluitingsweek]').forEach(k => k.addEventListener('click', () => {
+        const week = k.dataset.sluitingsweek;
+        if (!AppState.leaveVerdeling) return;
+        leaveDeelnemers().forEach(m => {
+            const uid = Number(m.id);
+            if (!AppState.leaveVerdeling[uid]) AppState.leaveVerdeling[uid] = {};
+            AppState.leaveVerdeling[uid][week] = 'verlof';
+        });
+        showToast('Iedereen heeft die week verlof. Pas de rest nog aan en leg de verdeling vast.', 'success');
+        renderLeave();
+    }));
     container.querySelector('#leave-verdeel-save')?.addEventListener('click', e =>
         saveLeaveVerdeling(data, e.currentTarget.dataset.block));
     container.querySelector('#leave-goto-overzicht')?.addEventListener('click', () => {
@@ -1222,6 +1424,13 @@ function refreshLeaveFillBody(blocks) {
     const bewerkbaar = round?.status === 'open' || canManageLeave();
     body.innerHTML = renderLeaveFillWeeks(block, AppState.leaveDraft, bewerkbaar);
     bindLeaveChoiceButtons(body, blocks);
+    // De controle op de afspraken loopt mee met elke klik.
+    const controle = document.getElementById('leave-controle');
+    if (controle) {
+        controle.outerHTML = leaveControleHtml(round, block, AppState.leaveDraft);
+        const nieuw = document.getElementById('leave-controle');
+        if (nieuw) IconHelper.init(nieuw);
+    }
 }
 
 // De verdeling wordt per DAG opgeslagen: de matrix, de export en apply werken
@@ -1735,11 +1944,17 @@ function renderLeavePeriodConcept(p) {
 }
 
 function openLeaveRoundModal() {
+    // Alleen vakanties die nog moeten komen, en standaard NIETS aangevinkt.
+    // Eerst stond elke vakantie hier aangevinkt, ook de voorbije en die van een
+    // ronde die al loopt: wie de zomerronde wilde starten, moest er vijf
+    // uitvinken en kreeg anders de kleine vakanties nog eens in een tweede ronde.
+    const vandaag = formatDateYYYYMMDD(new Date());
     const perioden = [...(DataStore.settings.holidayPeriods || [])]
+        .filter(p => (p.endDate || '') >= vandaag)
         .sort((a, b) => parseDateOnly(a.startDate) - parseDateOnly(b.startDate));
 
     if (!perioden.length) {
-        showToast('Voeg eerst vakantieperiodes toe bij Instellingen › Planning', 'warning');
+        showToast('Er staat geen komende vakantie in Instellingen › Planning. Voeg ze daar eerst toe.', 'warning');
         return;
     }
 
@@ -1773,10 +1988,10 @@ function openLeaveRoundModal() {
                             <label class="leave-period-row">
                                 <input type="checkbox" class="lr-period" value="${escapeHtml(String(p.id))}"
                                        data-name="${escapeHtml(p.name)}"
-                                       data-start="${escapeHtml(p.startDate)}" data-end="${escapeHtml(p.endDate)}" checked>
+                                       data-start="${escapeHtml(p.startDate)}" data-end="${escapeHtml(p.endDate)}">
                                 <span class="leave-period-name">
                                     <strong>${escapeHtml(p.name)}</strong>
-                                    <span class="text-muted text-xs">${escapeHtml(p.startDate)} – ${escapeHtml(p.endDate)}</span>
+                                    <span class="text-muted text-xs">${formatDateShortMetJaar(p.startDate)} – ${formatDateShortMetJaar(p.endDate)}</span>
                                     ${renderLeavePeriodConcept(p)}
                                 </span>
                                 <select class="form-input lr-period-mode">
@@ -1786,6 +2001,13 @@ function openLeaveRoundModal() {
                             </label>`).join('')}
                     </div>
                 </div>
+                <div class="form-group">
+                    <label class="form-label" for="lr-afspraken">Afspraken voor medewerkers <span class="text-muted">(optioneel)</span></label>
+                    <p class="text-muted text-xs mb-sm">
+                        Staan bovenaan bij het invullen. Eén afspraak per regel.
+                    </p>
+                    <textarea id="lr-afspraken" class="form-input" rows="7"></textarea>
+                </div>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="lr-cancel">Annuleren</button>
@@ -1794,6 +2016,19 @@ function openLeaveRoundModal() {
         </div>`;
     document.body.appendChild(overlay);
     IconHelper.init(overlay);
+
+    // Zodra er een voorkeurblok (de zomer) bij zit, staan de zomerafspraken er
+    // klaar. Wie de tekst zelf aanpaste, raken we niet meer aan.
+    const afsprakenVeld = overlay.querySelector('#lr-afspraken');
+    let afsprakenAangeraakt = false;
+    afsprakenVeld.addEventListener('input', () => { afsprakenAangeraakt = true; });
+    const heeftVoorkeurBlok = () => [...overlay.querySelectorAll('.lr-period')].some(cb =>
+        cb.checked && cb.closest('.leave-period-row').querySelector('.lr-period-mode').value === 'voorkeur');
+    const vulAfspraken = () => {
+        if (afsprakenAangeraakt) return;
+        afsprakenVeld.value = heeftVoorkeurBlok() ? LEAVE_ZOMER_AFSPRAKEN : '';
+    };
+    overlay.querySelectorAll('.lr-period, .lr-period-mode').forEach(el => el.addEventListener('change', vulAfspraken));
 
     const sluit = () => overlay.remove();
     overlay.querySelector('.modal-close').addEventListener('click', sluit);
@@ -1845,6 +2080,7 @@ function openLeaveRoundModal() {
                     name: naam,
                     deadline: overlay.querySelector('#lr-deadline').value || null,
                     blocks,
+                    rules: leaveRondeRegels(afsprakenVeld.value, blocks.some(b => b.mode === 'voorkeur')),
                     status: 'open'
                 })
             });
@@ -1882,5 +2118,9 @@ if (typeof module !== 'undefined' && module.exports) {
         leaveConceptVoorBlok,
         leaveBlokIsVerdeeld,
         leaveWensenBewaard,
+        leaveZomerControle,
+        leaveRondeRegels,
+        leaveVraagtVrijPerWeek,
+        LEAVE_ZOMER_AFSPRAKEN,
     };
 }

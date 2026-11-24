@@ -15080,3 +15080,24 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
     display: inline-block; margin: 6px 0 0; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
     background: var(--alert-warning-bg); color: var(--alert-warning-text); border: 1px solid var(--alert-warning-border);
 }
+
+/* Verlof: de afspraken van een ronde, en de controle terwijl je invult. */
+.leave-afspraken { margin: 0 0 14px; }
+.leave-afspraken ul { margin: 4px 0 0; padding-left: 18px; }
+.leave-afspraken li { margin: 2px 0; }
+.leave-controle { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.leave-controle-punt {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px;
+    font-size: 12px; border: 1px solid var(--alert-warning-border);
+    background: var(--alert-warning-bg); color: var(--alert-warning-text);
+}
+.leave-controle-punt.is-ok { border-color: var(--alert-ok-border); background: var(--alert-ok-bg); color: var(--alert-ok-text); }
+.leave-afspraken-venster { max-width: 560px; }
+.leave-afspraken-venster textarea, #lr-afspraken { resize: vertical; font-size: 13px; line-height: 1.5; }
+/* Verdeelscherm: de week waarin de meesten vrij vragen, en de knop sluitingsweek */
+.leave-meeste-vrij { font-weight: 700; background: var(--alert-warning-bg); color: var(--alert-warning-text); }
+.leave-sluitingsweek {
+    border: 1px solid var(--line-strong); background: var(--surface-color); color: var(--text-secondary);
+    border-radius: 999px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.leave-sluitingsweek:hover, .leave-sluitingsweek:focus-visible { background: var(--primary-color); border-color: var(--primary-color); color: white; outline: none; }
