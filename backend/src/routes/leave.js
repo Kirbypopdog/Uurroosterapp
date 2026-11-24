@@ -139,6 +139,30 @@ router.get('/leave-rounds/:id', requireAuth, async (req, res) => {
   }
 });
 
+// De mail "er is een verlofronde geopend", naar iedereen die meedoet.
+// Na de commit en buiten het antwoord om: een haperende mailservice mag het
+// openen zelf niet laten mislukken.
+//
+// Hij vertrok alleen bij een PUT naar 'open'. Een ronde die meteen open
+// AANGEMAAKT werd (de knop "Ronde openen" in het startvenster) stuurde dus
+// niets, terwijl het scherm deed alsof iedereen bericht kreeg.
+function stuurOpeningsmail(ronde) {
+  (async () => {
+    try {
+      const [ontvangers, blokken] = await Promise.all([
+        ontvangersVanRonde(),
+        pool.query(
+          `SELECT name, start_date::text AS "startDate", end_date::text AS "endDate"
+             FROM leave_round_blocks WHERE round_id = $1 ORDER BY sort_order, start_date`,
+          [ronde.id])
+      ]);
+      await verstuurRondeGeopend(ontvangers, ronde, blokken.rows);
+    } catch (e) {
+      console.error('[verlofmail] ronde geopend:', e.message);
+    }
+  })();
+}
+
 // Een ronde wordt aangemaakt mét zijn blokken (de vakanties van het
 // schooljaar). De ronde-datums zijn de omhullende van die blokken.
 router.post('/leave-rounds', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), async (req, res) => {
@@ -188,6 +212,9 @@ router.post('/leave-rounds', requireAuth, requireRole(...LEAVE_MANAGER_ROLES), a
     }
     await client.query('COMMIT');
     await logAudit(req, 'CREATE', 'settings', String(round.id), { type: 'leave_round', name, blocks: blocks.length });
+    // Een CONCEPT is alleen zichtbaar voor beheerders en mailt niemand; dat
+    // gebeurt pas bij het openen (PUT naar 'open').
+    if (round.status === 'open') stuurOpeningsmail(round);
     res.json({ round });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -263,23 +290,7 @@ router.put('/leave-rounds/:id', requireAuth, requireRole(...LEAVE_MANAGER_ROLES)
     // Na de commit en buiten het antwoord om: een haperende mailservice mag
     // het openen zelf niet laten mislukken.
     const gingOpen = status === 'open' && huidige.rows[0].status !== 'open';
-    if (gingOpen) {
-      const ronde = result.rows[0];
-      (async () => {
-        try {
-          const [ontvangers, blokken] = await Promise.all([
-            ontvangersVanRonde(),
-            pool.query(
-              `SELECT name, start_date::text AS "startDate", end_date::text AS "endDate"
-                 FROM leave_round_blocks WHERE round_id = $1 ORDER BY sort_order, start_date`,
-              [req.params.id])
-          ]);
-          await verstuurRondeGeopend(ontvangers, ronde, blokken.rows);
-        } catch (e) {
-          console.error('[verlofmail] ronde geopend:', e.message);
-        }
-      })();
-    }
+    if (gingOpen) stuurOpeningsmail(result.rows[0]);
 
     res.json({ round: result.rows[0] });
   } catch (err) {
