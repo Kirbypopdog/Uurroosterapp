@@ -4278,6 +4278,61 @@ describe('Verlofrondes', () => {
     expect(pool.query.mock.calls.some(([q]) => /INSERT INTO leave_round_submissions/.test(q))).toBe(false);
   });
 
+  // Wie niet op tijd invulde: een beheerder dient NAMENS hem in, ook in een
+  // gesloten ronde. Zonder dit bleef die persoon op "nog niet ingediend" staan.
+  test('POST submit namens iemand: een beheerder mag het, ook in een gesloten ronde', async () => {
+    const roosterverantw = { id: 4, name: 'Anna', role: 'roosterverantwoordelijke', team_id: 'cargo' };
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ role: 'medewerker', main_team: 'vlot2' }] }) // de doelpersoon
+      .mockResolvedValueOnce({ rows: [] })                                          // leaveTeams
+      .mockResolvedValueOnce({ rows: [{ status: 'gesloten' }] })
+      .mockResolvedValue({ rows: [] });
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/submit')
+      .set('Authorization', `Bearer ${makeToken(roosterverantw)}`)
+      .send({ userId: 3 });
+    expect(res.status).toBe(200);
+    const schrijf = pool.query.mock.calls.find(([q]) => /INSERT INTO leave_round_submissions/.test(q));
+    expect(schrijf[1]).toEqual(['6', 3]);
+  });
+
+  test('POST submit namens iemand: een medewerker mag het niet', async () => {
+    mockActiveUser();
+    pool.query.mockResolvedValue({ rows: [] });
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/submit')
+      .set('Authorization', `Bearer ${makeToken(medewerker)}`)
+      .send({ userId: 5 });
+    expect(res.status).toBe(403);
+    expect(pool.query.mock.calls.some(([q]) => /INSERT INTO leave_round_submissions/.test(q))).toBe(false);
+  });
+
+  test('POST submit namens iemand: niet meer na het toepassen', async () => {
+    mockActiveUser();
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ role: 'medewerker', main_team: 'vlot2' }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ status: 'toegepast' }] })
+      .mockResolvedValue({ rows: [] });
+    const res = await request(app)
+      .post('/api/v1/leave-rounds/6/submit')
+      .set('Authorization', `Bearer ${makeToken(beheerder)}`)
+      .send({ userId: 3 });
+    expect(res.status).toBe(403);
+  });
+
+  test('in het overzicht van iedereen klikt een beheerder op een naam om in te vullen', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const bron = fs.readFileSync(path.join(__dirname, '../../frontend/app-leave.js'), 'utf8');
+    expect(bron).toContain('data-leave-voor=');
+    expect(bron).toMatch(/JSON\.stringify\(\{ userId: me \}\)/);
+    expect(bron).toMatch(/namens \? \{ entries, userId: me \}/);
+    // Alleen zolang de ronde niet verwerkt is, zoals de backend.
+    expect(bron).toMatch(/function leaveKanNamensInvullen\(status\) \{\s*return status === 'open' \|\| status === 'gesloten';/);
+  });
+
   test('POST submit blijft werken voor een medewerker (#309)', async () => {
     mockActiveUser();
     pool.query

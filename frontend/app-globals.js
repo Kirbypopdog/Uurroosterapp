@@ -21,6 +21,7 @@ const AppState = {
     leaveScreen: 'landing',   // 'landing' | 'blok' | 'overzicht'
     leaveBlockId: null,       // welke vakantie staat open
     leaveDraft: {},           // { 'YYYY-MM-DD': status } vóór opslaan
+    leaveVoorWie: null,       // beheerder vult in namens deze medewerker (id), of null
     schedulesGenerated: false, // Flag to prevent duplicate auto-generation
     currentWeekStart: null,
     // #331: gezet wanneer de diensten voor de zichtbare week niet geladen

@@ -15057,3 +15057,16 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
     .wissel-actiebalk-knoppen { width: 100%; }
     .wissel-actiebalk-knoppen .btn { flex: 1; }
 }
+
+/* Verlof: een beheerder vult in namens iemand (Overzicht iedereen). */
+.leave-namens-link {
+    background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer;
+    text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;
+}
+.leave-namens-link:hover, .leave-namens-link:focus-visible { text-decoration-style: solid; }
+.leave-namens-uitleg { margin-top: 4px; opacity: .85; }
+.leave-namens { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.leave-namens-tag {
+    display: inline-block; margin: 6px 0 0; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    background: var(--alert-warning-bg); color: var(--alert-warning-text); border: 1px solid var(--alert-warning-border);
+}
