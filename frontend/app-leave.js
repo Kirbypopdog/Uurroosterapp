@@ -584,6 +584,11 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
             </div>
         </div>
 
+        ${round.status === 'concept' && canManageLeave() ? `
+            <div class="leave-banner leave-banner-info leave-namens">
+                <span><strong>Concept.</strong> Alleen beheerders zien deze ronde; medewerkers zien ze nog niet en er is nog geen mail vertrokken.</span>
+                <button class="btn btn-sm btn-primary leave-concept-open">Ronde openen</button>
+            </div>` : ''}
         ${namens ? `
             <div class="leave-banner leave-banner-warn leave-namens">
                 <span>Je vult in voor <strong>${escapeHtml(naamDoel)}</strong>.${round.status === 'gesloten' ? ' De ronde is gesloten, maar als beheerder kan je dit nog doen.' : ''}
@@ -734,7 +739,8 @@ function renderLeaveOverzichtScherm(round, blocks, entries, submissions) {
 }
 
 function renderLeaveStatusBanner(round, mySub, alleKlaar) {
-    if (round.status === 'concept')   return '<div class="leave-banner leave-banner-info">Nog een concept, dus nog niet zichtbaar voor medewerkers.</div>';
+    // Een concept krijgt zijn eigen balk bovenaan de rondepagina, met de knop.
+    if (round.status === 'concept')   return '';
     if (round.status === 'toegepast') return '<div class="leave-banner leave-banner-ok">Verwerkt. Het verlof staat in de planning.</div>';
     if (round.status === 'gesloten')  return '<div class="leave-banner leave-banner-info">Deze ronde is gesloten.</div>';
     if (mySub?.approved === true)     return '<div class="leave-banner leave-banner-ok">Je verlof is goedgekeurd.</div>';
@@ -1209,6 +1215,7 @@ function renderLeaveManagerActions(round, medewerkers, subMap, nogNiet, blocks =
                         </div>`).join('')}
                 </div>` : '<p class="text-muted text-sm">Niets te beoordelen.</p>'}
             <div class="leave-manager-actions">
+                ${round.status === 'concept' ? '<button class="btn btn-primary leave-concept-open">Ronde openen</button>' : ''}
                 ${round.status === 'open' ? `<button class="btn btn-secondary" id="leave-close" data-open="${nogNiet.length}">Ronde sluiten</button>` : ''}
                 ${/* #397: met de hand herinneren. Er gaat ook automatisch een
                       herinnering uit (7 en 2 dagen vóór de deadline), maar die
@@ -1256,6 +1263,7 @@ function bindLeaveEvents(container, data) {
     container.querySelector('#leave-new-round')?.addEventListener('click', openLeaveRoundModal);
     container.querySelector('#leave-delete')?.addEventListener('click', () => deleteLeaveRound(round));
     container.querySelector('#leave-afspraken-bewerk')?.addEventListener('click', () => bewerkLeaveAfspraken(round, blocks));
+    container.querySelectorAll('.leave-concept-open').forEach(k => k.addEventListener('click', () => openConceptRonde(round)));
     container.querySelectorAll('[data-leave-voor]').forEach(k => k.addEventListener('click', () => {
         AppState.leaveVoorWie = Number(k.dataset.leaveVoor);
         AppState.leaveDraft = {};
@@ -2010,6 +2018,8 @@ function openLeaveRoundModal() {
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="lr-cancel">Annuleren</button>
+                <button class="btn btn-secondary" id="lr-concept"
+                    data-tooltip="Alleen zichtbaar voor beheerders. Niemand krijgt een mail." data-tooltip-pos="top">Als concept bewaren</button>
                 <button class="btn btn-primary" id="lr-save">Ronde openen</button>
             </div>
         </div>`;
@@ -2034,7 +2044,10 @@ function openLeaveRoundModal() {
     overlay.querySelector('#lr-cancel').addEventListener('click', sluit);
     overlay.addEventListener('mousedown', e => { if (e.target === overlay) sluit(); });
 
-    overlay.querySelector('#lr-save').addEventListener('click', async () => {
+    // Twee knoppen, één weg: als CONCEPT is de ronde alleen zichtbaar voor
+    // admin en roosterverantwoordelijke en krijgt niemand mail. Openen kan
+    // later met "Ronde openen" bovenaan de ronde.
+    const maak = async (alsConcept) => {
         const naam = overlay.querySelector('#lr-name').value.trim();
         if (!naam) { showToast('Geef de ronde een naam', 'warning'); return; }
 
@@ -2080,20 +2093,46 @@ function openLeaveRoundModal() {
                     deadline: overlay.querySelector('#lr-deadline').value || null,
                     blocks,
                     rules: leaveRondeRegels(afsprakenVeld.value, blocks.some(b => b.mode === 'voorkeur')),
-                    status: 'open'
+                    status: alsConcept ? 'concept' : 'open'
                 })
             });
             sluit();
             AppState.leaveRoundId = res.round.id;
             AppState.leaveDraft = {};
             AppState.leaveScreen = 'landing';
-            showToast(`Verlofronde "${naam}" geopend`, 'success');
+            showToast(alsConcept
+                ? `Concept "${naam}" bewaard. Medewerkers zien het nog niet.`
+                : `Verlofronde "${naam}" geopend. Iedereen die meedoet krijgt een mail.`, 'success');
             renderLeave();
         } catch (err) {
             console.error('Ronde aanmaken mislukt:', err);
             showToast('Aanmaken mislukt: ' + getUserFriendlyError(err), 'error');
         }
+    };
+    overlay.querySelector('#lr-concept').addEventListener('click', () => maak(true));
+    overlay.querySelector('#lr-save').addEventListener('click', async () => {
+        const aantal = leaveDeelnemers().length;
+        if (!await showConfirm(
+            `De ronde gaat meteen open: ${aantal} medewerker${aantal === 1 ? '' : 's'} zien ze en krijgen een mail.\n\nWil je ze eerst nog nakijken, kies dan "Als concept bewaren".`,
+            'Ronde openen', { confirmText: 'Openen en mailen' })) return;
+        maak(false);
     });
+}
+
+// Een concept openen: vanaf nu zichtbaar voor iedereen die meedoet, en zij
+// krijgen de mail. Dat laatste doet de backend bij de overgang naar 'open'.
+async function openConceptRonde(round) {
+    const aantal = leaveDeelnemers().length;
+    if (!await showConfirm(
+        `${aantal} medewerker${aantal === 1 ? '' : 's'} zien "${round.name}" vanaf nu en krijgen een mail.`,
+        'Ronde openen', { confirmText: 'Openen en mailen' })) return;
+    try {
+        await dataApiFetch(`/leave-rounds/${round.id}`, { method: 'PUT', body: JSON.stringify({ status: 'open' }) });
+        showToast('Ronde geopend. De mail is onderweg.', 'success');
+        renderLeave();
+    } catch (err) {
+        showToast('Openen mislukt: ' + getUserFriendlyError(err), 'error');
+    }
 }
 
 // De pure helpers (weekindeling, gesloten dagen, voortgang) hebben geen DOM
