@@ -1104,7 +1104,15 @@ function bindLeaveEvents(container, data) {
         // Het gedrag was bovendien niet consistent: bij het hertekenen wint de
         // serverwaarde in de merge, dus een gewijzigde dag werd wél
         // teruggedraaid en een gloednieuwe dag bleef hangen.
-        const blok = blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
+        // Alleen vanuit het invulscherm van één vakantie. Deze knop staat ook
+        // op het overzicht van iedereen, en daar bleef `leaveBlockId` hangen
+        // van de laatst geopende vakantie. Na het invullen namens iemand is de
+        // draft leeg, dus vergeleek hij die met je EIGEN invulling en meldde
+        // hij "Je wijzigingen in Herfst 2027 zijn nog niet bewaard" terwijl er
+        // niets te bewaren was.
+        const blok = AppState.leaveScreen === 'blok'
+            ? blocks.find(b => String(b.id) === String(AppState.leaveBlockId))
+            : null;
         if (blok) {
             const serverMap = leaveServerMap(data.entries);
             if (leaveBlockGewijzigd(blok, serverMap)) {
