@@ -898,8 +898,8 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
                 <div class="leave-banner leave-banner-warn">
                     Nog niet ingediend (${nogNiet.length}): ${nogNiet.map(m => namensKan
                         ? `<button type="button" class="leave-namens-link" data-leave-voor="${m.id}">${escapeHtml(m.name)}</button>`
-                        : escapeHtml(m.name)).join(', ')}
-                    ${namensKan ? '<div class="text-xs leave-namens-uitleg">Klik op een naam, hier of bovenaan een kolom, om voor die persoon in te vullen en in te dienen.</div>' : ''}
+                        : escapeHtml(m.name)).join(namensKan ? ' ' : ', ')}
+                    ${namensKan ? '<div class="text-xs leave-namens-uitleg">Klik op een naam om voor die persoon in te vullen en in te dienen.</div>' : ''}
                 </div>` : '<div class="leave-banner leave-banner-ok">Iedereen heeft ingediend.</div>'}
 
             <div class="leave-legend">
@@ -1104,7 +1104,15 @@ function bindLeaveEvents(container, data) {
         // Het gedrag was bovendien niet consistent: bij het hertekenen wint de
         // serverwaarde in de merge, dus een gewijzigde dag werd wél
         // teruggedraaid en een gloednieuwe dag bleef hangen.
-        const blok = blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
+        // Alleen vanuit het invulscherm van één vakantie. Deze knop staat ook
+        // op het overzicht van iedereen, en daar bleef `leaveBlockId` hangen
+        // van de laatst geopende vakantie. Na het invullen namens iemand is de
+        // draft leeg, dus vergeleek hij die met je EIGEN invulling en meldde
+        // hij "Je wijzigingen in Herfst 2027 zijn nog niet bewaard" terwijl er
+        // niets te bewaren was.
+        const blok = AppState.leaveScreen === 'blok'
+            ? blocks.find(b => String(b.id) === String(AppState.leaveBlockId))
+            : null;
         if (blok) {
             const serverMap = leaveServerMap(data.entries);
             if (leaveBlockGewijzigd(blok, serverMap)) {

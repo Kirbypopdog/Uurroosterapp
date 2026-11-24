@@ -15059,11 +15059,21 @@ body.dark-mode .issue-details-level-error .issue-details-rule { color: var(--ale
 }
 
 /* Verlof: een beheerder vult in namens iemand (Overzicht iedereen). */
+/* Een naam als PILLETJE: dat leest als iets om op te klikken, waar een
+   onderstreping in een tabelkop gewoon rommelig oogde. */
 .leave-namens-link {
-    background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer;
-    text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;
+    display: inline-flex; align-items: center; max-width: 100%;
+    padding: 2px 10px; border-radius: 999px; cursor: pointer;
+    font: inherit; font-size: 12px; font-weight: 600; line-height: 1.5; white-space: nowrap;
+    background: var(--surface-color); color: var(--text-primary);
+    border: 1px solid var(--line-strong);
+    transition: background .12s, border-color .12s, color .12s;
 }
-.leave-namens-link:hover, .leave-namens-link:focus-visible { text-decoration-style: solid; }
+.leave-namens-link:hover, .leave-namens-link:focus-visible {
+    background: var(--primary-color); border-color: var(--primary-color); color: white;
+    outline: none;
+}
+.leave-banner .leave-namens-link { margin: 2px 2px; }
 .leave-namens-uitleg { margin-top: 4px; opacity: .85; }
 .leave-namens { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .leave-namens-tag {

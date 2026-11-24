@@ -114,3 +114,11 @@ describe('in de app', () => {
     expect(R).toMatch(/leaveTeams:\s+'array'/);
   });
 });
+
+describe('terug vanaf het overzicht van iedereen', () => {
+  test('vraagt niet naar onbewaarde wijzigingen: dat geldt alleen in het invulscherm', () => {
+    const bron = F('app-leave.js');
+    const blok = bron.slice(bron.indexOf("querySelector('#leave-back')?.addEventListener"));
+    expect(blok.slice(0, 2500)).toMatch(/const blok = AppState\.leaveScreen === 'blok'\s*\?/);
+  });
+});
