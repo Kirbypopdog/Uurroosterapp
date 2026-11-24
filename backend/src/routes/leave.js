@@ -618,18 +618,36 @@ router.put('/leave-rounds/:id/entries', requireAuth, async (req, res) => {
 });
 
 // Indienen (medewerker bevestigt zijn invulling)
+//
+// Een beheerder (admin of roosterverantwoordelijke) kan ook NAMENS iemand
+// indienen, met `userId` in de body, en dat ook nog in een gesloten ronde. Dat
+// is voor wie niet op tijd invulde: de beheerder neemt het dan over in het
+// overzicht van iedereen. Invullen voor een ander kon de server al
+// (`PUT /entries` met userId); zonder deze stap bleef die persoon eeuwig op
+// "nog niet ingediend" staan en kreeg hij nog herinneringsmails.
 router.post('/leave-rounds/:id/submit', requireAuth, async (req, res) => {
   try {
+    const { userId } = req.body || {};
+    const namens = userId != null && Number(userId) !== Number(req.user.id);
+    if (namens && !isLeaveManager(req.user)) {
+      return res.status(403).json({ error: 'Je kan enkel je eigen verlof indienen' });
+    }
+    const doelId = namens ? Number(userId) : req.user.id;
+
     // #309: zie de toelichting bij isRoosterMedewerker. Indienen met een
     // adminaccount leverde een indiening op die nergens terechtkwam.
-    if (!isRoosterMedewerker(req.user.role)) {
+    if (!namens && !isRoosterMedewerker(req.user.role)) {
       return res.status(403).json({
         error: 'Een beheeraccount draait niet mee in het rooster en kan geen verlof indienen.'
       });
     }
 
-    const ikRes = await pool.query('SELECT role, main_team FROM users WHERE id = $1', [req.user.id]);
-    if (!doetMeeAanVerlof(ikRes.rows[0] || { role: req.user.role }, await verlofTeams())) {
+    const doelRes = await pool.query('SELECT role, main_team FROM users WHERE id = $1', [doelId]);
+    if (namens && doelRes.rows.length === 0) return res.status(404).json({ error: 'Medewerker niet gevonden' });
+    if (namens && !isRoosterMedewerker(doelRes.rows[0].role)) {
+      return res.status(403).json({ error: 'Dit account draait niet mee in het rooster.' });
+    }
+    if (!doetMeeAanVerlof(doelRes.rows[0] || { role: req.user.role }, await verlofTeams())) {
       return res.status(403).json({
         error: 'Dit team vraagt zijn verlof niet aan via een verlofronde.'
       });
@@ -637,16 +655,21 @@ router.post('/leave-rounds/:id/submit', requireAuth, async (req, res) => {
 
     const roundRes = await pool.query('SELECT status FROM leave_rounds WHERE id = $1', [req.params.id]);
     if (roundRes.rows.length === 0) return res.status(404).json({ error: 'Ronde niet gevonden' });
-    if (roundRes.rows[0].status !== 'open') return res.status(403).json({ error: 'Deze ronde is gesloten' });
+    const status = roundRes.rows[0].status;
+    // Een beheerder mag namens iemand indienen zolang de ronde nog niet in de
+    // planning verwerkt is; een medewerker alleen zolang ze openstaat.
+    const toegelaten = namens ? (status === 'open' || status === 'gesloten') : status === 'open';
+    if (!toegelaten) return res.status(403).json({ error: 'Deze ronde is gesloten' });
 
     await pool.query(
       `INSERT INTO leave_round_submissions (round_id, user_id, submitted_at)
        VALUES ($1, $2, NOW())
        ON CONFLICT (round_id, user_id)
        DO UPDATE SET submitted_at = NOW(), approved = NULL, approved_by = NULL, approved_at = NULL`,
-      [req.params.id, req.user.id]
+      [req.params.id, doelId]
     );
-    await logAudit(req, 'UPDATE', 'settings', req.params.id, { type: 'leave_round_submit' });
+    await logAudit(req, 'UPDATE', 'settings', req.params.id,
+      namens ? { type: 'leave_round_submit', namens: doelId } : { type: 'leave_round_submit' });
     res.json({ ok: true });
   } catch (err) {
     console.error('Error submitting leave round:', err);

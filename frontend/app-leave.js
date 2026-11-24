@@ -197,6 +197,27 @@ function leaveIkDoeMee() {
     return draaitMeeInVerlof({ ...volledig, ...ik, mainTeam: ik.mainTeam ?? volledig?.mainTeam });
 }
 
+// ===== INVULLEN NAMENS IEMAND =====
+//
+// Een roosterverantwoordelijke of admin kan in het overzicht van iedereen op
+// een naam klikken en dan voor die persoon invullen en indienen, ook als de
+// ronde al gesloten is. Voor wie niet op tijd kon invullen.
+// `AppState.leaveVoorWie` is dan diens id; anders null en vul je voor jezelf in.
+
+/** Voor wie wordt er nu ingevuld? Het id als getal. */
+function leaveDoelId() {
+    const voor = AppState.leaveVoorWie;
+    return voor != null && canManageLeave() ? Number(voor) : Number(AppState.currentUser?.id);
+}
+function leaveNamens() {
+    return AppState.leaveVoorWie != null && canManageLeave()
+        && Number(AppState.leaveVoorWie) !== Number(AppState.currentUser?.id);
+}
+/** Mag de beheerder in deze ronde nog namens iemand invullen? Puur. */
+function leaveKanNamensInvullen(status) {
+    return status === 'open' || status === 'gesloten';
+}
+
 // ===== HOOFDWEERGAVE =====
 
 async function renderLeave() {
@@ -328,6 +349,7 @@ function bindLeaveRoundsOverview(container) {
             AppState.leaveRoundId = Number(card.dataset.openRound);
             AppState.leaveScreen = 'landing';
             AppState.leaveDraft = {};
+            AppState.leaveVoorWie = null;
             renderLeave();
         }));
 }
@@ -349,7 +371,7 @@ function renderLeaveRoundHtml(rounds, data) {
         // draait niet mee in het rooster. De kaarten die erheen leiden zijn voor
         // die rol al weg; deze regel vangt een blijven hangen leaveScreen op,
         // want die overleeft een hertekening.
-        const block = !leaveIkDoeMee()
+        const block = !leaveIkDoeMee() && !leaveNamens()
             ? null
             : blocks.find(b => String(b.id) === String(AppState.leaveBlockId));
         if (block) return renderLeaveBlokScherm(round, block, entries, submissions);
@@ -361,7 +383,9 @@ function renderLeaveRoundHtml(rounds, data) {
 // ===== LANDINGSPAGINA =====
 
 function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
-    const me = Number(AppState.currentUser?.id);
+    const me = leaveDoelId();
+    const namens = leaveNamens();
+    const naamDoel = namens ? (getEmployee(me)?.name || 'deze medewerker') : '';
     const mySub = submissions.find(s => Number(s.userId) === me);
     const entryMap = {};
     entries.filter(e => Number(e.userId) === me).forEach(e => { entryMap[e.date] = e.status; });
@@ -385,8 +409,8 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
     // getEffectiveRole(): een admin die een rol simuleert heeft nog steeds een
     // adminaccount, dus indienen zou nog steeds tot niets leiden. De backend
     // weigert het nu ook.
-    const doetNietMee = !leaveIkDoeMee();
-    const bewerkbaar = round.status === 'open' && !doetNietMee;
+    const doetNietMee = !namens && !leaveIkDoeMee();
+    const bewerkbaar = namens ? leaveKanNamensInvullen(round.status) : (round.status === 'open' && !doetNietMee);
 
     const groep = (titel, lijst) => !lijst.length ? '' : `
         <div class="leave-group">
@@ -409,7 +433,15 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
             </div>
         </div>
 
-        ${doetNietMee ? `
+        ${namens ? `
+            <div class="leave-banner leave-banner-warn leave-namens">
+                <span>Je vult in voor <strong>${escapeHtml(naamDoel)}</strong>.${round.status === 'gesloten' ? ' De ronde is gesloten, maar als beheerder kan je dit nog doen.' : ''}
+                ${mySub?.submittedAt ? ' Er is al ingediend; opnieuw indienen vervangt dat.' : ''}</span>
+                <button class="btn btn-sm btn-secondary" id="leave-namens-stop">Stoppen</button>
+            </div>
+            ${groep('Kleine vakanties', klein)}
+            ${groep('Zomer', zomer)}
+        ` : doetNietMee ? `
             <div class="leave-banner leave-banner-info">
                 ${AppState.currentUser?.role === 'admin'
                     ? 'Dit beheeraccount draait niet mee in het rooster, dus er valt voor jou geen verlof in te vullen.'
@@ -424,9 +456,9 @@ function renderLeaveLanding(rounds, round, blocks, entries, submissions) {
 
         <div class="leave-landing-actions">
             ${bewerkbaar ? `<button class="btn btn-primary" id="leave-submit" ${alleKlaar ? '' : 'disabled'}>
-                ${mySub?.submittedAt ? 'Opnieuw indienen' : 'Indienen'}
+                ${namens ? `Indienen namens ${escapeHtml(naamDoel)}` : (mySub?.submittedAt ? 'Opnieuw indienen' : 'Indienen')}
             </button>` : ''}
-            <button class="btn btn-secondary" id="leave-goto-overzicht">Overzicht iedereen</button>
+            ${namens ? '' : '<button class="btn btn-secondary" id="leave-goto-overzicht">Overzicht iedereen</button>'}
         </div>
         ${bewerkbaar && !alleKlaar
             ? '<p class="text-muted text-xs leave-submit-hint">Vul alle vakanties in om te kunnen indienen.</p>'
@@ -468,7 +500,7 @@ function leaveBlockDates(block) {
 
 /** De invulling zoals ze op de server staat, voor de ingelogde gebruiker. */
 function leaveServerMap(entries) {
-    const me = Number(AppState.currentUser?.id);
+    const me = leaveDoelId();
     const map = {};
     (entries || []).filter(e => Number(e.userId) === me).forEach(e => { map[e.date] = e.status; });
     return map;
@@ -504,7 +536,8 @@ function leaveDatumKort(iso) {
 // ===== DETAIL: één vakantie =====
 
 function renderLeaveBlokScherm(round, block, entries, submissions) {
-    const me = Number(AppState.currentUser?.id);
+    const me = leaveDoelId();
+    const namens = leaveNamens();
     const entryMap = {};
     entries.filter(e => Number(e.userId) === me).forEach(e => { entryMap[e.date] = e.status; });
     AppState.leaveDraft = { ...(AppState.leaveDraft || {}), ...entryMap };
@@ -521,6 +554,7 @@ function renderLeaveBlokScherm(round, block, entries, submissions) {
                 ${leaveDatumKort(block.startDate)} – ${leaveDatumKort(block.endDate)} ·
                 ${block.mode === 'voorkeur' ? 'geef je voorkeur' : 'werken of verlof'}
             </p>
+            ${namens ? `<p class="leave-namens-tag">Voor ${escapeHtml(getEmployee(me)?.name || '')}</p>` : ''}
         </div>
         <div class="leave-fill">
             <div class="leave-fill-toolbar">
@@ -839,6 +873,8 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
     const subMap = {};
     submissions.forEach(s => { subMap[Number(s.userId)] = s; });
     const nogNiet = medewerkers.filter(m => !subMap[Number(m.id)]?.submittedAt);
+    // Een beheerder kan op een naam klikken om voor die persoon in te vullen.
+    const namensKan = canManageLeave() && leaveKanNamensInvullen(round.status);
 
     const legendeItem = (klasse, label) =>
         `<span class="leave-legend-item"><span class="leave-legend-swatch ${klasse}"></span>${label}</span>`;
@@ -860,7 +896,10 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
         <div class="leave-matrix-wrap">
             ${nogNiet.length ? `
                 <div class="leave-banner leave-banner-warn">
-                    Nog niet ingediend (${nogNiet.length}): ${nogNiet.map(m => escapeHtml(m.name)).join(', ')}
+                    Nog niet ingediend (${nogNiet.length}): ${nogNiet.map(m => namensKan
+                        ? `<button type="button" class="leave-namens-link" data-leave-voor="${m.id}">${escapeHtml(m.name)}</button>`
+                        : escapeHtml(m.name)).join(', ')}
+                    ${namensKan ? '<div class="text-xs leave-namens-uitleg">Klik op een naam, hier of bovenaan een kolom, om voor die persoon in te vullen en in te dienen.</div>' : ''}
                 </div>` : '<div class="leave-banner leave-banner-ok">Iedereen heeft ingediend.</div>'}
 
             <div class="leave-legend">
@@ -872,7 +911,7 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
                 ${blocks.some(b => Array.isArray(b.closedDates)) ? legendeItem('leave-gesloten', 'gesloten') : ''}
             </div>
 
-            ${blocks.map(b => renderLeaveMatrixBlock(b, medewerkers, perUser, statusPil)).join('')}
+            ${blocks.map(b => renderLeaveMatrixBlock(b, medewerkers, perUser, statusPil, namensKan)).join('')}
 
             ${canManageLeave() ? renderLeaveManagerActions(round, medewerkers, subMap, nogNiet, blocks) : ''}
         </div>`;
@@ -881,7 +920,7 @@ function renderLeaveMatrix(round, blocks, entries, submissions) {
 // Eén tabel per vakantie, opgebouwd zoals de Excel: elke dag een rij, elke
 // medewerker een kolom. De weekweergave die hier eerst stond vatte een week
 // samen tot één vakje, waardoor je losse verlofdagen niet meer zag staan.
-function renderLeaveMatrixBlock(block, medewerkers, perUser, statusPil) {
+function renderLeaveMatrixBlock(block, medewerkers, perUser, statusPil, namensKan = false) {
     const dagen = leaveDaysOfBlock(block);
     if (!dagen.length) return '';
 
@@ -906,7 +945,9 @@ function renderLeaveMatrixBlock(block, medewerkers, perUser, statusPil) {
                     <thead>
                         <tr>
                             <th class="leave-matrix-day">Dag</th>
-                            ${medewerkers.map(m => `<th class="leave-matrix-person">${escapeHtml(leaveShortName(m.name))}</th>`).join('')}
+                            ${medewerkers.map(m => `<th class="leave-matrix-person">${namensKan
+                                ? `<button type="button" class="leave-namens-link" data-leave-voor="${m.id}" data-tooltip="Invullen voor ${escapeHtml(m.name)}" data-tooltip-pos="bottom">${escapeHtml(leaveShortName(m.name))}</button>`
+                                : escapeHtml(leaveShortName(m.name))}</th>`).join('')}
                             <th class="leave-matrix-count-head" data-tooltip="Aantal mensen dat die dag werkt" data-tooltip-pos="top">werkt</th>
                         </tr>
                         <tr class="leave-matrix-substatus">
@@ -1025,8 +1066,21 @@ function bindLeaveEvents(container, data) {
 
     container.querySelector('#leave-new-round')?.addEventListener('click', openLeaveRoundModal);
     container.querySelector('#leave-delete')?.addEventListener('click', () => deleteLeaveRound(round));
+    container.querySelectorAll('[data-leave-voor]').forEach(k => k.addEventListener('click', () => {
+        AppState.leaveVoorWie = Number(k.dataset.leaveVoor);
+        AppState.leaveDraft = {};
+        AppState.leaveScreen = 'landing';
+        renderLeave();
+    }));
+    container.querySelector('#leave-namens-stop')?.addEventListener('click', () => {
+        AppState.leaveVoorWie = null;
+        AppState.leaveDraft = {};
+        AppState.leaveScreen = 'overzicht';
+        renderLeave();
+    });
     container.querySelector('#leave-back-rounds')?.addEventListener('click', () => {
         AppState.leaveScreen = 'rondes';
+        AppState.leaveVoorWie = null;
         AppState.leaveDraft = {};
         renderLeave();
     });
@@ -1228,7 +1282,8 @@ async function saveLeaveDraft(round, ookIndienen, opties = {}) {
     // De server vervangt de volledige invulling. Leeg opslaan terwijl er op de
     // server wél iets staat, wist dus alles — dat is nooit de bedoeling van een
     // klik op Opslaan of Indienen.
-    const me = Number(AppState.currentUser?.id);
+    const me = leaveDoelId();
+    const namens = leaveNamens();
     const opServer = (AppState.leaveRound?.entries || []).some(e => Number(e.userId) === me);
     if (entries.length === 0 && opServer) {
         showToast('Er is niets om op te slaan.\nJe invulling is niet gewijzigd.', 'warning');
@@ -1237,9 +1292,17 @@ async function saveLeaveDraft(round, ookIndienen, opties = {}) {
 
     try {
         const uitkomst = await dataApiFetch(`/leave-rounds/${round.id}/entries`, {
-            method: 'PUT', body: JSON.stringify({ entries })
+            method: 'PUT', body: JSON.stringify(namens ? { entries, userId: me } : { entries })
         });
-        if (ookIndienen) {
+        if (ookIndienen && namens) {
+            await dataApiFetch(`/leave-rounds/${round.id}/submit`, { method: 'POST', body: JSON.stringify({ userId: me }) });
+            showToast(`Ingediend namens ${getEmployee(me)?.name || 'deze medewerker'}.\nKeur het goed onderaan het overzicht.`, 'success');
+            AppState.leaveVoorWie = null;
+            AppState.leaveDraft = {};
+            AppState.leaveScreen = 'overzicht';
+            renderLeave();
+            return;
+        } else if (ookIndienen) {
             await dataApiFetch(`/leave-rounds/${round.id}/submit`, { method: 'POST' });
             showToast('Verlof ingediend', 'success');
         } else {
