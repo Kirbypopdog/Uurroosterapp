@@ -211,7 +211,6 @@ const LEAVE_ZOMER_AFSPRAKEN = [
     'Hou rekening met het aantal verlofdagen dat je hebt: minder verlof = meer groen aanduiden.',
     'Iedereen werkt in de startweek (de laatste week van augustus).',
     'Je mag maximum 3 weken na elkaar verlof nemen.',
-    'Hoe het verder gaat: de week waarin de meesten verlof vragen, wordt de sluitingsweek. Dan heeft iedereen verlof, en daarna kan er nog een en ander verschuiven.',
 ].join('\n');
 
 const LEAVE_ZOMER_CONTROLE = { zekerNiet: 2, lieverNiet: 2, laatsteWeekWerken: true, maxAaneen: 3 };

@@ -57,7 +57,7 @@ describe('de regels die een nieuwe ronde meekrijgt', () => {
     expect(r.afspraken).toMatch(/2 weken ZEKER NIET/);
     expect(r.afspraken).toMatch(/startweek/);
     expect(r.afspraken).toMatch(/maximum 3 weken na elkaar/);
-    expect(r.afspraken).toMatch(/sluitingsweek/);
+    expect(r.afspraken).not.toMatch(/sluitingsweek/);
     expect(r.controle).toEqual(REGELS);
   });
 
